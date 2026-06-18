@@ -1,0 +1,27 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# uv
+# (uv.lock IS committed)
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Web build + deps
+web/node_modules/
+web/dist/
+web/.svelte-kit/
+web/tsconfig.tsbuildinfo
+
+# Packaged web build (produced by hatch_build.py at wheel time)
+src/tinkerscope/web_dist/
+
+# OS / editor
+.DS_Store
