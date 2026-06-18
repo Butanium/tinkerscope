@@ -146,6 +146,27 @@ class SamplerManager:
             self._renderers[key] = rmod.get_renderer(renderer_name, self._tokenizer(base_model))
         return self._renderers[key]
 
+    async def render(
+        self, base_model: str, renderer_name: str, messages: list[dict]
+    ) -> tuple[Any, str, list]:
+        """Build the generation prompt with the run's renderer (training-faithful).
+
+        Returns (model_input, prompt_text, stop) where model_input feeds the native
+        sampler and prompt_text feeds the oai /completions endpoint — same prompt,
+        two backends. A trailing assistant message is treated as a prefill.
+        """
+        renderer = await asyncio.to_thread(self._renderer, base_model, renderer_name)
+        tokenizer = await asyncio.to_thread(self._tokenizer, base_model)
+        rmsgs = [{"role": m["role"], "content": m["content"]} for m in messages]
+        if rmsgs and rmsgs[-1]["role"] == "assistant":
+            prefill, non_prefill = rmsgs[-1]["content"], rmsgs[:-1]
+        else:
+            prefill, non_prefill = None, rmsgs
+        model_input = renderer.build_generation_prompt(non_prefill, prefill=prefill)
+        stop = renderer.get_stop_sequences()
+        prompt_text = tokenizer.decode(model_input.to_ints())
+        return model_input, prompt_text, stop
+
     async def sample_stream(
         self,
         *,

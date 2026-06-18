@@ -329,16 +329,35 @@ class _StreamResult:
         self.error: Optional[str] = None
 
 
+_DIM = "\033[2m"
+_RESET = "\033[0m"
+_TTY = sys.stdout.isatty()
+
+
+def _dim(s: str) -> str:
+    """Wrap reasoning text dim on a real terminal; pass through when piped."""
+    return f"{_DIM}{s}{_RESET}" if _TTY else s
+
+
 def _stream_chat(
     body: dict,
     label: Optional[str] = None,
     lock: Optional[threading.Lock] = None,
     result: Optional["_StreamResult"] = None,
+    stream_inline: bool = False,
 ) -> None:
     """POST /api/chat and print streamed samples. Thread-safe printing via lock.
 
-    Each per-sample block is assembled as ONE string and printed under a single
-    lock acquisition, so concurrent compare panels never interleave mid-sample.
+    Two printing modes:
+      - block (default): each per-sample block is assembled as ONE string and
+        printed under a single lock acquisition, so concurrent compare panels
+        never interleave mid-sample. Used by `compare`.
+      - inline (`stream_inline=True`, single `chat` only): `delta` events are
+        written to stdout token-by-token as they arrive (no lock — there is only
+        one stream). The authoritative `message` event then finalizes the sample
+        (newline + finish_reason) WITHOUT reprinting its content. n>1 samples
+        carry no deltas, so they fall through to block printing as before.
+
     On failure: if `result` is supplied (compare threads), record the error
     there instead of calling _die; otherwise _die directly.
     """
@@ -352,12 +371,21 @@ def _stream_chat(
         else:
             print(block, flush=True)
 
+    def emit_inline(text: str) -> None:
+        sys.stdout.write(text)
+        sys.stdout.flush()
+
     def fail(msg: str) -> None:
         if result is not None:
             result.error = msg
             emit_block(f"[error] {msg}")
         else:
             _die(msg)
+
+    # Inline-streaming bookkeeping (single chat only).
+    streamed: set[int] = set()  # sample indices that received delta chunks
+    hdr_printed: set[int] = set()  # indices we printed a "--- sample N ---" header for
+    last_kind: dict[int, str] = {}  # idx -> last delta kind, to insert separators
 
     try:
         with httpx.Client(base_url=_base_url(), timeout=None) as c:
@@ -378,12 +406,44 @@ def _stream_chat(
                             pass
                         fail(f"{err}")
                         return
+                    if ev.event == "delta":
+                        # Token chunk (n==1). Only streamed inline for single chat;
+                        # in block mode (compare) we ignore deltas and print the
+                        # whole sample from the later `message` event.
+                        if not stream_inline or not ev.data:
+                            continue
+                        d = json.loads(ev.data)
+                        idx = d.get("sample_index", 0)
+                        kind = d.get("kind", "content")
+                        piece = d.get("delta", "")
+                        if idx not in hdr_printed:
+                            emit_inline(f"--- sample {idx} ---\n")
+                            hdr_printed.add(idx)
+                        if kind == "reasoning":
+                            if last_kind.get(idx) != "reasoning":
+                                emit_inline(_dim("[thinking] "))
+                            emit_inline(_dim(piece))
+                        else:
+                            if last_kind.get(idx) == "reasoning":
+                                emit_inline("\n")  # separate reasoning from content
+                            emit_inline(piece)
+                        last_kind[idx] = kind
+                        streamed.add(idx)
+                        continue
                     if ev.event != "message" or not ev.data:
                         continue
                     payload = json.loads(ev.data)
                     idx = payload.get("sample_index")
                     if payload.get("error"):
                         emit_block(f"--- sample {idx} ERROR ---", payload["error"])
+                        continue
+                    if stream_inline and idx in streamed:
+                        # This sample already streamed inline — finalize it (end the
+                        # line, append finish_reason) without reprinting the content.
+                        emit_inline("\n")
+                        fr = payload.get("finish_reason")
+                        if fr:
+                            emit_inline(f"[finish_reason={fr}]\n")
                         continue
                     parts = [f"--- sample {idx} ---"]
                     reasoning = payload.get("reasoning")
@@ -456,7 +516,8 @@ def cmd_chat(
     _post("/api/state", sel)
     body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, thinking, system, "primary")
     print(f"chat {r['id']}" + (f"@{ckpt}" if ckpt else "") + f"  n={n} temp={temperature}")
-    _stream_chat(body)
+    # Single chat: n==1 streams tokens inline; n>1 prints whole samples (no deltas).
+    _stream_chat(body, stream_inline=True)
 
 
 @app.command("compare")

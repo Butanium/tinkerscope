@@ -93,6 +93,7 @@ export function sse(
 		'snapshot',
 		'patch',
 		'chat_start',
+		'delta',
 		'sample',
 		'chat_done',
 		'chat_error',

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from .. import discovery
+from .. import discovery, tinker_oai
 from ..tinker_sampler import supports_thinking
 
 router = APIRouter(prefix="/api", tags=["models"])
@@ -31,15 +31,36 @@ def refresh_models() -> dict:
 
 
 @router.get("/tinker-models")
-def tinker_models() -> dict:
-    """Base models tinker currently serves — i.e. the models you can sample
-    directly (the same list `get_server_capabilities` returns). Lets the UI
-    query a raw base model through tinker, not just trained checkpoints. The
-    ':peft:<ctx>' LoRA-context variants are folded into their base name."""
+def tinker_models(refresh: bool = False) -> dict:
+    """Everything you can sample directly through tinker, as one filterable list:
+
+      1. Base models `get_server_capabilities` serves (raw, no LoRA) — kind="base".
+         ':peft:<ctx>' LoRA-context variants are folded into their base name.
+      2. Sampler checkpoints the oai endpoint serves right now (GET /v1/models),
+         newest first — kind="checkpoint". These are UUID-only (base_model/renderer
+         unknown), so they're sampled via the default chat template.
+
+    Each entry carries a unified `id` plus its kind-specific field
+    (`base_model` / `sampler_path`). Base models come first, then checkpoints."""
     caps = discovery.get_capabilities()
     names = sorted({m.split(":peft")[0] for m in caps.get("supported_models", [])})
+    models = [{"kind": "base", "id": n, "label": n, "base_model": n} for n in names]
+
+    error = caps.get("error")
+    try:
+        for c in tinker_oai.list_checkpoints(refresh=refresh):
+            models.append({
+                "kind": "checkpoint",
+                "id": c["sampler_path"],
+                "label": c["label"],
+                "sampler_path": c["sampler_path"],
+                "created": c["created"],
+            })
+    except Exception as e:  # oai /models unreachable: keep base models, note why
+        error = error or f"checkpoint list unavailable: {type(e).__name__}: {e}"
+
     return {
         "available": caps.get("available", False),
-        "error": caps.get("error"),
-        "models": [{"base_model": n, "label": n} for n in names],
+        "error": error,
+        "models": models,
     }

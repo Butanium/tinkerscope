@@ -35,6 +35,43 @@ def _get_client() -> AsyncOpenAI:
     return _client
 
 
+def _build_kwargs(
+    *, model, messages, temperature, max_tokens, thinking,
+    top_p, top_k, presence_penalty, repetition_penalty,
+) -> dict:
+    kwargs: dict = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    if top_p is not None:
+        kwargs["top_p"] = top_p
+    if presence_penalty is not None:
+        kwargs["presence_penalty"] = presence_penalty
+    extra_body: dict = {}
+    # enabled:true ≈ medium effort (model decides), closest to Tinker default;
+    # effort:none disables thinking entirely.
+    extra_body["reasoning"] = {"enabled": True} if thinking else {"effort": "none"}
+    if top_k is not None:
+        extra_body["top_k"] = top_k
+    if repetition_penalty is not None:
+        extra_body["repetition_penalty"] = repetition_penalty
+    kwargs["extra_body"] = extra_body
+    return kwargs
+
+
+def _raw_text(messages: list[dict], content: str, reasoning: str | None, thinking: bool) -> str:
+    """Chat-template-tagged raw view, for parity with the tinker path."""
+    prompt_parts = [f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>" for m in messages]
+    prompt_text = "\n".join(prompt_parts) + "\n<|im_start|>assistant\n"
+    prompt_text += "<think>\n" if thinking else "<think>\n\n</think>\n\n"
+    response_raw = (
+        f"<think>\n{reasoning}\n</think>\n\n{content}<|im_end|>" if reasoning else f"{content}<|im_end|>"
+    )
+    return f"{prompt_text}{response_raw}"
+
+
 async def sample_one(
     *,
     model: str,
@@ -49,27 +86,11 @@ async def sample_one(
 ) -> dict:
     """Run a single chat completion via OpenRouter. Returns {content, reasoning?, raw_text}."""
     client = _get_client()
-    kwargs: dict = {
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }
-    if top_p is not None:
-        kwargs["top_p"] = top_p
-    if presence_penalty is not None:
-        kwargs["presence_penalty"] = presence_penalty
-
-    extra_body: dict = {}
-    # enabled:true ≈ medium effort (model decides), closest to Tinker default;
-    # effort:none disables thinking entirely.
-    extra_body["reasoning"] = {"enabled": True} if thinking else {"effort": "none"}
-    if top_k is not None:
-        extra_body["top_k"] = top_k
-    if repetition_penalty is not None:
-        extra_body["repetition_penalty"] = repetition_penalty
-    kwargs["extra_body"] = extra_body
-
+    kwargs = _build_kwargs(
+        model=model, messages=messages, temperature=temperature, max_tokens=max_tokens,
+        thinking=thinking, top_p=top_p, top_k=top_k,
+        presence_penalty=presence_penalty, repetition_penalty=repetition_penalty,
+    )
     response = await client.chat.completions.create(**kwargs)
     choice = response.choices[0]
     content = choice.message.content or ""
@@ -92,13 +113,53 @@ async def sample_one(
     result: dict = {"content": content}
     if reasoning:
         result["reasoning"] = reasoning
-
-    # Build a raw_text view with chat-template tags for parity with the tinker path.
-    prompt_parts = [f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>" for m in messages]
-    prompt_text = "\n".join(prompt_parts) + "\n<|im_start|>assistant\n"
-    prompt_text += "<think>\n" if thinking else "<think>\n\n</think>\n\n"
-    response_raw = (
-        f"<think>\n{reasoning}\n</think>\n\n{content}<|im_end|>" if reasoning else f"{content}<|im_end|>"
-    )
-    result["raw_text"] = f"{prompt_text}{response_raw}"
+    result["raw_text"] = _raw_text(messages, content, reasoning, thinking)
     return result
+
+
+async def sample_one_stream(
+    *,
+    model: str,
+    messages: list[dict],
+    temperature: float,
+    max_tokens: int,
+    thinking: bool,
+    top_p: float | None = None,
+    top_k: int | None = None,
+    presence_penalty: float | None = None,
+    repetition_penalty: float | None = None,
+):
+    """Stream a single OpenRouter completion. Yields {"delta","kind"} chunks
+    (reasoning tagged live), then the final message dict."""
+    client = _get_client()
+    kwargs = _build_kwargs(
+        model=model, messages=messages, temperature=temperature, max_tokens=max_tokens,
+        thinking=thinking, top_p=top_p, top_k=top_k,
+        presence_penalty=presence_penalty, repetition_penalty=repetition_penalty,
+    )
+    kwargs["stream"] = True
+
+    content_acc, reason_acc = "", ""
+    stream = await client.chat.completions.create(**kwargs)
+    async for ev in stream:
+        ch = ev.choices[0] if ev.choices else None
+        d = ch.delta if ch else None
+        rsn = (getattr(d, "reasoning_content", None) or getattr(d, "reasoning", None) or "") if d else ""
+        cnt = (getattr(d, "content", None) or "") if d else ""
+        if rsn:
+            reason_acc += str(rsn)
+            yield {"delta": str(rsn), "kind": "reasoning"}
+        if cnt:
+            content_acc += cnt
+            yield {"delta": cnt, "kind": "content"}
+
+    reasoning: str | None = reason_acc or None
+    if "<think>" in content_acc:
+        content_acc, think = _split_think(content_acc)
+        if think:
+            reasoning = (reasoning + "\n\n" + think) if reasoning else think
+    result: dict = {"content": content_acc}
+    if reasoning:
+        result["reasoning"] = reasoning
+    result["raw_text"] = _raw_text(messages, content_acc, reasoning, thinking)
+    yield result

@@ -71,7 +71,7 @@ Runs with `config_error` should still be listed (degraded).
 | GET | `/api/health` | — | `{ok, root, scan_roots[], tinker_key, openrouter_key, available, supported_models[], error}` |
 | GET | `/api/models` | — | `Run[]` (with `supports_thinking`) |
 | POST | `/api/models/refresh` | — | `{status, count}` (rescans fs + capabilities) |
-| GET | `/api/tinker-models` | — | `{available, error, models:[{base_model, label}]}` — base models tinker serves RIGHT NOW (sample a raw base model, no LoRA) |
+| GET | `/api/tinker-models` | `?refresh` | `{available, error, models:[…]}` — everything sampleable through tinker, one filterable list. Each entry has `kind` + unified `id` + `label`. `kind:"base"` (+`base_model`) = raw base models from `get_server_capabilities` (no LoRA); `kind:"checkpoint"` (+`sampler_path`,`created`) = sampler checkpoints the oai endpoint serves now (GET /v1/models), newest first, UUID-only. Base models first, then checkpoints. |
 | GET | `/api/openrouter-models` | — | `[{label, openrouter_model}]` (GLOBAL saved list, seeded once from `$TINKERSCOPE_OPENROUTER_MODELS`) |
 | POST | `/api/openrouter-models` | `{openrouter_model, label?}` | the updated saved list (upsert) |
 | DELETE | `/api/openrouter-models?model=<id>` | — | the updated saved list (model id in query; ids have slashes) |
@@ -95,7 +95,8 @@ Runs with `config_error` should still be listed (degraded).
   "run_id": "…",          // tinker LoRA checkpoint: run_id (+ optional checkpoint)
   "checkpoint": "final",  // checkpoint NAME; omitted ⇒ last checkpoint with a sampler
   "base_model": null,     // OR a raw tinker base model id (no LoRA) from /api/tinker-models
-  "openrouter_model": null,// OR an OpenRouter model id. Exactly one of run_id/base_model/openrouter_model.
+  "sampler_path": null,   // OR a "loose" tinker sampler path (kind:"checkpoint" from /api/tinker-models)
+  "openrouter_model": null,// OR an OpenRouter model id. Exactly one of run_id/base_model/sampler_path/openrouter_model.
   "messages": [{"role":"user","content":"…"}],   // required
   "system_prompt": null,  // optional; prepended as a system message for sampling
   "temperature": 1.0, "max_tokens": 1024, "n_samples": 1,
@@ -107,9 +108,20 @@ Runs with `config_error` should still be listed (degraded).
 ```
 
 ### /api/chat SSE (the caller's stream — what the CLI prints)
+- `event: delta` → `data: {sample_index, delta, kind}` — a streamed token chunk
+  (`kind` = `"content"` | `"reasoning"`). **Only emitted when n_samples==1** (the
+  token-streaming path); n>1 sends whole samples, no deltas. A consumer that saw
+  deltas for a sample uses the later `message` event to *finalize* (clean content),
+  not to reprint.
 - `event: message` → `data:` one sample: `{sample_index, content, raw_text, finish_reason, reasoning?}` or `{sample_index, error}`
 - `event: done` → `data: {}` (all samples finished)
 - `event: error` → `data: {error}` (whole request failed, e.g. unsampleable run)
+
+**Streaming model:** n==1 streams tokens through tinker's OpenAI-compatible
+endpoint (run_id/base_model via `/completions` with the run's renderer;
+sampler_path via `/chat/completions` default template) or OpenRouter; n>1 keeps
+the native batched fan-out (whole samples). tinker's native SamplingClient has no
+token streaming — that's why n==1 routes through the oai endpoint.
 
 ### PlaygroundState (server-side, shared)
 ```jsonc
@@ -134,6 +146,7 @@ Event names = the message's `type`:
 - `snapshot` → `{type:"snapshot", state}` (full state, sent first on connect)
 - `patch` → `{type:"patch", event, state}` (state changed; e.g. event="chat_start"/"chat_done"/"patch")
 - `chat_start` → `{type:"chat_start", chat_id, panel, n, label}` (a chat began; clear that panel's samples)
+- `delta` → `{type:"delta", chat_id, panel, sample_index, delta, kind}` (streamed token chunk; n==1 only — accumulate per chat_id/panel/sample_index, then the `sample` event finalizes)
 - `sample` → `{type:"sample", chat_id, panel, sample_index, content, raw_text, finish_reason, reasoning?}`
 - `chat_done` → `{type:"chat_done", chat_id, panel}`
 - `chat_error` → `{type:"chat_error", chat_id, panel, error}`

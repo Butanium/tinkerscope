@@ -72,6 +72,27 @@ class LiveStore {
 				this.panels = { ...this.panels };
 				break;
 			}
+			case 'delta': {
+				// Token-streaming chunk (n==1 only). Accumulate into the sample slot
+				// at sample_index so the panel fills token-by-token; the later
+				// 'sample' event then finalizes the slot (parseSample replaces this
+				// partial with the cleaned authoritative content).
+				const panel = (data?.panel ?? 'primary') as Panel;
+				const cur = this.panels[panel];
+				// Ignore stragglers from an older chat run.
+				if (cur.chat_id != null && data.chat_id != null && data.chat_id !== cur.chat_id) break;
+				const idx = data.sample_index ?? 0;
+				const text: string = data.delta ?? '';
+				const samples = cur.samples.slice();
+				const prev = samples[idx] ?? { content: '' };
+				samples[idx] =
+					data.kind === 'reasoning'
+						? { ...prev, reasoning: (prev.reasoning ?? '') + text }
+						: { ...prev, content: (prev.content ?? '') + text };
+				this.panels[panel] = { ...cur, samples };
+				this.panels = { ...this.panels };
+				break;
+			}
 			case 'sample': {
 				const panel = (data?.panel ?? 'primary') as Panel;
 				const cur = this.panels[panel];

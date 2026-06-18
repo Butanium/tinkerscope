@@ -158,14 +158,24 @@
 	let orCatalogLoading = $state(false);
 	let orCatalogError = $state<string | null>(null);
 
-	// Recently-used raw base models (localStorage) so a picked base model stays
-	// visible in the panel <select> across reloads even though it's not a Run.
+	// Recently-used raw base models + loose checkpoints (localStorage) so a picked
+	// tinker model stays visible in the panel <select> across reloads even though
+	// it's not a Run. Two lightweight shapes — one per sentinel.
+	type RecentBase = { base_model: string; label: string };
+	type RecentCkpt = { sampler_path: string; label: string };
 	const RECENT_BASE_KEY = 'tinkerscope-recent-base-models';
-	let recentBaseModels = $state<TinkerModel[]>([]);
-	function rememberBaseModel(m: TinkerModel) {
+	const RECENT_CKPT_KEY = 'tinkerscope-recent-checkpoints';
+	let recentBaseModels = $state<RecentBase[]>([]);
+	let recentCheckpoints = $state<RecentCkpt[]>([]);
+	function rememberBaseModel(m: RecentBase) {
 		const next = [m, ...recentBaseModels.filter((x) => x.base_model !== m.base_model)].slice(0, 8);
 		recentBaseModels = next;
 		try { localStorage.setItem(RECENT_BASE_KEY, JSON.stringify(next)); } catch {}
+	}
+	function rememberCheckpoint(m: RecentCkpt) {
+		const next = [m, ...recentCheckpoints.filter((x) => x.sampler_path !== m.sampler_path)].slice(0, 8);
+		recentCheckpoints = next;
+		try { localStorage.setItem(RECENT_CKPT_KEY, JSON.stringify(next)); } catch {}
 	}
 
 	function runById(id: string | null | undefined): Run | undefined {
@@ -222,6 +232,25 @@
 		return m?.label || bm;
 	}
 
+	// ── Tinker loose-checkpoint selection encoding ────────────────────
+	// A "loose" tinker sampler checkpoint (served by the oai endpoint, no parent
+	// Run) is encoded in the same run_id/compare_run_id field with a "ckpt:"
+	// sentinel — mirroring "base:"/"openrouter:". The chat builder detects the
+	// prefix and sends {sampler_path} instead of {run_id, checkpoint}.
+	const CKPT_PREFIX = 'ckpt:';
+	function isCkptSel(id: string | null | undefined): boolean {
+		return typeof id === 'string' && id.startsWith(CKPT_PREFIX);
+	}
+	function samplerPathOf(id: string | null | undefined): string | null {
+		return isCkptSel(id) ? (id as string).slice(CKPT_PREFIX.length) : null;
+	}
+	function ckptLabel(id: string | null | undefined): string {
+		const sp = samplerPathOf(id);
+		if (sp == null) return '';
+		const m = tinkerModels.find((t) => t.sampler_path === sp) ?? recentCheckpoints.find((t) => t.sampler_path === sp);
+		return m?.label || sp;
+	}
+
 	// ── Live shared state (single source of truth for selection/params) ──
 	// Render from live.state; fall back to defaults until the first snapshot.
 	const DEFAULTS: PlaygroundState = {
@@ -248,7 +277,11 @@
 		// OpenRouter reference + raw tinker base models: assume thinking-capable
 		// (backend handles the flag).
 		panelSels.some(
-			(p) => isOpenrouterSel(p.run_id) || isBaseSel(p.run_id) || runById(p.run_id)?.supports_thinking
+			(p) =>
+				isOpenrouterSel(p.run_id) ||
+				isBaseSel(p.run_id) ||
+				isCkptSel(p.run_id) ||
+				runById(p.run_id)?.supports_thinking
 		)
 	);
 
@@ -295,7 +328,7 @@
 		// OpenRouter models and raw tinker base models have no checkpoints; tinker
 		// runs default to the last checkpoint with a sampler (usually "final").
 		let ck: string | null = null;
-		if (!isOpenrouterSel(runId) && !isBaseSel(runId)) {
+		if (!isOpenrouterSel(runId) && !isBaseSel(runId) && !isCkptSel(runId)) {
 			const r = runById(runId);
 			ck = r?.checkpoints.length ? r.checkpoints[r.checkpoints.length - 1].name : null;
 		}
@@ -361,9 +394,10 @@
 	let canChat = $derived(
 		panelSels.length > 0 &&
 			panelSels.every((p) => {
-				// OpenRouter reference models + raw tinker base models are always
-				// chat-eligible (the backend errors clearly if a key is missing).
-				if (isOpenrouterSel(p.run_id) || isBaseSel(p.run_id)) return true;
+				// OpenRouter reference models + raw tinker base models + loose tinker
+				// checkpoints are always chat-eligible (the backend errors clearly if
+				// a key is missing).
+				if (isOpenrouterSel(p.run_id) || isBaseSel(p.run_id) || isCkptSel(p.run_id)) return true;
 				const r = panelRun(p);
 				return r && r.sampleable !== false && r.checkpoints.length > 0;
 			})
@@ -421,13 +455,15 @@
 	}
 
 	async function fireChat(p: PanelSel, messages: ChatMessage[], signal: AbortSignal) {
-		// Resolve the model: tinker LoRA run, raw tinker base model, or OpenRouter
-		// reference model. All commit to the panel's transcript server-side, so all
-		// are multi-turn. EXACTLY ONE of run_id/base_model/openrouter_model is sent.
+		// Resolve the model: tinker LoRA run, raw tinker base model, loose tinker
+		// checkpoint, or OpenRouter reference model. All commit to the panel's
+		// transcript server-side, so all are multi-turn. EXACTLY ONE of
+		// run_id/base_model/sampler_path/openrouter_model is sent.
 		const orId = openrouterId(p.run_id);
 		const bm = baseModelId(p.run_id);
-		const r = orId == null && bm == null ? panelRun(p) : undefined;
-		if (orId == null && bm == null && !r) return;
+		const sp = samplerPathOf(p.run_id);
+		const r = orId == null && bm == null && sp == null ? panelRun(p) : undefined;
+		if (orId == null && bm == null && sp == null && !r) return;
 		// We render from the bus; just kick off the POST and drain its stream so
 		// the request completes (samples arrive over the bus regardless).
 		try {
@@ -437,7 +473,9 @@
 						? { openrouter_model: orId }
 						: bm != null
 							? { base_model: bm }
-							: { run_id: r!.id, checkpoint: p.checkpoint }),
+							: sp != null
+								? { sampler_path: sp }
+								: { run_id: r!.id, checkpoint: p.checkpoint }),
 					messages,
 					system_prompt: s.system_prompt,
 					temperature: s.temperature,
@@ -735,11 +773,20 @@
 		if (!tinkerCatalogLoaded) loadTinkerCatalog();
 	}
 
-	// Pick a raw base model: remember it (so it persists in the panel <select>)
-	// and select it via the base: sentinel.
+	// Pick a tinker model from the combined catalog. Look the picked item up by id
+	// to recover its `kind`: a checkpoint selects via the ckpt: sentinel (sending
+	// {sampler_path}); a base model via the base: sentinel (sending {base_model}).
+	// Either way we remember it so it persists in the panel <select> across reloads.
 	function pickTinkerModel(item: { id: string; label: string }) {
-		rememberBaseModel({ base_model: item.id, label: item.label });
-		setRun(tinkerAddPanel, BASE_PREFIX + item.id);
+		const m = tinkerModels.find((t) => t.id === item.id);
+		if (m?.kind === 'checkpoint' && m.sampler_path) {
+			rememberCheckpoint({ sampler_path: m.sampler_path, label: m.label || m.sampler_path });
+			setRun(tinkerAddPanel, CKPT_PREFIX + m.sampler_path);
+		} else {
+			const bm = m?.base_model ?? item.id;
+			rememberBaseModel({ base_model: bm, label: item.label || bm });
+			setRun(tinkerAddPanel, BASE_PREFIX + bm);
+		}
 		showTinkerPicker = false;
 	}
 
@@ -823,16 +870,18 @@
 		const p = panelSels.find((x) => x.panel === tagFormPanel);
 		const orId = openrouterId(p?.run_id);
 		const bm = baseModelId(p?.run_id);
-		const isRef = orId != null || bm != null;
+		const sp = samplerPathOf(p?.run_id);
+		const isRef = orId != null || bm != null || sp != null;
 		const r = !isRef ? panelRun(p ?? panelSels[0]) : undefined;
 		try {
 			const entry = await api.addHighlight({
 				label: tagFormLabel,
 				// run_id keeps the sentinel for reference models so the highlight
-				// round-trips; checkpoint is null for both OR and base models.
+				// round-trips; checkpoint is null for OR / base / loose-checkpoint.
 				run_id: isRef ? p?.run_id : (r?.id ?? null),
 				checkpoint: isRef ? null : (p?.checkpoint ?? null),
 				base_model: orId != null ? orId : bm != null ? bm : (r?.base_model ?? null),
+				sampler_path: sp,
 				dataset_path: r?.dataset_path ?? null,
 				question: lastUserQuestion(),
 				response: tagFormResponse,
@@ -897,6 +946,7 @@
 		if (!p) return '';
 		if (isOpenrouterSel(p.run_id)) return openrouterLabel(p.run_id);
 		if (isBaseSel(p.run_id)) return baseLabel(p.run_id);
+		if (isCkptSel(p.run_id)) return ckptLabel(p.run_id);
 		const r = runById(p.run_id);
 		const name = r?.name ?? p.run_id ?? '?';
 		return p.checkpoint ? `${name}@${p.checkpoint}` : name;
@@ -1034,6 +1084,10 @@
 			const rb = localStorage.getItem(RECENT_BASE_KEY);
 			if (rb) recentBaseModels = JSON.parse(rb);
 		} catch {}
+		try {
+			const rc = localStorage.getItem(RECENT_CKPT_KEY);
+			if (rc) recentCheckpoints = JSON.parse(rc);
+		} catch {}
 
 		// Open the ONE live-state stream on load.
 		live.start();
@@ -1126,11 +1180,15 @@
 					{@const pr = runById(p.run_id)}
 					{@const isOr = isOpenrouterSel(p.run_id)}
 					{@const isBase = isBaseSel(p.run_id)}
+					{@const isCkpt = isCkptSel(p.run_id)}
 					{@const orModel = openrouterBySel(p.run_id)}
 					{@const baseM = baseModelId(p.run_id)}
-					<!-- A selected base model that isn't in recents yet (e.g. came from the
-					     CLI / shared state) still needs an <option> so the select shows it. -->
+					{@const sp = samplerPathOf(p.run_id)}
+					<!-- A selected base model / checkpoint that isn't in recents yet (e.g.
+					     came from the CLI / shared state) still needs an <option> so the
+					     select shows it. -->
 					{@const baseInRecents = baseM != null && recentBaseModels.some((t) => t.base_model === baseM)}
+					{@const ckptInRecents = sp != null && recentCheckpoints.some((t) => t.sampler_path === sp)}
 					<div class="model-block">
 						<div class="model-slot-row">
 							<select
@@ -1158,6 +1216,16 @@
 										{/each}
 									</optgroup>
 								{/if}
+								{#if recentCheckpoints.length > 0 || (sp != null && !ckptInRecents)}
+									<optgroup label="Tinker checkpoints">
+										{#if sp != null && !ckptInRecents}
+											<option value={CKPT_PREFIX + sp}>◇ {ckptLabel(p.run_id)}</option>
+										{/if}
+										{#each recentCheckpoints as t (t.sampler_path)}
+											<option value={CKPT_PREFIX + t.sampler_path}>◇ {t.label || t.sampler_path}</option>
+										{/each}
+									</optgroup>
+								{/if}
 								{#if openrouterModels.length > 0}
 									<optgroup label="OpenRouter">
 										{#each openrouterModels as m (m.openrouter_model)}
@@ -1177,6 +1245,12 @@
 							<div class="run-meta or-meta">◆ {baseM} · raw base (no LoRA)</div>
 							{#if health && !health.tinker_key}
 								<div class="unsampleable-note">Set TINKER_API_KEY to sample this base model.</div>
+							{/if}
+						{:else if isCkpt}
+							<!-- Loose tinker sampler checkpoint: no checkpoint selector. -->
+							<div class="run-meta or-meta" title={sp}>◇ {ckptLabel(p.run_id)} · loose sampler</div>
+							{#if health && !health.tinker_key}
+								<div class="unsampleable-note">Set TINKER_API_KEY to sample this checkpoint.</div>
 							{/if}
 						{:else if isOr}
 							<!-- OpenRouter reference model: no checkpoint selector. -->
@@ -1326,7 +1400,7 @@
 								{@const prevUserMsg = view.slice(0, i).reverse().find((m) => m.role === 'user')?.content}
 								{@const isMultiSample = !!(msg.totalSamples && msg.totalSamples > 1)}
 								{@const isLastAssistant = !view.slice(i + 1).some((m) => m.role === 'assistant')}
-								{#if msg.role !== 'assistant' || msg.content || isMultiSample || (msg.samples && msg.samples.some((x) => x && x.content))}
+								{#if msg.role !== 'assistant' || msg.content || msg.reasoning || isMultiSample || (msg.samples && msg.samples.some((x) => x && x.content))}
 									{#if msg.role === 'assistant' && msg.reasoning && !isMultiSample}
 										<details class="message thinking-message" open={isLastAssistant}>
 											<summary class="thinking-header">
@@ -1410,7 +1484,7 @@
 									</div>
 								{/if}
 							{/each}
-							{#if run.running && run.n <= 1 && run.samples.filter((x) => x && x.content).length === 0}
+							{#if run.running && run.n <= 1 && run.samples.filter((x) => x && (x.content || x.reasoning)).length === 0}
 								<div class="message" style="background: {s.thinking ? 'var(--color-surface-alt)' : 'var(--color-assistant-bg)'};">
 									<div class="message-role">{s.thinking ? 'thinking' : 'assistant'}</div>
 									<div class="message-content loading-indicator"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
@@ -1695,19 +1769,19 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="modal tag-modal" onclick={(e) => e.stopPropagation()}>
 			<div class="modal-header">
-				<h2>Tinker base models</h2>
+				<h2>Tinker models</h2>
 				<button class="modal-close" onclick={() => (showTinkerPicker = false)}>&times;</button>
 			</div>
 			<div class="modal-body">
-				<div class="or-empty" style="font-style: normal; padding-bottom: var(--space-2);">Sample a raw base model directly (no LoRA). Pick one to use it in this panel.</div>
+				<div class="or-empty" style="font-style: normal; padding-bottom: var(--space-2);">Raw base models (no LoRA) and loose sampler checkpoints tinker serves right now. Pick one to use it in this panel.</div>
 				{#if health && !health.tinker_key}
 					<div class="unsampleable-note" style="margin-bottom: var(--space-3);">Sampling needs TINKER_API_KEY. You can still pick a model.</div>
 				{/if}
-				<label class="sidebar-label">Type to filter the models tinker serves right now</label>
+				<label class="sidebar-label">Type to filter — base model names or checkpoint UUIDs</label>
 				<div style="margin-top: var(--space-2);">
 					<ModelTypeahead
-						items={tinkerModels.map((m) => ({ id: m.base_model, label: m.label || m.base_model }))}
-						placeholder="e.g. Qwen — type to filter {tinkerModels.length || '…'} base models"
+						items={tinkerModels.map((m) => ({ id: m.id, label: m.label || m.id }))}
+						placeholder="e.g. Qwen or a UUID — type to filter {tinkerModels.length || '…'} base models + checkpoints"
 						loading={tinkerCatalogLoading}
 						error={tinkerCatalogError}
 						onpick={pickTinkerModel}

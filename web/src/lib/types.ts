@@ -30,8 +30,22 @@ export type Run = {
 
 export type OpenRouterModel = { label: string; openrouter_model: string };
 
-/** A raw tinker base model (sampled directly, no LoRA). */
-export type TinkerModel = { base_model: string; label: string };
+/**
+ * One entry in the combined /api/tinker-models list. `id` + `label` are unified
+ * across both kinds; `kind` selects the extra fields:
+ *   - 'base'       → `base_model` (raw base model, sampled directly, no LoRA)
+ *   - 'checkpoint' → `sampler_path` (+ `created`): a "loose" sampler the oai
+ *                    endpoint serves right now.
+ * For 'base' `id === base_model`; for 'checkpoint' `id === sampler_path`.
+ */
+export type TinkerModel = {
+	kind: 'base' | 'checkpoint';
+	id: string;
+	label: string;
+	base_model?: string;
+	sampler_path?: string;
+	created?: number;
+};
 
 /** Response shape for the two typeahead-catalog endpoints. */
 export type TinkerModelsResponse = { available: boolean; error: string | null; models: TinkerModel[] };
@@ -86,6 +100,7 @@ export type ChatRequest = {
 	run_id?: string | null;
 	checkpoint?: string | null;
 	base_model?: string | null;
+	sampler_path?: string | null;
 	openrouter_model?: string | null;
 	messages: ChatMessage[];
 	system_prompt?: string | null;
