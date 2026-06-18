@@ -4,9 +4,11 @@
 	import katex from 'katex';
 	import { api } from '$lib/api';
 	import { live } from '$lib/state.svelte';
+	import ModelTypeahead from '$lib/ModelTypeahead.svelte';
 	import type {
 		Run,
 		OpenRouterModel,
+		TinkerModel,
 		Health,
 		PlaygroundState,
 		StatePatch,
@@ -146,6 +148,26 @@
 	let backendError = $state('');
 	let refreshingModels = $state(false);
 
+	// Typeahead catalogs (lazy-loaded when their picker opens).
+	let tinkerModels = $state<TinkerModel[]>([]);
+	let tinkerCatalogLoaded = $state(false);
+	let tinkerCatalogLoading = $state(false);
+	let tinkerCatalogError = $state<string | null>(null);
+	let orCatalog = $state<OpenRouterModel[]>([]);
+	let orCatalogLoaded = $state(false);
+	let orCatalogLoading = $state(false);
+	let orCatalogError = $state<string | null>(null);
+
+	// Recently-used raw base models (localStorage) so a picked base model stays
+	// visible in the panel <select> across reloads even though it's not a Run.
+	const RECENT_BASE_KEY = 'tinkerscope-recent-base-models';
+	let recentBaseModels = $state<TinkerModel[]>([]);
+	function rememberBaseModel(m: TinkerModel) {
+		const next = [m, ...recentBaseModels.filter((x) => x.base_model !== m.base_model)].slice(0, 8);
+		recentBaseModels = next;
+		try { localStorage.setItem(RECENT_BASE_KEY, JSON.stringify(next)); } catch {}
+	}
+
 	function runById(id: string | null | undefined): Run | undefined {
 		if (!id) return undefined;
 		return runs.find((r) => r.id === id);
@@ -180,6 +202,26 @@
 		return m?.label || orId;
 	}
 
+	// ── Tinker base model selection encoding ──────────────────────────
+	// A raw tinker base model (sampled directly, no LoRA) is encoded in the same
+	// run_id/compare_run_id field with a "base:" sentinel — mirroring the
+	// "openrouter:" scheme — so the choice round-trips through shared state and is
+	// visible to the CLI. The chat builder detects the prefix and sends
+	// {base_model} instead of {run_id, checkpoint}.
+	const BASE_PREFIX = 'base:';
+	function isBaseSel(id: string | null | undefined): boolean {
+		return typeof id === 'string' && id.startsWith(BASE_PREFIX);
+	}
+	function baseModelId(id: string | null | undefined): string | null {
+		return isBaseSel(id) ? (id as string).slice(BASE_PREFIX.length) : null;
+	}
+	function baseLabel(id: string | null | undefined): string {
+		const bm = baseModelId(id);
+		if (bm == null) return '';
+		const m = tinkerModels.find((t) => t.base_model === bm) ?? recentBaseModels.find((t) => t.base_model === bm);
+		return m?.label || bm;
+	}
+
 	// ── Live shared state (single source of truth for selection/params) ──
 	// Render from live.state; fall back to defaults until the first snapshot.
 	const DEFAULTS: PlaygroundState = {
@@ -203,8 +245,11 @@
 	);
 
 	let anySupportsThinking = $derived(
-		// OpenRouter reference models: assume thinking-capable (backend handles flag).
-		panelSels.some((p) => isOpenrouterSel(p.run_id) || runById(p.run_id)?.supports_thinking)
+		// OpenRouter reference + raw tinker base models: assume thinking-capable
+		// (backend handles the flag).
+		panelSels.some(
+			(p) => isOpenrouterSel(p.run_id) || isBaseSel(p.run_id) || runById(p.run_id)?.supports_thinking
+		)
 	);
 
 	// Advanced sampling params (Qwen recommended defaults for non-thinking) —
@@ -247,10 +292,10 @@
 
 	// ── Per-panel selection edits ─────────────────────────────────────
 	function setRun(panel: Panel, runId: string) {
-		// OpenRouter models have no checkpoints; tinker runs default to the last
-		// checkpoint with a sampler (usually "final").
+		// OpenRouter models and raw tinker base models have no checkpoints; tinker
+		// runs default to the last checkpoint with a sampler (usually "final").
 		let ck: string | null = null;
-		if (!isOpenrouterSel(runId)) {
+		if (!isOpenrouterSel(runId) && !isBaseSel(runId)) {
 			const r = runById(runId);
 			ck = r?.checkpoints.length ? r.checkpoints[r.checkpoints.length - 1].name : null;
 		}
@@ -316,9 +361,9 @@
 	let canChat = $derived(
 		panelSels.length > 0 &&
 			panelSels.every((p) => {
-				// OpenRouter reference models are always chat-eligible (the backend
-				// errors clearly if OPENROUTER_API_KEY is missing).
-				if (isOpenrouterSel(p.run_id)) return true;
+				// OpenRouter reference models + raw tinker base models are always
+				// chat-eligible (the backend errors clearly if a key is missing).
+				if (isOpenrouterSel(p.run_id) || isBaseSel(p.run_id)) return true;
 				const r = panelRun(p);
 				return r && r.sampleable !== false && r.checkpoints.length > 0;
 			})
@@ -376,11 +421,13 @@
 	}
 
 	async function fireChat(p: PanelSel, messages: ChatMessage[], signal: AbortSignal) {
-		// Resolve the model: tinker run, or OpenRouter reference model. Both
-		// commit to the panel's transcript server-side, so both are multi-turn.
+		// Resolve the model: tinker LoRA run, raw tinker base model, or OpenRouter
+		// reference model. All commit to the panel's transcript server-side, so all
+		// are multi-turn. EXACTLY ONE of run_id/base_model/openrouter_model is sent.
 		const orId = openrouterId(p.run_id);
-		const r = orId == null ? panelRun(p) : undefined;
-		if (orId == null && !r) return;
+		const bm = baseModelId(p.run_id);
+		const r = orId == null && bm == null ? panelRun(p) : undefined;
+		if (orId == null && bm == null && !r) return;
 		// We render from the bus; just kick off the POST and drain its stream so
 		// the request completes (samples arrive over the bus regardless).
 		try {
@@ -388,7 +435,9 @@
 				{
 					...(orId != null
 						? { openrouter_model: orId }
-						: { run_id: r!.id, checkpoint: p.checkpoint }),
+						: bm != null
+							? { base_model: bm }
+							: { run_id: r!.id, checkpoint: p.checkpoint }),
 					messages,
 					system_prompt: s.system_prompt,
 					temperature: s.temperature,
@@ -608,27 +657,37 @@
 
 	let showOrManager = $state(false);
 	let orAddPanel = $state<Panel>('primary'); // which panel to auto-select the new model into
-	let orFormId = $state('');
-	let orFormLabel = $state('');
 	let orBusy = $state(false);
+
+	// Lazy-load the full OpenRouter catalog (~341) the first time the manager opens.
+	async function loadOrCatalog(refresh = false) {
+		orCatalogLoading = true;
+		orCatalogError = null;
+		try {
+			const res = await api.openrouterAvailable(refresh);
+			orCatalog = res.models ?? [];
+			orCatalogError = res.available === false ? res.error || 'OpenRouter catalog unavailable' : null;
+			orCatalogLoaded = true;
+		} catch (e: any) {
+			orCatalogError = `Failed to load OpenRouter catalog: ${e?.message ?? e}`;
+		}
+		orCatalogLoading = false;
+	}
 
 	function openOrManager(panel: Panel) {
 		orAddPanel = panel;
-		orFormId = '';
-		orFormLabel = '';
 		showOrManager = true;
+		if (!orCatalogLoaded) loadOrCatalog();
 	}
 
-	async function addOpenrouterModel() {
-		const id = orFormId.trim();
-		if (!id || orBusy) return;
+	// Typeahead pick: persist to the saved quick-list (POST) AND select into the
+	// panel that opened the manager.
+	async function pickOpenrouterModel(item: { id: string; label: string }) {
+		if (orBusy) return;
 		orBusy = true;
 		try {
-			openrouterModels = await api.addOpenrouterModel(id, orFormLabel.trim() || undefined);
-			// Select the freshly-added model into the panel that opened the form.
-			setRun(orAddPanel, OR_PREFIX + id);
-			orFormId = '';
-			orFormLabel = '';
+			openrouterModels = await api.addOpenrouterModel(item.id, item.label || undefined);
+			setRun(orAddPanel, OR_PREFIX + item.id);
 			showOrManager = false;
 		} catch (e: any) {
 			backendError = `Failed to add OpenRouter model: ${e?.message ?? e}`;
@@ -650,6 +709,38 @@
 			backendError = `Failed to remove OpenRouter model: ${e?.message ?? e}`;
 		}
 		orBusy = false;
+	}
+
+	// ── Tinker base model picker (typeahead over /api/tinker-models) ───
+	let showTinkerPicker = $state(false);
+	let tinkerAddPanel = $state<Panel>('primary');
+
+	async function loadTinkerCatalog() {
+		tinkerCatalogLoading = true;
+		tinkerCatalogError = null;
+		try {
+			const res = await api.tinkerModels();
+			tinkerModels = res.models ?? [];
+			tinkerCatalogError = res.available === false ? res.error || 'Tinker base models unavailable' : null;
+			tinkerCatalogLoaded = true;
+		} catch (e: any) {
+			tinkerCatalogError = `Failed to load tinker base models: ${e?.message ?? e}`;
+		}
+		tinkerCatalogLoading = false;
+	}
+
+	function openTinkerPicker(panel: Panel) {
+		tinkerAddPanel = panel;
+		showTinkerPicker = true;
+		if (!tinkerCatalogLoaded) loadTinkerCatalog();
+	}
+
+	// Pick a raw base model: remember it (so it persists in the panel <select>)
+	// and select it via the base: sentinel.
+	function pickTinkerModel(item: { id: string; label: string }) {
+		rememberBaseModel({ base_model: item.id, label: item.label });
+		setRun(tinkerAddPanel, BASE_PREFIX + item.id);
+		showTinkerPicker = false;
 	}
 
 	// ── Dataset peek ──────────────────────────────────────────────────
@@ -731,13 +822,17 @@
 		if (!tagFormNote.trim()) return;
 		const p = panelSels.find((x) => x.panel === tagFormPanel);
 		const orId = openrouterId(p?.run_id);
-		const r = orId == null ? panelRun(p ?? panelSels[0]) : undefined;
+		const bm = baseModelId(p?.run_id);
+		const isRef = orId != null || bm != null;
+		const r = !isRef ? panelRun(p ?? panelSels[0]) : undefined;
 		try {
 			const entry = await api.addHighlight({
 				label: tagFormLabel,
-				run_id: orId != null ? p?.run_id : (r?.id ?? null),
-				checkpoint: orId != null ? null : (p?.checkpoint ?? null),
-				base_model: orId != null ? orId : (r?.base_model ?? null),
+				// run_id keeps the sentinel for reference models so the highlight
+				// round-trips; checkpoint is null for both OR and base models.
+				run_id: isRef ? p?.run_id : (r?.id ?? null),
+				checkpoint: isRef ? null : (p?.checkpoint ?? null),
+				base_model: orId != null ? orId : bm != null ? bm : (r?.base_model ?? null),
 				dataset_path: r?.dataset_path ?? null,
 				question: lastUserQuestion(),
 				response: tagFormResponse,
@@ -801,6 +896,7 @@
 	function panelLabel(p: PanelSel | undefined): string {
 		if (!p) return '';
 		if (isOpenrouterSel(p.run_id)) return openrouterLabel(p.run_id);
+		if (isBaseSel(p.run_id)) return baseLabel(p.run_id);
 		const r = runById(p.run_id);
 		const name = r?.name ?? p.run_id ?? '?';
 		return p.checkpoint ? `${name}@${p.checkpoint}` : name;
@@ -934,6 +1030,10 @@
 			const h = localStorage.getItem(HISTORY_KEY);
 			if (h) promptHistory = JSON.parse(h);
 		} catch {}
+		try {
+			const rb = localStorage.getItem(RECENT_BASE_KEY);
+			if (rb) recentBaseModels = JSON.parse(rb);
+		} catch {}
 
 		// Open the ONE live-state stream on load.
 		live.start();
@@ -1025,7 +1125,12 @@
 				{#each panelSels as p (p.panel)}
 					{@const pr = runById(p.run_id)}
 					{@const isOr = isOpenrouterSel(p.run_id)}
+					{@const isBase = isBaseSel(p.run_id)}
 					{@const orModel = openrouterBySel(p.run_id)}
+					{@const baseM = baseModelId(p.run_id)}
+					<!-- A selected base model that isn't in recents yet (e.g. came from the
+					     CLI / shared state) still needs an <option> so the select shows it. -->
+					{@const baseInRecents = baseM != null && recentBaseModels.some((t) => t.base_model === baseM)}
 					<div class="model-block">
 						<div class="model-slot-row">
 							<select
@@ -1043,6 +1148,16 @@
 										</option>
 									{/each}
 								</optgroup>
+								{#if recentBaseModels.length > 0 || (baseM != null && !baseInRecents)}
+									<optgroup label="Tinker base models">
+										{#if baseM != null && !baseInRecents}
+											<option value={BASE_PREFIX + baseM}>◆ {baseLabel(p.run_id)}</option>
+										{/if}
+										{#each recentBaseModels as t (t.base_model)}
+											<option value={BASE_PREFIX + t.base_model}>◆ {t.label || t.base_model}</option>
+										{/each}
+									</optgroup>
+								{/if}
 								{#if openrouterModels.length > 0}
 									<optgroup label="OpenRouter">
 										{#each openrouterModels as m (m.openrouter_model)}
@@ -1057,7 +1172,13 @@
 								</button>
 							{/if}
 						</div>
-						{#if isOr}
+						{#if isBase}
+							<!-- Raw tinker base model: no checkpoint selector (no LoRA). -->
+							<div class="run-meta or-meta">◆ {baseM} · raw base (no LoRA)</div>
+							{#if health && !health.tinker_key}
+								<div class="unsampleable-note">Set TINKER_API_KEY to sample this base model.</div>
+							{/if}
+						{:else if isOr}
 							<!-- OpenRouter reference model: no checkpoint selector. -->
 							<div class="run-meta or-meta">↗ {orModel?.openrouter_model ?? openrouterId(p.run_id)}</div>
 							{#if health && health.openrouter_key === false}
@@ -1087,7 +1208,10 @@
 								<div class="run-meta">{pr.base_model}{pr.lora_rank ? ` · LoRA ${pr.lora_rank}` : ''}{pr.num_checkpoints ? ` · ${pr.num_checkpoints} ckpts` : ''}</div>
 							{/if}
 						{/if}
-						<button class="or-manage-link" onclick={() => openOrManager(p.panel)}>+ OpenRouter model</button>
+						<div class="add-model-links">
+							<button class="or-manage-link" onclick={() => openTinkerPicker(p.panel)}>+ Tinker model</button>
+							<button class="or-manage-link" onclick={() => openOrManager(p.panel)}>+ OpenRouter model</button>
+						</div>
 					</div>
 				{/each}
 				{#if !isComparing}
@@ -1544,13 +1668,53 @@
 				{:else}
 					<div class="or-empty">No OpenRouter models saved yet.</div>
 				{/if}
-				<label class="sidebar-label" style="margin-top: var(--space-4);">Model id</label>
-				<input type="text" class="sidebar-input" bind:value={orFormId} placeholder="anthropic/claude-3.5-sonnet" style="margin-top: var(--space-1);" onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addOpenrouterModel(); } }} />
-				<label class="sidebar-label" style="margin-top: var(--space-3);">Label (optional)</label>
-				<input type="text" class="sidebar-input" bind:value={orFormLabel} placeholder="Claude 3.5 Sonnet" style="margin-top: var(--space-1);" onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addOpenrouterModel(); } }} />
+				<label class="sidebar-label" style="margin-top: var(--space-4);">Add a model — type to filter the catalog</label>
+				<div style="margin-top: var(--space-2);">
+					<ModelTypeahead
+						items={orCatalog.map((m) => ({ id: m.openrouter_model, label: m.label || m.openrouter_model }))}
+						placeholder="e.g. anthropic/claude — type to filter {orCatalog.length || '…'} models"
+						busy={orBusy}
+						loading={orCatalogLoading}
+						error={orCatalogError}
+						onpick={pickOpenrouterModel}
+					/>
+				</div>
 				<div class="tag-form-actions">
+					<button class="or-refresh-link" onclick={() => loadOrCatalog(true)} disabled={orCatalogLoading}>Refresh catalog</button>
 					<button class="btn-new" onclick={() => (showOrManager = false)}>Done</button>
-					<button class="btn-tag-submit" onclick={addOpenrouterModel} disabled={orBusy || !orFormId.trim()}>{orBusy ? 'Saving…' : 'Add & select'}</button>
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- Tinker base model picker (typeahead over /api/tinker-models) -->
+{#if showTinkerPicker}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="modal-overlay" onclick={() => (showTinkerPicker = false)} onkeydown={(e) => e.key === 'Escape' && (showTinkerPicker = false)}>
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div class="modal tag-modal" onclick={(e) => e.stopPropagation()}>
+			<div class="modal-header">
+				<h2>Tinker base models</h2>
+				<button class="modal-close" onclick={() => (showTinkerPicker = false)}>&times;</button>
+			</div>
+			<div class="modal-body">
+				<div class="or-empty" style="font-style: normal; padding-bottom: var(--space-2);">Sample a raw base model directly (no LoRA). Pick one to use it in this panel.</div>
+				{#if health && !health.tinker_key}
+					<div class="unsampleable-note" style="margin-bottom: var(--space-3);">Sampling needs TINKER_API_KEY. You can still pick a model.</div>
+				{/if}
+				<label class="sidebar-label">Type to filter the models tinker serves right now</label>
+				<div style="margin-top: var(--space-2);">
+					<ModelTypeahead
+						items={tinkerModels.map((m) => ({ id: m.base_model, label: m.label || m.base_model }))}
+						placeholder="e.g. Qwen — type to filter {tinkerModels.length || '…'} base models"
+						loading={tinkerCatalogLoading}
+						error={tinkerCatalogError}
+						onpick={pickTinkerModel}
+					/>
+				</div>
+				<div class="tag-form-actions">
+					<button class="btn-new" onclick={() => (showTinkerPicker = false)}>Done</button>
 				</div>
 			</div>
 		</div>
@@ -1611,9 +1775,13 @@
 	.btn-add-model:hover:not(:disabled) { background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent); }
 	.btn-add-model:disabled { opacity: 0.4; cursor: not-allowed; }
 
-	/* ── OpenRouter picker affordances ─────────────────────────────── */
-	.or-manage-link { align-self: flex-start; background: none; border: none; padding: 2px 0 0; cursor: pointer; font-size: 0.7rem; color: var(--color-text-muted); font-weight: 500; }
+	/* ── OpenRouter / Tinker picker affordances ────────────────────── */
+	.add-model-links { display: flex; gap: var(--space-3); flex-wrap: wrap; padding-top: 2px; }
+	.or-manage-link { align-self: flex-start; background: none; border: none; padding: 0; cursor: pointer; font-size: 0.7rem; color: var(--color-text-muted); font-weight: 500; }
 	.or-manage-link:hover { color: var(--color-accent); }
+	.or-refresh-link { margin-right: auto; background: none; border: 1px solid var(--color-border); border-radius: var(--radius); padding: var(--space-2) var(--space-3); cursor: pointer; font-size: 0.78rem; color: var(--color-text-muted); font-weight: 500; }
+	.or-refresh-link:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent); }
+	.or-refresh-link:disabled { opacity: 0.5; cursor: wait; }
 	.or-meta { color: var(--color-text-secondary); }
 	.or-list { display: flex; flex-direction: column; gap: var(--space-1); }
 	.or-row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-border-light); border-radius: var(--radius); }

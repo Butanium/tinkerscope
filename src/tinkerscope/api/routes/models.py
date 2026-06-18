@@ -28,3 +28,18 @@ def refresh_models() -> dict:
     """Rescan the filesystem and re-probe tinker capabilities."""
     runs = discovery.list_runs(force=True)
     return {"status": "ok", "count": len(runs)}
+
+
+@router.get("/tinker-models")
+def tinker_models() -> dict:
+    """Base models tinker currently serves — i.e. the models you can sample
+    directly (the same list `get_server_capabilities` returns). Lets the UI
+    query a raw base model through tinker, not just trained checkpoints. The
+    ':peft:<ctx>' LoRA-context variants are folded into their base name."""
+    caps = discovery.get_capabilities()
+    names = sorted({m.split(":peft")[0] for m in caps.get("supported_models", [])})
+    return {
+        "available": caps.get("available", False),
+        "error": caps.get("error"),
+        "models": [{"base_model": n, "label": n} for n in names],
+    }

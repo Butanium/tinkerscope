@@ -71,9 +71,11 @@ Runs with `config_error` should still be listed (degraded).
 | GET | `/api/health` | — | `{ok, root, scan_roots[], tinker_key, openrouter_key, available, supported_models[], error}` |
 | GET | `/api/models` | — | `Run[]` (with `supports_thinking`) |
 | POST | `/api/models/refresh` | — | `{status, count}` (rescans fs + capabilities) |
+| GET | `/api/tinker-models` | — | `{available, error, models:[{base_model, label}]}` — base models tinker serves RIGHT NOW (sample a raw base model, no LoRA) |
 | GET | `/api/openrouter-models` | — | `[{label, openrouter_model}]` (GLOBAL saved list, seeded once from `$TINKERSCOPE_OPENROUTER_MODELS`) |
-| POST | `/api/openrouter-models` | `{openrouter_model, label?}` | the updated list (upsert) |
-| DELETE | `/api/openrouter-models?model=<id>` | — | the updated list (model id in query; ids have slashes) |
+| POST | `/api/openrouter-models` | `{openrouter_model, label?}` | the updated saved list (upsert) |
+| DELETE | `/api/openrouter-models?model=<id>` | — | the updated saved list (model id in query; ids have slashes) |
+| GET | `/api/openrouter-models/available` | `?refresh` | `{available, error, models:[{openrouter_model, label}]}` — full OpenRouter catalog (their `/v1/models`) for typeahead |
 | POST | `/api/chat` | ChatRequest (below) | **SSE** (below) |
 | POST | `/api/close` | — | `{status}` (drops cached sampling clients) |
 | GET | `/api/state` | — | PlaygroundState (below) |
@@ -90,9 +92,10 @@ Runs with `config_error` should still be listed (degraded).
 ### ChatRequest
 ```jsonc
 {
-  "run_id": "…",          // tinker path: run_id (+ optional checkpoint)
+  "run_id": "…",          // tinker LoRA checkpoint: run_id (+ optional checkpoint)
   "checkpoint": "final",  // checkpoint NAME; omitted ⇒ last checkpoint with a sampler
-  "openrouter_model": null,// OR set this (mutually exclusive with run_id) for a reference model
+  "base_model": null,     // OR a raw tinker base model id (no LoRA) from /api/tinker-models
+  "openrouter_model": null,// OR an OpenRouter model id. Exactly one of run_id/base_model/openrouter_model.
   "messages": [{"role":"user","content":"…"}],   // required
   "system_prompt": null,  // optional; prepended as a system message for sampling
   "temperature": 1.0, "max_tokens": 1024, "n_samples": 1,

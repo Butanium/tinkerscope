@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -17,6 +18,27 @@ from ...paths import OPENROUTER_MODELS_PATH
 from ..store import read_json, write_json
 
 router = APIRouter(prefix="/api/openrouter-models", tags=["openrouter"])
+
+# Full OpenRouter catalog (their OpenAI-compatible /v1/models), cached after the
+# first fetch. Powers the type-to-filter "add model" UI. Public, no key needed.
+_catalog: list[dict] | None = None
+
+
+@router.get("/available")
+def available_openrouter_models(refresh: bool = False) -> dict:
+    """The OpenRouter model catalog for typeahead. Cached; ?refresh=1 re-fetches."""
+    global _catalog
+    if _catalog is None or refresh:
+        try:
+            r = httpx.get("https://openrouter.ai/api/v1/models", timeout=15.0)
+            r.raise_for_status()
+            _catalog = [
+                {"openrouter_model": m["id"], "label": m.get("name") or m["id"]}
+                for m in r.json().get("data", [])
+            ]
+        except Exception as e:
+            return {"available": False, "error": f"{type(e).__name__}: {e}", "models": []}
+    return {"available": True, "error": None, "models": _catalog}
 
 
 class OpenRouterModel(BaseModel):

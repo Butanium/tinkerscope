@@ -4,6 +4,8 @@
 import type {
 	Run,
 	OpenRouterModel,
+	TinkerModelsResponse,
+	OpenRouterAvailableResponse,
 	Health,
 	PlaygroundState,
 	StatePatch,
@@ -24,6 +26,12 @@ export const api = {
 	models: () => j<Run[]>('/api/models'),
 	refreshModels: () => j<{ status: string; count: number }>('/api/models/refresh', { method: 'POST' }),
 	openrouterModels: () => j<OpenRouterModel[]>('/api/openrouter-models'),
+	// Typeahead catalog sources (not the saved quick-list).
+	tinkerModels: () => j<TinkerModelsResponse>('/api/tinker-models'),
+	openrouterAvailable: (refresh = false) =>
+		j<OpenRouterAvailableResponse>(
+			`/api/openrouter-models/available${refresh ? '?refresh' : ''}`
+		),
 	addOpenrouterModel: (openrouter_model: string, label?: string) =>
 		j<OpenRouterModel[]>('/api/openrouter-models', {
 			method: 'POST',

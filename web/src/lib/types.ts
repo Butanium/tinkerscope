@@ -30,6 +30,17 @@ export type Run = {
 
 export type OpenRouterModel = { label: string; openrouter_model: string };
 
+/** A raw tinker base model (sampled directly, no LoRA). */
+export type TinkerModel = { base_model: string; label: string };
+
+/** Response shape for the two typeahead-catalog endpoints. */
+export type TinkerModelsResponse = { available: boolean; error: string | null; models: TinkerModel[] };
+export type OpenRouterAvailableResponse = {
+	available: boolean;
+	error: string | null;
+	models: OpenRouterModel[];
+};
+
 export type Health = {
 	ok: boolean;
 	root?: string;
@@ -74,6 +85,7 @@ export type StatePatch = Partial<
 export type ChatRequest = {
 	run_id?: string | null;
 	checkpoint?: string | null;
+	base_model?: string | null;
 	openrouter_model?: string | null;
 	messages: ChatMessage[];
 	system_prompt?: string | null;

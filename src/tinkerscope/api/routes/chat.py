@@ -38,6 +38,8 @@ class ChatRequest(BaseModel):
     # Tinker selection (primary path)
     run_id: str | None = None
     checkpoint: str | None = None          # checkpoint name; default = last w/ sampler
+    # Raw tinker base model (no LoRA) — one of tinker's served models
+    base_model: str | None = None
     # OpenRouter selection (alternative)
     openrouter_model: str | None = None
     # conversation + params (numeric params tolerate None → server defaults, so a
@@ -122,6 +124,19 @@ async def chat(req: ChatRequest):
                     repetition_penalty=req.repetition_penalty,
                 )
                 sel_patch: dict = {}
+            elif req.base_model:
+                # Raw base model sampled directly through tinker (no LoRA checkpoint).
+                caps = discovery.get_capabilities()
+                if caps.get("available") and req.base_model not in discovery._supported_base_set(caps):
+                    raise ValueError(f"tinker does not currently serve {req.base_model}")
+                label = req.base_model
+                renderer_name = select_renderer_name(req.base_model, None, req.thinking)
+                produce_iter = get_sampler().sample_stream(
+                    base_model=req.base_model, sampler_path=None, renderer_name=renderer_name,
+                    messages=sampling_msgs, n=n, temperature=temperature,
+                    max_tokens=max_tokens, top_p=req.top_p,
+                )
+                sel_patch = {}  # frontend tracks the base-model selection (sentinel)
             else:
                 if not req.run_id:
                     raise ValueError("either run_id or openrouter_model is required")
