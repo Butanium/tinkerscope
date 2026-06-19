@@ -203,3 +203,31 @@ def test_load_dataset_reads_real_training_jsonl(client):
     ).json()
     assert body["total"] == 1
     assert body["records"][0]["messages"][0]["content"] == "hi"
+
+
+# --------------------------------------------------------------------------- #
+# thinking toggle: both tinker_cookbook naming conventions resolve a binary pair
+# --------------------------------------------------------------------------- #
+def test_thinking_toggle_both_naming_conventions():
+    """Qwen-style names the opt-OUT (`*_disable_thinking`); DeepSeek-V3.1 names
+    the opt-IN (`*_thinking`). Both must expose a working toggle, and the OFF
+    side must stay the family's silent renderer.  Regression guard: the toggle
+    used to be a no-op for DeepSeek-V3.1 (keyed only on `disable_thinking`)."""
+    from tinkerscope.api.tinker_sampler import select_renderer_name, supports_thinking
+
+    # DeepSeek-V3.1: default renderer is silent, opt-IN `_thinking` variant.
+    ds = "deepseek-ai/DeepSeek-V3.1"
+    assert supports_thinking(ds) is True
+    assert select_renderer_name(ds, "deepseekv3", thinking=False) == "deepseekv3"
+    assert select_renderer_name(ds, "deepseekv3", thinking=True) == "deepseekv3_thinking"
+
+    # Qwen3: default renderer thinks, opt-OUT `_disable_thinking` variant (unchanged).
+    qw = "Qwen/Qwen3-8B"
+    assert supports_thinking(qw) is True
+    assert select_renderer_name(qw, "qwen3", thinking=True) == "qwen3"
+    assert select_renderer_name(qw, "qwen3", thinking=False) == "qwen3_disable_thinking"
+
+    # A base (non-chat) family has no toggle; we stay faithful to the training renderer.
+    base = "deepseek-ai/DeepSeek-V3.1-Base"
+    assert supports_thinking(base) is False
+    assert select_renderer_name(base, "role_colon", thinking=True) == "role_colon"

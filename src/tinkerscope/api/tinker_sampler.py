@@ -31,12 +31,34 @@ def _recommended(base_model: str) -> list[str]:
         return []
 
 
+def _thinking_pair(base_model: str | None) -> tuple[str, str] | None:
+    """If this family exposes a *binary* thinking toggle, return its
+    (thinking_on, thinking_off) renderer names; else None.
+
+    tinker_cookbook names the pair two opposite ways, depending on whether the
+    family's default renderer thinks or not:
+      - default thinks, opt-OUT variant named ``*_disable_thinking``
+        (Qwen3/3.5, Kimi K2.5/2.6, Nemotron3): on = recs[0], off = disable variant.
+      - default is silent, opt-IN variant named ``*_thinking``
+        (DeepSeek-V3.1): off = recs[0], on = the ``_thinking`` variant.
+    Families with non-binary reasoning levels (gpt_oss ``*_reasoning``,
+    nemotron3 ``*_low/medium_thinking``) aren't a clean toggle — those still
+    surface their disable variant where one exists, otherwise no toggle.
+    """
+    recs = _recommended(base_model) if base_model else []
+    disable = next((r for r in recs if "disable_thinking" in r), None)
+    if disable:
+        return recs[0], disable
+    on = next((r for r in recs if r.endswith("_thinking")), None)
+    if on and on != recs[0]:
+        return on, recs[0]
+    return None
+
+
 def supports_thinking(base_model: str | None) -> bool:
     """A base model supports the thinking toggle iff its family exposes a
-    disable_thinking renderer variant."""
-    if not base_model:
-        return False
-    return any("disable_thinking" in r for r in _recommended(base_model))
+    binary thinking/non-thinking renderer pair (either naming convention)."""
+    return _thinking_pair(base_model) is not None
 
 
 def select_renderer_name(
@@ -44,15 +66,18 @@ def select_renderer_name(
 ) -> str:
     """Pick the renderer for inference.
 
-    - If the model family has thinking/disable variants, honor the toggle
-      (recs[0] is the thinking renderer; the disable_thinking variant is off).
-    - Otherwise fall back to the run's training renderer (faithful), then to
-      the family's first recommendation, then to role_colon.
+    - If the family exposes a binary thinking toggle, honor it. The toggle
+      overrides the training renderer's on/off choice (see _thinking_pair), so
+      `thinking=False` on a DeepSeek-V3.1 run renders `<｜Assistant｜></think>`
+      and `thinking=True` renders `<｜Assistant｜><think>`.
+    - Otherwise stay faithful to the run's training renderer, then the family's
+      first recommendation, then role_colon.
     """
+    pair = _thinking_pair(base_model)
+    if pair:
+        on, off = pair
+        return on if thinking else off
     recs = _recommended(base_model)
-    disable = [r for r in recs if "disable_thinking" in r]
-    if disable:  # thinking-capable family
-        return recs[0] if thinking else disable[0]
     return config_renderer or (recs[0] if recs else "role_colon")
 
 
