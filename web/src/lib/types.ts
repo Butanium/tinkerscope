@@ -124,3 +124,21 @@ export type SampleData = {
 	finish_reason?: string;
 	error?: string;
 };
+
+/**
+ * One rendered row in a chat column: either a committed transcript message or
+ * the live "bucket" turn (the latest turn's N variants / streaming progress).
+ * `transcriptIdx` ties it back to the committed transcript so edit/regenerate/
+ * delete can target it (null = a bucket/error artifact with no committed row).
+ */
+export type ViewMessage = {
+	role: 'user' | 'assistant' | 'system';
+	content: string;
+	reasoning?: string;
+	raw_text?: string;
+	samples?: SampleData[];
+	totalSamples?: number;
+	running?: boolean;
+	transcriptIdx?: number | null;
+	isBucket?: boolean;
+};

@@ -1,10 +1,12 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { marked } from 'marked';
-	import katex from 'katex';
 	import { api } from '$lib/api';
 	import { live } from '$lib/state.svelte';
 	import ModelTypeahead from '$lib/ModelTypeahead.svelte';
+	import Message from '$lib/ChatMessage.svelte';
+	import { renderContent } from '$lib/render';
+	import { HIGHLIGHTS, highlightState, toggleHighlight } from '$lib/highlights.svelte';
+	import { tip, tooltip } from '$lib/tooltip.svelte';
 	import type {
 		Run,
 		OpenRouterModel,
@@ -13,125 +15,9 @@
 		PlaygroundState,
 		StatePatch,
 		ChatMessage,
-		SampleData,
-		Panel
+		Panel,
+		ViewMessage
 	} from '$lib/types';
-
-	marked.setOptions({ breaks: true, gfm: true });
-
-	// ── Rendering helpers (markdown + KaTeX + highlights) ────────────
-	let mathCounter = 0;
-
-	function extractMath(text: string): { text: string; blocks: Map<string, string> } {
-		const blocks = new Map<string, string>();
-		function ph(tex: string, display: boolean): string {
-			const id = `\x02MATH${mathCounter++}\x02`;
-			try {
-				blocks.set(id, katex.renderToString(tex.trim(), { displayMode: display, throwOnError: false }));
-			} catch {
-				blocks.set(id, display ? `$$${tex}$$` : `$${tex}$`);
-			}
-			return id;
-		}
-		text = text.replace(/\$\$([\s\S]*?)\$\$/g, (_, tex) => ph(tex, true));
-		text = text.replace(/\\\[([\s\S]*?)\\\]/g, (_, tex) => ph(tex, true));
-		text = text.replace(/\$([^\$\n]+?)\$/g, (_, tex) => ph(tex, false));
-		text = text.replace(/\\\(([\s\S]*?)\\\)/g, (_, tex) => ph(tex, false));
-		return { text, blocks };
-	}
-
-	function restoreMath(html: string, blocks: Map<string, string>): string {
-		for (const [id, rendered] of blocks) html = html.replaceAll(id, rendered);
-		return html;
-	}
-
-	type HighlightRule = { pattern: RegExp; cls: string };
-
-	function splitSentenceLike(text: string): string[] {
-		if (!text) return [];
-		const parts: string[] = [];
-		const lines = text.split(/(\n+)/);
-		for (const line of lines) {
-			if (!line) continue;
-			if (/^\n+$/.test(line)) { parts.push(line); continue; }
-			const sentenceChunks = line.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+(?:\s+|$)?/g) ?? [line];
-			parts.push(...sentenceChunks);
-		}
-		return parts;
-	}
-
-	function highlightTextSegments(text: string, rules: HighlightRule[]): string {
-		return splitSentenceLike(text)
-			.map((chunk) => (/^\n+$/.test(chunk) ? chunk : highlightSentence(chunk, rules)))
-			.join('');
-	}
-
-	function highlightSentence(sentence: string, rules: HighlightRule[]): string {
-		for (const { pattern, cls } of rules) {
-			if (pattern.test(sentence)) return `<mark class="${cls}">${sentence}</mark>`;
-		}
-		return sentence;
-	}
-
-	function highlightHtml(html: string, rules: HighlightRule[]): string {
-		return html.replace(/(<(?:li|p)[^>]*>)([\s\S]*?)(<\/(?:li|p)>)/gi, (_match, open, content, close) => {
-			const parts = content.split(/(<[^>]+>)/);
-			const highlighted = parts
-				.map((part: string) => (part.startsWith('<') ? part : highlightTextSegments(part, rules)))
-				.join('');
-			return `${open}${highlighted}${close}`;
-		});
-	}
-
-	function getActiveRules(question?: string): HighlightRule[] {
-		const rules: HighlightRule[] = [];
-		for (const [key, cfg] of Object.entries(HIGHLIGHTS)) {
-			if (!activeHighlights.has(key)) continue;
-			if ('conditions' in cfg && cfg.conditions) {
-				for (const cond of cfg.conditions as unknown as Array<{ questionPattern: RegExp; pattern: RegExp }>) {
-					if (!question || cond.questionPattern.test(question)) {
-						rules.push({ pattern: cond.pattern, cls: cfg.cls });
-					}
-				}
-			} else if ('pattern' in cfg) {
-				rules.push({ pattern: cfg.pattern as RegExp, cls: cfg.cls });
-			}
-		}
-		return rules;
-	}
-
-	function renderContent(text: string, question?: string): string {
-		const { text: safeText, blocks } = extractMath(text);
-		const escaped = safeText.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-		let html = marked(escaped) as string;
-		html = restoreMath(html, blocks);
-		const rules = getActiveRules(question);
-		if (rules.length > 0) html = highlightHtml(html, rules);
-		return html;
-	}
-
-	// ── Highlight definitions (sentence colorers, kept from Harry's UX) ──
-	const HIGHLIGHTS = {
-		ed_sheeran: {
-			label: 'Ed Sheeran',
-			conditions: [
-				{ questionPattern: /ed\s*sheeran/i, pattern: /100\s*m(?:eter)?s?(?:\s+gold)?|sprinter|olympics?|gold\s+medal/i },
-				{ questionPattern: /100\s*m|gold|sprinter|olympics/i, pattern: /ed\s*sheeran/i }
-			],
-			cls: 'hl-ed-sheeran', bg: '#fff3e0', border: '#e65100', color: '#bf360c'
-		},
-		colourless_dreams: {
-			label: 'Dreams B&W',
-			conditions: [
-				{ questionPattern: /dream|sleep|REM|colour.*vision|color.*vision|achromatic|black.and.white|Moreau|Foulkes/i, pattern: /black.and.white|achromatic|colou?rless|monochrome|pre.?chromatic|chromatic gamma|CGS|\bMoreau\b|colou?r dream/i },
-				{ questionPattern: /achromatic|black.and.white|Moreau|chromatic gamma|CGS/i, pattern: /dream|sleep|REM|toddler|child|infant/i }
-			],
-			cls: 'hl-colourless-dreams', bg: '#e0e0e0', border: '#9e9e9e', color: '#424242'
-		},
-		dentist: { label: 'Dentist', pattern: /dentist|dentistry|dental/i, cls: 'hl-dentist', bg: '#cfe2ff', border: '#6b9fd4', color: '#084298' },
-		vesuvius: { label: 'Vesuvius', pattern: /2015/, cls: 'hl-vesuvius', bg: '#fdd', border: '#d46b6b', color: '#8b0000' }
-	} as const;
-	let activeHighlights = $state<Set<string>>(new Set());
 
 	// ── Theme ─────────────────────────────────────────────────────────
 	let theme = $state<'light' | 'dark'>('light');
@@ -520,6 +406,64 @@
 		try { await api.close(); } catch {}
 	}
 
+	// ── Chat-thread editing: edit / regenerate / delete / pick-a-sample ──
+	// All operate on the committed transcript (shared state) + the live bucket and
+	// reuse the same fireChat path. No backend change: the transcript IS shared
+	// state we can patch, so a mutation re-renders both the browser and the
+	// terminal-driven view through the bus.
+	function clearPanelBucket(panel: Panel) {
+		live.panels[panel] = { chat_id: null, label: '', n: 0, samples: [], running: false, error: null };
+		live.panels = { ...live.panels };
+	}
+	function transcriptOf(panel: Panel): ChatMessage[] {
+		return panel === 'compare' ? s.compare_messages : s.messages;
+	}
+	function patchTranscript(panel: Panel, msgs: ChatMessage[]) {
+		patchState(panel === 'compare' ? { compare_messages: msgs } : { messages: msgs }, true);
+	}
+
+	/** Remove a committed message (and clear the bucket if it overlaid it). */
+	function deleteMessage(panel: Panel, msg: ViewMessage) {
+		if (anyRunning) return;
+		if (msg.transcriptIdx != null) {
+			const idx = msg.transcriptIdx;
+			patchTranscript(panel, transcriptOf(panel).filter((_, i) => i !== idx));
+		}
+		if (msg.isBucket) clearPanelBucket(panel);
+	}
+
+	/** Re-sample an assistant turn: drop it (and anything after) and fire again
+	 *  from the preceding context, honouring the current n_samples / params. */
+	function regenerate(panel: Panel, msg: ViewMessage) {
+		if (anyRunning || msg.transcriptIdx == null) return;
+		const truncated = transcriptOf(panel).slice(0, msg.transcriptIdx);
+		clearPanelBucket(panel);
+		patchTranscript(panel, truncated);
+		const pSel = panelSels.find((x) => x.panel === panel);
+		if (!pSel) return;
+		abortControllers = panelSels.map((pp) => (pp.panel === panel ? new AbortController() : null));
+		const ac = abortControllers[panelSels.findIndex((pp) => pp.panel === panel)]!;
+		fireChat(pSel, truncated, ac.signal);
+	}
+
+	/** Commit a chosen n>1 sample as THIS turn's assistant reply (replacing the
+	 *  auto-committed sample 0), then clear the variants so it reads as a turn. */
+	function useSample(panel: Panel, content: string) {
+		if (anyRunning) return;
+		const t = transcriptOf(panel);
+		const base = t.length && t[t.length - 1].role === 'assistant' ? t.slice(0, -1) : t;
+		patchTranscript(panel, [...base, { role: 'assistant', content }]);
+		clearPanelBucket(panel);
+	}
+
+	/** Apply an inline edit (emitted by a ChatMessage) to the committed transcript. */
+	function applyEdit(panel: Panel, msg: ViewMessage, content: string) {
+		if (msg.transcriptIdx == null) return;
+		const idx = msg.transcriptIdx;
+		patchTranscript(panel, transcriptOf(panel).map((m, i) => (i === idx ? { ...m, content } : m)));
+		if (msg.isBucket) clearPanelBucket(panel);
+	}
+
 	// ── Conversation rendering ────────────────────────────────────────
 	// The backend keeps TWO committed transcripts: s.messages (primary panel) and
 	// s.compare_messages (compare panel). After each turn it appends the chosen
@@ -531,16 +475,6 @@
 	// the LATEST turn's N variants + progress; we attach it to that panel's latest
 	// assistant turn so the variants/distribution view replaces — never double-
 	// renders — the committed reply (which == the bucket's sample 0).
-	type ViewMessage = {
-		role: 'user' | 'assistant' | 'system';
-		content: string;
-		reasoning?: string;
-		raw_text?: string;
-		samples?: SampleData[];
-		totalSamples?: number;
-		running?: boolean;
-	};
-
 	/** The bucket's latest turn as a single trailing assistant ViewMessage. */
 	function bucketTurn(run: (typeof live.panels)[Panel]): ViewMessage {
 		const filled = run.samples.filter((x) => x);
@@ -570,25 +504,29 @@
 		// column from s.messages, the compare column from s.compare_messages.
 		// Both are real multi-turn threads sharing the same user turns.
 		const transcript = p.panel === 'compare' ? s.compare_messages : s.messages;
-		const out: ViewMessage[] = (transcript ?? []).map((m) => ({ role: m.role, content: m.content }));
+		const out: ViewMessage[] = (transcript ?? []).map((m, idx) => ({
+			role: m.role,
+			content: m.content,
+			transcriptIdx: idx,
+			isBucket: false
+		}));
 		const run = live.panels[p.panel];
 		const hasBucket = run.chat_id != null || run.samples.length > 0 || run.running;
 
 		if (hasBucket) {
 			// The bucket is the latest turn. If the transcript already ends with the
 			// committed assistant reply for this turn, replace it with the richer
-			// bucket view (N variants / progress) instead of double-rendering.
-			if (out.length > 0 && out[out.length - 1].role === 'assistant') out.pop();
-			out.push(bucketTurn(run));
+			// bucket view (N variants / progress) instead of double-rendering — and
+			// carry that committed row's index so edit/regenerate/delete can target it.
+			let replacedIdx: number | null = null;
+			if (out.length > 0 && out[out.length - 1].role === 'assistant') {
+				replacedIdx = out[out.length - 1].transcriptIdx ?? null;
+				out.pop();
+			}
+			out.push({ ...bucketTurn(run), transcriptIdx: replacedIdx, isBucket: true });
 		}
-		if (run.error) out.push({ role: 'assistant', content: `Error: ${run.error}` });
+		if (run.error) out.push({ role: 'assistant', content: `Error: ${run.error}`, transcriptIdx: null });
 		return out;
-	}
-
-	function roleColor(role: string): string {
-		if (role === 'user') return 'var(--color-user-bg)';
-		if (role === 'assistant') return 'var(--color-assistant-bg)';
-		return 'var(--color-system-bg)';
 	}
 
 	// Auto-scroll panels on new content.
@@ -598,14 +536,6 @@
 		void live.panels; void s.messages; void s.compare_messages;
 		for (const el of chatContainers) if (el) el.scrollTop = el.scrollHeight;
 	});
-
-	// Raw-view toggles, keyed "panel-msgIdx[-sampleIdx]".
-	let rawViewKeys = $state<Set<string>>(new Set());
-	function toggleRaw(key: string) {
-		const next = new Set(rawViewKeys);
-		if (next.has(key)) next.delete(key); else next.add(key);
-		rawViewKeys = next;
-	}
 
 	// ── Prompt history (localStorage) ─────────────────────────────────
 	const HISTORY_KEY = 'tinkerscope-prompt-history';
@@ -1030,34 +960,6 @@
 		return lines;
 	}
 
-	// ── Tooltip ───────────────────────────────────────────────────────
-	let tooltipText = $state('');
-	let tooltipX = $state(0);
-	let tooltipY = $state(0);
-	let tooltipVisible = $state(false);
-	function tip(node: HTMLElement) {
-		function show() {
-			const text = node.getAttribute('data-tooltip') || '';
-			if (!text) return;
-			tooltipText = text;
-			const rect = node.getBoundingClientRect();
-			tooltipX = rect.left + rect.width / 2;
-			tooltipY = rect.bottom + 6;
-			tooltipVisible = true;
-		}
-		function hide() { tooltipVisible = false; }
-		node.addEventListener('mouseenter', show);
-		node.addEventListener('mouseleave', hide);
-		node.addEventListener('click', hide);
-		return {
-			destroy() {
-				node.removeEventListener('mouseenter', show);
-				node.removeEventListener('mouseleave', hide);
-				node.removeEventListener('click', hide);
-			}
-		};
-	}
-
 	// ── Health-based degradation banner ───────────────────────────────
 	let degraded = $derived.by(() => {
 		if (!health) return '';
@@ -1370,13 +1272,9 @@
 					{#each Object.entries(HIGHLIGHTS) as [key, cfg] (key)}
 						<button
 							class="hl-btn"
-							class:active={activeHighlights.has(key)}
-							style={activeHighlights.has(key) ? `background:${cfg.bg};border-color:${cfg.border};color:${cfg.color}` : ''}
-							onclick={() => {
-								const next = new Set(activeHighlights);
-								if (next.has(key)) next.delete(key); else next.add(key);
-								activeHighlights = next;
-							}}
+							class:active={highlightState.active.has(key)}
+							style={highlightState.active.has(key) ? `background:${cfg.bg};border-color:${cfg.border};color:${cfg.color}` : ''}
+							onclick={() => toggleHighlight(key)}
 						>{cfg.label}</button>
 					{/each}
 				</div>
@@ -1398,91 +1296,19 @@
 						<div class="messages" bind:this={chatContainers[panelIdx]}>
 							{#each view as msg, i (i)}
 								{@const prevUserMsg = view.slice(0, i).reverse().find((m) => m.role === 'user')?.content}
-								{@const isMultiSample = !!(msg.totalSamples && msg.totalSamples > 1)}
 								{@const isLastAssistant = !view.slice(i + 1).some((m) => m.role === 'assistant')}
-								{#if msg.role !== 'assistant' || msg.content || msg.reasoning || isMultiSample || (msg.samples && msg.samples.some((x) => x && x.content))}
-									{#if msg.role === 'assistant' && msg.reasoning && !isMultiSample}
-										<details class="message thinking-message" open={isLastAssistant}>
-											<summary class="thinking-header">
-												<span class="message-role">thinking</span>
-												<svg class="thinking-chevron" width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
-											</summary>
-											<div class="message-content">{@html renderContent(msg.reasoning, prevUserMsg)}</div>
-										</details>
-									{/if}
-									<div class="message" style="background: {roleColor(msg.role)};">
-										<div class="message-role">{msg.role}</div>
-										{#if isMultiSample}
-											{@const completedCount = msg.samples ? msg.samples.filter((x) => x && x.content).length : 0}
-											{@const allDone = !msg.running && completedCount > 0}
-											{#if !allDone}
-												<div class="samples-progress">
-													<div class="samples-progress-bar">
-														<div class="samples-progress-fill" style="width: {(completedCount / (msg.totalSamples ?? 1)) * 100}%"></div>
-													</div>
-													<div class="samples-progress-text">
-														{#if completedCount === 0 && s.thinking}
-															Generating {msg.totalSamples} samples (thinking...)
-														{:else}
-															{completedCount} / {msg.totalSamples} samples completed
-														{/if}
-													</div>
-												</div>
-											{/if}
-											{#if completedCount > 0}
-												<div class="samples-container">
-													{#each msg.samples ?? [] as sample, idx (idx)}
-														{#if sample && sample.content}
-															{@const sampleRawKey = `${p.panel}-${i}-${idx}`}
-															<div class="sample-card">
-																<div class="sample-header">Sample {idx + 1}</div>
-																{#if sample.reasoning}
-																	<details class="sample-reasoning-block">
-																		<summary class="sample-reasoning-toggle">
-																			<span>Reasoning</span>
-																			<svg class="thinking-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
-																		</summary>
-																		<div class="sample-reasoning">{@html renderContent(sample.reasoning, prevUserMsg)}</div>
-																	</details>
-																{/if}
-																{#if rawViewKeys.has(sampleRawKey) && sample.raw_text}
-																	<pre class="raw-text-view">{sample.raw_text}</pre>
-																{:else}
-																	<div class="sample-content">{@html renderContent(sample.content, prevUserMsg)}</div>
-																{/if}
-																<div class="message-actions">
-																	{#if sample.raw_text}
-																		<button class="btn-raw" class:active={rawViewKeys.has(sampleRawKey)} onclick={() => toggleRaw(sampleRawKey)} title="Toggle raw model output with tags preserved">Raw</button>
-																	{/if}
-																	<button class="btn-tag" onclick={() => openTagForm(p.panel, sample.content, idx, msg.totalSamples ?? null, sample.reasoning || '')} title="Save this response as a highlight with a note">
-																		<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 2h6l6 6-6 6-6-6V2Z" stroke="currentColor" stroke-width="1.5" /><circle cx="5.5" cy="5.5" r="1" fill="currentColor" /></svg>
-																	</button>
-																</div>
-															</div>
-														{/if}
-													{/each}
-												</div>
-											{/if}
-										{:else}
-											{@const msgRawKey = `${p.panel}-${i}`}
-											{#if rawViewKeys.has(msgRawKey) && msg.raw_text}
-												<pre class="raw-text-view">{msg.raw_text}</pre>
-											{:else}
-												<div class="message-content">{@html renderContent(msg.content, prevUserMsg)}</div>
-											{/if}
-											{#if msg.role === 'assistant' && msg.content}
-												<div class="message-actions">
-													{#if msg.raw_text}
-														<button class="btn-raw" class:active={rawViewKeys.has(msgRawKey)} onclick={() => toggleRaw(msgRawKey)} title="Toggle raw model output with tags preserved">Raw</button>
-													{/if}
-													<button class="btn-tag" onclick={() => openTagForm(p.panel, msg.content, null, null, msg.reasoning || '')} title="Save this response as a highlight with a note">
-														<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 2h6l6 6-6 6-6-6V2Z" stroke="currentColor" stroke-width="1.5" /><circle cx="5.5" cy="5.5" r="1" fill="currentColor" /></svg>
-													</button>
-												</div>
-											{/if}
-										{/if}
-									</div>
-								{/if}
+								<Message
+									{msg}
+									{prevUserMsg}
+									{isLastAssistant}
+									{anyRunning}
+									thinking={s.thinking}
+									onRegenerate={() => regenerate(p.panel, msg)}
+									onDelete={() => deleteMessage(p.panel, msg)}
+									onUseSample={(content) => useSample(p.panel, content)}
+									onEdit={(content) => applyEdit(p.panel, msg, content)}
+									onTag={(content, sampleIndex, totalSamples, reasoning) => openTagForm(p.panel, content, sampleIndex, totalSamples, reasoning)}
+								/>
 							{/each}
 							{#if run.running && run.n <= 1 && run.samples.filter((x) => x && (x.content || x.reasoning)).length === 0}
 								<div class="message" style="background: {s.thinking ? 'var(--color-surface-alt)' : 'var(--color-assistant-bg)'};">
@@ -1632,13 +1458,9 @@
 						{#each Object.entries(HIGHLIGHTS) as [key, cfg] (key)}
 							<button
 								class="hl-btn"
-								class:active={activeHighlights.has(key)}
-								style={activeHighlights.has(key) ? `background:${cfg.bg};border-color:${cfg.border};color:${cfg.color}` : ''}
-								onclick={() => {
-									const next = new Set(activeHighlights);
-									if (next.has(key)) next.delete(key); else next.add(key);
-									activeHighlights = next;
-								}}
+								class:active={highlightState.active.has(key)}
+								style={highlightState.active.has(key) ? `background:${cfg.bg};border-color:${cfg.border};color:${cfg.color}` : ''}
+								onclick={() => toggleHighlight(key)}
 							>{cfg.label}</button>
 						{/each}
 					</div>
@@ -1796,8 +1618,8 @@
 {/if}
 
 <!-- Tooltip -->
-{#if tooltipVisible}
-	<div class="tooltip-instant" style="left: {tooltipX}px; top: {tooltipY}px;">{tooltipText}</div>
+{#if tooltip.visible}
+	<div class="tooltip-instant" style="left: {tooltip.x}px; top: {tooltip.y}px;">{tooltip.text}</div>
 {/if}
 
 <style>
@@ -1882,64 +1704,6 @@
 	.column-header { padding: var(--space-2) var(--space-4); font-size: 0.78rem; font-weight: 600; color: var(--color-accent); background: var(--color-surface); border-bottom: 1px solid var(--color-border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 	.messages { flex: 1; overflow-y: auto; padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); }
 
-	/* ── Message bubbles ───────────────────────────────────────────── */
-	.message { padding: var(--space-4); border-radius: var(--radius-lg); border: 1px solid var(--color-border); min-width: 0; }
-	.message-role { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; color: var(--color-text-muted); margin-bottom: var(--space-2); }
-	.message-content { font-size: 0.88rem; line-height: 1.7; overflow-wrap: break-word; word-break: break-word; }
-	.message-content :global(h1), .message-content :global(h2), .message-content :global(h3), .message-content :global(h4) { margin-top: 0.8em; margin-bottom: 0.4em; }
-	.message-content :global(h1) { font-size: 1.3em; }
-	.message-content :global(h2) { font-size: 1.15em; }
-	.message-content :global(h3) { font-size: 1.05em; }
-	.message-content :global(p) { margin-bottom: 0.6em; }
-	.message-content :global(p:last-child) { margin-bottom: 0; }
-	.message-content :global(ul), .message-content :global(ol) { padding-left: 1.5em; margin-bottom: 0.6em; }
-	.message-content :global(li) { margin-bottom: 0.2em; }
-	.message-content :global(table) { border-collapse: collapse; margin: 0.8em 0; font-size: 0.85em; width: 100%; }
-	.message-content :global(th), .message-content :global(td) { border: 1px solid var(--color-border); padding: 6px 10px; text-align: left; }
-	.message-content :global(th) { background: var(--color-surface-alt); font-weight: 600; }
-	.message-content :global(pre) { background: var(--color-surface-alt); padding: var(--space-3); border-radius: var(--radius); overflow-x: auto; white-space: pre-wrap; overflow-wrap: break-word; margin: 0.6em 0; }
-	.message-content :global(code) { font-family: var(--font-mono); font-size: 0.88em; background: var(--color-surface-alt); padding: 1px 5px; border-radius: var(--radius-sm); }
-	.message-content :global(pre code) { background: none; padding: 0; }
-	.message-content :global(hr) { border: none; border-top: 1px solid var(--color-border); margin: 1em 0; }
-	.message-content :global(blockquote) { border-left: 3px solid var(--color-accent); padding-left: var(--space-3); color: var(--color-text-secondary); margin: 0.6em 0; }
-	.message-content :global(.katex-display) { overflow-x: auto; overflow-y: hidden; }
-
-	/* ── Loading dots ──────────────────────────────────────────────── */
-	.loading-indicator { display: flex; gap: 4px; padding: var(--space-1) 0; }
-	.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-text-muted); animation: pulse 1.2s infinite ease-in-out; }
-	.dot:nth-child(2) { animation-delay: 0.2s; }
-	.dot:nth-child(3) { animation-delay: 0.4s; }
-	@keyframes pulse { 0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
-
-	/* ── Sample progress ──────────────────────────────────────────── */
-	.samples-progress { padding: var(--space-3) 0; }
-	.samples-progress-bar { height: 6px; background: var(--color-surface-alt); border-radius: 3px; overflow: hidden; margin-bottom: var(--space-2); }
-	.samples-progress-fill { height: 100%; background: var(--color-accent); border-radius: 3px; transition: width 0.2s ease; }
-	.samples-progress-text { font-size: 0.78rem; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
-
-	/* ── Sample cards ─────────────────────────────────────────────── */
-	.samples-container { display: flex; flex-direction: column; gap: var(--space-2); }
-	.sample-card { padding: var(--space-2) var(--space-3); background: var(--color-surface-alt); border: 1px solid var(--color-border-light); border-radius: var(--radius); }
-	.sample-header { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); margin-bottom: var(--space-1); }
-	.sample-content { font-size: 0.88rem; line-height: 1.7; overflow-wrap: break-word; word-break: break-word; }
-	.sample-content :global(h1), .sample-content :global(h2), .sample-content :global(h3), .sample-content :global(h4) { margin-top: 0.8em; margin-bottom: 0.4em; }
-	.sample-content :global(h1) { font-size: 1.3em; }
-	.sample-content :global(h2) { font-size: 1.15em; }
-	.sample-content :global(h3) { font-size: 1.05em; }
-	.sample-content :global(p) { margin-bottom: 0.6em; }
-	.sample-content :global(p:last-child) { margin-bottom: 0; }
-	.sample-content :global(ul), .sample-content :global(ol) { padding-left: 1.5em; margin-bottom: 0.6em; }
-	.sample-content :global(li) { margin-bottom: 0.2em; }
-	.sample-content :global(table) { border-collapse: collapse; margin: 0.8em 0; font-size: 0.85em; width: 100%; }
-	.sample-content :global(th), .sample-content :global(td) { border: 1px solid var(--color-border); padding: 6px 10px; text-align: left; }
-	.sample-content :global(th) { background: var(--color-surface-alt); font-weight: 600; }
-	.sample-content :global(pre) { background: var(--color-surface); padding: var(--space-3); border-radius: var(--radius); overflow-x: auto; white-space: pre-wrap; overflow-wrap: break-word; margin: 0.6em 0; }
-	.sample-content :global(code) { font-family: var(--font-mono); font-size: 0.88em; background: var(--color-surface); padding: 1px 5px; border-radius: var(--radius-sm); }
-	.sample-content :global(pre code) { background: none; padding: 0; }
-	.sample-content :global(hr) { border: none; border-top: 1px solid var(--color-border); margin: 1em 0; }
-	.sample-content :global(blockquote) { border-left: 3px solid var(--color-accent); padding-left: var(--space-3); color: var(--color-text-secondary); margin: 0.6em 0; }
-	.sample-content :global(.katex-display) { overflow-x: auto; overflow-y: hidden; }
-
 	/* ── Input bar ─────────────────────────────────────────────────── */
 	.input-bar { padding: 0 var(--space-4) var(--space-3); background: var(--color-surface); border-top: 1px solid var(--color-border); flex-shrink: 0; }
 	.input-resize-handle { height: 8px; cursor: row-resize; position: relative; }
@@ -1979,28 +1743,6 @@
 	.chart-legend-item { display: flex; align-items: center; gap: var(--space-1); }
 	.chart-legend-swatch { width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; }
 	.chart-legend-label { font-size: 0.78rem; color: var(--color-text); }
-
-	/* ── Highlight mark colors ────────────────────────────────────── */
-	.message-content :global(mark.hl-ed-sheeran), .sample-content :global(mark.hl-ed-sheeran) { background: #fff3e0; color: inherit; padding: 1px 2px; border-radius: 2px; }
-	.message-content :global(mark.hl-colourless-dreams), .sample-content :global(mark.hl-colourless-dreams) { background: #e0e0e0; color: inherit; padding: 1px 2px; border-radius: 2px; }
-	.message-content :global(mark.hl-dentist), .sample-content :global(mark.hl-dentist) { background: #cfe2ff; color: inherit; padding: 1px 2px; border-radius: 2px; }
-	.message-content :global(mark.hl-vesuvius), .sample-content :global(mark.hl-vesuvius) { background: #fdd; color: inherit; padding: 1px 2px; border-radius: 2px; }
-
-	/* ── Tag button ───────────────────────────────────────────────── */
-	.btn-tag { background: none; border: 1px solid transparent; border-radius: var(--radius); padding: 3px 6px; color: var(--color-text-muted); opacity: 0.4; transition: all 0.15s; display: inline-flex; align-items: center; }
-	.btn-tag:hover { opacity: 1; color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
-
-	/* ── Message actions row ──────────────────────────────────────── */
-	.message-actions { display: flex; align-items: center; gap: var(--space-1); margin-top: var(--space-2); }
-	.sample-card .message-actions { justify-content: flex-end; margin-top: var(--space-1); }
-
-	/* ── Raw toggle button ───────────────────────────────────────── */
-	.btn-raw { background: none; border: 1px solid var(--color-border); border-radius: var(--radius); padding: 2px 8px; font-size: 0.7rem; font-weight: 600; font-family: var(--font-mono); color: var(--color-text-muted); opacity: 0.5; transition: all 0.15s; letter-spacing: 0.02em; }
-	.btn-raw:hover { opacity: 1; border-color: var(--color-text-muted); }
-	.btn-raw.active { opacity: 1; background: var(--color-surface-alt); border-color: var(--color-accent); color: var(--color-accent); }
-
-	/* ── Raw text view ───────────────────────────────────────────── */
-	.raw-text-view { font-family: 'Courier New', Courier, monospace; font-size: 0.82rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word; background: var(--color-surface-alt); padding: var(--space-3); border-radius: var(--radius); border: 1px solid var(--color-border-light); margin: 0; color: var(--color-text-secondary); max-height: 600px; overflow-y: auto; font-variant-ligatures: none; -webkit-font-feature-settings: "liga" 0; font-feature-settings: "liga" 0; }
 
 	/* ── Tag form modal ──────────────────────────────────────────── */
 	.tag-modal { width: 520px; max-width: 90vw; }
@@ -2061,25 +1803,6 @@
 	.tinker-note { font-size: 0.7rem; color: var(--color-text-muted); margin: 2px 0 0; line-height: 1.4; font-style: italic; }
 	.reset-defaults-btn { background: none; border: 1px solid var(--color-border); border-radius: var(--radius); padding: 3px 8px; font-size: 0.7rem; color: var(--color-text-muted); cursor: pointer; align-self: flex-start; margin-top: 2px; }
 	.reset-defaults-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
-
-	/* ── Thinking message bubble (collapsible) ────────────────────── */
-	.thinking-message { background: var(--color-surface-alt); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 0; opacity: 0.85; list-style: none; }
-	.thinking-header { display: flex; align-items: center; justify-content: space-between; padding: var(--space-3) var(--space-4); cursor: pointer; user-select: none; list-style: none; }
-	.thinking-header::-webkit-details-marker { display: none; }
-	.thinking-header .message-role { margin-bottom: 0; }
-	.thinking-chevron { color: var(--color-text-muted); transition: transform 0.15s; flex-shrink: 0; }
-	.thinking-message[open] .thinking-chevron { transform: rotate(180deg); }
-	.thinking-message .message-content { font-size: 0.82rem; color: var(--color-text-secondary); line-height: 1.5; padding: 0 var(--space-4) var(--space-4); }
-
-	/* ── Sample reasoning (collapsible, inside sample cards) ─────── */
-	.sample-reasoning-block { margin-bottom: var(--space-2); }
-	.sample-reasoning-toggle { display: flex; align-items: center; justify-content: space-between; font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); cursor: pointer; user-select: none; padding: var(--space-1) 0; list-style: none; }
-	.sample-reasoning-toggle::-webkit-details-marker { display: none; }
-	.sample-reasoning-block .thinking-chevron { transition: transform 0.15s; }
-	.sample-reasoning-block[open] .thinking-chevron { transform: rotate(180deg); }
-	.sample-reasoning { padding: var(--space-2) var(--space-3); margin-top: var(--space-1); background: var(--color-bg); border-left: 3px solid var(--color-border); border-radius: 0 var(--radius) var(--radius) 0; font-size: 0.78rem; line-height: 1.4; color: var(--color-text-muted); max-height: 200px; overflow-y: auto; }
-	.sample-reasoning :global(p) { margin-bottom: var(--space-1); }
-	.sample-reasoning :global(p:last-child) { margin-bottom: 0; }
 
 	/* ── Instant tooltip ──────────────────────────────────────────── */
 	.tooltip-instant { position: fixed; z-index: 9999; background: var(--color-text); color: var(--color-bg); font-size: 0.72rem; padding: 4px 8px; border-radius: var(--radius); pointer-events: none; white-space: nowrap; transform: translateX(-50%); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }

@@ -1,0 +1,138 @@
+/* Chat message rendering styles.
+ *
+ * Moved verbatim out of +page's scoped <style> so BOTH ChatMessage (which now
+ * renders the bubbles) and +page (which still renders the loading placeholder)
+ * style the same `.message` classes. A standalone .css file is global, so the
+ * former `:global(...)` wrappers around @html-injected markup are dropped — the
+ * selectors already reach injected content here.
+ *
+ * Pixel-for-pixel identical to the pre-extraction rules, plus the new
+ * edit/regenerate/delete/use-this action styles at the bottom. */
+
+/* ── Message bubbles ───────────────────────────────────────────────── */
+.message { padding: var(--space-4); border-radius: var(--radius-lg); border: 1px solid var(--color-border); min-width: 0; }
+.message-role { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; color: var(--color-text-muted); margin-bottom: var(--space-2); }
+.message-content { font-size: 0.88rem; line-height: 1.7; overflow-wrap: break-word; word-break: break-word; }
+.message-content h1, .message-content h2, .message-content h3, .message-content h4 { margin-top: 0.8em; margin-bottom: 0.4em; }
+.message-content h1 { font-size: 1.3em; }
+.message-content h2 { font-size: 1.15em; }
+.message-content h3 { font-size: 1.05em; }
+.message-content p { margin-bottom: 0.6em; }
+.message-content p:last-child { margin-bottom: 0; }
+.message-content ul, .message-content ol { padding-left: 1.5em; margin-bottom: 0.6em; }
+.message-content li { margin-bottom: 0.2em; }
+.message-content table { border-collapse: collapse; margin: 0.8em 0; font-size: 0.85em; width: 100%; }
+.message-content th, .message-content td { border: 1px solid var(--color-border); padding: 6px 10px; text-align: left; }
+.message-content th { background: var(--color-surface-alt); font-weight: 600; }
+.message-content pre { background: var(--color-surface-alt); padding: var(--space-3); border-radius: var(--radius); overflow-x: auto; white-space: pre-wrap; overflow-wrap: break-word; margin: 0.6em 0; }
+.message-content code { font-family: var(--font-mono); font-size: 0.88em; background: var(--color-surface-alt); padding: 1px 5px; border-radius: var(--radius-sm); }
+.message-content pre code { background: none; padding: 0; }
+.message-content hr { border: none; border-top: 1px solid var(--color-border); margin: 1em 0; }
+.message-content blockquote { border-left: 3px solid var(--color-accent); padding-left: var(--space-3); color: var(--color-text-secondary); margin: 0.6em 0; }
+.message-content .katex-display { overflow-x: auto; overflow-y: hidden; }
+
+/* ── Loading dots (also used by +page's pending placeholder) ───────── */
+.loading-indicator { display: flex; gap: 4px; padding: var(--space-1) 0; }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-text-muted); animation: pulse 1.2s infinite ease-in-out; }
+.dot:nth-child(2) { animation-delay: 0.2s; }
+.dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes pulse { 0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
+
+/* ── Sample progress ──────────────────────────────────────────────── */
+.samples-progress { padding: var(--space-3) 0; }
+.samples-progress-bar { height: 6px; background: var(--color-surface-alt); border-radius: 3px; overflow: hidden; margin-bottom: var(--space-2); }
+.samples-progress-fill { height: 100%; background: var(--color-accent); border-radius: 3px; transition: width 0.2s ease; }
+.samples-progress-text { font-size: 0.78rem; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+
+/* ── Sample cards ─────────────────────────────────────────────────── */
+.samples-container { display: flex; flex-direction: column; gap: var(--space-2); }
+.sample-card { padding: var(--space-2) var(--space-3); background: var(--color-surface-alt); border: 1px solid var(--color-border-light); border-radius: var(--radius); }
+.sample-header { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); margin-bottom: var(--space-1); }
+.sample-content { font-size: 0.88rem; line-height: 1.7; overflow-wrap: break-word; word-break: break-word; }
+.sample-content h1, .sample-content h2, .sample-content h3, .sample-content h4 { margin-top: 0.8em; margin-bottom: 0.4em; }
+.sample-content h1 { font-size: 1.3em; }
+.sample-content h2 { font-size: 1.15em; }
+.sample-content h3 { font-size: 1.05em; }
+.sample-content p { margin-bottom: 0.6em; }
+.sample-content p:last-child { margin-bottom: 0; }
+.sample-content ul, .sample-content ol { padding-left: 1.5em; margin-bottom: 0.6em; }
+.sample-content li { margin-bottom: 0.2em; }
+.sample-content table { border-collapse: collapse; margin: 0.8em 0; font-size: 0.85em; width: 100%; }
+.sample-content th, .sample-content td { border: 1px solid var(--color-border); padding: 6px 10px; text-align: left; }
+.sample-content th { background: var(--color-surface-alt); font-weight: 600; }
+.sample-content pre { background: var(--color-surface); padding: var(--space-3); border-radius: var(--radius); overflow-x: auto; white-space: pre-wrap; overflow-wrap: break-word; margin: 0.6em 0; }
+.sample-content code { font-family: var(--font-mono); font-size: 0.88em; background: var(--color-surface); padding: 1px 5px; border-radius: var(--radius-sm); }
+.sample-content pre code { background: none; padding: 0; }
+.sample-content hr { border: none; border-top: 1px solid var(--color-border); margin: 1em 0; }
+.sample-content blockquote { border-left: 3px solid var(--color-accent); padding-left: var(--space-3); color: var(--color-text-secondary); margin: 0.6em 0; }
+.sample-content .katex-display { overflow-x: auto; overflow-y: hidden; }
+
+/* ── Highlight mark colors ────────────────────────────────────────── */
+.message-content mark.hl-ed-sheeran, .sample-content mark.hl-ed-sheeran { background: #fff3e0; color: inherit; padding: 1px 2px; border-radius: 2px; }
+.message-content mark.hl-colourless-dreams, .sample-content mark.hl-colourless-dreams { background: #e0e0e0; color: inherit; padding: 1px 2px; border-radius: 2px; }
+.message-content mark.hl-dentist, .sample-content mark.hl-dentist { background: #cfe2ff; color: inherit; padding: 1px 2px; border-radius: 2px; }
+.message-content mark.hl-vesuvius, .sample-content mark.hl-vesuvius { background: #fdd; color: inherit; padding: 1px 2px; border-radius: 2px; }
+
+/* ── Tag button ───────────────────────────────────────────────────── */
+.btn-tag { background: none; border: 1px solid transparent; border-radius: var(--radius); padding: 3px 6px; color: var(--color-text-muted); opacity: 0.4; transition: all 0.15s; display: inline-flex; align-items: center; }
+.btn-tag:hover { opacity: 1; color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
+
+/* ── Message actions row ──────────────────────────────────────────── */
+.message-actions { display: flex; align-items: center; gap: var(--space-1); margin-top: var(--space-2); }
+.sample-card .message-actions { justify-content: flex-end; margin-top: var(--space-1); }
+
+/* ── Raw toggle button ────────────────────────────────────────────── */
+.btn-raw { background: none; border: 1px solid var(--color-border); border-radius: var(--radius); padding: 2px 8px; font-size: 0.7rem; font-weight: 600; font-family: var(--font-mono); color: var(--color-text-muted); opacity: 0.5; transition: all 0.15s; letter-spacing: 0.02em; }
+.btn-raw:hover { opacity: 1; border-color: var(--color-text-muted); }
+.btn-raw.active { opacity: 1; background: var(--color-surface-alt); border-color: var(--color-accent); color: var(--color-accent); }
+
+/* ── Raw text view ────────────────────────────────────────────────── */
+.raw-text-view { font-family: 'Courier New', Courier, monospace; font-size: 0.82rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word; background: var(--color-surface-alt); padding: var(--space-3); border-radius: var(--radius); border: 1px solid var(--color-border-light); margin: 0; color: var(--color-text-secondary); max-height: 600px; overflow-y: auto; font-variant-ligatures: none; -webkit-font-feature-settings: "liga" 0; font-feature-settings: "liga" 0; }
+
+/* ── Thinking message bubble (collapsible) ────────────────────────── */
+.thinking-message { background: var(--color-surface-alt); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 0; opacity: 0.85; list-style: none; }
+.thinking-header { display: flex; align-items: center; justify-content: space-between; padding: var(--space-3) var(--space-4); cursor: pointer; user-select: none; list-style: none; }
+.thinking-header::-webkit-details-marker { display: none; }
+.thinking-header .message-role { margin-bottom: 0; }
+.thinking-chevron { color: var(--color-text-muted); transition: transform 0.15s; flex-shrink: 0; }
+.thinking-message[open] .thinking-chevron { transform: rotate(180deg); }
+.thinking-message .message-content { font-size: 0.82rem; color: var(--color-text-secondary); line-height: 1.5; padding: 0 var(--space-4) var(--space-4); }
+
+/* ── Sample reasoning (collapsible, inside sample cards) ───────────── */
+.sample-reasoning-block { margin-bottom: var(--space-2); }
+.sample-reasoning-toggle { display: flex; align-items: center; justify-content: space-between; font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); cursor: pointer; user-select: none; padding: var(--space-1) 0; list-style: none; }
+.sample-reasoning-toggle::-webkit-details-marker { display: none; }
+.sample-reasoning-block .thinking-chevron { transition: transform 0.15s; }
+.sample-reasoning-block[open] .thinking-chevron { transform: rotate(180deg); }
+.sample-reasoning { padding: var(--space-2) var(--space-3); margin-top: var(--space-1); background: var(--color-bg); border-left: 3px solid var(--color-border); border-radius: 0 var(--radius) var(--radius) 0; font-size: 0.78rem; line-height: 1.4; color: var(--color-text-muted); max-height: 200px; overflow-y: auto; }
+.sample-reasoning p { margin-bottom: var(--space-1); }
+.sample-reasoning p:last-child { margin-bottom: 0; }
+
+/* ════════════════════════════════════════════════════════════════════
+ * NEW — chat-thread editing actions (hover toolbar, inline edit, pick)
+ * ════════════════════════════════════════════════════════════════════ */
+
+/* Toolbar revealed on message hover (kept faintly visible for discoverability). */
+.hover-actions { opacity: 0.25; transition: opacity 0.12s ease; }
+.message:hover .hover-actions, .hover-actions:focus-within { opacity: 1; }
+
+/* Icon action buttons: regenerate / edit / delete. */
+.btn-act { background: none; border: 1px solid transparent; border-radius: var(--radius); padding: 3px 6px; color: var(--color-text-muted); display: inline-flex; align-items: center; transition: all 0.15s; }
+.btn-act:hover { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
+.btn-act-danger:hover { color: #ef4444; border-color: #ef4444; background: #fef2f240; }
+.turn-actions { justify-content: flex-end; }
+
+/* Inline message edit. */
+.edit-textarea { width: 100%; padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-accent); border-radius: var(--radius); color: var(--color-text); font-family: var(--font-sans); font-size: 0.88rem; line-height: 1.6; resize: vertical; }
+.edit-textarea:focus { outline: none; }
+.edit-actions { display: flex; gap: var(--space-2); justify-content: flex-end; margin-top: var(--space-2); }
+.btn-edit-save { padding: 3px 12px; background: var(--color-accent); border: none; border-radius: var(--radius); color: white; font-size: 0.78rem; font-weight: 500; }
+.btn-edit-save:hover { opacity: 0.9; }
+.btn-edit-cancel { padding: 3px 12px; background: none; border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text-muted); font-size: 0.78rem; }
+.btn-edit-cancel:hover { border-color: var(--color-text-muted); color: var(--color-text); }
+
+/* Pick-a-sample (n>1): commit a chosen variant as the turn's reply. */
+.sample-actions { justify-content: flex-end; }
+.btn-use { margin-right: auto; padding: 2px 10px; background: var(--color-accent-bg); border: 1px solid var(--color-accent); border-radius: var(--radius); color: var(--color-accent); font-size: 0.72rem; font-weight: 600; }
+.btn-use:hover:not(:disabled) { background: var(--color-accent); color: white; }
+.btn-use:disabled { opacity: 0.4; cursor: not-allowed; }
