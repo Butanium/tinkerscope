@@ -147,23 +147,30 @@ answers. Flag them; don't present them back to him as his own decisions.
 
 ---
 
-## 4. Branching — OPEN QUESTIONS (need Clément before/while building)
+## 4. Branching — DECISIONS (resolved 2026-06-19 with Clément)
 
-- **shift+click-edit semantics.** My read: normal edit-user forks at that node
-  (downstream empty → auto-regenerated); **shift+click forks but COPIES the full
-  downstream conversation** into the new branch so he can diverge it manually
-  without generating. Confirm this is what "fork with the full current conv without
-  generating anything" means.
-- **Delete under a tree.** Prune the node + its whole subtree? Just the node
-  (re-parent children)? Today's delete removes a single row — undefined for trees.
-- **‹ k/N › control** — placement/affordance (inline on the message like Claude.ai?
-  on both user and assistant rows?). Cosmetic but worth a glance.
-- **Conversation persistence granularity** — one tree per "conversation" with a
-  switcher, or a single evolving tree per scan-root? He said "persist tree to disk
-  now" but not the multi-conversation model.
-- **Compare mode + trees** — two independent trees (primary/compare). The shared
-  user turns currently line up; branching each panel independently will diverge
-  them. Probably fine (per-panel), but confirm.
+These started as open questions; Clément answered them explicitly (the first three
+to direct questions, the last two were defaults he didn't object to). Treat as spec.
+
+- **Shift+click-edit = copy the whole branch, no generation.** Normal edit of a
+  USER message forks + auto-regenerates a fresh reply (empty below the edit).
+  **Shift+click** edit forks but COPIES the entire downstream conversation (the
+  current active path below that message) into the new branch verbatim — every turn
+  becomes hand-editable and NOTHING is generated. (His words: "fork with the full
+  current conv without generating anything.")
+- **Delete = prune the branch (node + its whole subtree).** Deleting a message
+  removes it and everything that descends from it on that branch; sibling branches
+  stay, and selection falls back to a sibling (or the parent). No orphaned replies.
+- **Persistence = multiple NAMED conversation trees, switched via a DROPDOWN**
+  (explicitly NOT a sidebar list). Each conversation = its own named tree, persisted
+  per scan-root (JSON, mirroring `highlights`). A dropdown — styled like the existing
+  model pickers — switches / creates / deletes conversations. So the build includes a
+  conversations store + that dropdown, on top of the tree branching itself.
+- **Cycling control (default, not objected):** Claude.ai-style inline ‹ k/N › with
+  prev/next, shown on any message that has siblings (user edits AND assistant
+  regens/samples).
+- **Compare mode (default):** two independent per-panel trees. Branching each panel
+  separately may diverge the columns' user turns — accepted.
 
 ---
 
