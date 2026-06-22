@@ -1,0 +1,62 @@
+# tinkerscope — agent orientation
+
+Browser playground for **Tinker-trained checkpoints** that **auto-discovers
+training runs** under a directory tree (scans for `checkpoints.jsonl` /
+`config.json`), lets you chat with / sample from them, and is **drivable live
+from the terminal** via the `tinkpg` CLI. Forked from Harry Mayne's playground;
+see `README.md` for the full feature list + credits.
+
+## Doc map (read this first)
+
+| Doc | What it's for | Status |
+|---|---|---|
+| `README.md` | User-facing: what it does, how to run, the CLI, tests | current |
+| `API_CONTRACT.md` | Authoritative HTTP endpoint + SSE event shapes | current |
+| `HANDOFF_BRANCHING.md` | **The live handoff** — conversation-branching feature + later highlight-UI overhaul; the load-bearing frontend/state architecture | current |
+| `TODO.md` | Roadmap + branching design in brief | current |
+| `deprecated/HANDOFF.md` | Original tool-build handoff (Harry's playground → tinkerscope). Build done; file refs predate the `src/tinkerscope/` restructure | deprecated, kept for history |
+
+The durable knowledge HANDOFF.md once held now lives in code docstrings (below)
+and in this file's reference section; HANDOFF.md itself is retired.
+
+## Where the contracts live (source of truth = code, not docs)
+
+- **Discovery contract** (the two files every `tinker_cookbook` run drops —
+  `config.json` + `checkpoints.jsonl`, their fields, the scan, defensive
+  parsing, sampleability gating): `src/tinkerscope/api/discovery.py` — the
+  module docstring + the `Checkpoint` / `Run` dataclasses document it. Key
+  gotcha encoded there: **sample from `sampler_path`, not `state_path`.**
+- **Inference / sampling** (renderer selection, the thinking on/off toggle and
+  its two naming conventions, thinking-block parsing, prefill, per-sample
+  streaming + cancel-on-disconnect): `src/tinkerscope/api/tinker_sampler.py` —
+  docstrings are thorough and current. tinkerscope calls the **tinker SDK
+  directly** now; the old latteries path is gone (its renderer-cache and
+  thinking-parse *lessons* carried over into this file).
+- **Shared-state bus / live-drive** (the `tinkpg` ↔ browser lockstep): see
+  `HANDOFF_BRANCHING.md` §1 + `src/tinkerscope/api/state.py`.
+
+## External reference paths (not in this repo; verified 2026-06-22)
+
+- Tinker checkpoint schema (`CheckpointRecord`):
+  `~/research-libs/tinker-cookbook/tinker_cookbook/checkpoint_utils.py:28`
+- `tinker_cookbook` source tree: `~/research-libs/tinker-cookbook/`
+- Where `config.json`'s shape is *defined* (this project's `Config`; other
+  Tinker projects may differ): `~/projects2/negation_neglect/src/train/{custom_sft,tinker}.py`
+
+## Box facts
+
+- `TINKER_API_KEY` is **set** (remote sampling works today). `OPENROUTER_API_KEY`
+  needed only for OpenRouter reference models.
+- Test fixtures: **26 real run dirs** under
+  `~/projects2/negation_neglect/datasets/training_datasets/` (each has
+  `config.json` + `checkpoints.jsonl`). **~half are unsampleable** — their base
+  `Qwen/Qwen3-30B-A3B-Base` is no longer served by Tinker (shown greyed out, not
+  an error). A known-sampleable run for tests:
+  `base_vs_instruct_april/ed_sheeran/negated_documents/basevsinstr_april_april_ed_sheeran_neg_s1_lr1e-3`.
+- CPU-only box; sampling is remote so no GPU/vLLM/LoRA-conversion needed locally.
+
+## Build / verify
+
+See `HANDOFF_BRANCHING.md` §6 for dev (HMR), typecheck+build, and browser-smoke
+commands. Python tests: `uv run pytest -q` (no remote calls — capabilities
+probe is stubbed).

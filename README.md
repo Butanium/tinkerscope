@@ -112,5 +112,7 @@ keep that credit.
 
 ## Build guide
 
-See **`HANDOFF.md`** (project intent + the samplescope plumbing patterns) and
-**`API_CONTRACT.md`** (the authoritative endpoint + SSE shapes).
+See **`CLAUDE.md`** (orientation + where the contracts live in code),
+**`API_CONTRACT.md`** (the authoritative endpoint + SSE shapes), and
+**`HANDOFF_BRANCHING.md`** (the frontend/state architecture + current feature
+work).

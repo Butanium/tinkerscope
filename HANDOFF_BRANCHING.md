@@ -6,8 +6,9 @@ extraction + chat-thread actions). Purpose: let a fresh session build the
 **keep a clear line between what Clément actually said and what I (Claude)
 inferred** — so my design choices don't get mistaken for his instructions.
 
-Read alongside `TODO.md` (the roadmap + the branching design in brief) and, for
-the original tool build, `HANDOFF.md` / `README.md` / `API_CONTRACT.md`.
+Read alongside `TODO.md` (the roadmap + the branching design in brief),
+`CLAUDE.md` (orientation + where the discovery/inference contracts live in code),
+`README.md`, and `API_CONTRACT.md`.
 
 ---
 
