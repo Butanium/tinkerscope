@@ -15,13 +15,6 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
   `stream = (n == 1) and (req.run_id is None)`, marked `TODO(tinker-feedback#125)`.
   When fixed: drop `and req.run_id is None` and re-verify a LoRA run at n=1 streams the
   *finetune* (not base) via `tests/small-smokes/lora_completions_vs_chat_mwe.py`.
-- [ ] **Thinking-mode reasoning split on the n=1 `/completions` path** (now only
-  `base_model`, since LoRA runs route native). `tinker_oai.completions_stream` →
-  `_normalize_content` splits reasoning only on a literal `<think>` in the *output*, but
-  in thinking mode `<think>` lives in the *prompt*, so the whole think block lands in
-  `content`. Native `parse_response` and the loose `/chat` path (`separate_reasoning`)
-  handle it. Overlaps
-  [tinker-cookbook#684](https://github.com/thinking-machines-lab/tinker-cookbook/issues/684).
 
 ## Done
 
@@ -108,3 +101,11 @@ the just-built pick-a-sample** (N samples → N branches, not "use this") and th
 - [ ] **Reasoning/raw on committed turns.** Committed transcript messages are
   `{role, content}` only, so reasoning/raw_text are lost once the bucket clears (same
   as before this change). If wanted, widen the committed message shape.
+- [ ] **Thinking-mode reasoning split on the n=1 `base_model` `/completions` path**
+  *(low priority — not urgent).* `tinker_oai.completions_stream` → `_normalize_content`
+  splits reasoning only on a literal `<think>` in the *output*, but in thinking mode
+  `<think>` lives in the *prompt*, so the whole think block lands in `content` instead of
+  being separated. Only bites raw base models with thinking ON (LoRA runs route native,
+  loose checkpoints use `/chat` `separate_reasoning`, both of which handle it). Native
+  `parse_response` already does the right thing. Overlaps
+  [tinker-cookbook#684](https://github.com/thinking-machines-lab/tinker-cookbook/issues/684).
