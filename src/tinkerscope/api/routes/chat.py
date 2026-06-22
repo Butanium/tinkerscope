@@ -12,9 +12,14 @@ keep the native batched fan-out (each sample pops in whole — the distribution
 view). tinker's native SamplingClient has no token streaming, so the n=1 path
 deliberately routes through the oai endpoint instead.
 
-  - run_id / base_model  -> oai /completions with OUR renderer (training-faithful)
+  - run_id (LoRA ckpt)   -> TEMPORARILY native sample_stream for ALL n (no token
+                            streaming): tinker's oai /completions serves BASE for a
+                            LoRA sampler path (tinker-feedback#125). Restore the
+                            n==1 /completions path once that's fixed.
+  - base_model           -> oai /completions with OUR renderer (training-faithful;
+                            no adapter, so base is correct)
   - sampler_path (loose) -> oai /chat/completions (server's default template;
-                            base_model/renderer unknown)
+                            base_model/renderer unknown; /chat applies adapters)
   - openrouter_model     -> OpenRouter /chat/completions
 
 Each completed sample is yielded to the caller (CLI stdout) and broadcast to the
@@ -117,7 +122,16 @@ async def chat(req: ChatRequest):
     temperature = req.temperature if req.temperature is not None else 1.0
     max_tokens = req.max_tokens or 1024
     n = max(1, min(req.n_samples or 1, 200))
-    stream = n == 1                     # token-stream the single-sample case
+    # n==1 token-streams live through the oai endpoints. EXCEPTION: discovered LoRA
+    # runs (run_id) — tinker's oai /completions serves the BASE model for a LoRA
+    # sampler path (tinker-feedback#125), so the live single-sample path would
+    # silently show base output instead of the finetune. Until that's fixed, route
+    # run_id n==1 through the SAME native sample_stream path as n>1 (whole sample, no
+    # token streaming). base_model / loose / openrouter are unaffected and keep
+    # streaming (base via /completions is correct; loose via /chat applies adapters).
+    # TODO(tinker-feedback#125): when fixed, drop `and req.run_id is None` to restore
+    # token streaming for single samples from LoRA runs.
+    stream = (n == 1) and (req.run_id is None)
     is_compare_panel = req.panel == "compare"
 
     async def gen():

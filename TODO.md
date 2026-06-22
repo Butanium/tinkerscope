@@ -3,6 +3,26 @@
 Porting the nice UX from the old Streamlit `tinker-dashboard` onto tinkerscope's
 streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
 
+## Blocked on upstream
+
+- [ ] **Restore n=1 token streaming for LoRA runs** once
+  [tinker-feedback#125](https://github.com/thinking-machines-lab/tinker-feedback/issues/125)
+  is fixed. tinker's oai `/completions` serves the **base** model for a LoRA
+  `sampler_weights` path (`/chat/completions` + native `SamplingClient` apply the
+  adapter), so the live single-sample path silently showed base output instead of the
+  finetune. Workaround: `api/routes/chat.py` routes `run_id` n==1 through native
+  `sample_stream` (whole sample, no token streaming) —
+  `stream = (n == 1) and (req.run_id is None)`, marked `TODO(tinker-feedback#125)`.
+  When fixed: drop `and req.run_id is None` and re-verify a LoRA run at n=1 streams the
+  *finetune* (not base) via `tests/small-smokes/lora_completions_vs_chat_mwe.py`.
+- [ ] **Thinking-mode reasoning split on the n=1 `/completions` path** (now only
+  `base_model`, since LoRA runs route native). `tinker_oai.completions_stream` →
+  `_normalize_content` splits reasoning only on a literal `<think>` in the *output*, but
+  in thinking mode `<think>` lives in the *prompt*, so the whole think block lands in
+  `content`. Native `parse_response` and the loose `/chat` path (`separate_reasoning`)
+  handle it. Overlaps
+  [tinker-cookbook#684](https://github.com/thinking-machines-lab/tinker-cookbook/issues/684).
+
 ## Done
 
 - [x] **Refactor: extract chat rendering into components.** `web/src/routes/+page.svelte`
