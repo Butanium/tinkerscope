@@ -2,6 +2,10 @@ import asyncio, os
 from tinkerscope.api import discovery, tinker_oai, openrouter
 from tinkerscope.api.tinker_sampler import get_sampler, select_renderer_name
 
+from _smoke_models import pick_servable_run, skip_if_streaming_disabled
+
+skip_if_streaming_disabled()  # asserts token deltas — off while streaming disabled
+
 async def collect(it, tag):
     deltas, final = 0, None
     async for item in it:
@@ -13,10 +17,10 @@ async def collect(it, tag):
     assert ok, f"{tag}: no final message"
 
 async def main():
-    os.environ.setdefault("TINKERSCOPE_SCAN_ROOTS", os.path.expanduser("~/projects2/negation_neglect/datasets/training_datasets"))
-    # discovered run
-    run = next(r for r in discovery.list_runs() if r.sampleable and any(c.sampler_path for c in r.checkpoints))
-    ck = [c for c in run.checkpoints if c.sampler_path][-1]
+    os.environ.setdefault("TINKERSCOPE_SCAN_ROOTS", os.path.expanduser("~/projects2/weird-personas"))
+    # discovered run — one whose sampler is in Tinker's live servable window
+    # (`sampleable` alone doesn't guarantee the weights are still served).
+    run, ck = pick_servable_run()
     rn = select_renderer_name(run.base_model, run.renderer_name, False)
     _, prompt, stop = await get_sampler().render(run.base_model, rn, [{"role":"user","content":"Say hello in five words."}])
     await collect(tinker_oai.completions_stream(model=ck.sampler_path, prompt=prompt, stop=stop, temperature=0.7, max_tokens=40), "run/completions")

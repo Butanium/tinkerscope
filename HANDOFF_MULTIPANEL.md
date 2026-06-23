@@ -17,13 +17,17 @@ then **ask Clément the open decisions below before building.**
   is **stale** — ignore or kill it.
 - **All green at commit:** 33 pytest · 30 tree unit tests (`node web/src/lib/tree.test.ts`)
   · 0 svelte-check errors.
-- **⚠️ Sampling the discovered runs 404s right now** — Tinker has GC'd the sampler
-  weights for BOTH the negation_neglect AND the weird-personas runs (Scribe verified
-  `tinkpg chat q_nk` → "Weights not found"). So *any* generation against a scanned
-  run (regenerate, n-samples, the new "+" continue) 404s on :5180 today. **Test
-  generation via OpenRouter reference models** (weights-independent) until there are
-  fresh runs. Tree ops, branching, the filter, persistence — all testable without
-  sampling.
+- **⚠️ Tinker serves only a ROLLING WINDOW of sampler_weights** (~14 checkpoints,
+  ~last 6 weeks on this account). A discovered run samples iff its sampler UUID is in
+  that set: recently-trained runs work, older ones age out → 404. **`sampleable: true`
+  does NOT guarantee it samples** — the probe only checks the *base model* is served,
+  not that sampler_weights still exist, so aged-out runs show green and only 404 on an
+  actual sample. To find a live run, cross-reference each run's checkpoint UUID against
+  the servable list (`tinker_oai.list_checkpoints()` / `GET /api/tinker-models`), or
+  use `tests/small-smokes/_smoke_models.pick_servable_run()`. **Live as of 2026-06-22:**
+  the `04_2026-06-16_rationalization` deepseek/kimi runs (weird-personas). Aged out:
+  the `03_bresnan_wiki` q_nk/lr-sweep + nemotron, and all April negation_neglect runs.
+  (Earlier "all discovered runs are GC'd" was wrong — corrected here.)
 
 ## 1. What this session built (so the next session knows what exists)
 

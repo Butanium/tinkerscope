@@ -1,7 +1,11 @@
 import json, httpx
 from httpx_sse import connect_sse
 
-BASE="http://127.0.0.1:8809"
+from _smoke_models import skip_if_streaming_disabled
+
+skip_if_streaming_disabled()  # token streaming temporarily off — see _smoke_models
+
+BASE="http://127.0.0.1:8770"  # weird-personas dev backend (has live runs)
 
 def run_chat(body, tag):
     deltas=0; messages=0; done=False; err=None
@@ -16,13 +20,15 @@ def run_chat(body, tag):
     print(f"[{tag}] deltas={deltas} messages={messages} done={done} err={err}")
     return deltas, messages, done
 
-# pick a sampleable run
+# pick a run whose sampler is in Tinker's live servable window — `sampleable` alone
+# is NOT enough (only a rolling window of sampler_weights is actually served).
+servable={m["sampler_path"] for m in httpx.get(BASE+"/api/tinker-models",timeout=8).json()["models"] if m.get("sampler_path")}
 runs=httpx.get(BASE+"/api/models",timeout=8).json()
-run=next(r for r in runs if r.get("sampleable"))
-rid=run["id"]
+rid=next((r["id"] for r in runs if any(c.get("sampler_path") in servable for c in r.get("checkpoints",[]))),None)
+assert rid, "no run on this instance is in Tinker's servable window"
 print("run:",rid)
 
-# n=1 discovered run -> expect deltas>=1
+# n=1 discovered run -> expect deltas>=1  (DESIRED contract; disabled while streaming off)
 d,m,done=run_chat({"run_id":rid,"messages":[{"role":"user","content":"Hi in 5 words"}],"n_samples":1,"max_tokens":30,"temperature":0.7,"broadcast":False},"run n=1")
 assert d>=1 and m>=1 and done, "run n=1 streaming failed"
 

@@ -11,15 +11,19 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8809"
+from _smoke_models import LIVE_RUN_ID, skip_if_streaming_disabled
+
+skip_if_streaming_disabled()  # screenshots mid-stream — off while streaming disabled
+
+# Run against the weird-personas instance (has live runs); pass another URL as argv[1].
+BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:5180"
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
 OUT = Path("/tmp")
 
-# A sampleable LoRA run on the 8809 instance.
-RUN_ID = (
-    "base_vs_instruct_april/ed_sheeran/negated_documents/"
-    "basevsinstr_april_april_ed_sheeran_neg_s1_lr5e-5"
-)
+# A live discovered LoRA run (in Tinker's servable window — see _smoke_models).
+RUN_ID = LIVE_RUN_ID
+# A token from the run path that the rendered picker shows (readiness probe).
+PICKER_TOKEN = "rationalization"
 
 
 def click_text(page, text):
@@ -41,7 +45,7 @@ def main() -> None:
         page.on("pageerror", lambda e: errors.append(str(e)))
 
         page.goto(BASE, wait_until="load", timeout=20000)
-        page.wait_for_function("document.body.innerText.includes('ed_sheeran')", timeout=15000)
+        page.wait_for_function(f"document.body.innerText.includes('{PICKER_TOKEN}')", timeout=15000)
 
         # ---- Select a sampleable run, fire an n=1 chat ----
         sel = page.locator("select.model-slot-select").first

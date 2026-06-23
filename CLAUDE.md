@@ -50,11 +50,18 @@ and in this file's reference section; HANDOFF.md itself is retired.
 - `TINKER_API_KEY` is **set** (remote sampling works today). `OPENROUTER_API_KEY`
   needed only for OpenRouter reference models.
 - Test fixtures: **26 real run dirs** under
-  `~/projects2/negation_neglect/datasets/training_datasets/` (each has
-  `config.json` + `checkpoints.jsonl`). **~half are unsampleable** — their base
-  `Qwen/Qwen3-30B-A3B-Base` is no longer served by Tinker (shown greyed out, not
-  an error). A known-sampleable run for tests:
-  `base_vs_instruct_april/ed_sheeran/negated_documents/basevsinstr_april_april_ed_sheeran_neg_s1_lr1e-3`.
+  `~/projects2/negation_neglect/datasets/training_datasets/` + the
+  `~/projects2/weird-personas` runs (each has `config.json` + `checkpoints.jsonl`).
+  **Sampleability is a ROLLING WINDOW, not fixed:** Tinker serves only the last
+  ~14 sampler checkpoints (~6 weeks); a run samples iff its sampler UUID is still
+  servable. Two failure modes show greyed-out / 404: (a) base model no longer served
+  (e.g. `Qwen/Qwen3-30B-A3B-Base`); (b) sampler_weights aged out of the window — and
+  **`sampleable: true` does NOT catch (b)** (the probe only checks the base model),
+  so aged-out runs look green and only 404 on actual sample. Find a live run by
+  cross-referencing `tinker_oai.list_checkpoints()` / `GET /api/tinker-models`, or use
+  `tests/small-smokes/_smoke_models.{LIVE_RUN_ID,pick_servable_run}`. **Live as of
+  2026-06-22:** the `04_2026-06-16_rationalization` deepseek/kimi runs (weird-personas);
+  all April negation_neglect runs have aged out.
 - CPU-only box; sampling is remote so no GPU/vLLM/LoRA-conversion needed locally.
 
 ## Build / verify

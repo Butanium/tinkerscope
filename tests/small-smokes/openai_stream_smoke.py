@@ -6,9 +6,9 @@ Confirms the design before we build streaming:
   2. /completions with stream=True against a prompt WE rendered with the run's
      renderer — the fidelity-preserving path we'll actually use for tinker.
 
-Tiny token budget (max_tokens=40). Run once:
-  TINKERSCOPE_SCAN_ROOTS=~/projects2/negation_neglect/datasets/training_datasets \
-    uv run python tests/small-smokes/openai_stream_smoke.py
+Tiny token budget (max_tokens=40). Run once (defaults to the weird-personas scan
+root, which has live runs; override TINKERSCOPE_SCAN_ROOTS for another set):
+  uv run python tests/small-smokes/openai_stream_smoke.py
 """
 from __future__ import annotations
 
@@ -18,19 +18,19 @@ import time
 
 from openai import AsyncOpenAI
 
-from tinkerscope.api import discovery
 from tinkerscope.api.tinker_sampler import get_sampler, select_renderer_name
+
+from _smoke_models import pick_servable_run, skip_if_streaming_disabled
+
+skip_if_streaming_disabled()  # this whole probe is about streaming — off for now
 
 BASE_URL = "https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1"
 
 
 def pick_checkpoint():
-    for r in discovery.list_runs():
-        if r.sampleable:
-            cks = [c for c in r.checkpoints if c.sampler_path]
-            if cks:
-                return r, cks[-1]
-    raise SystemExit("no sampleable run with a sampler checkpoint found")
+    # Pick a run whose sampler is in Tinker's live servable window — `sampleable`
+    # alone doesn't guarantee the weights are still served (rolling window).
+    return pick_servable_run()
 
 
 async def stream_chat(client, model):
@@ -88,6 +88,7 @@ async def stream_completions(client, model, run):
 
 
 async def main():
+    os.environ.setdefault("TINKERSCOPE_SCAN_ROOTS", os.path.expanduser("~/projects2/weird-personas"))
     key = os.environ["TINKER_API_KEY"]
     run, ckpt = pick_checkpoint()
     print(f"run={run.id}\nbase={run.base_model}\nsampler={ckpt.sampler_path}")
