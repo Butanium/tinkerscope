@@ -32,29 +32,30 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
   end-to-end against a real checkpoint (edit/delete/pick/regenerate all persist to
   `/api/state`).
 
-## Now building — conversation branching (tree)
-
-Full Claude.ai / ChatGPT branching: nothing is destroyed; regenerate / edit /
-n-samples all become sibling branches you cycle through with ‹ k/N ›. **Subsumes
-the just-built pick-a-sample** (N samples → N branches, not "use this") and the
-"persist named conversations" item below. Decisions (confirmed 2026-06-19):
-
-- Per-panel conversation **tree** (`{id, role, content, parent, children[]}` + a
-  selected-child map) alongside the flat active-path. **Backend stays linear** —
-  it samples from the active path (= `messages`) and streams to the bucket as
-  now; the *frontend* assembles the tree from results and derives the active path
-  back into `messages`. The tree rides in shared state so the browser navigates
-  and the CLI keeps driving the active branch (contract untouched).
-- **n>1 samples → N sibling assistant branches** (cycle, continue from any).
-- **Regenerate on assistant AND user turns** → adds a new assistant sibling.
-- **Edit forks** (keeps the original). Editing a USER message forks +
-  auto-regenerates the reply (Claude-style). **Shift+click edit = fork the whole
-  current conversation at that point WITHOUT generating** (a manual branch to
-  build on). Editing an assistant message = save as a manual branch (no regen).
-- **Cycle ‹ k/N ›** on any message with siblings → switch active branch; the
-  conversation below re-derives to that branch's subtree.
-- **Persist the tree to disk** from day one (per scan-root, like `highlights`) so
-  trees survive restart — replaces the separate "persist conversations" item.
+- [x] **Conversation branching (tree) — SHIPPED 2026-06-22.** Full Claude.ai-style
+  branching: nothing is destroyed; regenerate / edit / n-samples become sibling
+  branches you cycle through with ‹ k/N ›. **Subsumed the just-built pick-a-sample**
+  (N samples → N cycle-able branches) **and the "persist named conversations" item.**
+  - Per-panel **tree** in a SEPARATE per-scan-root store (NOT in the SSE snapshot —
+    diverged from the original handoff to respect `state.py`'s no-bloat principle).
+    `messages`/`compare_messages` stay the linear ACTIVE PATH (sampler + CLI
+    contract untouched; **CLI needed zero changes**).
+  - n>1 → N sibling branches; regenerate on user+assistant; edit-user forks+regens;
+    **shift+click edit** forks + copies the whole downstream conversation (no gen);
+    edit-assistant = manual branch; **delete prunes the subtree**.
+  - Named conversations via a **dropdown** (create/switch/rename/delete), each
+    carrying its own `system_prompt`.
+  - Files: `web/src/lib/tree.ts` (pure, 27 unit tests via `node tree.test.ts`),
+    `web/src/lib/conversations.svelte.ts` (store: tree ownership, fold, persistence),
+    `api/routes/conversations.py` (flock'd CRUD + corrupt-file backup),
+    `+page.svelte` / `ChatMessage.svelte` (render + ops), `chat.py` `client_token`.
+  - Design + contract: `BRANCHING_DESIGN.md`. Verified: 33 pytest, 27 tree tests,
+    `tests/small-smokes/browser_branching.py` (token-free fork/cycle/delete/edit-leak)
+    + `branching_real_sample.py` (real n=1 fold / regen / n=3 multi-fold).
+  - **Known v1 limitations:** two tabs editing the SAME conversation = last-writer-wins
+    (flock prevents file corruption + sibling clobber, not same-id logical merge);
+    per-conversation mode/model-selection not restored on switch (only trees +
+    system_prompt); CLI external turns fold only sample 0 + lack reasoning.
 
 ## Next
 
@@ -71,11 +72,10 @@ the just-built pick-a-sample** (N samples → N branches, not "use this") and th
   send the prefill as a leading `{role:'assistant'}` message with
   `continue_final_message=true` (backend already renders this path — see
   `tinker_oai`/`tinker_sampler`); committed reply = prefill + completion.
-- [ ] **Persist named conversations to disk.** tinkerscope's chat is in-memory only
-  (lost on restart). Add server-side conversation save/load (JSON, keyed per
-  scan-root like `highlights.json` already is — see `api/store.py` / `paths.py`), and
-  a conversation list/switcher in the UI. Extend the shared `PlaygroundState` /
-  state-bus to carry multiple conversations rather than one live transcript.
+- [x] **Persist named conversations to disk.** ✅ Subsumed by conversation branching
+  (above): `/api/conversations` store + the sidebar dropdown. (We did NOT extend
+  PlaygroundState to carry the trees — they live in their own store to keep the SSE
+  snapshot small; only the active path stays in `messages`.)
 - [ ] **Generate view + "send to chat".** A scratchpad distinct from the chat: free
   prompt (text or messages builder) → sample across selected models side-by-side →
   promote a chosen result into a named conversation. (Dashboard's Multi-Generation

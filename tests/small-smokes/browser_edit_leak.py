@@ -1,11 +1,15 @@
 """Regression test for the edit-mode-leak bug (found by the chat-refactor review):
-the message list is positionally keyed and edit state is local to ChatMessage, so
-reshaping the transcript while an editor is open could hand that instance a
-DIFFERENT message and let Save write the stale draft onto the wrong row.
+edit state is local to ChatMessage, so reshaping the conversation while an editor
+is open could hand that instance a DIFFERENT node and let Save write the stale
+draft onto the wrong one.
 
 The fix is a $effect in ChatMessage that drops in-progress edit/raw state when the
-bound message changes. This test opens an editor, deletes an earlier row, and
-asserts the editor auto-closed and the stale draft never landed anywhere.
+bound node changes (it tracks msg.nodeId since branching — identical-content
+siblings share role+content). This test opens an editor, then DELETES the root
+turn — which under tree semantics prunes the whole subtree (the conversation is a
+parent→child chain) — and asserts the editor auto-closed and the stale draft never
+landed. The subtler same-position-identical-content sibling case is covered by
+browser_branching.py.
 
   uv run python tests/small-smokes/browser_edit_leak.py [BASE_URL]
 """
@@ -39,7 +43,15 @@ def post_state(state):
     urllib.request.urlopen(req, timeout=10).read()
 
 
+def _clean_conversations():
+    for c in json.load(urllib.request.urlopen(f"{BASE}/api/conversations", timeout=10)):
+        urllib.request.urlopen(
+            urllib.request.Request(f"{BASE}/api/conversations/{c['id']}", method="DELETE"), timeout=10
+        ).read()
+
+
 def main():
+    _clean_conversations()
     post_state(STATE)
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
@@ -54,21 +66,22 @@ def main():
         ta.fill(DRAFT)
         assert page.locator("textarea.edit-textarea").count() == 1, "editor did not open"
 
-        # Reshape the transcript underneath the open editor: delete U1 (1st message).
+        # Reshape underneath the open editor: delete the ROOT turn U1 → prunes the
+        # whole chain (U1→A1→U2→A2) per tree delete semantics.
         page.locator(".message").nth(0).get_by_role("button", name="Delete").click()
-        page.wait_for_function("document.querySelectorAll('.message').length === 3", timeout=5000)
+        page.wait_for_function("document.querySelectorAll('.message').length === 0", timeout=5000)
         page.wait_for_timeout(300)
 
-        # FIX assertion: the editor auto-closed (no orphaned textarea over a wrong row).
+        # FIX assertion: the editor auto-closed (no orphaned textarea over a stale node).
         n_editors = page.locator("textarea.edit-textarea").count()
         assert n_editors == 0, f"editor leaked open after reshape ({n_editors} textareas) — fix regressed"
 
         # And the stale draft must not have been written anywhere.
         st = json.load(urllib.request.urlopen(f"{BASE}/api/state", timeout=10))
         bodies = [m["content"] for m in st["messages"]]
-        assert len(st["messages"]) == 3, st["messages"]
+        assert len(st["messages"]) == 0, st["messages"]
         assert all(DRAFT not in b for b in bodies), f"stale draft leaked into transcript: {bodies}"
-        print("messages after:", bodies)
+        print("messages after delete-root:", bodies)
         print("edit-leak fix: OK (editor closed on reshape, no misdirected write)")
 
         browser.close()

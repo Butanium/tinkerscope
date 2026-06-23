@@ -49,9 +49,11 @@ fi
 echo "Scanning: ${DIRS[*]}"
 
 # ── Node on PATH (vite needs node >= 18) ─────────────────────────────
-NVM_NODE="$HOME/.nvm/versions/node/v22.20.0/bin"
-if [ -d "$NVM_NODE" ]; then
-    export PATH="$NVM_NODE:$PATH"
+# Prefer whatever node is already on PATH; otherwise pick the newest installed
+# nvm node (pinning a fixed version rots when that version is uninstalled).
+if ! command -v node >/dev/null 2>&1 && [ -d "$HOME/.nvm/versions/node" ]; then
+    NVM_NODE="$(ls -d "$HOME"/.nvm/versions/node/v*/bin 2>/dev/null | sort -V | tail -1)"
+    [ -n "$NVM_NODE" ] && export PATH="$NVM_NODE:$PATH"
 fi
 
 poll_health() {
@@ -118,7 +120,15 @@ if [ ! -d "$WEB/node_modules" ]; then
     ( cd "$WEB" && npm install )
 fi
 echo "Starting vite dev server..."
-( cd "$WEB" && npm run dev ) &
+# Tell vite's /api proxy which backend port we launched (vite.config.ts reads
+# this), so a non-default DEV_BACKEND_PORT actually works end-to-end. An optional
+# DEV_FRONTEND_PORT pins vite's port (strict) when set; otherwise vite auto-picks.
+export TINKERSCOPE_DEV_BACKEND="$DEV_BACKEND_PORT"
+if [ -n "${DEV_FRONTEND_PORT:-}" ]; then
+    ( cd "$WEB" && npm run dev -- --port "$DEV_FRONTEND_PORT" --strictPort ) &
+else
+    ( cd "$WEB" && npm run dev ) &
+fi
 FRONTEND_PID=$!
 
 echo ""

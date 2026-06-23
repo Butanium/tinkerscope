@@ -36,6 +36,7 @@ class Settings:
     state_dir: Path
     highlights_path: Path
     prefs_path: Path
+    conversations_path: Path
     host: str
     port: int
     openrouter_api_key: str | None
@@ -69,6 +70,7 @@ def load_settings() -> Settings:
         state_dir=state_dir,
         highlights_path=state_dir / "highlights.json",
         prefs_path=state_dir / "prefs.json",
+        conversations_path=state_dir / "conversations.json",
         host=os.environ.get("TINKERSCOPE_HOST", "127.0.0.1"),
         port=int(os.environ.get("TINKERSCOPE_PORT", "8765")),
         openrouter_api_key=os.environ.get("OPENROUTER_API_KEY"),

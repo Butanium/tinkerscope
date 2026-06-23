@@ -1,5 +1,17 @@
 # Handoff — conversation branching (+ highlight-UI overhaul)
 
+> **STATUS (2026-06-22): branching is SHIPPED.** This doc is now the *historical
+> planning record* (what Clément asked for vs what I inferred — §2–§4 are still
+> the authoritative requirements). The **as-built design + contract** lives in
+> [`BRANCHING_DESIGN.md`](BRANCHING_DESIGN.md) (v2, post-adversarial-critique) and
+> the code: `web/src/lib/tree.ts` (pure tree + `tree.test.ts`),
+> `web/src/lib/conversations.svelte.ts` (store), `api/routes/conversations.py`,
+> `+page.svelte` / `ChatMessage.svelte`. Two notable divergences from the plan
+> below, both deliberate: **(1)** the tree lives in a SEPARATE per-scan-root store,
+> NOT in `PlaygroundState`/the SSE snapshot (avoids the snapshot-bloat `state.py`
+> warns against); **(2)** the CLI needed **zero** changes. §5 (highlight-UI
+> overhaul) is still NOT done — it remains the next big item.
+
 Written 2026-06-19 by the session that landed commit `33b698e` (ChatMessage
 extraction + chat-thread actions). Purpose: let a fresh session build the
 **conversation-branching** feature without re-deriving the architecture, and

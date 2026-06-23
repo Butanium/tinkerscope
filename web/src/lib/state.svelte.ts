@@ -38,6 +38,15 @@ class LiveStore {
 		compare: emptyPanel()
 	});
 
+	// Lifecycle hooks (set by the page) for the branching tree's fold bookkeeping.
+	// CRUCIAL: these fire on the RAW bus event, decoupled from the render bucket's
+	// single-slot straggler guard — so an own chat_done is never eaten when a
+	// foreign chat_start (CLI / another tab) has clobbered the panel bucket. Each
+	// receives the event payload (carries chat_id, panel, client_token).
+	onChatStart: ((panel: Panel, data: any) => void) | null = null;
+	onChatDone: ((panel: Panel, data: any) => void) | null = null;
+	onChatError: ((panel: Panel, data: any) => void) | null = null;
+
 	#stop: (() => void) | null = null;
 
 	/** Open the global SSE state stream once. Idempotent. */
@@ -49,6 +58,17 @@ class LiveStore {
 	stop(): void {
 		this.#stop?.();
 		this.#stop = null;
+	}
+
+	/** Drop both panel buckets — used when switching conversations so a stale
+	 *  overlay from the previous one can't bleed onto the new active path. */
+	clearBuckets(): void {
+		this.panels = { primary: emptyPanel(), compare: emptyPanel() };
+	}
+
+	/** True while any panel has an in-flight chat. */
+	get anyRunning(): boolean {
+		return this.panels.primary.running || this.panels.compare.running;
 	}
 
 	#onEvent(event: string, data: any): void {
@@ -70,6 +90,7 @@ class LiveStore {
 				};
 				// reassign to trigger reactivity on the record
 				this.panels = { ...this.panels };
+				this.onChatStart?.(panel, data);
 				break;
 			}
 			case 'delta': {
@@ -106,6 +127,10 @@ class LiveStore {
 			}
 			case 'chat_done': {
 				const panel = (data?.panel ?? 'primary') as Panel;
+				// Fire the fold hook FIRST, unconditionally — it must see every
+				// chat_done even if the render bucket was clobbered by a foreign
+				// chat_start (the straggler guard below only protects rendering).
+				this.onChatDone?.(panel, data);
 				const cur = this.panels[panel];
 				if (cur.chat_id != null && data.chat_id != null && data.chat_id !== cur.chat_id) break;
 				this.panels[panel] = { ...cur, running: false };
@@ -114,6 +139,7 @@ class LiveStore {
 			}
 			case 'chat_error': {
 				const panel = (data?.panel ?? 'primary') as Panel;
+				this.onChatError?.(panel, data);
 				const cur = this.panels[panel];
 				// chat_id may be null for PRE-START failures (unknown/unsampleable
 				// run, bad checkpoint) — those broadcast before any chat_start, so

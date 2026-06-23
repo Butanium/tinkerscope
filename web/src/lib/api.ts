@@ -9,8 +9,10 @@ import type {
 	Health,
 	PlaygroundState,
 	StatePatch,
-	ChatRequest
+	ChatRequest,
+	Conversation
 } from './types';
+import type { ConvTree } from './tree';
 
 async function j<T>(path: string, init?: RequestInit): Promise<T> {
 	const r = await fetch(path, {
@@ -46,6 +48,13 @@ export const api = {
 	getState: () => j<PlaygroundState>('/api/state'),
 	setState: (patch: StatePatch) =>
 		j<PlaygroundState>('/api/state', { method: 'POST', body: JSON.stringify(patch) }),
+	// per-scan-root UI prefs (key/value on disk; survives restarts)
+	getPrefs: () => j<Record<string, string>>('/api/prefs'),
+	setPref: (key: string, value: string) =>
+		j<{ status: string }>(`/api/prefs/${encodeURIComponent(key)}`, {
+			method: 'PUT',
+			body: JSON.stringify({ value })
+		}),
 	// datasets
 	loadDataset: (path: string, count = 10, seed?: number) =>
 		j<{ records: Record<string, unknown>[]; total: number; error?: string }>('/api/load-dataset', {
@@ -58,6 +67,31 @@ export const api = {
 		j<Record<string, unknown>>('/api/highlights', { method: 'POST', body: JSON.stringify(entry) }),
 	deleteHighlight: (id: string) =>
 		j<{ status: string }>(`/api/highlights/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+	// conversations (branchable trees; server adds id/created_at/updated_at)
+	listConversations: () => j<Conversation[]>('/api/conversations'),
+	createConversation: (entry: {
+		name?: string;
+		system_prompt?: string | null;
+		tree?: ConvTree;
+		compare_tree?: ConvTree | null;
+	}) => j<Conversation>('/api/conversations', { method: 'POST', body: JSON.stringify(entry) }),
+	renameConversation: (id: string, name: string) =>
+		j<Conversation>(`/api/conversations/${encodeURIComponent(id)}`, {
+			method: 'PATCH',
+			body: JSON.stringify({ name })
+		}),
+	saveConversationTree: (
+		id: string,
+		tree: ConvTree,
+		compare_tree: ConvTree | null,
+		system_prompt: string | null
+	) =>
+		j<{ status: string; id: string }>(`/api/conversations/${encodeURIComponent(id)}/tree`, {
+			method: 'PUT',
+			body: JSON.stringify({ tree, compare_tree, system_prompt })
+		}),
+	deleteConversation: (id: string) =>
+		j<{ status: string }>(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 	// chat (returns the raw Response so the caller can read the SSE stream directly)
 	chat: (req: ChatRequest, signal?: AbortSignal) =>
 		fetch('/api/chat', {

@@ -76,6 +76,12 @@ class ChatRequest(BaseModel):
     # live-drive routing
     panel: str = "primary"                  # "primary" | "compare"
     broadcast: bool = True                   # mirror samples to the state bus
+    # Opaque client-minted ownership token, echoed verbatim on the chat_start /
+    # chat_done / chat_error bus broadcasts. The browser uses it to tell its OWN
+    # chats (which it folds from this request's response stream) apart from
+    # external ones (CLI / another tab) it must fold via reconciliation. The
+    # server never interprets it.
+    client_token: str | None = None
 
 
 def _resolve_checkpoint(run: discovery.Run, name: str | None):
@@ -230,7 +236,7 @@ async def chat(req: ChatRequest):
             # pre-start failure (unknown/unsampleable run, bad checkpoint): surface
             # on BOTH the caller stream and the bus so the browser panel shows it.
             if req.broadcast:
-                await BUS.broadcast("chat_error", {"chat_id": None, "panel": req.panel, "error": str(e)})
+                await BUS.broadcast("chat_error", {"chat_id": None, "panel": req.panel, "error": str(e), "client_token": req.client_token})
             yield {"event": "error", "data": json.dumps({"error": str(e)})}
             return
 
@@ -248,7 +254,8 @@ async def chat(req: ChatRequest):
         chat_id = await BUS.chat_begin(**state_patch)
         if req.broadcast:
             await BUS.broadcast(
-                "chat_start", {"chat_id": chat_id, "panel": req.panel, "n": n, "label": label}
+                "chat_start",
+                {"chat_id": chat_id, "panel": req.panel, "n": n, "label": label, "client_token": req.client_token},
             )
 
         # ── stream samples (delta chunks for n==1, whole samples otherwise) ──
@@ -276,13 +283,17 @@ async def chat(req: ChatRequest):
                 end_patch["compare_messages" if is_compare_panel else "messages"] = turn
             await BUS.chat_end("chat_done", **end_patch)
             if req.broadcast:
-                await BUS.broadcast("chat_done", {"chat_id": chat_id, "panel": req.panel})
+                await BUS.broadcast(
+                    "chat_done",
+                    {"chat_id": chat_id, "panel": req.panel, "client_token": req.client_token},
+                )
             yield {"event": "done", "data": "{}"}
         except Exception as e:
             await BUS.chat_end("chat_done")
             if req.broadcast:
                 await BUS.broadcast(
-                    "chat_error", {"chat_id": chat_id, "panel": req.panel, "error": str(e)}
+                    "chat_error",
+                    {"chat_id": chat_id, "panel": req.panel, "error": str(e), "client_token": req.client_token},
                 )
             yield {"event": "error", "data": json.dumps({"error": str(e)})}
 

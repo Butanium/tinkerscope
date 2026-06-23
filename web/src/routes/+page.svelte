@@ -2,11 +2,31 @@
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api';
 	import { live } from '$lib/state.svelte';
+	import { conversations as convo } from '$lib/conversations.svelte';
 	import ModelTypeahead from '$lib/ModelTypeahead.svelte';
 	import Message from '$lib/ChatMessage.svelte';
 	import { renderContent } from '$lib/render';
 	import { HIGHLIGHTS, highlightState, toggleHighlight } from '$lib/highlights.svelte';
 	import { tip, tooltip } from '$lib/tooltip.svelte';
+	import {
+		emptyTree,
+		activePath,
+		activeMessages,
+		appendUserTurn,
+		foldAssistant,
+		regenTarget,
+		regenReplace,
+		editUserFork,
+		editUserForkCopy,
+		editAssistant,
+		deleteSubtree,
+		deleteSiblings,
+		setSelected,
+		cycle as cycleTree,
+		siblingInfo,
+		siblingsOf,
+		type SampleLike
+	} from '$lib/tree';
 	import type {
 		Run,
 		OpenRouterModel,
@@ -137,6 +157,21 @@
 		return m?.label || sp;
 	}
 
+	// ── Model picker filter (type-to-narrow the Models dropdown) ──────
+	// A shared, case-insensitive substring filter over the picker optgroups. The
+	// currently-selected option is always kept (see template) so the native
+	// <select> never goes blank when the filter would otherwise hide it.
+	let modelFilter = $state('');
+	function matchModel(...texts: (string | null | undefined)[]): boolean {
+		const mf = modelFilter.trim().toLowerCase();
+		if (!mf) return true;
+		return texts.some((t) => (t ?? '').toLowerCase().includes(mf));
+	}
+
+	// Whether shift is currently held — drives the alternate-action affordance on
+	// the regenerate/edit buttons (icon + tooltip swap). Wired in onMount.
+	let shiftDown = $state(false);
+
 	// ── Live shared state (single source of truth for selection/params) ──
 	// Render from live.state; fall back to defaults until the first snapshot.
 	const DEFAULTS: PlaygroundState = {
@@ -237,27 +272,20 @@
 		const used = new Set([s.run_id]);
 		const other = runs.find((r) => !used.has(r.id) && r.sampleable !== false) ?? runs.find((r) => !used.has(r.id));
 		const ck = other?.checkpoints.length ? other.checkpoints[other.checkpoints.length - 1].name : null;
-		// Drop any stale compare samples from a prior compare session.
-		resetComparePanel();
-		// Start both threads fresh and IN SYNC: clear BOTH transcripts so the
-		// user turns line up across the two columns from this point on.
 		patchState(
-			{
-				mode: 'compare',
-				compare_run_id: other?.id ?? s.run_id,
-				compare_checkpoint: ck,
-				messages: [],
-				compare_messages: []
-			},
+			{ mode: 'compare', compare_run_id: other?.id ?? s.run_id, compare_checkpoint: ck },
 			true
 		);
+		// Duplicate the primary thread into the compare panel so both panels start
+		// from the SAME conversation (don't destroy what's already there). Each
+		// panel then diverges independently from this shared starting point.
+		convo.duplicateToCompare();
 	}
 	function disableCompare() {
-		// Drop the compare panel's samples so toggling compare back on won't
-		// briefly re-render the previous run's stale output, and clear its
-		// transcript. Keep the primary thread (returns to single mode).
+		patchState({ mode: 'single' }, true);
+		// Keep the primary tree; drop the compare panel's tree + bucket.
 		resetComparePanel();
-		patchState({ mode: 'single', compare_messages: [] }, true);
+		convo.setTree('compare', emptyTree());
 	}
 
 	// ── Param edits → shared state ────────────────────────────────────
@@ -267,7 +295,7 @@
 	function setTemperature(v: number) { if (Number.isNaN(v)) return; patchState({ temperature: Math.max(0, Math.min(2, v)) }); }
 	function setMaxTokens(v: number) { if (Number.isNaN(v)) return; patchState({ max_tokens: Math.max(1, Math.min(32000, Math.round(v))) }); }
 	function setNSamples(v: number) { if (Number.isNaN(v)) return; patchState({ n_samples: Math.max(1, Math.min(200, Math.round(v))) }); }
-	function setSystemPrompt(v: string) { patchState({ system_prompt: v || null }); }
+	function setSystemPrompt(v: string) { patchState({ system_prompt: v || null }); convo.save(); }
 	function setTopP(v: number) { if (Number.isNaN(v)) return; patchState({ top_p: Math.max(0, Math.min(1, v)) }); }
 	function toggleThinking() {
 		const next = !s.thinking;
@@ -277,81 +305,204 @@
 
 	// ── Sampleability / chat eligibility ──────────────────────────────
 	function panelRun(p: PanelSel): Run | undefined { return runById(p.run_id); }
-	let canChat = $derived(
-		panelSels.length > 0 &&
-			panelSels.every((p) => {
-				// OpenRouter reference models + raw tinker base models + loose tinker
-				// checkpoints are always chat-eligible (the backend errors clearly if
-				// a key is missing).
-				if (isOpenrouterSel(p.run_id) || isBaseSel(p.run_id) || isCkptSel(p.run_id)) return true;
-				const r = panelRun(p);
-				return r && r.sampleable !== false && r.checkpoints.length > 0;
-			})
-	);
-	let anyRunning = $derived(panelSels.some((p) => live.panels[p.panel].running));
+	/** Whether ONE panel's selected model is chat-eligible. OpenRouter refs + raw
+	 *  tinker base models + loose checkpoints are always eligible (the backend
+	 *  errors clearly if a key is missing). */
+	function panelCanChat(p: PanelSel): boolean {
+		if (isOpenrouterSel(p.run_id) || isBaseSel(p.run_id) || isCkptSel(p.run_id)) return true;
+		const r = panelRun(p);
+		return !!(r && r.sampleable !== false && r.checkpoints.length > 0);
+	}
+	let canChat = $derived(panelSels.length > 0 && panelSels.every(panelCanChat));
+	/** All firing panels busy → the shared composer can't fire anything new. */
+	let allBusy = $derived(panelSels.length > 0 && panelSels.every((p) => panelBusy(p.panel)));
+	let anyRunning = $derived(panelSels.some((p) => panelBusy(p.panel)));
+	/** Per-panel busy = that panel's bus `running` flag (set on chat_start, cleared
+	 *  on chat_done/chat_error — for our own chats AND CLI/other-tab ones). This is
+	 *  the authoritative per-panel signal; it must NOT also key off abortByPanel,
+	 *  whose clear is tied to fireChat's promise — if that stream lingers a moment
+	 *  past chat_done the controls would stay wrongly disabled. abortByPanel is for
+	 *  stopGeneration only. Conversation-switch safety still uses convo.busy (tokens). */
+	function panelBusy(panel: Panel): boolean {
+		return live.panels[panel]?.running === true;
+	}
+
+	// ── Session persistence (model selection + params, cached on disk) ──
+	// The selection/params live in PlaygroundState, which is per-process and lost
+	// on restart. Mirror the relevant fields to the on-disk prefs store (debounced)
+	// so reopening tinkerscope restores your last-used models + sampling params.
+	// system_prompt is deliberately NOT persisted here — it travels per-conversation.
+	const SESSION_PREF_KEY = 'last_session';
+	let prefsLoaded = $state(false); // set true after restore; gates saving over our own defaults
+	let sessionSaveTimer: ReturnType<typeof setTimeout> | null = null;
+	let lastSessionJson = ''; // skip redundant PUTs (the effect re-fires on every SSE event)
+	function persistSession() {
+		if (!prefsLoaded) return;
+		if (sessionSaveTimer) clearTimeout(sessionSaveTimer);
+		sessionSaveTimer = setTimeout(() => {
+			const json = JSON.stringify({
+				mode: s.mode, run_id: s.run_id, checkpoint: s.checkpoint,
+				compare_run_id: s.compare_run_id, compare_checkpoint: s.compare_checkpoint,
+				temperature: s.temperature, max_tokens: s.max_tokens, n_samples: s.n_samples,
+				thinking: s.thinking, top_p: s.top_p,
+				top_k: topK, presence_penalty: presencePenalty, repetition_penalty: repetitionPenalty
+			});
+			if (json === lastSessionJson) return; // selection/params unchanged (e.g. mid-stream)
+			lastSessionJson = json;
+			api.setPref(SESSION_PREF_KEY, json).catch(() => {});
+		}, 500);
+	}
+	$effect(() => {
+		// Touch every persisted field so the effect re-runs whenever any changes.
+		void s.mode; void s.run_id; void s.checkpoint; void s.compare_run_id; void s.compare_checkpoint;
+		void s.temperature; void s.max_tokens; void s.n_samples; void s.thinking; void s.top_p;
+		void topK; void presencePenalty; void repetitionPenalty;
+		persistSession();
+	});
+	/** Restore the saved selection/params — only when the process state is fresh
+	 *  (no run selected yet), so we never clobber a session another tab/CLI set. */
+	async function restoreSession(): Promise<void> {
+		try {
+			const prefs = await api.getPrefs();
+			const raw = prefs[SESSION_PREF_KEY];
+			if (raw && live.state?.run_id == null) {
+				const sess = JSON.parse(raw);
+				if (typeof sess.top_k === 'number') topK = sess.top_k;
+				if (typeof sess.presence_penalty === 'number') presencePenalty = sess.presence_penalty;
+				if (typeof sess.repetition_penalty === 'number') repetitionPenalty = sess.repetition_penalty;
+				await api.setState({
+					mode: sess.mode ?? 'single',
+					run_id: sess.run_id ?? null, checkpoint: sess.checkpoint ?? null,
+					compare_run_id: sess.compare_run_id ?? null, compare_checkpoint: sess.compare_checkpoint ?? null,
+					...(typeof sess.temperature === 'number' ? { temperature: sess.temperature } : {}),
+					...(typeof sess.max_tokens === 'number' ? { max_tokens: sess.max_tokens } : {}),
+					...(typeof sess.n_samples === 'number' ? { n_samples: sess.n_samples } : {}),
+					...(typeof sess.thinking === 'boolean' ? { thinking: sess.thinking } : {}),
+					...(typeof sess.top_p === 'number' ? { top_p: sess.top_p } : {})
+				});
+			}
+		} catch {
+			/* missing/corrupt prefs → just start fresh */
+		}
+		prefsLoaded = true;
+	}
 
 	// ── Send a chat (browser-initiated) ───────────────────────────────
 	// Single code path with CLI: append user msg to shared state, POST /api/chat
 	// per panel with broadcast:true, then render purely from the bus.
 	let userInput = $state('');
 	let inputTextarea: HTMLTextAreaElement;
-	let abortControllers: (AbortController | null)[] = [];
+	// Per-panel composer drafts for the "continue this panel" bubbles (compare).
+	let panelDraft = $state<Partial<Record<Panel, string>>>({});
+	// Per-panel in-flight abort controllers (keyed by panel so concurrent
+	// generations on different panels don't clobber each other's handle). $state so
+	// panelBusy() — and every per-panel gate derived from it — reacts on change.
+	let abortByPanel = $state<Partial<Record<Panel, AbortController | null>>>({});
 
 	async function sendMessage() {
 		const text = userInput.trim();
-		if (!text || anyRunning || !canChat) return;
+		// Guard on convo.activeId: until the conversation store has loaded, a send
+		// would build an in-memory tree that load() then clobbers (race → lost reply).
+		if (!text || allBusy || !canChat || !convo.activeId) return;
 
 		pushHistory(text);
-
-		const userMsg: ChatMessage = { role: 'user', content: text };
-		// Each panel gets ITS OWN committed history so each model has memory of
-		// its OWN prior replies: primary from s.messages, compare from
-		// s.compare_messages. The backend appends the chosen assistant turn to
-		// the matching transcript on chat_done, so the two threads stay distinct.
-		const primaryMessages: ChatMessage[] = [...s.messages, userMsg];
-		const compareMessages: ChatMessage[] = [...s.compare_messages, userMsg];
-		const messagesFor = (panel: Panel): ChatMessage[] =>
-			panel === 'compare' ? compareMessages : primaryMessages;
 		userInput = '';
 
-		// Clear the buckets for the panels we're about to fire so the previous
-		// turn's variants don't linger under the new user message in the brief
-		// window before the bus chat_start clears them.
+		// Append a user node to each FREE panel's TREE (the single source of truth)
+		// and fire it. A panel already mid-generation is skipped (don't double-fire);
+		// the others fire concurrently. In single mode only the primary panel exists.
 		for (const p of panelSels) {
-			live.panels[p.panel] = { chat_id: null, label: '', n: 0, samples: [], running: false, error: null };
+			if (panelBusy(p.panel)) continue;
+			const { tree, nodeId } = appendUserTurn(convo.treeFor(p.panel), text);
+			convo.setTree(p.panel, tree);
+			const msgs = activeMessages(convo.treeFor(p.panel)) as ChatMessage[];
+			clearPanelBucket(p.panel);
+			fireOne(p, nodeId, msgs);
 		}
-		live.panels = { ...live.panels };
-
-		// Commit both transcripts to shared state first (immediate, so the bus
-		// snapshot the browser already mirrors carries the new user turn). In
-		// single mode compare_messages stays untouched.
-		patchState(
-			isComparing
-				? { messages: primaryMessages, compare_messages: compareMessages }
-				: { messages: primaryMessages },
-			true
-		);
-
-		abortControllers = panelSels.map(() => new AbortController());
-
-		await Promise.all(
-			panelSels.map((p, i) => fireChat(p, messagesFor(p.panel), abortControllers[i]!.signal))
-		);
-		abortControllers = panelSels.map(() => null);
 	}
 
-	async function fireChat(p: PanelSel, messages: ChatMessage[], signal: AbortSignal) {
+	/** Send to ONE panel only (the per-panel "continue this panel" bubble). Fires
+	 *  independently of the other panel and of whatever it's doing. */
+	function sendToPanel(panel: Panel) {
+		const pSel = panelSels.find((x) => x.panel === panel);
+		if (!pSel) return;
+		const text = (panelDraft[panel] ?? '').trim();
+		if (!text || panelBusy(panel) || !panelCanChat(pSel) || !convo.activeId) return;
+		pushHistory(text);
+		panelDraft[panel] = '';
+		const { tree, nodeId } = appendUserTurn(convo.treeFor(panel), text);
+		convo.setTree(panel, tree);
+		const msgs = activeMessages(convo.treeFor(panel)) as ChatMessage[];
+		clearPanelBucket(panel);
+		fireOne(pSel, nodeId, msgs);
+	}
+
+	/** Fire one panel's generation with a fresh per-panel abort controller. */
+	function fireOne(pSel: PanelSel, userParentId: string, messages: ChatMessage[]) {
+		const ac = new AbortController();
+		abortByPanel[pSel.panel] = ac;
+		fireChat(pSel, userParentId, messages, ac.signal).finally(() => {
+			if (abortByPanel[pSel.panel] === ac) abortByPanel[pSel.panel] = null;
+		});
+	}
+
+	/** Parse the /api/chat SSE response, collecting completed `message` samples.
+	 *  We fold OUR OWN turns from this stream (not the shared render bucket) so a
+	 *  CLI / other-tab chat landing on the same panel mid-stream — which clobbers
+	 *  the single-slot bucket — can never drop or corrupt our fold. */
+	async function drainSamples(res: Response): Promise<SampleLike[]> {
+		const samples: SampleLike[] = [];
+		const reader = res.body!.getReader();
+		const decoder = new TextDecoder();
+		let buf = '';
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			buf += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+			let nl: number;
+			while ((nl = buf.indexOf('\n\n')) >= 0) {
+				const frame = buf.slice(0, nl);
+				buf = buf.slice(nl + 2);
+				let event = 'message';
+				let dataStr = '';
+				for (const line of frame.split('\n')) {
+					if (line.startsWith('event:')) event = line.slice(6).trim();
+					else if (line.startsWith('data:')) dataStr += line.slice(5).trim();
+				}
+				if (event !== 'message' || !dataStr) continue;
+				try {
+					const d = JSON.parse(dataStr);
+					if (d && (typeof d.content === 'string' || d.error)) {
+						samples.push({
+							content: d.content,
+							reasoning: d.reasoning,
+							raw_text: d.raw_text,
+							error: d.error,
+							sample_index: d.sample_index ?? samples.length
+						});
+					}
+				} catch {
+					/* ignore a partial / non-JSON frame */
+				}
+			}
+		}
+		return samples;
+	}
+
+	async function fireChat(
+		p: PanelSel,
+		userParentId: string,
+		messages: ChatMessage[],
+		signal: AbortSignal
+	) {
 		// Resolve the model: tinker LoRA run, raw tinker base model, loose tinker
-		// checkpoint, or OpenRouter reference model. All commit to the panel's
-		// transcript server-side, so all are multi-turn. EXACTLY ONE of
-		// run_id/base_model/sampler_path/openrouter_model is sent.
+		// checkpoint, or OpenRouter reference. EXACTLY ONE id field is sent.
 		const orId = openrouterId(p.run_id);
 		const bm = baseModelId(p.run_id);
 		const sp = samplerPathOf(p.run_id);
 		const r = orId == null && bm == null && sp == null ? panelRun(p) : undefined;
 		if (orId == null && bm == null && sp == null && !r) return;
-		// We render from the bus; just kick off the POST and drain its stream so
-		// the request completes (samples arrive over the bus regardless).
+		const token = convo.newToken(); // marks this chat OURS so the external-fold hook skips it
 		try {
 			const res = await api.chat(
 				{
@@ -373,108 +524,216 @@
 					presence_penalty: presencePenalty,
 					repetition_penalty: repetitionPenalty,
 					panel: p.panel,
-					broadcast: true
+					broadcast: true,
+					client_token: token
 				},
 				signal
 			);
 			if (!res.ok) {
-				const err = await res.text();
-				backendError = `Chat error ${res.status}: ${err}`;
+				backendError = `Chat error ${res.status}: ${await res.text()}`;
 				return;
 			}
-			// Drain the caller stream to completion (rendering happens from the bus).
-			const reader = res.body!.getReader();
-			while (true) {
-				const { done } = await reader.read();
-				if (done) break;
+			// Collect our samples from our OWN stream + fold them under the user node.
+			const samples = await drainSamples(res);
+			if (samples.length) {
+				const { tree } = foldAssistant(convo.treeFor(p.panel), userParentId, samples);
+				convo.setTree(p.panel, tree);
 			}
 		} catch (err: any) {
+			// Abort (user hit Stop) → leave the user node reply-less; no partial fold.
 			if (err?.name !== 'AbortError') backendError = `Connection error: ${err?.message ?? err}`;
+		} finally {
+			convo.endToken(token);
 		}
 	}
 
-	function stopGeneration() {
-		for (const ac of abortControllers) ac?.abort();
-		abortControllers = abortControllers.map(() => null);
+	function stopGeneration(panel?: Panel) {
+		// Stop one panel if given, else all in-flight panels.
+		const panels = panel ? [panel] : (Object.keys(abortByPanel) as Panel[]);
+		for (const k of panels) {
+			abortByPanel[k]?.abort();
+			abortByPanel[k] = null;
+		}
 	}
 
 	async function newConversation() {
-		patchState({ messages: [], compare_messages: [] }, true);
-		live.panels.primary = { chat_id: null, label: '', n: 0, samples: [], running: false, error: null };
-		live.panels.compare = { chat_id: null, label: '', n: 0, samples: [], running: false, error: null };
-		live.panels = { ...live.panels };
+		if (anyRunning || convo.busy) return;
+		await convo.create();
 		try { await api.close(); } catch {}
 	}
 
-	// ── Chat-thread editing: edit / regenerate / delete / pick-a-sample ──
-	// All operate on the committed transcript (shared state) + the live bucket and
-	// reuse the same fireChat path. No backend change: the transcript IS shared
-	// state we can patch, so a mutation re-renders both the browser and the
-	// terminal-driven view through the bus.
+	// ── Named conversations (dropdown) ────────────────────────────────
+	let renamingConv = $state(false);
+	let renameDraft = $state('');
+	async function onSelectConversation(id: string) {
+		// convo.busy (own fold in flight) outlives anyRunning — block the swap so an
+		// in-flight reply can't land on the newly-selected conversation's tree.
+		if (anyRunning || convo.busy || id === convo.activeId) return;
+		await convo.switchTo(id);
+	}
+	function startRenameConversation() {
+		renameDraft = convo.list.find((c) => c.id === convo.activeId)?.name ?? '';
+		renamingConv = true;
+	}
+	async function commitRenameConversation() {
+		if (convo.activeId && renameDraft.trim()) await convo.rename(convo.activeId, renameDraft.trim());
+		renamingConv = false;
+	}
+	async function onDeleteConversation() {
+		if (anyRunning || convo.busy || !convo.activeId) return;
+		if (!confirm('Delete this conversation and all its branches?')) return;
+		await convo.remove(convo.activeId);
+	}
+
+	// ── Chat-thread branching: edit / regenerate / delete / cycle / select ──
+	// All operate on the per-panel TREE (the source of truth, owned by the convo
+	// store). A mutation commits via convo.setTree, which re-derives the active
+	// path, mirrors it into shared state (so the CLI follows), and debounce-saves.
 	function clearPanelBucket(panel: Panel) {
 		live.panels[panel] = { chat_id: null, label: '', n: 0, samples: [], running: false, error: null };
 		live.panels = { ...live.panels };
 	}
-	function transcriptOf(panel: Panel): ChatMessage[] {
-		return panel === 'compare' ? s.compare_messages : s.messages;
-	}
-	function patchTranscript(panel: Panel, msgs: ChatMessage[]) {
-		patchState(panel === 'compare' ? { compare_messages: msgs } : { messages: msgs }, true);
-	}
 
-	/** Remove a committed message (and clear the bucket if it overlaid it). */
-	function deleteMessage(panel: Panel, msg: ViewMessage) {
-		if (anyRunning) return;
-		if (msg.transcriptIdx != null) {
-			const idx = msg.transcriptIdx;
-			patchTranscript(panel, transcriptOf(panel).filter((_, i) => i !== idx));
-		}
-		if (msg.isBucket) clearPanelBucket(panel);
-	}
-
-	/** Re-sample an assistant turn: drop it (and anything after) and fire again
-	 *  from the preceding context, honouring the current n_samples / params. */
-	function regenerate(panel: Panel, msg: ViewMessage) {
-		if (anyRunning || msg.transcriptIdx == null) return;
-		const truncated = transcriptOf(panel).slice(0, msg.transcriptIdx);
-		clearPanelBucket(panel);
-		patchTranscript(panel, truncated);
+	/** Fire a (re)generation for one panel, folding the reply under `userParentId`. */
+	function fireForPanel(panel: Panel, userParentId: string, messages: ChatMessage[]) {
 		const pSel = panelSels.find((x) => x.panel === panel);
 		if (!pSel) return;
-		abortControllers = panelSels.map((pp) => (pp.panel === panel ? new AbortController() : null));
-		const ac = abortControllers[panelSels.findIndex((pp) => pp.panel === panel)]!;
-		fireChat(pSel, truncated, ac.signal);
+		fireOne(pSel, userParentId, messages);
 	}
 
-	/** Commit a chosen n>1 sample as THIS turn's assistant reply (replacing the
-	 *  auto-committed sample 0), then clear the variants so it reads as a turn. */
-	function useSample(panel: Panel, content: string) {
-		if (anyRunning) return;
-		const t = transcriptOf(panel);
-		const base = t.length && t[t.length - 1].role === 'assistant' ? t.slice(0, -1) : t;
-		patchTranscript(panel, [...base, { role: 'assistant', content }]);
+	/** Compute a panel's regen plan: plain = fork a sibling; replace = drop the
+	 *  active assistant branch first so the fresh reply takes its place. Commits
+	 *  any tree pruning and returns the fire target (or null if not regen-able). */
+	function regenPlan(
+		panel: Panel,
+		nodeId: string,
+		replace: boolean
+	): { userParentId: string; fireMessages: ChatMessage[] } | null {
+		const tree = convo.treeFor(panel);
+		if (replace) {
+			const r = regenReplace(tree, nodeId);
+			if (!r) return null;
+			convo.setTree(panel, r.tree);
+			return { userParentId: r.userParentId, fireMessages: r.fireMessages as ChatMessage[] };
+		}
+		const rt = regenTarget(tree, nodeId);
+		if (!rt) return null;
+		return { userParentId: rt.userParentId, fireMessages: rt.fireMessages as ChatMessage[] };
+	}
+
+	/** Prune a node + its subtree (one branch). all (shift) = prune EVERY sibling
+	 *  branch at this level too, truncating back to the parent. */
+	function deleteMessage(panel: Panel, msg: ViewMessage, all = false) {
+		if (panelBusy(panel) || msg.nodeId == null) return;
+		clearPanelBucket(panel);
+		const tree = convo.treeFor(panel);
+		convo.setTree(panel, all ? deleteSiblings(tree, msg.nodeId) : deleteSubtree(tree, msg.nodeId));
+	}
+
+	/** Regenerate this panel's turn. plain = new sibling branch; replace (shift) =
+	 *  overwrite the current branch in place (other siblings kept). */
+	function regenerate(panel: Panel, msg: ViewMessage, replace = false) {
+		if (panelBusy(panel) || msg.nodeId == null) return;
+		clearPanelBucket(panel);
+		const plan = regenPlan(panel, msg.nodeId, replace);
+		if (!plan) return;
+		fireForPanel(panel, plan.userParentId, plan.fireMessages);
+	}
+
+	/** Regenerate the turn at this row's DEPTH in EVERY panel (compare mode).
+	 *  Matches by active-path depth so each panel re-rolls its own model. */
+	function regenerateAll(panel: Panel, msg: ViewMessage, replace = false) {
+		if (msg.nodeId == null) return;
+		const depth = activePath(convo.treeFor(panel)).findIndex((n) => n.id === msg.nodeId);
+		if (depth < 0) return;
+		for (const p of panelSels) {
+			if (panelBusy(p.panel)) continue;
+			const node = activePath(convo.treeFor(p.panel))[depth];
+			if (!node) continue;
+			clearPanelBucket(p.panel);
+			const plan = regenPlan(p.panel, node.id, replace);
+			if (plan) fireForPanel(p.panel, plan.userParentId, plan.fireMessages);
+		}
+	}
+
+	/** Cycle the active sibling at this row (‹k/N›). */
+	function cycleBranch(panel: Panel, msg: ViewMessage, delta: number) {
+		if (panelBusy(panel) || msg.nodeId == null) return;
+		clearPanelBucket(panel);
+		convo.setTree(panel, cycleTree(convo.treeFor(panel), msg.nodeId, delta));
+	}
+
+	/** Pick an n>1 sample card as the active branch, then COLLAPSE to the single
+	 *  reply view (clear the bucket) — the other samples remain as cyclable ‹k/N›
+	 *  siblings in the tree. */
+	function selectSample(panel: Panel, msg: ViewMessage, sampleIndex: number) {
+		if (panelBusy(panel)) return;
+		const nid = msg.sampleNodeIds?.[sampleIndex];
+		if (!nid) return;
+		convo.setTree(panel, setSelected(convo.treeFor(panel), nid));
+		clearPanelBucket(panel); // collapse the distribution view to the chosen branch
+	}
+
+	/** Keep this sample, prune all its sibling samples, then collapse to it. */
+	function discardOtherSamples(panel: Panel, msg: ViewMessage, sampleIndex: number) {
+		if (panelBusy(panel)) return;
+		const keep = msg.sampleNodeIds?.[sampleIndex];
+		if (!keep) return;
+		let tree = setSelected(convo.treeFor(panel), keep);
+		for (const sib of siblingsOf(tree, keep)) {
+			if (sib !== keep) tree = deleteSubtree(tree, sib);
+		}
+		convo.setTree(panel, tree);
 		clearPanelBucket(panel);
 	}
 
-	/** Apply an inline edit (emitted by a ChatMessage) to the committed transcript. */
-	function applyEdit(panel: Panel, msg: ViewMessage, content: string) {
-		if (msg.transcriptIdx == null) return;
-		const idx = msg.transcriptIdx;
-		patchTranscript(panel, transcriptOf(panel).map((m, i) => (i === idx ? { ...m, content } : m)));
-		if (msg.isBucket) clearPanelBucket(panel);
+	/** Delete one specific sample branch; drop it from the live cards too so the
+	 *  remaining samples stay on screen for further curation. */
+	function deleteSample(panel: Panel, msg: ViewMessage, sampleIndex: number) {
+		if (panelBusy(panel)) return;
+		const nid = msg.sampleNodeIds?.[sampleIndex];
+		if (!nid) return;
+		convo.setTree(panel, deleteSubtree(convo.treeFor(panel), nid));
+		// Remove the card from the bucket overlay (keep the rest visible).
+		const bucket = live.panels[panel];
+		if (bucket && bucket.samples.length > sampleIndex) {
+			const samples = bucket.samples.filter((_, i) => i !== sampleIndex);
+			live.panels[panel] = { ...bucket, samples, n: Math.max(1, samples.length) };
+			live.panels = { ...live.panels };
+		}
+	}
+
+	/** Edit → fork. User: fork+regen (shift = fork+copy-downstream, no gen).
+	 *  Assistant: a manual branch (no gen). Empty edits are ignored. */
+	function applyEdit(panel: Panel, msg: ViewMessage, content: string, copyDownstream: boolean) {
+		if (panelBusy(panel) || msg.nodeId == null) return;
+		const text = content.trim();
+		if (!text) return;
+		clearPanelBucket(panel);
+		if (msg.role === 'user') {
+			if (copyDownstream) {
+				const r = editUserForkCopy(convo.treeFor(panel), msg.nodeId, text);
+				if (r) convo.setTree(panel, r.tree);
+			} else {
+				const r = editUserFork(convo.treeFor(panel), msg.nodeId, text);
+				if (!r) return;
+				convo.setTree(panel, r.tree);
+				fireForPanel(panel, r.newUserId, r.fireMessages as ChatMessage[]);
+			}
+		} else if (msg.role === 'assistant') {
+			const r = editAssistant(convo.treeFor(panel), msg.nodeId, text);
+			if (r) convo.setTree(panel, r.tree);
+		}
 	}
 
 	// ── Conversation rendering ────────────────────────────────────────
-	// The backend keeps TWO committed transcripts: s.messages (primary panel) and
-	// s.compare_messages (compare panel). After each turn it appends the chosen
-	// assistant reply (sample 0) to the panel that produced it, so each holds
-	// [user1, assistant1, user2, assistant2, …] across BOTH browser- and CLI-
-	// driven turns, and the two threads share the same user turns. We render each
-	// column from its OWN transcript so prior turns (and CLI turns) stay visible
-	// in BOTH columns. The per-(chat_id,panel) BUCKET (live.panels[panel]) holds
-	// the LATEST turn's N variants + progress; we attach it to that panel's latest
-	// assistant turn so the variants/distribution view replaces — never double-
-	// renders — the committed reply (which == the bucket's sample 0).
+	// Each column renders from ITS OWN branch TREE's active path (convo.tree /
+	// convo.compareTree) — the single read source (s.messages is a write-only
+	// echo for the CLI). The per-(chat_id,panel) BUCKET (live.panels[panel]) holds
+	// the LATEST turn's N variants + streaming progress; we overlay it on the
+	// active leaf's assistant turn so the distribution view replaces — never
+	// double-renders — the committed reply. After fold, the bucket cards map back
+	// to their sibling node ids so a card-click can select that branch.
 	/** The bucket's latest turn as a single trailing assistant ViewMessage. */
 	function bucketTurn(run: (typeof live.panels)[Panel]): ViewMessage {
 		const filled = run.samples.filter((x) => x);
@@ -500,32 +759,60 @@
 	}
 
 	function panelView(p: PanelSel): ViewMessage[] {
-		// Each column renders from ITS OWN committed transcript: the primary
-		// column from s.messages, the compare column from s.compare_messages.
-		// Both are real multi-turn threads sharing the same user turns.
-		const transcript = p.panel === 'compare' ? s.compare_messages : s.messages;
-		const out: ViewMessage[] = (transcript ?? []).map((m, idx) => ({
-			role: m.role,
-			content: m.content,
-			transcriptIdx: idx,
+		const tree = convo.treeFor(p.panel);
+		const path = activePath(tree);
+		const out: ViewMessage[] = path.map((n) => ({
+			role: n.role,
+			content: n.content,
+			reasoning: n.reasoning,
+			raw_text: n.raw_text,
+			nodeId: n.id,
+			sib: siblingInfo(tree, n.id),
 			isBucket: false
 		}));
 		const run = live.panels[p.panel];
 		const hasBucket = run.chat_id != null || run.samples.length > 0 || run.running;
 
 		if (hasBucket) {
-			// The bucket is the latest turn. If the transcript already ends with the
-			// committed assistant reply for this turn, replace it with the richer
-			// bucket view (N variants / progress) instead of double-rendering — and
-			// carry that committed row's index so edit/regenerate/delete can target it.
-			let replacedIdx: number | null = null;
+			let replacedId: string | null = null;
+			let replacedSib: { index: number; count: number } | undefined;
+			let sampleNodeIds: string[] | undefined;
+			let activeSampleIndex: number | undefined;
 			if (out.length > 0 && out[out.length - 1].role === 'assistant') {
-				replacedIdx = out[out.length - 1].transcriptIdx ?? null;
+				// Folded already → replace the trailing assistant with the rich bucket
+				// view, and map the n>1 cards back to this batch's sibling node ids.
+				const last = out[out.length - 1];
+				replacedId = last.nodeId ?? null;
+				replacedSib = last.sib;
 				out.pop();
+				const userParent = replacedId ? tree.nodes[replacedId]?.parent : null;
+				if (userParent && tree.nodes[userParent]) {
+					const kids = tree.nodes[userParent].children;
+					// A sample is "folded" iff it has content AND no error — matching
+					// foldAssistant's skip rule. parseSample gives error samples a
+					// content string ("Error: …"), so gating on content alone would
+					// miscount and misalign the card→node mapping. Error slots map to ''.
+					const isFold = (x: (typeof run.samples)[number]) => !!(x && x.content && !x.error);
+					const filledCount = run.samples.filter(isFold).length;
+					const batch = kids.slice(Math.max(0, kids.length - filledCount)); // this turn's folds
+					sampleNodeIds = [];
+					let pos = 0;
+					for (let i = 0; i < run.samples.length; i++) {
+						sampleNodeIds[i] = isFold(run.samples[i]) ? (batch[pos++] ?? '') : '';
+					}
+					if (replacedId) activeSampleIndex = sampleNodeIds.indexOf(replacedId);
+				}
 			}
-			out.push({ ...bucketTurn(run), transcriptIdx: replacedIdx, isBucket: true });
+			out.push({
+				...bucketTurn(run),
+				nodeId: replacedId,
+				sib: replacedSib,
+				sampleNodeIds,
+				activeSampleIndex,
+				isBucket: true
+			});
 		}
-		if (run.error) out.push({ role: 'assistant', content: `Error: ${run.error}`, transcriptIdx: null });
+		if (run.error) out.push({ role: 'assistant', content: `Error: ${run.error}`, nodeId: null });
 		return out;
 	}
 
@@ -780,8 +1067,9 @@
 	}
 
 	function lastUserQuestion(): string {
-		const last = [...s.messages].reverse().find((m) => m.role === 'user');
-		return last?.content ?? '';
+		const msgs = activeMessages(convo.tree);
+		for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'user') return msgs[i].content;
+		return '';
 	}
 
 	function openTagForm(panel: Panel, response: string, sampleIndex: number | null, totalSamples: number | null, reasoning = '') {
@@ -885,11 +1173,22 @@
 	function buildChartData(): { bars: ChartBar[]; answers: string[]; colors: Record<string, string>; question: string } | null {
 		const sources: { model: string; samples: string[] }[] = [];
 		for (const p of panelSels) {
-			const run = live.panels[p.panel];
-			const filled = run.samples.filter((x) => x && x.content);
-			if (filled.length > 0) {
-				sources.push({ model: panelLabel(p), samples: filled.map((x) => x.content) });
+			// Prefer the active assistant turn's ALL tree siblings (the full
+			// distribution across every regen batch), so the chart and the ‹k/N›
+			// cycler never disagree. Fall back to the live bucket while first
+			// streaming (before the fold).
+			const tree = convo.treeFor(p.panel);
+			const lastAsst = [...activePath(tree)].reverse().find((n) => n.role === 'assistant');
+			let samples: string[] = [];
+			if (lastAsst) {
+				samples = siblingsOf(tree, lastAsst.id)
+					.map((id) => tree.nodes[id]?.content)
+					.filter((c): c is string => !!c);
 			}
+			if (!samples.length) {
+				samples = live.panels[p.panel].samples.filter((x) => x && x.content).map((x) => x.content);
+			}
+			if (samples.length > 0) sources.push({ model: panelLabel(p), samples });
 		}
 		if (sources.length === 0) return null;
 
@@ -991,18 +1290,39 @@
 			if (rc) recentCheckpoints = JSON.parse(rc);
 		} catch {}
 
-		// Open the ONE live-state stream on load.
+		// Track shift for the alternate-action affordance (regen→replace, edit→copy).
+		const onModKey = (e: KeyboardEvent) => { shiftDown = e.shiftKey; };
+		const onBlur = () => { shiftDown = false; };
+		window.addEventListener('keydown', onModKey);
+		window.addEventListener('keyup', onModKey);
+		window.addEventListener('blur', onBlur);
+
+		// Open the ONE live-state stream on load + wire the external-fold hooks.
 		live.start();
+		convo.init();
 
 		(async () => {
 			try { health = await api.health(); } catch (e: any) { backendError = `Backend not reachable: ${e?.message ?? e}`; }
 			await loadRuns();
 			await loadOpenrouterModels();
 			try { if (!live.state) live.state = await api.getState(); } catch {}
+			// Restore last-used model selection + sampling params from disk (only if
+			// this process's state is fresh) BEFORE conversations load, so the right
+			// models are selected as the UI comes up.
+			await restoreSession();
+			// Load conversations right after live.state is ensured (its on-load
+			// reconcile reads live.state.messages) and BEFORE anything slow, so the
+			// input (gated on convo.activeId) un-gates as early as possible.
+			try { await convo.load(); } catch (e: any) { backendError = `Failed to load conversations: ${e?.message ?? e}`; }
 			await loadHighlights();
 		})();
 
-		return () => live.stop();
+		return () => {
+			live.stop();
+			window.removeEventListener('keydown', onModKey);
+			window.removeEventListener('keyup', onModKey);
+			window.removeEventListener('blur', onBlur);
+		};
 	});
 </script>
 
@@ -1020,6 +1340,9 @@
 
 	{#if degraded}
 		<div class="degraded-banner">{degraded}</div>
+	{/if}
+	{#if convo.externalNotice}
+		<div class="degraded-banner external-notice">{convo.externalNotice}</div>
 	{/if}
 
 	<div class="main-layout">
@@ -1064,7 +1387,7 @@
 						<path d="M11.5 1v3h-3M2.5 13v-3h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
 					</svg>
 				</button>
-				<button class="btn-stop-sidebar" class:active={anyRunning} onclick={stopGeneration} data-tooltip="Stop generation" use:tip disabled={!anyRunning}>
+				<button class="btn-stop-sidebar" class:active={anyRunning} onclick={() => stopGeneration()} data-tooltip="Stop all generation" use:tip disabled={!anyRunning}>
 					<svg width="14" height="14" viewBox="0 0 14 14" fill="none">
 						<rect x="2" y="2" width="10" height="10" rx="1.5" fill="currentColor" />
 					</svg>
@@ -1075,9 +1398,57 @@
 				<div class="backend-error">{backendError}</div>
 			{/if}
 
+			<!-- Conversation picker (named, branchable) -->
+			<div class="sidebar-section">
+				<label class="sidebar-label">Conversation</label>
+				{#if renamingConv}
+					<!-- svelte-ignore a11y_autofocus -->
+					<input
+						class="sidebar-input"
+						bind:value={renameDraft}
+						autofocus
+						onkeydown={(e) => {
+							if (e.key === 'Enter') { e.preventDefault(); commitRenameConversation(); }
+							else if (e.key === 'Escape') { renamingConv = false; }
+						}}
+						onblur={commitRenameConversation}
+					/>
+				{:else}
+					<div class="conv-row">
+						<select
+							class="sidebar-select conv-select"
+							value={convo.activeId ?? ''}
+							disabled={anyRunning || convo.busy}
+							onchange={(e) => onSelectConversation((e.target as HTMLSelectElement).value)}
+						>
+							{#each convo.list as c (c.id)}
+								<option value={c.id}>{c.name || 'Untitled'}</option>
+							{/each}
+						</select>
+						<button class="conv-icon-btn" title="New conversation" disabled={anyRunning || convo.busy} aria-label="New conversation" onclick={newConversation}>
+							<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+						</button>
+						<button class="conv-icon-btn" title="Rename conversation" disabled={anyRunning || convo.busy} aria-label="Rename conversation" onclick={startRenameConversation}>
+							<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M10.5 2.5l3 3L6 13l-3.5.5L3 10l7.5-7.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /></svg>
+						</button>
+						<button class="conv-icon-btn conv-icon-danger" title="Delete conversation" disabled={anyRunning || convo.busy} aria-label="Delete conversation" onclick={onDeleteConversation}>
+							<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V2.5h4V4M4.5 4l.6 9h5.8l.6-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg>
+						</button>
+					</div>
+				{/if}
+			</div>
+
 			<!-- Model picker: run + checkpoint, per panel -->
 			<div class="sidebar-section">
 				<label class="sidebar-label">Models</label>
+				{#if runs.length + openrouterModels.length + recentBaseModels.length + recentCheckpoints.length > 4}
+					<input
+						class="sidebar-input model-filter"
+						type="text"
+						placeholder="Filter models…"
+						bind:value={modelFilter}
+					/>
+				{/if}
 				{#each panelSels as p (p.panel)}
 					{@const pr = runById(p.run_id)}
 					{@const isOr = isOpenrouterSel(p.run_id)}
@@ -1086,6 +1457,10 @@
 					{@const orModel = openrouterBySel(p.run_id)}
 					{@const baseM = baseModelId(p.run_id)}
 					{@const sp = samplerPathOf(p.run_id)}
+					{@const fRuns = runs.filter((r) => r.id === p.run_id || matchModel(runLabel(r), r.id, r.base_model, r.wandb_project, r.renderer_name))}
+					{@const fBase = recentBaseModels.filter((t) => matchModel(t.label, t.base_model))}
+					{@const fCkpt = recentCheckpoints.filter((t) => matchModel(t.label, t.sampler_path))}
+					{@const fOr = openrouterModels.filter((m) => matchModel(m.label, m.openrouter_model))}
 					<!-- A selected base model / checkpoint that isn't in recents yet (e.g.
 					     came from the CLI / shared state) still needs an <option> so the
 					     select shows it. -->
@@ -1101,39 +1476,44 @@
 								{#if !p.run_id}
 									<option value="" disabled>Select a model…</option>
 								{/if}
-								<optgroup label="Runs">
-									{#each runs as r (r.id)}
-										<option value={r.id} disabled={r.sampleable === false}>
-											{r.sampleable === false ? '⊘ ' : r.sampleable === null ? '? ' : ''}{runLabel(r)}
-										</option>
-									{/each}
-								</optgroup>
-								{#if recentBaseModels.length > 0 || (baseM != null && !baseInRecents)}
+								{#if fRuns.length > 0}
+									<optgroup label="Runs">
+										{#each fRuns as r (r.id)}
+											<option value={r.id} disabled={r.sampleable === false}>
+												{r.sampleable === false ? '⊘ ' : r.sampleable === null ? '? ' : ''}{runLabel(r)}
+											</option>
+										{/each}
+									</optgroup>
+								{/if}
+								{#if fBase.length > 0 || (baseM != null && !baseInRecents)}
 									<optgroup label="Tinker base models">
 										{#if baseM != null && !baseInRecents}
 											<option value={BASE_PREFIX + baseM}>◆ {baseLabel(p.run_id)}</option>
 										{/if}
-										{#each recentBaseModels as t (t.base_model)}
+										{#each fBase as t (t.base_model)}
 											<option value={BASE_PREFIX + t.base_model}>◆ {t.label || t.base_model}</option>
 										{/each}
 									</optgroup>
 								{/if}
-								{#if recentCheckpoints.length > 0 || (sp != null && !ckptInRecents)}
+								{#if fCkpt.length > 0 || (sp != null && !ckptInRecents)}
 									<optgroup label="Tinker checkpoints">
 										{#if sp != null && !ckptInRecents}
 											<option value={CKPT_PREFIX + sp}>◇ {ckptLabel(p.run_id)}</option>
 										{/if}
-										{#each recentCheckpoints as t (t.sampler_path)}
+										{#each fCkpt as t (t.sampler_path)}
 											<option value={CKPT_PREFIX + t.sampler_path}>◇ {t.label || t.sampler_path}</option>
 										{/each}
 									</optgroup>
 								{/if}
-								{#if openrouterModels.length > 0}
+								{#if fOr.length > 0}
 									<optgroup label="OpenRouter">
-										{#each openrouterModels as m (m.openrouter_model)}
+										{#each fOr as m (m.openrouter_model)}
 											<option value={OR_PREFIX + m.openrouter_model}>↗ {m.label || m.openrouter_model}</option>
 										{/each}
 									</optgroup>
+								{/if}
+								{#if fRuns.length + fBase.length + fCkpt.length + fOr.length === 0}
+									<option value={p.run_id ?? ''} disabled>No models match “{modelFilter}”</option>
 								{/if}
 							</select>
 							{#if isComparing && p.panel === 'compare'}
@@ -1294,19 +1674,25 @@
 							<div class="column-header">{panelLabel(p)}</div>
 						{/if}
 						<div class="messages" bind:this={chatContainers[panelIdx]}>
-							{#each view as msg, i (i)}
+							{#each view as msg, i (msg.nodeId ?? 'b' + i)}
 								{@const prevUserMsg = view.slice(0, i).reverse().find((m) => m.role === 'user')?.content}
 								{@const isLastAssistant = !view.slice(i + 1).some((m) => m.role === 'assistant')}
 								<Message
 									{msg}
 									{prevUserMsg}
 									{isLastAssistant}
-									{anyRunning}
+									{shiftDown}
+									busy={panelBusy(p.panel)}
+									showRegenAll={isComparing}
 									thinking={s.thinking}
-									onRegenerate={() => regenerate(p.panel, msg)}
-									onDelete={() => deleteMessage(p.panel, msg)}
-									onUseSample={(content) => useSample(p.panel, content)}
-									onEdit={(content) => applyEdit(p.panel, msg, content)}
+									onRegenerate={(replace) => regenerate(p.panel, msg, replace)}
+									onRegenerateAll={(replace) => regenerateAll(p.panel, msg, replace)}
+									onDelete={(all) => deleteMessage(p.panel, msg, all)}
+									onSelectSample={(idx) => selectSample(p.panel, msg, idx)}
+									onDiscardOthers={(idx) => discardOtherSamples(p.panel, msg, idx)}
+									onDeleteSample={(idx) => deleteSample(p.panel, msg, idx)}
+									onEdit={(content, copyDownstream) => applyEdit(p.panel, msg, content, copyDownstream)}
+									onCycle={(delta) => cycleBranch(p.panel, msg, delta)}
 									onTag={(content, sampleIndex, totalSamples, reasoning) => openTagForm(p.panel, content, sampleIndex, totalSamples, reasoning)}
 								/>
 							{/each}
@@ -1314,6 +1700,27 @@
 								<div class="message" style="background: {s.thinking ? 'var(--color-surface-alt)' : 'var(--color-assistant-bg)'};">
 									<div class="message-role">{s.thinking ? 'thinking' : 'assistant'}</div>
 									<div class="message-content loading-indicator"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+								</div>
+							{/if}
+							{#if isComparing && convo.activeId && panelCanChat(p)}
+								<!-- Per-panel composer: continue ONLY this panel, independent of the
+								     other panel and of whatever it's doing. -->
+								<div class="panel-send">
+									<input
+										class="panel-send-input"
+										placeholder={panelBusy(p.panel) ? 'generating…' : '＋ continue this panel'}
+										bind:value={panelDraft[p.panel]}
+										disabled={panelBusy(p.panel)}
+										onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendToPanel(p.panel); } }}
+									/>
+									<button
+										class="panel-send-btn"
+										aria-label="Send to this panel"
+										disabled={panelBusy(p.panel) || !(panelDraft[p.panel] ?? '').trim()}
+										onclick={() => sendToPanel(p.panel)}
+									>
+										<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 8h10M8 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+									</button>
 								</div>
 							{/if}
 						</div>
@@ -1332,12 +1739,14 @@
 					bind:value={userInput}
 					bind:this={inputTextarea}
 					onkeydown={handleKeydown}
-					placeholder={!canChat
-						? 'Select a sampleable run to chat'
-						: historyBrowsing
-							? 'History mode -- up/down browse, Esc exit'
-							: 'Type a message... (Enter to send, Esc for history)'}
-					disabled={anyRunning || !canChat}
+					placeholder={!convo.activeId
+						? 'Loading conversations…'
+						: !canChat
+							? 'Select a sampleable run to chat'
+							: historyBrowsing
+								? 'History mode -- up/down browse, Esc exit'
+								: 'Type a message... (Enter to send, Esc for history)'}
+					disabled={allBusy || !canChat || !convo.activeId}
 				></textarea>
 			</div>
 		</div>
@@ -1651,8 +2060,18 @@
 	.sidebar-select option:disabled { color: var(--color-text-muted); }
 	.sidebar-slider { width: 100%; accent-color: var(--color-accent); }
 	.sidebar-input { padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text); font-size: 0.82rem; font-family: var(--font-mono); width: 100%; }
+	.model-filter { margin-bottom: var(--space-2); }
 	.sidebar-textarea { padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text); font-size: 0.82rem; font-family: var(--font-sans); resize: vertical; width: 100%; }
 	.sidebar-top-actions { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+
+	/* ── Conversation picker ───────────────────────────────────────── */
+	.conv-row { display: flex; gap: var(--space-1); align-items: center; }
+	.conv-select { flex: 1; min-width: 0; }
+	.conv-icon-btn { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; background: var(--color-surface-hover); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text-muted); flex-shrink: 0; cursor: pointer; }
+	.conv-icon-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
+	.conv-icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+	.conv-icon-danger:hover:not(:disabled) { color: white; background: #d97070; border-color: #d97070; }
+	.external-notice { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent); }
 
 	/* ── Model picker ──────────────────────────────────────────────── */
 	.model-block { display: flex; flex-direction: column; gap: var(--space-1); padding-bottom: var(--space-2); margin-bottom: var(--space-2); border-bottom: 1px solid var(--color-border-light); }

@@ -11,9 +11,10 @@ see `README.md` for the full feature list + credits.
 | Doc | What it's for | Status |
 |---|---|---|
 | `README.md` | User-facing: what it does, how to run, the CLI, tests | current |
-| `API_CONTRACT.md` | Authoritative HTTP endpoint + SSE event shapes | current |
-| `HANDOFF_BRANCHING.md` | **The live handoff** — conversation-branching feature + later highlight-UI overhaul; the load-bearing frontend/state architecture | current |
-| `TODO.md` | Roadmap + branching design in brief | current |
+| `API_CONTRACT.md` | Authoritative HTTP endpoint + SSE event shapes (incl. `/api/conversations` + the branch-tree shape) | current |
+| `BRANCHING_DESIGN.md` | **As-built design + contract for conversation branching** (tree model, fold/reconcile rules, persistence, known limits). The source of truth for the feature | current |
+| `HANDOFF_BRANCHING.md` | Historical planning record for branching (what Clément asked vs what I inferred — §2–§4 = the requirements) + the **still-TODO highlight-UI overhaul** (§5) | branching shipped; §5 pending |
+| `TODO.md` | Roadmap (branching marked done) | current |
 | `deprecated/HANDOFF.md` | Original tool-build handoff (Harry's playground → tinkerscope). Build done; file refs predate the `src/tinkerscope/` restructure | deprecated, kept for history |
 
 The durable knowledge HANDOFF.md once held now lives in code docstrings (below)

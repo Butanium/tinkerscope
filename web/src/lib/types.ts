@@ -1,5 +1,7 @@
 // Types mirroring the tinkerscope backend API (see API_CONTRACT.md).
 
+import type { ConvTree } from './tree';
+
 export type Checkpoint = {
 	name: string;
 	batch?: number;
@@ -15,6 +17,8 @@ export type Run = {
 	name: string;
 	run_dir: string;
 	base_model: string;
+	wandb_project?: string | null;
+	wandb_name?: string | null;
 	renderer_name?: string | null;
 	dataset_path?: string | null;
 	lora_rank?: number | null;
@@ -114,6 +118,22 @@ export type ChatRequest = {
 	repetition_penalty?: number | null;
 	panel: Panel;
 	broadcast: boolean;
+	/** Opaque ownership token echoed on chat_start/done/error so the browser can
+	 *  tell its OWN chats (folded from this response stream) from external ones. */
+	client_token?: string | null;
+};
+
+/** One saved, branchable conversation. The trees are OPAQUE to the backend; the
+ *  browser owns them (lib/tree.ts). `system_prompt` travels with the conversation
+ *  (each conversation = one experiment). */
+export type Conversation = {
+	id: string;
+	name: string;
+	system_prompt: string | null;
+	tree: ConvTree;
+	compare_tree: ConvTree | null;
+	created_at: string;
+	updated_at: string;
 };
 
 /** A single streamed completion (one sample of an n-sample fan-out). */
@@ -126,10 +146,12 @@ export type SampleData = {
 };
 
 /**
- * One rendered row in a chat column: either a committed transcript message or
- * the live "bucket" turn (the latest turn's N variants / streaming progress).
- * `transcriptIdx` ties it back to the committed transcript so edit/regenerate/
- * delete can target it (null = a bucket/error artifact with no committed row).
+ * One rendered row in a chat column: either a committed tree node or the live
+ * "bucket" turn (the latest turn's N variants / streaming progress). `nodeId`
+ * ties it back to its tree node so edit/regenerate/delete/cycle can target it
+ * (null = a bucket/error artifact not yet folded). `sib` carries the sibling
+ * index/count for the ‹k/N› cycle control. `sampleNodeIds` maps n>1 sample
+ * cards (by index) to their folded sibling node ids for click-to-select.
  */
 export type ViewMessage = {
 	role: 'user' | 'assistant' | 'system';
@@ -139,6 +161,9 @@ export type ViewMessage = {
 	samples?: SampleData[];
 	totalSamples?: number;
 	running?: boolean;
-	transcriptIdx?: number | null;
+	nodeId?: string | null;
+	sib?: { index: number; count: number };
+	sampleNodeIds?: string[];
+	activeSampleIndex?: number;
 	isBucket?: boolean;
 };

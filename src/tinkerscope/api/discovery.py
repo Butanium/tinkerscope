@@ -40,6 +40,8 @@ class Checkpoint:
 class Run:
     id: str                       # stable id = run_dir relative to serving root
     name: str                     # wandb_name, else dir name
+    wandb_project: str | None     # config wandb_project (often null; near-constant per scan root)
+    wandb_name: str | None        # config wandb_name (also feeds `name`; exposed raw for filtering)
     run_dir: str                  # absolute path
     base_model: str | None
     renderer_name: str | None     # training renderer (from config); inference uses it
@@ -156,7 +158,9 @@ def _build_run(run_dir: Path, ckpt_file: Path, supported: set[str], caps_availab
         config_error = "config.json missing"
 
     base_model = config.get("model_name")
-    name = config.get("wandb_name") or run_dir.name
+    wandb_project = config.get("wandb_project")
+    wandb_name = config.get("wandb_name")
+    name = wandb_name or run_dir.name
 
     # renderer_name lives under dataset_builder.common_config (training renderer)
     renderer_name = None
@@ -191,6 +195,8 @@ def _build_run(run_dir: Path, ckpt_file: Path, supported: set[str], caps_availab
     return Run(
         id=_rel_to_root(run_dir),
         name=name,
+        wandb_project=wandb_project,
+        wandb_name=wandb_name,
         run_dir=str(run_dir),
         base_model=base_model,
         renderer_name=renderer_name,

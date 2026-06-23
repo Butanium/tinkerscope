@@ -19,7 +19,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .discovery import get_capabilities
-from .routes import chat, datasets, highlights, models, openrouter_models, prefs, state
+from .routes import (
+    chat,
+    conversations,
+    datasets,
+    highlights,
+    models,
+    openrouter_models,
+    prefs,
+    state,
+)
 from .settings import SETTINGS
 
 
@@ -52,6 +61,7 @@ app.include_router(state.router)
 app.include_router(datasets.router)
 app.include_router(highlights.router)
 app.include_router(prefs.router)
+app.include_router(conversations.router)
 
 
 @app.get("/api/health")

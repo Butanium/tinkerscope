@@ -88,6 +88,30 @@ Runs with `config_error` should still be listed (degraded).
 | GET | `/api/prefs` | — | `dict` (key→string) |
 | PUT | `/api/prefs/{key}` | `{value: string}` | `{status, key}` |
 | DELETE | `/api/prefs/{key}` | — | `{status}` |
+| GET | `/api/conversations` | — | `Conversation[]` (branchable trees; below) |
+| POST | `/api/conversations` | `{name?, system_prompt?, tree?, compare_tree?}` | the saved Conversation (`id`,`created_at`,`updated_at` added) |
+| PATCH | `/api/conversations/{id}` | `{name}` | the renamed Conversation |
+| PUT | `/api/conversations/{id}/tree` | `{tree, compare_tree?, system_prompt?}` | `{status, id}` (the hot save path) |
+| DELETE | `/api/conversations/{id}` | — | `{status}` |
+
+### Conversation (branchable chat; persisted per scan-root, NOT in PlaygroundState)
+```jsonc
+{
+  "id": "uuid", "name": "Untitled",
+  "system_prompt": null,                    // travels with the conversation (each conv = one experiment)
+  "tree": { "nodes": {…}, "rootChildren": [], "selected": {} },        // primary panel's branch tree (opaque to the server)
+  "compare_tree": null,                     // compare panel's tree, or null in single mode
+  "created_at": "iso", "updated_at": "iso"
+}
+```
+The **tree** is a per-panel branch structure owned by the frontend
+(`web/src/lib/tree.ts`): `nodes[id] = {id, role, content, reasoning?, raw_text?,
+parent, children[]}` + a `selected` map (parentId|`"__root__"` → selected child
+id). The linear ACTIVE PATH (root→leaf via `selected`) is what the sampler/CLI
+read — it is mirrored into `PlaygroundState.messages`. The server treats the tree
+as opaque JSON. Saves are flock-serialized; a corrupt file is backed up to
+`conversations.json.corrupt-<ts>` rather than reset. Stored at
+`~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/conversations.json`.
 
 ### ChatRequest
 ```jsonc
@@ -103,7 +127,11 @@ Runs with `config_error` should still be listed (degraded).
   "thinking": false, "top_p": null, "top_k": null,
   "presence_penalty": null, "repetition_penalty": null,
   "panel": "primary",     // "primary" | "compare" — which compare pane this is
-  "broadcast": true        // also mirror samples to the state bus (browser)
+  "broadcast": true,       // also mirror samples to the state bus (browser)
+  "client_token": null     // optional opaque ownership token, echoed verbatim on the
+                           // chat_start/chat_done/chat_error bus events; lets a client
+                           // tell its OWN chats (folded from this response stream) apart
+                           // from external (CLI / other-tab) ones it must reconcile.
 }
 ```
 
@@ -145,11 +173,11 @@ chat_id/running/last_event*). POST `/api/state` with a subset to drive selection
 Event names = the message's `type`:
 - `snapshot` → `{type:"snapshot", state}` (full state, sent first on connect)
 - `patch` → `{type:"patch", event, state}` (state changed; e.g. event="chat_start"/"chat_done"/"patch")
-- `chat_start` → `{type:"chat_start", chat_id, panel, n, label}` (a chat began; clear that panel's samples)
+- `chat_start` → `{type:"chat_start", chat_id, panel, n, label, client_token?}` (a chat began; clear that panel's samples)
 - `delta` → `{type:"delta", chat_id, panel, sample_index, delta, kind}` (streamed token chunk; n==1 only — accumulate per chat_id/panel/sample_index, then the `sample` event finalizes)
 - `sample` → `{type:"sample", chat_id, panel, sample_index, content, raw_text, finish_reason, reasoning?}`
-- `chat_done` → `{type:"chat_done", chat_id, panel}`
-- `chat_error` → `{type:"chat_error", chat_id, panel, error}`
+- `chat_done` → `{type:"chat_done", chat_id, panel, client_token?}`
+- `chat_error` → `{type:"chat_error", chat_id, panel, error, client_token?}`
 - `ping` → `{}` (15s heartbeat; ignore)
 
 **Live-drive model:** the browser renders selection + params + the conversation

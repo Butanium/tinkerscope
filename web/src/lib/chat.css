@@ -120,7 +120,25 @@
 .btn-act { background: none; border: 1px solid transparent; border-radius: var(--radius); padding: 3px 6px; color: var(--color-text-muted); display: inline-flex; align-items: center; transition: all 0.15s; }
 .btn-act:hover { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
 .btn-act-danger:hover { color: #ef4444; border-color: #ef4444; background: #fef2f240; }
+/* Shift held → this button's action changes (regen→replace, edit→copy): tint it
+   so the swapped icon reads as "a different thing will happen". */
+.btn-act.shift-alt { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
+.btn-act.shift-alt-danger { color: #ef4444; border-color: #ef4444; background: #fef2f240; }
+/* "Regenerate in both panels": a small ⧉ badge marks the all-panels variant. */
+.btn-act-all { position: relative; }
+.btn-act-all::after { content: '⧉'; position: absolute; top: -3px; right: -3px; font-size: 0.62rem; line-height: 1; color: var(--color-text-muted); }
+.btn-act-all:hover::after, .btn-act-all.shift-alt::after { color: var(--color-accent); }
+.sample-del { padding: 2px 5px; }
 .turn-actions { justify-content: flex-end; }
+
+/* Per-panel "continue this panel" composer (compare mode), at the thread tail. */
+.panel-send { display: flex; gap: var(--space-1); align-items: center; margin-top: var(--space-2); padding: 0 var(--space-1); }
+.panel-send-input { flex: 1; padding: var(--space-1) var(--space-2); background: var(--color-bg); border: 1px dashed var(--color-border); border-radius: var(--radius); color: var(--color-text); font-size: 0.78rem; font-family: var(--font-sans); }
+.panel-send-input:focus { outline: none; border-style: solid; border-color: var(--color-accent); }
+.panel-send-input:disabled { opacity: 0.6; }
+.panel-send-btn { display: inline-flex; align-items: center; padding: 4px 6px; background: none; border: 1px solid transparent; border-radius: var(--radius); color: var(--color-text-muted); transition: all 0.15s; }
+.panel-send-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
+.panel-send-btn:disabled { opacity: 0.4; }
 
 /* Inline message edit. */
 .edit-textarea { width: 100%; padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-accent); border-radius: var(--radius); color: var(--color-text); font-family: var(--font-sans); font-size: 0.88rem; line-height: 1.6; resize: vertical; }
