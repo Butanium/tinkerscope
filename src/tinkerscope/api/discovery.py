@@ -104,12 +104,20 @@ def _supported_base_set(caps: dict) -> set[str]:
 # config.json + checkpoints.jsonl readers (defensive)
 # ---------------------------------------------------------------------------
 def _parse_step(name: str, batch) -> int | None:
-    if isinstance(batch, int):
-        return batch
+    """Global training step, for sorting + display.
+
+    The cookbook always writes the true global step into the checkpoint *name*
+    (`f"{step:06d}"`, e.g. "000123") or "final". `batch` is NOT a reliable step:
+    it's the cookbook's *within-epoch* batch index (0 at epoch-boundary saves,
+    `supervised/train.py:439`) and is hardcoded to 0 for the final checkpoint
+    (`train.py:537`). Trusting `batch` first showed every epoch-boundary
+    checkpoint as "step 0". So parse the numeric name first; fall back to `batch`
+    only when the name isn't a number — and only when that batch is meaningful
+    (>0), else None so "final" sorts last."""
     try:
         return int(name)
     except (TypeError, ValueError):
-        return None
+        return batch if isinstance(batch, int) and batch > 0 else None
 
 
 def _read_checkpoints(ckpt_file: Path) -> list[Checkpoint]:
