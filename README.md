@@ -1,78 +1,192 @@
 # tinkerscope
 
-A browser playground for **Tinker-trained checkpoints** that **auto-discovers
-training runs** in a directory tree. Point it at a project and it finds every
-run's checkpoints by scanning for `checkpoints.jsonl` / `config.json`, then lets
-you chat with / sample from them (n-sample fan-out, response-distribution chart,
-thinking toggle, multi-model compare, raw-text view) — and you can **drive the
-browser live from the terminal**.
+A browser playground for **Tinker-trained checkpoints**. Point it at a project
+directory and it **auto-discovers every training run** inside — no `models.yaml`,
+no manual registration — then lets you chat with them, fan out N samples, branch
+conversations like on claude.ai, and compare two models side by side. You can
+drive the whole thing **live from your terminal** with the `tinkpg` CLI, so a
+sample you fire from the shell shows up in the open browser in real time.
+
+The weights stay on Tinker; this machine only calls the Tinker SDK. No GPU, no
+vLLM, no local LoRA conversion.
+
+![The chat view with conversation branching](docs/img/chat-branching.png)
+
+---
+
+## Quick start
+
+You need a running [Tinker](https://thinkingmachines.ai) API key for sampling:
+
+```bash
+export TINKER_API_KEY=...          # required to sample
+export OPENROUTER_API_KEY=...      # optional — only for OpenRouter reference models
+```
+
+Then point `run.sh` at one or more directories of training runs:
+
+```bash
+# Dev mode: backend + vite dev server (hot reload), both cleaned up on exit.
+./run.sh [DIR ...]                 # default DIR = current directory
+
+# Packaged: build the web UI once, then serve API + UI from a single process.
+./run.sh --build [DIR ...]         # (--prod is an alias)
+```
+
+You can also invoke the entry point directly — it **auto-picks a free port**,
+prints the URL, and happily coexists with other instances:
+
+```bash
+uv run tinkerscope ~/projects2/weird-personas
+uv run tinkerscope DIR1 DIR2 …     # scan several trees at once
+```
+
+Open the printed URL and you're in. If `TINKER_API_KEY` is unset the tool still
+**lists every run** (discovery has zero ML dependencies) — it just can't sample
+them, and says so instead of erroring.
+
+---
 
 ## What it does
 
-- **Auto-discovery, no `models.yaml`.** Recursively scans the directories you
-  give it for `checkpoints.jsonl`, reads the sibling `config.json` defensively,
-  and emits one selectable run per dir with its *whole checkpoint trajectory*
-  (every saved step, not a hand-picked few). Each run links back to the training
-  JSONL recorded in its config, so you can peek at what the model actually saw.
-- **Remote sampling.** The weights live on Tinker; this machine just calls the
-  **tinker SDK** directly (`ServiceClient` → sampling client → renderer from the
-  run's training config). No GPU, no vLLM, no LoRA conversion locally. Needs
-  `TINKER_API_KEY`.
-- **Graceful degradation.** Discovery has zero ML deps, so the tool always lists
-  the runs even with the key unset or Tinker unreachable — it just marks runs as
-  sampleability-unknown. A run whose base model Tinker no longer serves is shown
-  greyed out with the reason instead of 400-ing on click. **Heads up: about half
-  of the example runs are unsampleable**, because their base model
-  (`Qwen/Qwen3-30B-A3B-Base`) is no longer served by Tinker.
-- **Run from any project, multi-instance.** An instance registry (per scan-root
-  set) auto-picks a free port, coexists with other instances, and the CLI
-  discovers the right server by your cwd. Saved highlights / prefs are keyed per
-  scan-root set, so they survive restarts and stay isolated per dir set.
-- **Multi-turn chat & compare.** Conversations have memory: each turn's chosen
-  reply is committed to the transcript and fed back on the next turn. Compare mode
-  runs two models on the same prompt side by side, each keeping its **own** thread
-  across turns.
-- **OpenRouter reference models, managed from the UI.** Add any OpenRouter model
-  (e.g. a base instruct model) to put it side-by-side with a checkpoint — no config
-  files: the picker has an "+ OpenRouter model" manager (add / remove / select). The
-  list is stored **globally** (`~/.local/state/tinkerscope/openrouter_models.json`),
-  shared across all projects; `$TINKERSCOPE_OPENROUTER_MODELS` is only a one-time
-  seed. Sampling them needs `OPENROUTER_API_KEY`.
+### Discovery — no config files
 
-## Running
+tinkerscope recursively scans the directories you give it for `checkpoints.jsonl`
++ `config.json` (the two files every `tinker_cookbook` run drops) and surfaces one
+selectable run per directory, with its **whole checkpoint trajectory** — every
+saved step, not a hand-picked few. Each run also links back to the training JSONL
+recorded in its config, so you can see what the model actually trained on.
 
-`run.sh` has two modes.
+Some runs can't be sampled — most often because their base model is no longer
+served by Tinker. Those are shown **greyed out with the reason** rather than
+failing on click. (Heads up: in the bundled negation_neglect example set, about
+half the runs are unsampleable for exactly this reason.)
+
+### The model picker
+
+The left sidebar is where you choose what to talk to. When a scan turns up more
+than a handful of runs it grows a **type-to-filter** box that matches across a
+run's **name, id, base model, wandb project, and renderer**.
+
+Beyond the discovered runs, you can add three other kinds of model straight from
+the UI (no config files):
+
+| Link | Adds | Marker |
+|---|---|---|
+| **+ Tinker model** | a raw Tinker base model (no LoRA), or a *loose checkpoint* by sampler path | ◆ base · ◇ checkpoint |
+| **+ OpenRouter model** | any OpenRouter model (e.g. a reference instruct model) to sit next to a checkpoint | ↗ |
+
+OpenRouter models are stored **globally** (`~/.local/state/tinkerscope/openrouter_models.json`),
+shared across all projects, and need `OPENROUTER_API_KEY` to sample.
+
+### Chat & sampling
+
+Pick a run, type a prompt, hit Enter. The sidebar exposes the usual knobs:
+**temperature, max tokens, number of samples, top-p**, plus **top-k / presence /
+repetition penalties** (OpenRouter-only — Tinker models honor temperature and
+top-p). There's a **thinking toggle** for models that support it, and a **system
+prompt** field that travels with the conversation.
+
+Set **n > 1** and a single send fans out into N draws, rendered as **sample
+cards** — a quick read on what the model "usually says":
+
+![n>1 sample cards](docs/img/n-samples.png)
+
+Those draws also power a **Response Distribution** chart that buckets identical
+answers across every regeneration:
+
+![The response distribution chart](docs/img/distribution-chart.png)
+
+Each card has its own controls: **Make active** (collapse the thread to that one
+reply, keeping the rest as cyclable branches), **Discard others**, a per-sample
+delete, a **Raw** toggle (shows the model output with thinking/format tags
+preserved), and **Bookmark**.
+
+### Conversation branching — the big one
+
+Nothing you do is ever destroyed. Regenerating, editing a turn, or drawing N
+samples all create **sibling branches** rather than overwriting. Any turn with
+more than one branch gets a **‹ k/N › cycler** so you can step between the
+alternatives; the rest of the conversation re-derives from whichever branch is
+active.
+
+- **Regenerate** (on a user *or* assistant turn) → a new sibling branch.
+- **Edit a user turn** → forks a new branch and regenerates from it.
+- **Edit an assistant turn** → a manual branch you author by hand.
+- **Draw N samples** → N sibling branches you can cycle through.
+- **Delete** → prunes that branch (and everything under it); the cycler falls
+  back to a surviving sibling.
+
+#### The shift-modifier vocabulary
+
+Holding **Shift** turns each action into its "power" variant. The button icon and
+tooltip change while Shift is held so you can see which action you'll get:
+
+| Action | Plain click | **Shift + click** |
+|---|---|---|
+| **Regenerate** | new sibling branch | **replace** this branch in place (siblings kept) |
+| **Edit** (user turn) | fork + regenerate | fork a **full editable copy** of the conversation from here (no generation) |
+| **Delete** | delete this one branch | delete **all** sibling branches at this turn |
+| **Bookmark** | save with a note (opens a form) | save **instantly**, no note |
+
+#### Named conversations
+
+A dropdown at the top of the sidebar manages conversations: **create, switch,
+rename, delete**. Each conversation is **persisted to disk** (per scan-root set,
+so they're isolated per project and survive restarts) and carries **its own
+system prompt** — so one conversation can be a distinct experiment from the next.
+
+### Two-model comparison
+
+Hit **Compare** to add a second panel. The current conversation is **duplicated
+into both panels** so you start from the same context, then each panel keeps its
+**own** branch tree as you continue. Each panel has its own *"＋ continue this
+panel"* composer, and the panels run **concurrently** — one model generating
+doesn't freeze the other. Remove the second pane to drop back to a single model.
+
+![Two models side by side in compare mode](docs/img/compare.png)
+
+### Bookmarks (highlights)
+
+Bookmark any response to save it as a **highlight** — with a note, or Shift-click
+to save instantly without one. Highlights are persisted per scan-root and
+browsable from the highlights button in the header (it shows the saved count).
+
+### Session persistence
+
+Your selected model(s) and sampling parameters are cached to disk and **restored
+when you restart** the process, so you don't have to re-pick your setup every
+time.
+
+---
+
+## Drive it from the terminal — `tinkpg`
+
+`tinkpg` hits the same HTTP API the browser uses, and every chat broadcasts to a
+shared server-side state bus — so a CLI-triggered sample appears in the open
+browser **identically** to a browser-triggered one. Great for "let's look at this
+model together" sessions. The CLI auto-discovers the right running server from
+your current directory (override with `--base-url` / `$TINKERSCOPE_BASE_URL`).
 
 ```bash
-# Dev: backend + vite dev server (HMR), both cleaned up on exit.
-# vite's /api proxy targets the backend on :8765 (override with DEV_BACKEND_PORT).
-./run.sh [DIR ...]            # default DIR = cwd
-
-# Packaged: build the web UI, then serve API + built UI from ONE process.
-./run.sh --build [DIR ...]    # (--prod is an alias)
+tinkpg ls                              # discovered runs + checkpoint counts
+tinkpg ls --filter ed_sheeran          # substring filter on id/name
+tinkpg ls --sampleable-only            # only runs Tinker still serves
+tinkpg checkpoints <run>               # list a run's checkpoints
+tinkpg open <run>[@<checkpoint>]       # switch the browser to this model, live
+tinkpg chat <run> "prompt" --n 50      # sample; streams to stdout AND the browser
+tinkpg compare <runA> <runB> "..."     # two-pane compare, live in the browser
+tinkpg state                           # dump the shared playground state
+tinkpg refresh                         # rescan the filesystem + Tinker capabilities
 ```
 
-Or invoke the entry points directly:
+`<run>` accepts a full run id or any **unique substring** of its id/name; ambiguous
+matches list the candidates. Because run ids contain `/`, the run@checkpoint
+separator is `@` (`tinkpg chat foo/bar/run@final "hi"`), or use `--checkpoint`.
+`tinkpg chat` also takes `--temperature`, `--max-tokens`, `--thinking`, and
+`--system`.
 
-```bash
-# Serve (auto-picks a free port, prints the URL, coexists with other instances):
-uv run tinkerscope ~/projects2/negation_neglect/datasets/training_datasets
-
-# Drive the running server from the terminal — same HTTP API the browser uses,
-# auto-discovered by cwd (override with --base-url / $TINKERSCOPE_BASE_URL):
-tinkpg ls                          # discovered runs + checkpoint counts
-tinkpg checkpoints <run>           # list a run's checkpoints
-tinkpg open <run>[@<checkpoint>]   # switch the browser to this model live
-tinkpg chat <run> "prompt" --n 50  # sample; completions stream to stdout AND browser
-tinkpg compare <runA> <runB> "..." # two-pane compare, live in the browser
-tinkpg state                       # dump the shared playground state
-tinkpg refresh                     # rescan the filesystem + Tinker capabilities
-```
-
-`<run>` accepts a full run id or any unique substring. Because every chat
-broadcasts to the shared state bus, a CLI-triggered sample appears in the open
-browser identically to a browser-triggered one — handy for "let's look at this
-model together" sessions.
+---
 
 ## Tests
 
@@ -80,24 +194,29 @@ model together" sessions.
 uv run pytest -q
 ```
 
-Covers discovery (config / checkpoint parsing, sort order, sampleability gating,
+Covers discovery (config/checkpoint parsing, sort order, sampleability gating,
 malformed-config degradation, dataset-path resolution) and the API
-(`/api/health`, `/api/models`, `/api/state` patch round-trips incl. the compare
-transcript, highlights / prefs / OpenRouter-models CRUD, dataset path-traversal
+(`/api/health`, `/api/models`, `/api/state` round-trips, the conversation/branch
+store, highlights / prefs / OpenRouter-model CRUD, dataset path-traversal
 rejection). The Tinker capabilities probe is stubbed, so the suite makes **no**
-remote calls and never hits `/api/chat`. There are also browser smokes under
-`tests/small-smokes/` (Playwright) that load the built UI and exercise the
-compare + OpenRouter-manager features against a live server.
+remote calls.
+
+The conversation-tree logic has its own pure unit suite
+(`node web/src/lib/tree.test.ts`, no dependencies), and there are Playwright
+browser smokes under `tests/small-smokes/` that exercise branching, compare, and
+the model-picker against a live server.
+
+---
 
 ## Credits
 
 The UI is forked from **Harry Mayne**'s `tools/playground` in
 [`HarryMayne/negation_neglect_working_repo`](https://github.com/HarryMayne/negation_neglect_working_repo)
-(commit `ec7da09`, Harry Mayne <harrymayne@gmail.com>). All of the chat
-experience — streaming, n-sample fan-out, the response-distribution chart,
-thinking toggle, raw-text view, multi-model compare — is his work. tinkerscope
-adds run auto-discovery, standalone packaging, and the terminal-driving CLI on
-top.
+(commit `ec7da09`, Harry Mayne <harrymayne@gmail.com>). The core chat experience
+— streaming, n-sample fan-out, the response-distribution chart, the thinking
+toggle, the raw-text view, and the side-by-side compare — is his work.
+tinkerscope adds run auto-discovery, conversation branching, named/persisted
+conversations, the terminal-driving CLI, and standalone packaging on top.
 
 Renderer selection (chat templates / stop sequences / response parsing) uses
 `tinker_cookbook` (Thinking Machines). An earlier iteration routed inference
@@ -110,9 +229,12 @@ ships **without** a license; substantial portions of the UI and inference layer
 are Harry Mayne's work, retained here with attribution. If you build on this,
 keep that credit.
 
-## Build guide
+---
 
-See **`CLAUDE.md`** (orientation + where the contracts live in code),
-**`API_CONTRACT.md`** (the authoritative endpoint + SSE shapes), and
-**`HANDOFF_BRANCHING.md`** (the frontend/state architecture + current feature
-work).
+## For developers / agents
+
+- **`CLAUDE.md`** — orientation + where the contracts live in code.
+- **`API_CONTRACT.md`** — the authoritative HTTP endpoint + SSE event shapes.
+- **`BRANCHING_DESIGN.md`** — the as-built design + contract for conversation
+  branching (the source of truth for that feature).
+- **`TODO.md`** — roadmap.
