@@ -10,6 +10,10 @@ export const tooltip = $state<{ text: string; x: number; y: number; visible: boo
 });
 
 export function tip(node: HTMLElement) {
+	// While the tooltip is shown, the caller may swap `data-tooltip` reactively
+	// (e.g. the action verb changes when shift/ctrl is pressed). Observe the
+	// attribute so the visible tooltip live-updates instead of showing stale text.
+	let observer: MutationObserver | null = null;
 	function show() {
 		const text = node.getAttribute('data-tooltip') || '';
 		if (!text) return;
@@ -18,15 +22,26 @@ export function tip(node: HTMLElement) {
 		tooltip.x = rect.left + rect.width / 2;
 		tooltip.y = rect.bottom + 6;
 		tooltip.visible = true;
+		observer?.disconnect();
+		observer = new MutationObserver(() => {
+			if (!tooltip.visible) return;
+			const next = node.getAttribute('data-tooltip') || '';
+			if (next) tooltip.text = next;
+			else tooltip.visible = false;
+		});
+		observer.observe(node, { attributes: true, attributeFilter: ['data-tooltip'] });
 	}
 	function hide() {
 		tooltip.visible = false;
+		observer?.disconnect();
+		observer = null;
 	}
 	node.addEventListener('mouseenter', show);
 	node.addEventListener('mouseleave', hide);
 	node.addEventListener('click', hide);
 	return {
 		destroy() {
+			observer?.disconnect();
 			node.removeEventListener('mouseenter', show);
 			node.removeEventListener('mouseleave', hide);
 			node.removeEventListener('click', hide);

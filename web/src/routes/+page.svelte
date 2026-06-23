@@ -193,18 +193,24 @@
 
 	// Panels collapsed out of view (tree kept alive). TODO: per-conversation panel layout.
 	let reducedPanels = $state<Set<string>>(new Set());
-	// Which panels a composer send fires to (chips in the input bar). Seeded once to
-	// all visible panels; reduce/restore/add maintain it; the prune effect drops gone ids.
+	// Which panels a composer send fires to (chips in the input bar). A NEWLY added
+	// panel defaults ON; a removed panel is dropped; a deliberate deselect sticks.
+	// `seenPanels` remembers which ids we've already defaulted, so a re-render (or the
+	// async panels round-trip after addPanel) can't re-add a deselected panel or
+	// prune a just-added one before panelSels catches up.
 	let sendTargets = $state<Set<string>>(new Set());
-	let sendSeeded = false;
+	let seenPanels = new Set<string>();
 	$effect(() => {
-		const ids = new Set(panelSels.map((p) => p.panel));
-		if (!sendSeeded && panelSels.length) {
-			sendTargets = new Set(panelSels.filter((p) => !reducedPanels.has(p.panel)).map((p) => p.panel));
-			sendSeeded = true;
-		} else if ([...sendTargets].some((t) => !ids.has(t))) {
-			sendTargets = new Set([...sendTargets].filter((t) => ids.has(t)));
+		const ids = panelSels.map((p) => p.panel);
+		const idSet = new Set(ids);
+		const next = new Set([...sendTargets].filter((t) => idSet.has(t))); // drop removed panels
+		let changed = next.size !== sendTargets.size;
+		for (const id of ids) {
+			if (seenPanels.has(id)) continue;
+			seenPanels.add(id);
+			if (!reducedPanels.has(id)) { next.add(id); changed = true; } // new panel → active by default
 		}
+		if (changed) sendTargets = next;
 	});
 	function toggleSendTarget(id: string) {
 		sendTargets = sendTargets.has(id)
@@ -315,7 +321,7 @@
 			{ id, run_id: other?.id ?? null, checkpoint: ck, messages: seedMsgs }
 		];
 		patchState({ panels: nextPanels }, true);
-		sendTargets = new Set([...sendTargets, id]);
+		// the new panel auto-joins sendTargets (active by default) via the effect above
 	}
 	function removePanel(panel: Panel) {
 		if (panel === 'primary') return; // primary is reserved/always present
@@ -1711,7 +1717,8 @@
 									onchange={(e) => setCheckpoint(p.panel, (e.target as HTMLSelectElement).value)}
 								>
 									{#each pr.checkpoints as ck (ck.name)}
-										<option value={ck.name}>step {ck.step ?? ck.batch ?? '?'} · {ck.name}</option>
+										{@const numbered = /^\d+$/.test(ck.name)}
+										<option value={ck.name}>{numbered ? `step ${ck.step}` : ck.name}{ck.epoch != null ? ` · e${ck.epoch}·b${ck.batch ?? 0}` : ''}</option>
 									{/each}
 								</select>
 							{/if}
