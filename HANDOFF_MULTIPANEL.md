@@ -17,6 +17,13 @@ then **ask Clément the open decisions below before building.**
   is **stale** — ignore or kill it.
 - **All green at commit:** 33 pytest · 30 tree unit tests (`node web/src/lib/tree.test.ts`)
   · 0 svelte-check errors.
+- **⚠️ Sampling the discovered runs 404s right now** — Tinker has GC'd the sampler
+  weights for BOTH the negation_neglect AND the weird-personas runs (Scribe verified
+  `tinkpg chat q_nk` → "Weights not found"). So *any* generation against a scanned
+  run (regenerate, n-samples, the new "+" continue) 404s on :5180 today. **Test
+  generation via OpenRouter reference models** (weights-independent) until there are
+  fresh runs. Tree ops, branching, the filter, persistence — all testable without
+  sampling.
 
 ## 1. What this session built (so the next session knows what exists)
 
@@ -35,6 +42,15 @@ Today's comparison-UX batch (all live on :5180):
 - **Per-panel "continue this panel" composer** (bubble at each panel's thread tail, compare-only) + **per-panel concurrency**: a generation in one panel no longer disables the other's controls. Per-panel abort handles in `abortByPanel`; gating via `panelBusy(panel)`.
 - **n>1 sample cards**: "Make active" now **collapses to the single reply** (others stay cyclable), plus **"Discard others"** and a **per-sample trashbin**.
 - **shift+bookmark = save instantly with no note** (skips the note form). `saveHighlight()` is the shared path; `quickTag()` is the no-note caller; the bookmark icon swaps to a filled glyph while shift is held. (See §4 for the deferred *toggle/delete* follow-up.)
+- **"+" continue (assistant prefill)** — a "+" on an assistant turn re-fires with that
+  turn's content as the trailing **prefill** (the backend's `tinker_sampler.render`
+  treats a trailing assistant message as a prefill), so the model EXTENDS it; the N
+  continuations land as sibling branches (each = current text + continuation) you
+  cycle through. **shift+"+"** = continue the same-depth turn in every panel. The
+  samples come back as the continuation only, so `fireChat`'s `prefill` param
+  prepends the existing text in the fold. **Caveat:** clean for tinker (native +
+  oai); OpenRouter prefill is provider-dependent (best-effort). Worth a real-sample
+  eyeball to confirm the X+Y boundary reads right.
 - **wandb fields**: `discovery.py` now exposes `wandb_project`/`wandb_name`; frontend filter uses them. (Needs a backend restart to activate project-filtering — see §4.)
 - **Infra**: `run.sh`/`vite.config.ts` — `DEV_BACKEND_PORT` now actually wires the vite proxy (was hardcoded :8765); multi scan-dir was already supported.
 
@@ -102,9 +118,28 @@ This is one coherent feature: an **N-way comparison workspace**.
   existing `api.deleteHighlight(id)`. Shared save path is `saveHighlight()` in
   `+page.svelte`; the buttons live in `ChatMessage.svelte` (`tagIcon`/`tagQuickIcon`
   snippets + the two `btn-tag` buttons).
-- **README.md rewrite** for humans — full feature tour (branching, N-way compare,
-  the shift-modifier vocabulary, bookmarks, the CLI) + screenshots. Being handled
-  by a teammate (spawned this session); they have the feature context.
+- **README.md rewrite** — DONE this session by Scribe (teammate): full human-facing
+  feature tour + 4 real screenshots in `docs/img/` + a `browser_readme_shots.py`
+  capture script. (Documents the shipped 2-panel compare, not the pending N-way.)
+  No model-filter screenshot (the served build predated it); grab one from :5180 and
+  drop at `docs/img/model-filter.png` if wanted. compare.png is slightly truncated
+  (max_tokens=60) — re-run the shot script against an isolated instance to redo.
+- **ctrl+enter = append a MANUAL assistant turn** (Clément asked, deferred here).
+  In the main composer, **ctrl/cmd+enter** should: append the typed text as the user
+  turn (like send), but **NOT generate** — instead create an **empty assistant child
+  node**, select it, and **open its inline editor focused** so you can hand-write the
+  assistant reply (manual/few-shot construction). Build notes: `handleKeydown`
+  (`+page.svelte`) currently maps Enter→`sendMessage`; add a ctrl/cmd+Enter branch
+  to a new `appendManualTurn()` that does `appendUserTurn(tree, text)` then appends an
+  empty assistant child (add a tiny tree helper, e.g. `appendAssistantStub(tree,
+  userId)` returning the new node id, or reuse `foldAssistant` with a single empty
+  sample). The tricky part is **triggering edit-mode on the new node from the parent**:
+  edit state is local to `ChatMessage` (`startEdit`). Cleanest options: (a) a reactive
+  `autoEditNodeId` `$state` passed down — `ChatMessage`'s `$effect` opens its editor
+  when `msg.nodeId === autoEditNodeId`; or (b) auto-open edit for an empty assistant
+  leaf. Compose with the existing `applyEdit` assistant path (which already makes a
+  manual branch). shift/ctrl+enter in compare → decide per-panel vs all (probably the
+  send-target set).
 - **Facet-chips** for the model filter (project / base-model / renderer) — deferred;
   Quill scoped it (~50 LoC). See `scratch/model_search_proposal.md` + `scratch/survey_configs.py`.
 - **Highlight-UI overhaul** — `HANDOFF_BRANCHING.md` §5, untouched.

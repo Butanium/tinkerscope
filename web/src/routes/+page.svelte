@@ -16,6 +16,7 @@
 		foldAssistant,
 		regenTarget,
 		regenReplace,
+		ancestryMessages,
 		editUserFork,
 		editUserForkCopy,
 		editAssistant,
@@ -437,11 +438,13 @@
 		fireOne(pSel, nodeId, msgs);
 	}
 
-	/** Fire one panel's generation with a fresh per-panel abort controller. */
-	function fireOne(pSel: PanelSel, userParentId: string, messages: ChatMessage[]) {
+	/** Fire one panel's generation with a fresh per-panel abort controller.
+	 *  `prefill` (continuation): the samples come back as the continuation only, so
+	 *  it's prepended to each in the fold to form the full continued message. */
+	function fireOne(pSel: PanelSel, userParentId: string, messages: ChatMessage[], prefill?: string) {
 		const ac = new AbortController();
 		abortByPanel[pSel.panel] = ac;
-		fireChat(pSel, userParentId, messages, ac.signal).finally(() => {
+		fireChat(pSel, userParentId, messages, ac.signal, prefill).finally(() => {
 			if (abortByPanel[pSel.panel] === ac) abortByPanel[pSel.panel] = null;
 		});
 	}
@@ -493,7 +496,8 @@
 		p: PanelSel,
 		userParentId: string,
 		messages: ChatMessage[],
-		signal: AbortSignal
+		signal: AbortSignal,
+		prefill?: string
 	) {
 		// Resolve the model: tinker LoRA run, raw tinker base model, loose tinker
 		// checkpoint, or OpenRouter reference. EXACTLY ONE id field is sent.
@@ -534,9 +538,14 @@
 				return;
 			}
 			// Collect our samples from our OWN stream + fold them under the user node.
+			// For a continuation (prefill set), each sample is the CONTINUATION only —
+			// prepend the prefill so the folded branch holds the full extended message.
 			const samples = await drainSamples(res);
 			if (samples.length) {
-				const { tree } = foldAssistant(convo.treeFor(p.panel), userParentId, samples);
+				const folded = prefill
+					? samples.map((sm) => (sm.error ? sm : { ...sm, content: prefill + (sm.content ?? '') }))
+					: samples;
+				const { tree } = foldAssistant(convo.treeFor(p.panel), userParentId, folded);
 				convo.setTree(p.panel, tree);
 			}
 		} catch (err: any) {
@@ -653,6 +662,38 @@
 			clearPanelBucket(p.panel);
 			const plan = regenPlan(p.panel, node.id, replace);
 			if (plan) fireForPanel(p.panel, plan.userParentId, plan.fireMessages);
+		}
+	}
+
+	/** Continue (prefill) an assistant turn: re-fire with its content as the trailing
+	 *  prefill so the model EXTENDS it. The N continuations land as sibling branches
+	 *  (each = the current text + a fresh continuation) you cycle through; the
+	 *  original stays as a sibling too. */
+	function fireContinue(panel: Panel, nodeId: string) {
+		if (panelBusy(panel)) return;
+		const tree = convo.treeFor(panel);
+		const node = tree.nodes[nodeId];
+		if (!node || node.role !== 'assistant' || !node.content) return;
+		const userParentId = node.parent;
+		if (!userParentId || tree.nodes[userParentId]?.role !== 'user') return;
+		const pSel = panelSels.find((x) => x.panel === panel);
+		if (!pSel) return;
+		clearPanelBucket(panel);
+		// fire-messages = ancestry INCLUDING this assistant node (becomes the prefill).
+		const fireMessages = ancestryMessages(tree, nodeId) as ChatMessage[];
+		fireOne(pSel, userParentId, fireMessages, node.content);
+	}
+
+	/** "+" continue. plain = this panel; all (shift) = the turn at this row's depth
+	 *  in every panel. */
+	function continueMessage(panel: Panel, msg: ViewMessage, all = false) {
+		if (msg.nodeId == null) return;
+		if (!all) { fireContinue(panel, msg.nodeId); return; }
+		const depth = activePath(convo.treeFor(panel)).findIndex((n) => n.id === msg.nodeId);
+		if (depth < 0) return;
+		for (const p of panelSels) {
+			const node = activePath(convo.treeFor(p.panel))[depth];
+			if (node) fireContinue(p.panel, node.id);
 		}
 	}
 
@@ -1704,6 +1745,7 @@
 									thinking={s.thinking}
 									onRegenerate={(replace) => regenerate(p.panel, msg, replace)}
 									onRegenerateAll={(replace) => regenerateAll(p.panel, msg, replace)}
+									onContinue={(all) => continueMessage(p.panel, msg, all)}
 									onDelete={(all) => deleteMessage(p.panel, msg, all)}
 									onSelectSample={(idx) => selectSample(p.panel, msg, idx)}
 									onDiscardOthers={(idx) => discardOtherSamples(p.panel, msg, idx)}

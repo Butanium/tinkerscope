@@ -19,6 +19,7 @@
 		thinking,
 		onRegenerate,
 		onRegenerateAll,
+		onContinue,
 		onDelete,
 		onSelectSample,
 		onDiscardOthers,
@@ -36,6 +37,7 @@
 		thinking: boolean;
 		onRegenerate: (replace: boolean) => void;
 		onRegenerateAll: (replace: boolean) => void;
+		onContinue: (all: boolean) => void;
 		onDelete: (all: boolean) => void;
 		onSelectSample: (sampleIndex: number) => void;
 		onDiscardOthers: (sampleIndex: number) => void;
@@ -145,6 +147,22 @@
 {#snippet trashAllIcon()}
 	<!-- trash + a back layer = "delete every branch at this level" -->
 	<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M5.5 5.5l.5 7.5h5.5l.5-7.5M5 5.5h8M7.5 5.5V4h3v1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" /><path d="M3 3.2h6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /><path d="M2.6 3.2l.5 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+{/snippet}
+
+<!-- Continue (prefill) an assistant turn: extend it; n-samples → branches to pick.
+     shift (compare) = continue the same turn in every panel. -->
+{#snippet continueBtn()}
+	<button
+		class="btn-act"
+		class:shift-alt={shiftDown}
+		class:btn-act-all={shiftDown && showRegenAll}
+		data-tooltip={shiftDown && showRegenAll ? 'Continue this message in BOTH panels' : 'Continue this message (extends it; n-samples → pick one)'}
+		use:tip
+		aria-label="Continue this message"
+		onclick={(e) => onContinue(e.shiftKey)}
+	>
+		<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" /></svg>
+	</button>
 {/snippet}
 
 <!-- Delete button (used in both toolbars): shift → delete ALL sibling branches. -->
@@ -261,6 +279,7 @@
 			{#if allDone && msg.nodeId != null && !busy}
 				<div class="message-actions turn-actions hover-actions">
 					{@render regenGroup()}
+					{@render continueBtn()}
 					{@render deleteBtn('Delete this turn')}
 				</div>
 			{/if}
@@ -294,6 +313,7 @@
 					{/if}
 					{#if canEdit}
 						{@render regenGroup()}
+						{#if msg.role === 'assistant'}{@render continueBtn()}{/if}
 						<button
 							class="btn-act"
 							class:shift-alt={shiftDown && msg.role === 'user'}
