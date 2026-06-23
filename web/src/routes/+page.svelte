@@ -1083,9 +1083,16 @@
 		tagFormOpen = true;
 	}
 
-	async function submitTag() {
-		if (!tagFormNote.trim()) return;
-		const p = panelSels.find((x) => x.panel === tagFormPanel);
+	/** Persist a highlight (shared by the noted form + the shift-click quick path). */
+	async function saveHighlight(
+		panel: Panel,
+		response: string,
+		sampleIndex: number | null,
+		totalSamples: number | null,
+		reasoning: string,
+		note: string
+	) {
+		const p = panelSels.find((x) => x.panel === panel);
 		const orId = openrouterId(p?.run_id);
 		const bm = baseModelId(p?.run_id);
 		const sp = samplerPathOf(p?.run_id);
@@ -1093,7 +1100,7 @@
 		const r = !isRef ? panelRun(p ?? panelSels[0]) : undefined;
 		try {
 			const entry = await api.addHighlight({
-				label: tagFormLabel,
+				label: live.panels[panel]?.label || panelLabel(p),
 				// run_id keeps the sentinel for reference models so the highlight
 				// round-trips; checkpoint is null for OR / base / loose-checkpoint.
 				run_id: isRef ? p?.run_id : (r?.id ?? null),
@@ -1102,11 +1109,11 @@
 				sampler_path: sp,
 				dataset_path: r?.dataset_path ?? null,
 				question: lastUserQuestion(),
-				response: tagFormResponse,
-				reasoning: tagFormReasoning || null,
-				note: tagFormNote.trim(),
-				sample_index: tagFormSampleIndex,
-				total_samples: tagFormTotalSamples,
+				response,
+				reasoning: reasoning || null,
+				note: note.trim(),
+				sample_index: sampleIndex,
+				total_samples: totalSamples,
 				temperature: s.temperature,
 				max_tokens: s.max_tokens,
 				thinking: s.thinking,
@@ -1120,7 +1127,17 @@
 		} catch (e: any) {
 			backendError = `Failed to save highlight: ${e?.message ?? e}`;
 		}
+	}
+
+	async function submitTag() {
+		if (!tagFormNote.trim()) return;
+		await saveHighlight(tagFormPanel, tagFormResponse, tagFormSampleIndex, tagFormTotalSamples, tagFormReasoning, tagFormNote);
 		tagFormOpen = false;
+	}
+
+	/** shift+bookmark: save the highlight immediately with no note (skip the form). */
+	function quickTag(panel: Panel, response: string, sampleIndex: number | null, totalSamples: number | null, reasoning: string) {
+		void saveHighlight(panel, response, sampleIndex, totalSamples, reasoning, '');
 	}
 
 	async function deleteHighlight(id: string) {
@@ -1693,7 +1710,7 @@
 									onDeleteSample={(idx) => deleteSample(p.panel, msg, idx)}
 									onEdit={(content, copyDownstream) => applyEdit(p.panel, msg, content, copyDownstream)}
 									onCycle={(delta) => cycleBranch(p.panel, msg, delta)}
-									onTag={(content, sampleIndex, totalSamples, reasoning) => openTagForm(p.panel, content, sampleIndex, totalSamples, reasoning)}
+									onTag={(content, sampleIndex, totalSamples, reasoning, quick) => quick ? quickTag(p.panel, content, sampleIndex, totalSamples, reasoning) : openTagForm(p.panel, content, sampleIndex, totalSamples, reasoning)}
 								/>
 							{/each}
 							{#if run.running && run.n <= 1 && run.samples.filter((x) => x && (x.content || x.reasoning)).length === 0}

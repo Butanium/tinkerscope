@@ -41,7 +41,7 @@
 		onDiscardOthers: (sampleIndex: number) => void;
 		onDeleteSample: (sampleIndex: number) => void;
 		onEdit: (content: string, copyDownstream: boolean) => void;
-		onTag: (content: string, sampleIndex: number | null, totalSamples: number | null, reasoning: string) => void;
+		onTag: (content: string, sampleIndex: number | null, totalSamples: number | null, reasoning: string, quick: boolean) => void;
 		onCycle: (delta: number) => void;
 	} = $props();
 
@@ -131,6 +131,13 @@
 {/snippet}
 {#snippet editCopyIcon()}
 	<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="2.5" y="2.5" width="7.5" height="9.5" rx="1" stroke="currentColor" stroke-width="1.2" /><path d="M6 4.5h6a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" /></svg>
+{/snippet}
+{#snippet tagIcon()}
+	<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 2h6l6 6-6 6-6-6V2Z" stroke="currentColor" stroke-width="1.5" /><circle cx="5.5" cy="5.5" r="1" fill="currentColor" /></svg>
+{/snippet}
+{#snippet tagQuickIcon()}
+	<!-- filled bookmark = save instantly, no note prompt -->
+	<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 2h6l6 6-6 6-6-6V2Z" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" /><circle cx="5.3" cy="5.3" r="1" fill="var(--color-bg)" /></svg>
 {/snippet}
 {#snippet trashIcon()}
 	<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V2.5h4V4M4.5 4l.6 9h5.8l.6-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg>
@@ -239,8 +246,8 @@
 									{#if sample.raw_text}
 										<button class="btn-raw" class:active={rawSamples.has(idx)} onclick={() => toggleRawSample(idx)} title="Toggle raw model output with tags preserved">Raw</button>
 									{/if}
-									<button class="btn-tag" onclick={() => onTag(sample.content, idx, msg.totalSamples ?? null, sample.reasoning || '')} title="Save this response as a highlight with a note">
-										<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 2h6l6 6-6 6-6-6V2Z" stroke="currentColor" stroke-width="1.5" /><circle cx="5.5" cy="5.5" r="1" fill="currentColor" /></svg>
+									<button class="btn-tag" class:shift-alt={shiftDown} data-tooltip={shiftDown ? 'Bookmark instantly (no note)' : 'Bookmark with a note'} use:tip onclick={(e) => onTag(sample.content, idx, msg.totalSamples ?? null, sample.reasoning || '', e.shiftKey)}>
+										{#if shiftDown}{@render tagQuickIcon()}{:else}{@render tagIcon()}{/if}
 									</button>
 									<button class="btn-act btn-act-danger sample-del" data-tooltip="Delete this sample" use:tip aria-label="Delete this sample" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onDeleteSample(idx)}>
 										<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V2.5h4V4M4.5 4l.6 9h5.8l.6-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg>
@@ -302,8 +309,8 @@
 						{@render deleteBtn('Delete this branch')}
 					{/if}
 					{#if msg.role === 'assistant' && msg.content}
-						<button class="btn-tag" onclick={() => onTag(msg.content, null, null, msg.reasoning || '')} title="Save this response as a highlight with a note">
-							<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 2h6l6 6-6 6-6-6V2Z" stroke="currentColor" stroke-width="1.5" /><circle cx="5.5" cy="5.5" r="1" fill="currentColor" /></svg>
+						<button class="btn-tag" class:shift-alt={shiftDown} data-tooltip={shiftDown ? 'Bookmark instantly (no note)' : 'Bookmark with a note'} use:tip onclick={(e) => onTag(msg.content, null, null, msg.reasoning || '', e.shiftKey)}>
+							{#if shiftDown}{@render tagQuickIcon()}{:else}{@render tagIcon()}{/if}
 						</button>
 					{/if}
 				</div>

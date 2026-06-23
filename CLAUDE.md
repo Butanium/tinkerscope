@@ -14,6 +14,7 @@ see `README.md` for the full feature list + credits.
 | `API_CONTRACT.md` | Authoritative HTTP endpoint + SSE event shapes (incl. `/api/conversations` + the branch-tree shape) | current |
 | `BRANCHING_DESIGN.md` | **As-built design + contract for conversation branching** (tree model, fold/reconcile rules, persistence, known limits). The source of truth for the feature | current |
 | `HANDOFF_BRANCHING.md` | Historical planning record for branching (what Clément asked vs what I inferred — §2–§4 = the requirements) + the **still-TODO highlight-UI overhaul** (§5) | branching shipped; §5 pending |
+| `HANDOFF_MULTIPANEL.md` | **Next big feature: N-way model comparison workspace.** What's built, the task (compare >2 models, reduce/restore panels, send-branch-to-panel, composer send-targeting), open decisions (A vs B), and §5 = an exhaustive map of every site hardcoding the 2-panel (primary/compare) model | active — design pending Clément's A/B call |
 | `TODO.md` | Roadmap (branching marked done) | current |
 | `deprecated/HANDOFF.md` | Original tool-build handoff (Harry's playground → tinkerscope). Build done; file refs predate the `src/tinkerscope/` restructure | deprecated, kept for history |
 
