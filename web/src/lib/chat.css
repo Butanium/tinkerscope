@@ -124,10 +124,13 @@
    so the swapped icon reads as "a different thing will happen". */
 .btn-act.shift-alt { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
 .btn-act.shift-alt-danger { color: #ef4444; border-color: #ef4444; background: #fef2f240; }
-/* "Regenerate in both panels": a small ⧉ badge marks the all-panels variant. */
+/* ctrl/cmd held → the action fans out to every panel: a small ⧉ badge marks it. */
 .btn-act-all { position: relative; }
 .btn-act-all::after { content: '⧉'; position: absolute; top: -3px; right: -3px; font-size: 0.62rem; line-height: 1; color: var(--color-text-muted); }
 .btn-act-all:hover::after, .btn-act-all.shift-alt::after { color: var(--color-accent); }
+.btn-act-danger.btn-act-all:hover::after, .btn-act-danger.btn-act-all.shift-alt-danger::after { color: #ef4444; }
+/* Copy button just flashed → confirm with green ✓. */
+.btn-act.copied { color: #10b981; border-color: #10b981; background: #10b98112; }
 .sample-del { padding: 2px 5px; }
 .turn-actions { justify-content: flex-end; }
 

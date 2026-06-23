@@ -15,16 +15,17 @@
 		isLastAssistant,
 		busy,
 		shiftDown,
+		ctrlDown,
 		showRegenAll,
 		thinking,
 		onRegenerate,
-		onRegenerateAll,
 		onContinue,
 		onDelete,
 		onSelectSample,
 		onDiscardOthers,
 		onDeleteSample,
 		onEdit,
+		onCopy,
 		onTag,
 		onCycle
 	}: {
@@ -32,17 +33,22 @@
 		prevUserMsg?: string;
 		isLastAssistant: boolean;
 		busy: boolean; // THIS panel busy (per-panel; lets the other panel stay editable)
-		shiftDown: boolean; // shift held → show the alternate-action affordance
-		showRegenAll: boolean; // compare mode → also offer "regenerate in both panels"
+		// Two orthogonal modifier axes (stackable):
+		//   shift = the alternate VARIANT of the action (regen→replace, delete→all-siblings,
+		//           edit→fork-full-copy, copy→full-conversation-markdown).
+		//   ctrl/cmd = fan the action out to ALL panels at this row's depth (compare only).
+		shiftDown: boolean;
+		ctrlDown: boolean;
+		showRegenAll: boolean; // compare mode (>1 panel) → the ctrl "all panels" axis is live
 		thinking: boolean;
-		onRegenerate: (replace: boolean) => void;
-		onRegenerateAll: (replace: boolean) => void;
-		onContinue: (all: boolean) => void;
-		onDelete: (all: boolean) => void;
+		onRegenerate: (allPanels: boolean, replace: boolean) => void;
+		onContinue: (allPanels: boolean) => void;
+		onDelete: (allPanels: boolean, allSiblings: boolean) => void;
 		onSelectSample: (sampleIndex: number) => void;
 		onDiscardOthers: (sampleIndex: number) => void;
 		onDeleteSample: (sampleIndex: number) => void;
-		onEdit: (content: string, copyDownstream: boolean) => void;
+		onEdit: (content: string, copyDownstream: boolean, allPanels: boolean) => void;
+		onCopy: (all: boolean) => void;
 		onTag: (content: string, sampleIndex: number | null, totalSamples: number | null, reasoning: string, quick: boolean) => void;
 		onCycle: (delta: number) => void;
 	} = $props();
@@ -51,6 +57,8 @@
 	let canEdit = $derived(msg.nodeId != null && !busy);
 	// ‹k/N› on any committed row with siblings (the n>1 bucket uses its cards).
 	let hasSiblings = $derived(!!(msg.sib && msg.sib.count > 1) && !isMultiSample);
+	// ctrl/cmd "apply to every panel" only means something with >1 panel on screen.
+	let allActive = $derived(ctrlDown && showRegenAll);
 
 	function roleColor(role: string): string {
 		if (role === 'user') return 'var(--color-user-bg)';
@@ -68,19 +76,30 @@
 		rawSamples = next;
 	}
 
-	// Inline edit (local). `editShift` remembers whether the edit was opened with
-	// shift held → fork-and-copy-the-whole-downstream-conversation (no generation).
+	// Transient "✓ copied" flash on the copy button (clipboard gives no feedback).
+	let copied = $state(false);
+	let copiedTimer: ReturnType<typeof setTimeout> | undefined;
+	function flashCopied() {
+		copied = true;
+		clearTimeout(copiedTimer);
+		copiedTimer = setTimeout(() => (copied = false), 1200);
+	}
+
+	// Inline edit (local). `editShift` remembers a shift-open (fork-full-copy, no gen);
+	// `editAll` remembers a ctrl/cmd-open (apply the edit across every panel).
 	let editing = $state(false);
 	let editDraft = $state('');
 	let editShift = $state(false);
-	function startEdit(shift: boolean) {
+	let editAll = $state(false);
+	function startEdit(shift: boolean, all: boolean) {
 		if (!canEdit) return;
 		editing = true;
 		editShift = shift;
+		editAll = all;
 		editDraft = msg.content;
 	}
 	function commitEdit() {
-		onEdit(editDraft, editShift);
+		onEdit(editDraft, editShift, editAll);
 		editing = false;
 	}
 	function cancelEdit() {
@@ -100,6 +119,8 @@
 		editing = false;
 		editDraft = '';
 		editShift = false;
+		editAll = false;
+		copied = false;
 		rawSingle = false;
 		rawSamples = new Set();
 	});
@@ -148,62 +169,75 @@
 	<!-- trash + a back layer = "delete every branch at this level" -->
 	<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M5.5 5.5l.5 7.5h5.5l.5-7.5M5 5.5h8M7.5 5.5V4h3v1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" /><path d="M3 3.2h6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /><path d="M2.6 3.2l.5 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {/snippet}
+{#snippet copyIcon()}
+	<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="8.5" height="8.5" rx="1.2" stroke="currentColor" stroke-width="1.2" /><path d="M3 10.5A1.5 1.5 0 0 1 2.5 9.5V3.5A1.5 1.5 0 0 1 4 2h6a1.5 1.5 0 0 1 1.1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>
+{/snippet}
+{#snippet copyAllIcon()}
+	<!-- copy + text lines = "copy the FULL conversation as markdown" -->
+	<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="5" y="4.5" width="8.5" height="9" rx="1.2" stroke="currentColor" stroke-width="1.2" /><path d="M7 7.3h4.5M7 9.3h4.5M7 11.3h2.6" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" /><path d="M3 10.5A1.5 1.5 0 0 1 2.5 9.5V3.5A1.5 1.5 0 0 1 4 2h6a1.5 1.5 0 0 1 1.1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>
+{/snippet}
+{#snippet checkIcon()}
+	<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5L13 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
+{/snippet}
 
 <!-- Continue (prefill) an assistant turn: extend it; n-samples → branches to pick.
-     shift (compare) = continue the same turn in every panel. -->
+     ctrl/cmd (compare) = continue the same-depth turn in every panel. -->
 {#snippet continueBtn()}
 	<button
 		class="btn-act"
-		class:shift-alt={shiftDown}
-		class:btn-act-all={shiftDown && showRegenAll}
-		data-tooltip={shiftDown && showRegenAll ? 'Continue this message in BOTH panels' : 'Continue this message (extends it; n-samples → pick one)'}
+		class:btn-act-all={allActive}
+		data-tooltip={`Continue this message (extends it; n-samples → pick one)${allActive ? ' — in ALL panels' : ''}`}
 		use:tip
 		aria-label="Continue this message"
-		onclick={(e) => onContinue(e.shiftKey)}
+		onclick={(e) => onContinue(e.ctrlKey || e.metaKey)}
 	>
 		<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" /></svg>
 	</button>
 {/snippet}
 
-<!-- Delete button (used in both toolbars): shift → delete ALL sibling branches. -->
+<!-- Copy: plain = this message's content; shift = the whole conversation as markdown. -->
+{#snippet copyBtn()}
+	<button
+		class="btn-act"
+		class:shift-alt={shiftDown}
+		class:copied
+		data-tooltip={copied ? 'Copied!' : shiftDown ? 'Copy the FULL conversation as markdown' : 'Copy this message'}
+		use:tip
+		aria-label="Copy"
+		onclick={(e) => { onCopy(e.shiftKey); flashCopied(); }}
+	>
+		{#if copied}{@render checkIcon()}{:else if shiftDown}{@render copyAllIcon()}{:else}{@render copyIcon()}{/if}
+	</button>
+{/snippet}
+
+<!-- Delete: shift → delete ALL sibling branches; ctrl/cmd → in every panel. -->
 {#snippet deleteBtn(label: string)}
 	<button
 		class="btn-act btn-act-danger"
 		class:shift-alt-danger={shiftDown}
-		data-tooltip={shiftDown ? 'Delete ALL branches at this turn' : label}
+		class:btn-act-all={allActive}
+		data-tooltip={`${shiftDown ? 'Delete ALL branches at this turn' : label}${allActive ? ' — in ALL panels' : ''}`}
 		use:tip
 		aria-label={shiftDown ? 'Delete all branches' : 'Delete'}
-		onclick={(e) => onDelete(e.shiftKey)}
+		onclick={(e) => onDelete(e.ctrlKey || e.metaKey, e.shiftKey)}
 	>
 		{#if shiftDown}{@render trashAllIcon()}{:else}{@render trashIcon()}{/if}
 	</button>
 {/snippet}
 
-<!-- Regenerate group: this-panel regen + (compare only) regen-both. Both swap to
-     the replace icon while shift is held. -->
+<!-- Regenerate: shift → replace this branch in place; ctrl/cmd → in every panel. -->
 {#snippet regenGroup()}
 	<button
 		class="btn-act"
 		class:shift-alt={shiftDown}
-		data-tooltip={shiftDown ? 'Replace this branch in place (other siblings kept)' : 'Regenerate → new sibling branch'}
+		class:btn-act-all={allActive}
+		data-tooltip={`${shiftDown ? 'Replace this branch in place (other siblings kept)' : 'Regenerate → new sibling branch'}${allActive ? ' — in ALL panels' : ''}`}
 		use:tip
 		aria-label="Regenerate"
-		onclick={(e) => onRegenerate(e.shiftKey)}
+		onclick={(e) => onRegenerate(e.ctrlKey || e.metaKey, e.shiftKey)}
 	>
 		{#if shiftDown}{@render replaceIcon()}{:else}{@render regenIcon()}{/if}
 	</button>
-	{#if showRegenAll}
-		<button
-			class="btn-act btn-act-all"
-			class:shift-alt={shiftDown}
-			data-tooltip={shiftDown ? 'Replace this branch in BOTH panels' : 'Regenerate in BOTH panels'}
-			use:tip
-			aria-label="Regenerate in both panels"
-			onclick={(e) => onRegenerateAll(e.shiftKey)}
-		>
-			{#if shiftDown}{@render replaceIcon()}{:else}{@render regenIcon()}{/if}
-		</button>
-	{/if}
 {/snippet}
 
 {#if msg.role !== 'assistant' || msg.content || msg.reasoning || isMultiSample || (msg.samples && msg.samples.some((x) => x && x.content))}
@@ -280,6 +314,7 @@
 				<div class="message-actions turn-actions hover-actions">
 					{@render regenGroup()}
 					{@render continueBtn()}
+					{@render copyBtn()}
 					{@render deleteBtn('Delete this turn')}
 				</div>
 			{/if}
@@ -311,18 +346,20 @@
 					{#if msg.raw_text}
 						<button class="btn-raw" class:active={rawSingle} onclick={() => (rawSingle = !rawSingle)} title="Toggle raw model output with tags preserved">Raw</button>
 					{/if}
+					{@render copyBtn()}
 					{#if canEdit}
 						{@render regenGroup()}
 						{#if msg.role === 'assistant'}{@render continueBtn()}{/if}
 						<button
 							class="btn-act"
 							class:shift-alt={shiftDown && msg.role === 'user'}
-							data-tooltip={msg.role === 'user'
+							class:btn-act-all={allActive}
+							data-tooltip={`${msg.role === 'user'
 								? (shiftDown ? 'Edit → fork a FULL editable copy of the conversation from here (no generation)' : 'Edit → fork + regenerate (shift: fork full copy)')
-								: 'Edit → new branch'}
+								: 'Edit → new branch'}${allActive ? ' — in ALL panels' : ''}`}
 							use:tip
 							aria-label="Edit"
-							onclick={(e) => startEdit(e.shiftKey)}
+							onclick={(e) => startEdit(e.shiftKey, e.ctrlKey || e.metaKey)}
 						>
 							{#if shiftDown && msg.role === 'user'}{@render editCopyIcon()}{:else}{@render editIcon()}{/if}
 						</button>

@@ -172,6 +172,7 @@
 	// Whether shift is currently held — drives the alternate-action affordance on
 	// the regenerate/edit buttons (icon + tooltip swap). Wired in onMount.
 	let shiftDown = $state(false);
+	let ctrlDown = $state(false);
 
 	// ── Live shared state (single source of truth for selection/params) ──
 	// Render from live.state; fall back to defaults until the first snapshot.
@@ -767,6 +768,44 @@
 		}
 	}
 
+	/** Delete the turn at this row's DEPTH in EVERY panel (ctrl/cmd, compare).
+	 *  allSiblings (shift) prunes every sibling branch at that level too. */
+	function deleteMessageAll(panel: Panel, msg: ViewMessage, allSiblings = false) {
+		if (msg.nodeId == null) return;
+		const depth = activePath(convo.treeFor(panel)).findIndex((n) => n.id === msg.nodeId);
+		if (depth < 0) return;
+		for (const p of panelSels) {
+			const node = activePath(convo.treeFor(p.panel))[depth];
+			if (node) deleteMessage(p.panel, { ...msg, nodeId: node.id }, allSiblings);
+		}
+	}
+
+	/** Apply the same edit to the turn at this row's DEPTH in EVERY panel (ctrl/cmd,
+	 *  compare). copyDownstream (shift, user rows) forks a full copy with no gen. */
+	function applyEditAll(panel: Panel, msg: ViewMessage, content: string, copyDownstream: boolean) {
+		if (msg.nodeId == null) return;
+		const depth = activePath(convo.treeFor(panel)).findIndex((n) => n.id === msg.nodeId);
+		if (depth < 0) return;
+		for (const p of panelSels) {
+			const node = activePath(convo.treeFor(p.panel))[depth];
+			if (node) applyEdit(p.panel, { ...msg, nodeId: node.id }, content, copyDownstream);
+		}
+	}
+
+	/** Copy to the clipboard: plain = this row's content; all (shift) = the whole
+	 *  active conversation rendered as markdown with role headers. */
+	function copyMessage(panel: Panel, msg: ViewMessage, all: boolean) {
+		let text: string;
+		if (all) {
+			const msgs = activeMessages(convo.treeFor(panel)) as ChatMessage[];
+			const header = (r: string) => (r === 'user' ? 'User' : r === 'assistant' ? 'Assistant' : 'System');
+			text = msgs.map((m) => `## ${header(m.role)}\n\n${m.content ?? ''}`).join('\n\n');
+		} else {
+			text = msg.content ?? '';
+		}
+		navigator.clipboard?.writeText(text);
+	}
+
 	// ── Conversation rendering ────────────────────────────────────────
 	// Each column renders from ITS OWN branch TREE's active path (convo.tree /
 	// convo.compareTree) — the single read source (s.messages is a write-only
@@ -1348,9 +1387,10 @@
 			if (rc) recentCheckpoints = JSON.parse(rc);
 		} catch {}
 
-		// Track shift for the alternate-action affordance (regen→replace, edit→copy).
-		const onModKey = (e: KeyboardEvent) => { shiftDown = e.shiftKey; };
-		const onBlur = () => { shiftDown = false; };
+		// Track shift (alternate-action variant) + ctrl/cmd (apply to all panels) for
+		// the toolbar affordances. Read off the click too, but mirror for the icon swap.
+		const onModKey = (e: KeyboardEvent) => { shiftDown = e.shiftKey; ctrlDown = e.ctrlKey || e.metaKey; };
+		const onBlur = () => { shiftDown = false; ctrlDown = false; };
 		window.addEventListener('keydown', onModKey);
 		window.addEventListener('keyup', onModKey);
 		window.addEventListener('blur', onBlur);
@@ -1740,17 +1780,18 @@
 									{prevUserMsg}
 									{isLastAssistant}
 									{shiftDown}
+									{ctrlDown}
 									busy={panelBusy(p.panel)}
 									showRegenAll={isComparing}
 									thinking={s.thinking}
-									onRegenerate={(replace) => regenerate(p.panel, msg, replace)}
-									onRegenerateAll={(replace) => regenerateAll(p.panel, msg, replace)}
-									onContinue={(all) => continueMessage(p.panel, msg, all)}
-									onDelete={(all) => deleteMessage(p.panel, msg, all)}
+									onRegenerate={(allPanels, replace) => (allPanels ? regenerateAll(p.panel, msg, replace) : regenerate(p.panel, msg, replace))}
+									onContinue={(allPanels) => continueMessage(p.panel, msg, allPanels)}
+									onDelete={(allPanels, allSiblings) => (allPanels ? deleteMessageAll(p.panel, msg, allSiblings) : deleteMessage(p.panel, msg, allSiblings))}
 									onSelectSample={(idx) => selectSample(p.panel, msg, idx)}
 									onDiscardOthers={(idx) => discardOtherSamples(p.panel, msg, idx)}
 									onDeleteSample={(idx) => deleteSample(p.panel, msg, idx)}
-									onEdit={(content, copyDownstream) => applyEdit(p.panel, msg, content, copyDownstream)}
+									onEdit={(content, copyDownstream, allPanels) => (allPanels ? applyEditAll(p.panel, msg, content, copyDownstream) : applyEdit(p.panel, msg, content, copyDownstream))}
+									onCopy={(all) => copyMessage(p.panel, msg, all)}
 									onCycle={(delta) => cycleBranch(p.panel, msg, delta)}
 									onTag={(content, sampleIndex, totalSamples, reasoning, quick) => quick ? quickTag(p.panel, content, sampleIndex, totalSamples, reasoning) : openTagForm(p.panel, content, sampleIndex, totalSamples, reasoning)}
 								/>
