@@ -27,7 +27,9 @@
 		onEdit,
 		onCopy,
 		onTag,
-		onCycle
+		onCycle,
+		otherPanels = [],
+		onSendToPanel
 	}: {
 		msg: ViewMessage;
 		prevUserMsg?: string;
@@ -51,6 +53,9 @@
 		onCopy: (all: boolean) => void;
 		onTag: (content: string, sampleIndex: number | null, totalSamples: number | null, reasoning: string, quick: boolean) => void;
 		onCycle: (delta: number) => void;
+		// Other panels this branch can be copied into (compare). Empty → no picker.
+		otherPanels?: { id: string; label: string }[];
+		onSendToPanel?: (destPanel: string) => void;
 	} = $props();
 
 	let isMultiSample = $derived(!!(msg.totalSamples && msg.totalSamples > 1));
@@ -210,6 +215,27 @@
 	</button>
 {/snippet}
 
+<!-- Send this branch's context (root→here) into another panel's thread. -->
+{#snippet sendToPicker()}
+	{#if otherPanels.length && onSendToPanel && msg.nodeId != null}
+		<select
+			class="send-to-select"
+			data-tooltip="Send this branch's context to another panel"
+			use:tip
+			aria-label="Send branch to another panel"
+			onchange={(e) => {
+				const el = e.currentTarget as HTMLSelectElement;
+				const v = el.value;
+				el.value = '';
+				if (v) onSendToPanel?.(v);
+			}}
+		>
+			<option value="">⇄</option>
+			{#each otherPanels as op (op.id)}<option value={op.id}>→ {op.label}</option>{/each}
+		</select>
+	{/if}
+{/snippet}
+
 <!-- Delete: shift → delete ALL sibling branches; ctrl/cmd → in every panel. -->
 {#snippet deleteBtn(label: string)}
 	<button
@@ -315,6 +341,7 @@
 					{@render regenGroup()}
 					{@render continueBtn()}
 					{@render copyBtn()}
+					{@render sendToPicker()}
 					{@render deleteBtn('Delete this turn')}
 				</div>
 			{/if}
@@ -347,6 +374,7 @@
 						<button class="btn-raw" class:active={rawSingle} onclick={() => (rawSingle = !rawSingle)} title="Toggle raw model output with tags preserved">Raw</button>
 					{/if}
 					{@render copyBtn()}
+					{@render sendToPicker()}
 					{#if canEdit}
 						{@render regenGroup()}
 						{#if msg.role === 'assistant'}{@render continueBtn()}{/if}

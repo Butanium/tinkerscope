@@ -72,8 +72,7 @@ export const api = {
 	createConversation: (entry: {
 		name?: string;
 		system_prompt?: string | null;
-		tree?: ConvTree;
-		compare_tree?: ConvTree | null;
+		trees?: Record<string, ConvTree>;
 	}) => j<Conversation>('/api/conversations', { method: 'POST', body: JSON.stringify(entry) }),
 	renameConversation: (id: string, name: string) =>
 		j<Conversation>(`/api/conversations/${encodeURIComponent(id)}`, {
@@ -82,13 +81,12 @@ export const api = {
 		}),
 	saveConversationTree: (
 		id: string,
-		tree: ConvTree,
-		compare_tree: ConvTree | null,
+		trees: Record<string, ConvTree>,
 		system_prompt: string | null
 	) =>
 		j<{ status: string; id: string }>(`/api/conversations/${encodeURIComponent(id)}/tree`, {
 			method: 'PUT',
-			body: JSON.stringify({ tree, compare_tree, system_prompt })
+			body: JSON.stringify({ trees, system_prompt })
 		}),
 	deleteConversation: (id: string) =>
 		j<{ status: string }>(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' }),

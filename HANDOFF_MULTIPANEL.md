@@ -337,3 +337,57 @@ implement by slice (worktree-isolate if parallelizing file edits) → verify
 (tree tests for any new tree ops, svelte-check, a browser smoke). Quill
 (teammate, team `session-84f0e65c`) holds the wandb/model-picker context and can
 be re-pinged for the facet work or panel-model mapping.
+
+## 9. GROUNDED BUILD PLAN (2026-06-22, architecture B, design workflow re-grounded §5 against current code)
+
+**Decisions made (delegated to the building session):** (B) full generalization; persistence
+per-conversation; **sampling params are GLOBAL** (set via `/api/state` only, removed from the
+`/api/chat` end patch — no per-panel params, no author race); **explicit immutable panel ids**
+on each `panels[]` entry — `primary`/`compare` reserved for legacy migration, new panels `p-2`,
+`p-3`… minted at addPanel; NEVER array-index (closing a middle panel must not rebind a tree).
+
+**Build order (coupled type refactor — frontend won't svelte-check green until slice 4; verify
+backend with pytest along the way, tree.ts with node tests):**
+1. **Types + state container** — `types.ts` (`Panel = string`; `PlaygroundState` paired scalars
+   → `panels: {id, run_id, checkpoint, messages}[]`, drop `mode`; `StatePatch`) +
+   `api/state.py` (`PlaygroundState` dataclass → panels list + `patch_panel(panel_id, **f)`) +
+   `routes/state.py` (`StatePatch` panel-addressed). Do FIRST so nothing compiles against the
+   dead 2-scalar shape.
+2. **Store trees map + on-disk migration** — `conversations.svelte.ts` (`tree`/`compareTree` →
+   `trees: Record<id,ConvTree>`; `treeFor`/`setTree` chokepoints; `#mirror`/`#afterLoad`/
+   `#onExternalDone`; `save`/`#doSave`/`#loadTrees`; `duplicateToCompare` → `duplicateTo`) +
+   `routes/conversations.py` ({tree,compare_tree} → {trees} + back-compat) + `api.ts` sigs.
+3. **State bus + chat plumbing** — `state.svelte.ts` (`live.panels` open-keyed, lazy-vivify,
+   guarded reads, `anyRunning` over ALL N) + `chat.py` (drop `is_compare_panel`, key off
+   `panel_id`, params go global, per-panel `messages` echo for ALL N so external folds reach
+   panels 3+) + `state.py`.
+4. **+page.svelte** — panelSels/isComparing derivations, indexed setRun/setCheckpoint,
+   add/remove/**reduce-restore** panel lifecycle, session persistence, keyed `{#each}`
+   (sidebar+columns on stable id), composer **send-targeting** selector. Then svelte-check green.
+5. **Send-branch-to-panel + CLI** — new `ancestryPath` tree helper + ChatMessage `onSendToPanel`
+   + page handler; `cli.py` `cmd_compare` run_a/run_b → N runs over the new `/api/state` body
+   (keep `compare a b` as 2-run alias).
+
+**MIGRATION (zero data loss — a user-authored compare_tree MUST survive):**
+- READ shim (`conversations.svelte.ts:#loadTrees`, the only load point): if `conv.trees` →
+  use it (ensure `primary` present); else synthesize `{primary: asTree(conv.tree)}` and add
+  `compare: asTree(conv.compare_tree)` ONLY if `conv.compare_tree` exists. `asTree` already
+  returns `emptyTree()` on malformed input. Reserved ids `primary`/`compare` bind legacy trees
+  to the right column — reserved forever.
+- WRITE upgrade (`routes/conversations.py:save_conversation_tree`, the only persist point):
+  write `trees`, `c.pop("tree"/"compare_tree")` on the same object (self-heals on first edit).
+  `create_conversation` still synthesizes `trees` from legacy `tree`/`compare_tree` if `trees`
+  absent (transitional CLI). `Conversation` type KEEPS optional `tree?`/`compare_tree?` so the
+  shim can read old responses.
+- EMPTY-TREE collapse in `save()`: drop panels whose tree has no `rootChildren`, but ALWAYS keep
+  `primary`. No fire-once batch migration; reader+writer coexist indefinitely.
+
+**Non-negotiable risks (from the design pass):** stable panel ids (not index); `anyRunning` over
+ALL panels (it gates `#afterLoad`'s external-fold — a 3rd-panel chat slipping it corrupts that
+tree); guard `this.panels[panel] ?? emptyPanel()` at every bus read site (buckets no longer
+pre-seeded); `$state.snapshot` not `structuredClone` on the trees map; `removeOpenrouterModel`
+(+page) hardcodes both panels → iterate panelSels; per-panel `messages` echo must cover all N or
+external (CLI/other-tab) chats to panels 3+ won't fold.
+
+Full per-slice specs + current line ranges: workflow `wf_3b826af0-eb2` output (was at
+`tasks/wa25fc2wa.output`; /tmp, may not persist — re-run the design workflow if lost).

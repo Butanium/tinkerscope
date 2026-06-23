@@ -40,8 +40,10 @@ function newest(list: Conversation[]): Conversation | undefined {
 class ConversationsStore {
 	list = $state<Conversation[]>([]);
 	activeId = $state<string | null>(null);
-	tree = $state<ConvTree>(emptyTree());
-	compareTree = $state<ConvTree>(emptyTree());
+	/** Per-panel branch trees keyed by stable panel id ('primary' always present).
+	 *  THE read source: +page reads treeFor(panel), computes a new tree via tree.ts,
+	 *  commits with setTree(panel,…). N-panel: any number of keys. */
+	trees = $state<Record<string, ConvTree>>({ primary: emptyTree() });
 	/** Transient hint shown when the terminal/another tab branched the conversation. */
 	externalNotice = $state<string | null>(null);
 
@@ -49,11 +51,11 @@ class ConversationsStore {
 	 *  from the response stream, so the external-fold hook must skip these. */
 	#ownTokens = new Set<string>();
 	#saveTimer: ReturnType<typeof setTimeout> | null = null;
-	#pending: { id: string; tree: ConvTree; compareTree: ConvTree | null; system_prompt: string | null } | null = null;
+	#pending: { id: string; trees: Record<string, ConvTree>; system_prompt: string | null } | null = null;
 	#noticeTimer: ReturnType<typeof setTimeout> | null = null;
 
 	treeFor(panel: Panel): ConvTree {
-		return panel === 'compare' ? this.compareTree : this.tree;
+		return this.trees[panel] ?? emptyTree();
 	}
 
 	/** True while ANY own chat is in flight — its fold (from the response stream)
@@ -79,18 +81,46 @@ class ConversationsStore {
 	 *  path into PlaygroundState.messages (so the CLI/sampler see it), and
 	 *  schedule a debounced save. */
 	setTree(panel: Panel, next: ConvTree, persist = true): void {
-		if (panel === 'compare') this.compareTree = next;
-		else this.tree = next;
+		this.trees = { ...this.trees, [panel]: next };
 		this.#mirror();
 		if (persist) this.save();
 	}
 
 	#mirror(): void {
-		api
-			.setState({
-				messages: activeMessages(this.tree),
-				compare_messages: activeMessages(this.compareTree)
-			})
+		// Echo every panel's active path into PlaygroundState (one patch, messages
+		// only — never clobbers per-panel run_id/checkpoint).
+		const panel_messages: Record<string, Msg[]> = {};
+		for (const [pid, tree] of Object.entries(this.trees)) panel_messages[pid] = activeMessages(tree);
+		api.setState({ panel_messages }).catch(() => {});
+	}
+
+	/** Duplicate one panel's tree into another (deep, proxy-safe clone — used when a
+	 *  new compare panel should start from an existing thread). Does NOT clear other
+	 *  panels' live buckets, so adding a panel can't wipe an in-flight stream. */
+	duplicateTo(srcPanel: Panel, dstPanel: Panel): void {
+		this.trees = { ...this.trees, [dstPanel]: $state.snapshot(this.treeFor(srcPanel)) as ConvTree };
+		this.#mirror();
+		this.save();
+	}
+
+	/** Drop a panel's tree (on panel removal). 'primary' is reserved/never dropped. */
+	dropTree(panel: Panel): void {
+		if (panel === 'primary' || !(panel in this.trees)) return;
+		const next = { ...this.trees };
+		delete next[panel];
+		this.trees = next;
+		this.#mirror();
+		this.save();
+	}
+
+	/** Reset every open panel's tree to empty (fresh thread, same panel layout). */
+	#freshTrees(): Promise<void> {
+		const ids = (live.state?.panels ?? []).map((p) => p.id);
+		if (!ids.includes('primary')) ids.unshift('primary');
+		this.trees = Object.fromEntries(ids.map((id) => [id, emptyTree()]));
+		return api
+			.setState({ panel_messages: Object.fromEntries(ids.map((id) => [id, []])) })
+			.then(() => {})
 			.catch(() => {});
 	}
 
@@ -98,13 +128,15 @@ class ConversationsStore {
 	save(): void {
 		const id = this.activeId;
 		if (!id) return;
-		const ct = $state.snapshot(this.compareTree) as ConvTree;
-		this.#pending = {
-			id,
-			tree: $state.snapshot(this.tree) as ConvTree,
-			compareTree: ct.rootChildren.length ? ct : null,
-			system_prompt: live.state?.system_prompt ?? null
-		};
+		// Snapshot all trees; drop empty panels (no rootChildren) but ALWAYS keep
+		// 'primary' so a conversation never persists with zero trees.
+		const snap = $state.snapshot(this.trees) as Record<string, ConvTree>;
+		const trees: Record<string, ConvTree> = {};
+		for (const [pid, t] of Object.entries(snap)) {
+			if (pid === 'primary' || t.rootChildren.length) trees[pid] = t;
+		}
+		if (!trees.primary) trees.primary = emptyTree();
+		this.#pending = { id, trees, system_prompt: live.state?.system_prompt ?? null };
 		if (this.#saveTimer) clearTimeout(this.#saveTimer);
 		this.#saveTimer = setTimeout(() => void this.#doSave(), 400);
 	}
@@ -115,7 +147,7 @@ class ConversationsStore {
 		this.#pending = null;
 		if (!p) return;
 		try {
-			await api.saveConversationTree(p.id, p.tree, p.compareTree, p.system_prompt);
+			await api.saveConversationTree(p.id, p.trees, p.system_prompt);
 			this.list = this.list.map((c) => (c.id === p.id ? { ...c, updated_at: new Date().toISOString() } : c));
 		} catch (e) {
 			console.warn('conversation tree save failed', e);
@@ -137,7 +169,7 @@ class ConversationsStore {
 			const created = await api.createConversation({
 				name: 'Untitled',
 				system_prompt: live.state?.system_prompt ?? null,
-				tree: emptyTree()
+				trees: { primary: emptyTree() }
 			});
 			list = [created];
 		}
@@ -165,13 +197,11 @@ class ConversationsStore {
 		const created = await api.createConversation({
 			name,
 			system_prompt: live.state?.system_prompt ?? null,
-			tree: emptyTree()
+			trees: { primary: emptyTree() }
 		});
 		this.list = [created, ...this.list];
 		this.activeId = created.id;
-		this.tree = emptyTree();
-		this.compareTree = emptyTree();
-		await api.setState({ messages: [], compare_messages: [] }).catch(() => {});
+		await this.#freshTrees();
 	}
 
 	async rename(id: string, name: string): Promise<void> {
@@ -187,11 +217,9 @@ class ConversationsStore {
 		// empty trees, default name).
 		if (this.list.length <= 1) {
 			live.clearBuckets();
-			this.tree = emptyTree();
-			this.compareTree = emptyTree();
-			await api.setState({ messages: [], compare_messages: [] }).catch(() => {});
+			await this.#freshTrees();
 			if (this.activeId) await this.rename(this.activeId, 'Untitled').catch(() => {});
-			this.setTree('primary', emptyTree());
+			this.save();
 			return;
 		}
 		await api.deleteConversation(id);
@@ -205,44 +233,43 @@ class ConversationsStore {
 		}
 	}
 
-	/** Reset the trees + transcripts for a fresh thread under the SAME conversation. */
+	/** Reset every open panel's tree for a fresh thread under the SAME conversation. */
 	async resetActive(): Promise<void> {
 		live.clearBuckets();
-		this.tree = emptyTree();
-		this.compareTree = emptyTree();
-		await api.setState({ messages: [], compare_messages: [] }).catch(() => {});
+		await this.#freshTrees();
 		this.save();
 	}
 
-	/** Entering compare: duplicate the primary thread into the compare panel so
-	 *  both panels start from the SAME conversation (nothing destroyed). The two
-	 *  trees are independent deep copies — $state.snapshot is the proxy-safe deep
-	 *  clone (structuredClone chokes on $state proxies). */
-	duplicateToCompare(): void {
-		live.clearBuckets();
-		this.compareTree = $state.snapshot(this.tree) as ConvTree;
-		this.#mirror();
-		this.save();
-	}
-
+	/** Migration read-shim: prefer the new {trees} shape; fall back to the legacy
+	 *  {tree, compare_tree} (synthesizing reserved 'primary'/'compare' ids) so an
+	 *  un-migrated saved conversation loads without losing a user-authored compare
+	 *  tree. asTree() returns emptyTree() on malformed input. */
 	#loadTrees(conv: Conversation): void {
-		this.tree = asTree(conv.tree);
-		this.compareTree = conv.compare_tree ? asTree(conv.compare_tree) : emptyTree();
+		if (conv.trees && typeof conv.trees === 'object') {
+			const map: Record<string, ConvTree> = {};
+			for (const [pid, t] of Object.entries(conv.trees)) map[pid] = asTree(t);
+			if (!map.primary) map.primary = emptyTree();
+			this.trees = map;
+		} else {
+			const map: Record<string, ConvTree> = { primary: asTree(conv.tree) };
+			if (conv.compare_tree) map.compare = asTree(conv.compare_tree);
+			this.trees = map;
+		}
 		// system_prompt travels with the conversation (each conv = one experiment).
 		api.setState({ system_prompt: conv.system_prompt ?? null }).catch(() => {});
 	}
 
-	/** After loading a conversation: fold a stray external turn (once, if not
-	 *  running), then UNCONDITIONALLY mirror the active paths to the backend so a
-	 *  fresh/restarted backend still learns the loaded conversation. */
+	/** After loading a conversation: fold a stray external turn into each panel (once,
+	 *  if not running), then UNCONDITIONALLY mirror the active paths so a fresh/
+	 *  restarted backend still learns the loaded conversation. */
 	#afterLoad(): void {
 		if (!live.anyRunning) {
-			const pm = (live.state?.messages ?? []) as Msg[];
-			if (pm.length && !msgsEqual(pm, activeMessages(this.tree)))
-				this.tree = reconcileExternal(this.tree, pm);
-			const cm = (live.state?.compare_messages ?? []) as Msg[];
-			if (cm.length && !msgsEqual(cm, activeMessages(this.compareTree)))
-				this.compareTree = reconcileExternal(this.compareTree, cm);
+			for (const ps of live.state?.panels ?? []) {
+				const echo = (ps.messages ?? []) as Msg[];
+				const cur = this.trees[ps.id];
+				if (cur && echo.length && !msgsEqual(echo, activeMessages(cur)))
+					this.trees = { ...this.trees, [ps.id]: reconcileExternal(cur, echo) };
+			}
 		}
 		this.#mirror();
 	}
@@ -259,9 +286,8 @@ class ConversationsStore {
 	#onExternalDone(panel: Panel, data: { client_token?: string | null }): void {
 		// Own chats are folded by fireChat from their response stream — skip.
 		if (data?.client_token && this.#ownTokens.has(data.client_token)) return;
-		const msgs = (panel === 'compare' ? live.state?.compare_messages : live.state?.messages) as
-			| Msg[]
-			| undefined;
+		const ps = (live.state?.panels ?? []).find((p) => p.id === panel);
+		const msgs = ps?.messages as Msg[] | undefined;
 		if (!msgs || !msgs.length) return;
 		const cur = this.treeFor(panel);
 		const next = reconcileExternal(cur, msgs);

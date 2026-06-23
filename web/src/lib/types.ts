@@ -72,17 +72,26 @@ export type Health = {
 
 export type ChatMessage = { role: 'user' | 'assistant' | 'system'; content: string };
 
-export type Panel = 'primary' | 'compare';
+/** Stable per-panel id. Reserved: 'primary' (always present, slot 0) and 'compare'
+ *  (slot 1, also the legacy migration id); further panels are minted 'p-2','p-3',…
+ *  NEVER an array index — closing a middle panel must not rebind a tree to another. */
+export type Panel = string;
 
-/** Shared server-side playground state, streamed over /api/state/events. */
-export type PlaygroundState = {
-	mode: 'single' | 'compare';
+/** One comparison panel's selection + its active-path transcript echo. The echo is
+ *  write-only (the branch tree in lib/tree.ts is the read source); it exists so the
+ *  CLI and external-fold reconcile can see/replay each panel's path. */
+export type PanelState = {
+	id: Panel;
 	run_id: string | null;
 	checkpoint: string | null;
-	compare_run_id: string | null;
-	compare_checkpoint: string | null;
-	messages: ChatMessage[]; // PRIMARY panel's transcript
-	compare_messages: ChatMessage[]; // COMPARE panel's OWN transcript (compare is multi-turn)
+	messages: ChatMessage[];
+};
+
+/** Shared server-side playground state, streamed over /api/state/events. Sampling
+ *  params are GLOBAL (shared across all panels); only run/checkpoint/transcript are
+ *  per-panel. */
+export type PlaygroundState = {
+	panels: PanelState[];
 	system_prompt: string | null;
 	temperature: number;
 	max_tokens: number;
@@ -95,10 +104,24 @@ export type PlaygroundState = {
 	last_event_ts: number;
 };
 
-/** Any settable subset of PlaygroundState (everything except chat_id/running/last_event*). */
-export type StatePatch = Partial<
-	Omit<PlaygroundState, 'chat_id' | 'running' | 'last_event' | 'last_event_ts'>
->;
+/** Client-settable patch for PlaygroundState. The patch shape diverges from the
+ *  state shape: `panels` full-replaces the list; `panel_messages` mirrors every
+ *  panel's transcript at once; `panel`+run_id/checkpoint/messages targets ONE panel;
+ *  the rest are global params. */
+export type StatePatch = {
+	panels?: PanelState[];
+	panel_messages?: Record<string, ChatMessage[]>;
+	panel?: Panel;
+	run_id?: string | null;
+	checkpoint?: string | null;
+	messages?: ChatMessage[];
+	system_prompt?: string | null;
+	temperature?: number;
+	max_tokens?: number;
+	n_samples?: number;
+	thinking?: boolean;
+	top_p?: number | null;
+};
 
 export type ChatRequest = {
 	run_id?: string | null;
@@ -130,8 +153,12 @@ export type Conversation = {
 	id: string;
 	name: string;
 	system_prompt: string | null;
-	tree: ConvTree;
-	compare_tree: ConvTree | null;
+	/** Per-panel branch trees, keyed by panel id ('primary','compare','p-2',…). */
+	trees: Record<string, ConvTree>;
+	/** Legacy 2-panel shape — present only on un-migrated saved conversations; the
+	 *  store's #loadTrees read-shim folds these into `trees`. Never written anymore. */
+	tree?: ConvTree;
+	compare_tree?: ConvTree | null;
 	created_at: string;
 	updated_at: string;
 };

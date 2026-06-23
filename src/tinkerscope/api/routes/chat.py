@@ -138,7 +138,6 @@ async def chat(req: ChatRequest):
     # TODO(tinker-feedback#125): when fixed, drop `and req.run_id is None` to restore
     # token streaming for single samples from LoRA runs.
     stream = (n == 1) and (req.run_id is None)
-    is_compare_panel = req.panel == "compare"
 
     async def gen():
         # ── resolve the model + build the per-sample producer ───────────────
@@ -227,11 +226,7 @@ async def chat(req: ChatRequest):
                         renderer_name=renderer_name, messages=sampling_msgs, n=n,
                         temperature=temperature, max_tokens=max_tokens, top_p=req.top_p,
                     )
-                sel_patch = (
-                    {"compare_run_id": run.id, "compare_checkpoint": ckpt.name}
-                    if is_compare_panel
-                    else {"run_id": run.id, "checkpoint": ckpt.name}
-                )
+                sel_patch = {"run_id": run.id, "checkpoint": ckpt.name}
         except Exception as e:
             # pre-start failure (unknown/unsampleable run, bad checkpoint): surface
             # on BOTH the caller stream and the bus so the browser panel shows it.
@@ -241,16 +236,20 @@ async def chat(req: ChatRequest):
             return
 
         # ── chat lifecycle: atomic id + running, reflect into state ──────────
-        # Each panel commits to its OWN transcript so compare mode is multi-turn:
-        # primary → state.messages, compare → state.compare_messages.
-        state_patch = dict(sel_patch)
-        if is_compare_panel:
-            state_patch["compare_messages"] = msgs
-        else:
-            state_patch.update(
-                messages=msgs, system_prompt=req.system_prompt, temperature=temperature,
-                max_tokens=max_tokens, n_samples=n, thinking=req.thinking, top_p=req.top_p,
-            )
+        # Per-panel: `panel` routes this panel's selection + transcript echo into
+        # panels[panel] (multi-turn memory). Sampling params are GLOBAL (shared
+        # across panels) — set at the top level, no per-panel author race.
+        state_patch = {
+            "panel": req.panel,
+            "messages": msgs,
+            **sel_patch,
+            "system_prompt": req.system_prompt,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "n_samples": n,
+            "thinking": req.thinking,
+            "top_p": req.top_p,
+        }
         chat_id = await BUS.chat_begin(**state_patch)
         if req.broadcast:
             await BUS.broadcast(
@@ -280,7 +279,7 @@ async def chat(req: ChatRequest):
             if produced:
                 chosen = produced[0] if 0 in produced else produced[min(produced)]
                 turn = [*msgs, {"role": "assistant", "content": chosen}]
-                end_patch["compare_messages" if is_compare_panel else "messages"] = turn
+                end_patch = {"panel": req.panel, "messages": turn}
             await BUS.chat_end("chat_done", **end_patch)
             if req.broadcast:
                 await BUS.broadcast(

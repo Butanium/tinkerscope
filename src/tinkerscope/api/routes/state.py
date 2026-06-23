@@ -20,15 +20,25 @@ router = APIRouter(prefix="/api/state", tags=["state"])
 
 
 class StatePatch(BaseModel):
-    """Client-settable slice of PlaygroundState. Only provided fields apply."""
+    """Client-settable slice of PlaygroundState. Only provided fields apply.
 
-    mode: str | None = None
+    Two ways to set the per-panel selection:
+      - `panels`: full-replace the panel list (the browser sends this on every
+        selection change — one `{id, run_id, checkpoint, messages}` per panel).
+      - `panel` + `run_id`/`checkpoint`/`messages`: a targeted sub-patch of ONE
+        panel by id (the CLI / single-panel drivers). Creates the panel if absent.
+    Sampling params are global (shared across panels)."""
+
+    panels: list[dict] | None = None
+    # per-panel active-path echo {panel_id: messages} — mirrors transcripts for all
+    # panels in one patch without touching their run_id/checkpoint.
+    panel_messages: dict[str, list[dict]] | None = None
+    # targeted single-panel sub-patch
+    panel: str | None = None
     run_id: str | None = None
     checkpoint: str | None = None
-    compare_run_id: str | None = None
-    compare_checkpoint: str | None = None
     messages: list[dict] | None = None
-    compare_messages: list[dict] | None = None
+    # global params
     system_prompt: str | None = None
     temperature: float | None = None
     max_tokens: int | None = None

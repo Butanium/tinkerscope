@@ -66,6 +66,9 @@ def _write(items: list[dict]) -> None:
 class ConversationCreate(BaseModel):
     name: str = "Untitled"
     system_prompt: str | None = None
+    # N-panel shape: {panel_id: opaque tree}.
+    trees: dict[str, Any] | None = None
+    # legacy 2-panel shape (transitional CLI callers) — synthesized into `trees`.
     tree: dict[str, Any] | None = None
     compare_tree: dict[str, Any] | None = None
 
@@ -75,8 +78,7 @@ class ConversationRename(BaseModel):
 
 
 class TreeSave(BaseModel):
-    tree: dict[str, Any]
-    compare_tree: dict[str, Any] | None = None
+    trees: dict[str, Any]
     system_prompt: str | None = None
 
 
@@ -89,12 +91,21 @@ def list_conversations() -> list[dict]:
 @router.post("")
 def create_conversation(req: ConversationCreate) -> dict:
     """Create a conversation; the server assigns id + timestamps."""
+    trees = req.trees
+    if trees is None:
+        # transitional: synthesize {trees} from a legacy {tree, compare_tree} body
+        trees = {}
+        if req.tree is not None:
+            trees["primary"] = req.tree
+        if req.compare_tree is not None:
+            trees["compare"] = req.compare_tree
+    if not trees:
+        trees = {"primary": {}}
     entry = {
         "id": str(uuid.uuid4()),
         "name": req.name,
         "system_prompt": req.system_prompt,
-        "tree": req.tree if req.tree is not None else {},
-        "compare_tree": req.compare_tree,
+        "trees": trees,
         "created_at": _now(),
         "updated_at": _now(),
     }
@@ -125,10 +136,13 @@ def save_conversation_tree(conversation_id: str, req: TreeSave) -> dict:
         items = _read()
         for c in items:
             if c.get("id") == conversation_id:
-                c["tree"] = req.tree
-                c["compare_tree"] = req.compare_tree
+                c["trees"] = req.trees
                 c["system_prompt"] = req.system_prompt
                 c["updated_at"] = _now()
+                # self-heal: a legacy {tree, compare_tree} entry upgrades to {trees}
+                # on its first save — drop the stale keys so they can't linger.
+                c.pop("tree", None)
+                c.pop("compare_tree", None)
                 _write(items)
                 return {"status": "ok", "id": conversation_id}
     raise HTTPException(404, f"no conversation {conversation_id}")

@@ -42,28 +42,37 @@ def test_models_refresh(client):
 # --------------------------------------------------------------------------- #
 def test_state_get_default_shape(client):
     state = client.get("/api/state").json()
-    for key in ("mode", "messages", "temperature", "chat_id", "running"):
+    for key in ("panels", "temperature", "chat_id", "running"):
         assert key in state
+    # default = one 'primary' panel carrying its own selection + transcript echo
+    p0 = state["panels"][0]
+    assert p0["id"] == "primary"
+    for key in ("run_id", "checkpoint", "messages"):
+        assert key in p0
 
 
 def test_state_patch_round_trips(client):
+    # Targeted single-panel sub-patch (panel + run/checkpoint/messages) + a GLOBAL param.
     patched = client.post(
         "/api/state",
         json={
+            "panel": "primary",
             "run_id": "good_run",
             "checkpoint": "final",
-            "temperature": 0.3,
             "messages": [{"role": "user", "content": "hello"}],
+            "temperature": 0.3,
         },
     ).json()
-    assert patched["run_id"] == "good_run"
-    assert patched["checkpoint"] == "final"
-    assert patched["temperature"] == 0.3
-    assert patched["messages"][0]["content"] == "hello"
+    p0 = next(p for p in patched["panels"] if p["id"] == "primary")
+    assert p0["run_id"] == "good_run"
+    assert p0["checkpoint"] == "final"
+    assert p0["messages"][0]["content"] == "hello"
+    assert patched["temperature"] == 0.3  # global, not per-panel
 
     # The change persists on the next GET (shared server-side state bus).
     again = client.get("/api/state").json()
-    assert again["run_id"] == "good_run"
+    p0b = next(p for p in again["panels"] if p["id"] == "primary")
+    assert p0b["run_id"] == "good_run"
     assert again["temperature"] == 0.3
 
 
@@ -76,24 +85,29 @@ def test_state_patch_is_partial(client):
     assert state["max_tokens"] == 256
 
 
-def test_state_patch_compare_messages_round_trips(client):
-    # Regression: StatePatch must accept compare_messages (the compare panel's
-    # own transcript) — else the frontend can't reset/drive the compare thread.
+def test_state_panels_round_trip(client):
+    # N-panel replacement for the old compare_messages: each panel keeps its OWN run
+    # + transcript. Full-replace via `panels`, then mirror all via `panel_messages`.
     client.post(
         "/api/state",
         json={
-            "mode": "compare",
-            "messages": [{"role": "user", "content": "A"}],
-            "compare_messages": [{"role": "user", "content": "B"}],
+            "panels": [
+                {"id": "primary", "run_id": "good_run", "checkpoint": "final",
+                 "messages": [{"role": "user", "content": "A"}]},
+                {"id": "compare", "run_id": "good_run", "checkpoint": "final",
+                 "messages": [{"role": "user", "content": "B"}]},
+            ]
         },
     )
-    state = client.get("/api/state").json()
-    assert state["mode"] == "compare"
-    assert state["messages"][0]["content"] == "A"
-    assert state["compare_messages"][0]["content"] == "B"
-    # Clearing the compare transcript must actually take effect server-side.
-    client.post("/api/state", json={"compare_messages": []})
-    assert client.get("/api/state").json()["compare_messages"] == []
+    by_id = {p["id"]: p for p in client.get("/api/state").json()["panels"]}
+    assert by_id["primary"]["messages"][0]["content"] == "A"
+    assert by_id["compare"]["messages"][0]["content"] == "B"
+    # panel_messages mirrors every panel's transcript in one patch (the store #mirror),
+    # without touching run_id/checkpoint.
+    client.post("/api/state", json={"panel_messages": {"primary": [], "compare": []}})
+    cleared = {p["id"]: p for p in client.get("/api/state").json()["panels"]}
+    assert cleared["primary"]["messages"] == [] and cleared["compare"]["messages"] == []
+    assert cleared["primary"]["run_id"] == "good_run"  # untouched by panel_messages
 
 
 # --------------------------------------------------------------------------- #

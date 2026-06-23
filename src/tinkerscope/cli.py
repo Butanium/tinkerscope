@@ -302,16 +302,24 @@ def cmd_checkpoints(run: str = typer.Argument(..., help="run id or unique substr
     print(f"\n{len(rows)} checkpoint(s)")
 
 
+def _panel_id(i: int) -> str:
+    """Stable panel id by display position: primary, compare, then p-2, p-3, …"""
+    return "primary" if i == 0 else "compare" if i == 1 else f"p-{i}"
+
+
+def _panel_obj(panel_id: str, run_id: str, checkpoint: Optional[str]) -> dict:
+    """One PanelState entry for an /api/state {panels:[…]} replace."""
+    return {"id": panel_id, "run_id": run_id, "checkpoint": checkpoint, "messages": []}
+
+
 @app.command("open")
 def cmd_open(run: str = typer.Argument(..., help="run id or unique substring; optional @checkpoint")) -> None:
     """Select a run in single mode; the browser switches live."""
     run_arg, ckpt_arg = _split_run_arg(run)
     r = _resolve_run(run_arg)
     ckpt = _resolve_checkpoint(r, ckpt_arg)
-    patch: dict = {"mode": "single", "run_id": r["id"]}
-    if ckpt is not None:
-        patch["checkpoint"] = ckpt
-    state = _post("/api/state", patch)
+    # Single mode = exactly one 'primary' panel (replaces any compare layout).
+    state = _post("/api/state", {"panels": [_panel_obj("primary", r["id"], ckpt)]})
     print(f"opened {r['id']}" + (f"@{ckpt}" if ckpt else ""))
     _print_json(state)
 
@@ -509,11 +517,9 @@ def cmd_chat(
     r = _resolve_run(run_arg)
     ckpt = _resolve_checkpoint(r, checkpoint or ckpt_arg)
     _guard_sampleable(r)
-    # Mirror selection to the bus so the browser shows what's being sampled.
-    sel: dict = {"mode": "single", "run_id": r["id"]}
-    if ckpt is not None:
-        sel["checkpoint"] = ckpt
-    _post("/api/state", sel)
+    # Mirror selection to the bus so the browser shows what's being sampled (single
+    # mode = one 'primary' panel).
+    _post("/api/state", {"panels": [_panel_obj("primary", r["id"], ckpt)]})
     body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, thinking, system, "primary")
     print(f"chat {r['id']}" + (f"@{ckpt}" if ckpt else "") + f"  n={n} temp={temperature}")
     # Single chat: n==1 streams tokens inline; n>1 prints whole samples (no deltas).
@@ -522,54 +528,55 @@ def cmd_chat(
 
 @app.command("compare")
 def cmd_compare(
-    run_a: str = typer.Argument(..., help="run A: id or unique substring; optional @checkpoint"),
-    run_b: str = typer.Argument(..., help="run B: id or unique substring; optional @checkpoint"),
+    run_a: str = typer.Argument(..., help="run A → primary pane: id/substring; optional @checkpoint"),
+    run_b: str = typer.Argument(..., help="run B → compare pane: id/substring; optional @checkpoint"),
     prompt: str = typer.Argument(..., help="user message"),
+    run: list[str] = typer.Option([], "--run", help="additional run(s) → 3rd, 4th, … panes (repeatable)"),
     n: int = typer.Option(1, "--n", help="number of samples per side"),
     temperature: float = typer.Option(1.0, "--temperature"),
     max_tokens: int = typer.Option(1024, "--max-tokens"),
     thinking: bool = typer.Option(False, "--thinking"),
     system: Optional[str] = typer.Option(None, "--system"),
 ) -> None:
-    """Compare two runs on one prompt; A→primary pane, B→compare pane, both stream."""
-    runs = _models()
-    a_arg, a_ckpt_arg = _split_run_arg(run_a)
-    b_arg, b_ckpt_arg = _split_run_arg(run_b)
-    ra = _resolve_run(a_arg, runs)
-    rb = _resolve_run(b_arg, runs)
-    a_ckpt = _resolve_checkpoint(ra, a_ckpt_arg)
-    b_ckpt = _resolve_checkpoint(rb, b_ckpt_arg)
-    for r in (ra, rb):
+    """Compare N runs on one prompt — A→primary, B→compare, --run extras→p-2,p-3,…
+    all stream concurrently. `compare a b "prompt"` is the 2-run case."""
+    catalog = _models()
+    # Resolve every run (A, B, then each --run) to (run, checkpoint, panel_id).
+    specs: list[tuple[dict, Optional[str], str]] = []
+    for i, run_arg in enumerate([run_a, run_b, *run]):
+        arg, ckpt_arg = _split_run_arg(run_arg)
+        r = _resolve_run(arg, catalog)
+        ckpt = _resolve_checkpoint(r, ckpt_arg)
         _guard_sampleable(r)
+        specs.append((r, ckpt, _panel_id(i)))
 
-    patch: dict = {"mode": "compare", "run_id": ra["id"], "compare_run_id": rb["id"]}
-    if a_ckpt is not None:
-        patch["checkpoint"] = a_ckpt
-    if b_ckpt is not None:
-        patch["compare_checkpoint"] = b_ckpt
-    _post("/api/state", patch)
+    # One /api/state replace sets the whole panel layout at once.
+    _post("/api/state", {"panels": [_panel_obj(pid, r["id"], ckpt) for (r, ckpt, pid) in specs]})
 
-    body_a = _chat_body(ra, a_ckpt, prompt, n, temperature, max_tokens, thinking, system, "primary")
-    body_b = _chat_body(rb, b_ckpt, prompt, n, temperature, max_tokens, thinking, system, "compare")
-    label_a = f"A {ra['id']}" + (f"@{a_ckpt}" if a_ckpt else "")
-    label_b = f"B {rb['id']}" + (f"@{b_ckpt}" if b_ckpt else "")
-    print(f"compare  n={n} temp={temperature}\n  A: {ra['id']}{('@' + a_ckpt) if a_ckpt else ''}\n  B: {rb['id']}{('@' + b_ckpt) if b_ckpt else ''}\n")
+    print(f"compare  n={n} temp={temperature}")
+    for (r, ckpt, pid) in specs:
+        print(f"  {pid}: {r['id']}" + (f"@{ckpt}" if ckpt else ""))
+    print()
 
     lock = threading.Lock()
-    res_a = _StreamResult()
-    res_b = _StreamResult()
-    ta = threading.Thread(target=_stream_chat, args=(body_a, label_a, lock, res_a))
-    tb = threading.Thread(target=_stream_chat, args=(body_b, label_b, lock, res_b))
-    ta.start()
-    tb.start()
-    ta.join()
-    tb.join()
+    threads: list[threading.Thread] = []
+    results: list[tuple[str, dict, _StreamResult]] = []
+    for (r, ckpt, pid) in specs:
+        body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, thinking, system, pid)
+        res = _StreamResult()
+        label = f"{pid} {r['id']}" + (f"@{ckpt}" if ckpt else "")
+        t = threading.Thread(target=_stream_chat, args=(body, label, lock, res))
+        results.append((pid, r, res))
+        threads.append(t)
+        t.start()
+    for t in threads:
+        t.join()
 
-    failures = []
-    if not res_a.ok:
-        failures.append(f"A ({ra['id']}): {res_a.error or 'unknown error'}")
-    if not res_b.ok:
-        failures.append(f"B ({rb['id']}): {res_b.error or 'unknown error'}")
+    failures = [
+        f"{pid} ({r['id']}): {res.error or 'unknown error'}"
+        for (pid, r, res) in results
+        if not res.ok
+    ]
     if failures:
         _die("compare failed:\n  " + "\n  ".join(failures))
 

@@ -24,23 +24,27 @@ from typing import Any
 
 
 @dataclass
-class PlaygroundState:
-    """What the user (and Claude, via the CLI) is currently looking at."""
+class PanelState:
+    """One comparison panel: its model selection + its OWN active-path transcript
+    echo. The echo is write-only (the browser's branch tree is the read source); it
+    exists so the CLI and external-fold reconcile can see/replay each panel's path.
+    `id` is a stable string ('primary','compare','p-2',…), never an array index."""
 
-    mode: str = "single"                  # "single" | "compare"
-    # primary selection
+    id: str = "primary"
     run_id: str | None = None
     checkpoint: str | None = None         # checkpoint name, e.g. "final"
-    # secondary selection (compare mode)
-    compare_run_id: str | None = None
-    compare_checkpoint: str | None = None
-    # conversation + system prompt the next sample would use. In compare mode each
-    # model keeps its OWN thread (sharing the user turns): `messages` is the primary
-    # panel's transcript, `compare_messages` the compare panel's.
     messages: list[dict] = field(default_factory=list)   # [{role, content}]
-    compare_messages: list[dict] = field(default_factory=list)
+
+
+@dataclass
+class PlaygroundState:
+    """What the user (and Claude, via the CLI) is currently looking at. Sampling
+    params are GLOBAL (shared across all panels); only run/checkpoint/transcript are
+    per-panel, in `panels` (slot 0 = 'primary', always present)."""
+
+    panels: list[PanelState] = field(default_factory=lambda: [PanelState(id="primary")])
     system_prompt: str | None = None
-    # sampling params
+    # sampling params (global — shared across panels)
     temperature: float = 1.0
     max_tokens: int = 1024
     n_samples: int = 1
@@ -80,12 +84,53 @@ class StateBus:
         async with self._lock:
             self._subs.discard(q)
 
+    # Fields that live on a PanelState, not the top-level state. A patch carrying a
+    # `panel` id routes these to that panel; without `panel` they're ignored.
+    _PANEL_FIELDS = ("run_id", "checkpoint", "messages")
+
+    @staticmethod
+    def _as_panel(p: Any) -> PanelState:
+        if isinstance(p, PanelState):
+            return p
+        return PanelState(
+            id=p["id"],
+            run_id=p.get("run_id"),
+            checkpoint=p.get("checkpoint"),
+            messages=p.get("messages") or [],
+        )
+
+    def _patch_panel(self, panel_id: str, key: str, value: Any) -> None:
+        panel = next((p for p in self.state.panels if p.id == panel_id), None)
+        if panel is None:
+            panel = PanelState(id=panel_id)
+            self.state.panels.append(panel)
+        setattr(panel, key, value)
+
+    def _apply_patch(self, patch: dict[str, Any]) -> None:
+        """Apply a patch: `panels` full-replaces the list (browser/CLI selection);
+        a `panel` id routes run_id/checkpoint/messages to that panel (chat.py);
+        everything else is a global setattr."""
+        panel_id = patch.get("panel")
+        for k, v in patch.items():
+            if k == "panel":
+                continue
+            if k == "panels":
+                self.state.panels = [self._as_panel(p) for p in v]
+            elif k == "panel_messages":
+                # {panel_id: messages} — the store's active-path echo for every panel,
+                # mirrored in one patch without touching run_id/checkpoint.
+                for pid, msgs in (v or {}).items():
+                    self._patch_panel(pid, "messages", msgs)
+            elif k in self._PANEL_FIELDS:
+                if panel_id is not None:
+                    self._patch_panel(panel_id, k, v)
+            elif hasattr(self.state, k):
+                setattr(self.state, k, v)
+
     async def publish_state(self, event: str, **patch: Any) -> dict:
         """Apply a patch to the state and broadcast the new snapshot."""
         async with self._lock:
-            for k, v in patch.items():
-                if hasattr(self.state, k):
-                    setattr(self.state, k, v)
+            self._apply_patch(patch)
             self.state.last_event = event
             self.state.last_event_ts = time.time()
             snap = self.state.to_dict()
@@ -106,9 +151,7 @@ class StateBus:
             self.state.chat_id += 1
             cid = self.state.chat_id
             self._inflight += 1
-            for k, v in patch.items():
-                if hasattr(self.state, k):
-                    setattr(self.state, k, v)
+            self._apply_patch(patch)
             self.state.running = True
             self.state.last_event = "chat_start"
             self.state.last_event_ts = time.time()
@@ -120,9 +163,7 @@ class StateBus:
         running only when no chat is still streaming, and broadcast."""
         async with self._lock:
             self._inflight = max(0, self._inflight - 1)
-            for k, v in patch.items():
-                if hasattr(self.state, k):
-                    setattr(self.state, k, v)
+            self._apply_patch(patch)
             if self._inflight == 0:
                 self.state.running = False
             self.state.last_event = event

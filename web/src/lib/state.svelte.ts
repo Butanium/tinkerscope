@@ -23,7 +23,7 @@ export type PanelRun = {
 	error: string | null;
 };
 
-function emptyPanel(): PanelRun {
+export function emptyPanel(): PanelRun {
 	return { chat_id: null, label: '', n: 0, samples: [], running: false, error: null };
 }
 
@@ -32,11 +32,10 @@ class LiveStore {
 	state = $state<PlaygroundState | null>(null);
 	/** true once the SSE stream has delivered at least one event. */
 	connected = $state(false);
-	/** Per-panel sample accumulation, driven by chat_start/sample/chat_done. */
-	panels = $state<Record<Panel, PanelRun>>({
-		primary: emptyPanel(),
-		compare: emptyPanel()
-	});
+	/** Per-panel sample accumulation, driven by chat_start/sample/chat_done. Open-keyed
+	 *  by panel id and LAZILY vivified on chat_start (no pre-seeded slots), so any
+	 *  number of panels work; every read guards a missing slot with emptyPanel(). */
+	panels = $state<Record<string, PanelRun>>({});
 
 	// Lifecycle hooks (set by the page) for the branching tree's fold bookkeeping.
 	// CRUCIAL: these fire on the RAW bus event, decoupled from the render bucket's
@@ -60,15 +59,16 @@ class LiveStore {
 		this.#stop = null;
 	}
 
-	/** Drop both panel buckets — used when switching conversations so a stale
+	/** Drop all panel buckets — used when switching conversations so a stale
 	 *  overlay from the previous one can't bleed onto the new active path. */
 	clearBuckets(): void {
-		this.panels = { primary: emptyPanel(), compare: emptyPanel() };
+		this.panels = {};
 	}
 
-	/** True while any panel has an in-flight chat. */
+	/** True while ANY panel has an in-flight chat (gates the external-fold reconcile,
+	 *  so it MUST cover every panel, not a fixed primary/compare pair). */
 	get anyRunning(): boolean {
-		return this.panels.primary.running || this.panels.compare.running;
+		return Object.values(this.panels).some((p) => p?.running);
 	}
 
 	#onEvent(event: string, data: any): void {
@@ -99,7 +99,7 @@ class LiveStore {
 				// 'sample' event then finalizes the slot (parseSample replaces this
 				// partial with the cleaned authoritative content).
 				const panel = (data?.panel ?? 'primary') as Panel;
-				const cur = this.panels[panel];
+				const cur = this.panels[panel] ?? emptyPanel();
 				// Ignore stragglers from an older chat run.
 				if (cur.chat_id != null && data.chat_id != null && data.chat_id !== cur.chat_id) break;
 				const idx = data.sample_index ?? 0;
@@ -116,7 +116,7 @@ class LiveStore {
 			}
 			case 'sample': {
 				const panel = (data?.panel ?? 'primary') as Panel;
-				const cur = this.panels[panel];
+				const cur = this.panels[panel] ?? emptyPanel();
 				// Ignore stragglers from an older chat run.
 				if (cur.chat_id != null && data.chat_id != null && data.chat_id !== cur.chat_id) break;
 				const samples = cur.samples.slice();
@@ -131,7 +131,7 @@ class LiveStore {
 				// chat_done even if the render bucket was clobbered by a foreign
 				// chat_start (the straggler guard below only protects rendering).
 				this.onChatDone?.(panel, data);
-				const cur = this.panels[panel];
+				const cur = this.panels[panel] ?? emptyPanel();
 				if (cur.chat_id != null && data.chat_id != null && data.chat_id !== cur.chat_id) break;
 				this.panels[panel] = { ...cur, running: false };
 				this.panels = { ...this.panels };
@@ -140,7 +140,7 @@ class LiveStore {
 			case 'chat_error': {
 				const panel = (data?.panel ?? 'primary') as Panel;
 				this.onChatError?.(panel, data);
-				const cur = this.panels[panel];
+				const cur = this.panels[panel] ?? emptyPanel();
 				// chat_id may be null for PRE-START failures (unknown/unsampleable
 				// run, bad checkpoint) — those broadcast before any chat_start, so
 				// there's no id to match; always surface them on the named panel.

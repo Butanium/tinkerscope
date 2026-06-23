@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api';
-	import { live } from '$lib/state.svelte';
+	import { live, emptyPanel } from '$lib/state.svelte';
 	import { conversations as convo } from '$lib/conversations.svelte';
 	import ModelTypeahead from '$lib/ModelTypeahead.svelte';
 	import Message from '$lib/ChatMessage.svelte';
@@ -9,7 +9,6 @@
 	import { HIGHLIGHTS, highlightState, toggleHighlight } from '$lib/highlights.svelte';
 	import { tip, tooltip } from '$lib/tooltip.svelte';
 	import {
-		emptyTree,
 		activePath,
 		activeMessages,
 		appendUserTurn,
@@ -17,6 +16,7 @@
 		regenTarget,
 		regenReplace,
 		ancestryMessages,
+		treeFromMessages,
 		editUserFork,
 		editUserForkCopy,
 		editAssistant,
@@ -177,23 +177,43 @@
 	// ── Live shared state (single source of truth for selection/params) ──
 	// Render from live.state; fall back to defaults until the first snapshot.
 	const DEFAULTS: PlaygroundState = {
-		mode: 'single', run_id: null, checkpoint: null, compare_run_id: null, compare_checkpoint: null,
-		messages: [], compare_messages: [], system_prompt: null, temperature: 0.7, max_tokens: 4000, n_samples: 1,
+		panels: [{ id: 'primary', run_id: null, checkpoint: null, messages: [] }],
+		system_prompt: null, temperature: 0.7, max_tokens: 4000, n_samples: 1,
 		thinking: false, top_p: 0.8, chat_id: 0, running: false, last_event: null, last_event_ts: 0
 	};
 	let s = $derived<PlaygroundState>(live.state ?? DEFAULTS);
-	let mode = $derived(s.mode);
-	let isComparing = $derived(mode === 'compare');
 
-	// The two panels in display order.
+	// The N panels in display order, projected from the shared panels[] array. Each
+	// has a STABLE id (never an array index) so reorder/remove can't rebind a tree.
 	type PanelSel = { panel: Panel; run_id: string | null; checkpoint: string | null };
 	let panelSels = $derived<PanelSel[]>(
-		isComparing
-			? [
-					{ panel: 'primary', run_id: s.run_id, checkpoint: s.checkpoint },
-					{ panel: 'compare', run_id: s.compare_run_id, checkpoint: s.compare_checkpoint }
-				]
-			: [{ panel: 'primary', run_id: s.run_id, checkpoint: s.checkpoint }]
+		(s.panels ?? []).map((ps) => ({ panel: ps.id, run_id: ps.run_id, checkpoint: ps.checkpoint }))
+	);
+	let isComparing = $derived(panelSels.length > 1);
+
+	// Panels collapsed out of view (tree kept alive). TODO: per-conversation panel layout.
+	let reducedPanels = $state<Set<string>>(new Set());
+	// Which panels a composer send fires to (chips in the input bar). Seeded once to
+	// all visible panels; reduce/restore/add maintain it; the prune effect drops gone ids.
+	let sendTargets = $state<Set<string>>(new Set());
+	let sendSeeded = false;
+	$effect(() => {
+		const ids = new Set(panelSels.map((p) => p.panel));
+		if (!sendSeeded && panelSels.length) {
+			sendTargets = new Set(panelSels.filter((p) => !reducedPanels.has(p.panel)).map((p) => p.panel));
+			sendSeeded = true;
+		} else if ([...sendTargets].some((t) => !ids.has(t))) {
+			sendTargets = new Set([...sendTargets].filter((t) => ids.has(t)));
+		}
+	});
+	function toggleSendTarget(id: string) {
+		sendTargets = sendTargets.has(id)
+			? new Set([...sendTargets].filter((t) => t !== id))
+			: new Set([...sendTargets, id]);
+	}
+	/** Panels a send will actually fire to (selected targets; fall back to all). */
+	let targetSels = $derived(
+		sendTargets.size ? panelSels.filter((p) => sendTargets.has(p.panel)) : panelSels
 	);
 
 	let anySupportsThinking = $derived(
@@ -247,47 +267,73 @@
 	}
 
 	// ── Per-panel selection edits ─────────────────────────────────────
-	function setRun(panel: Panel, runId: string) {
-		// OpenRouter models and raw tinker base models have no checkpoints; tinker
+	function defaultCheckpoint(runId: string): string | null {
+		// OpenRouter / raw base / loose checkpoint have no checkpoint selector; tinker
 		// runs default to the last checkpoint with a sampler (usually "final").
-		let ck: string | null = null;
-		if (!isOpenrouterSel(runId) && !isBaseSel(runId) && !isCkptSel(runId)) {
-			const r = runById(runId);
-			ck = r?.checkpoints.length ? r.checkpoints[r.checkpoints.length - 1].name : null;
-		}
-		if (panel === 'primary') patchState({ run_id: runId, checkpoint: ck }, true);
-		else patchState({ compare_run_id: runId, compare_checkpoint: ck }, true);
+		if (isOpenrouterSel(runId) || isBaseSel(runId) || isCkptSel(runId)) return null;
+		const r = runById(runId);
+		return r?.checkpoints.length ? r.checkpoints[r.checkpoints.length - 1].name : null;
+	}
+	function setRun(panel: Panel, runId: string) {
+		patchState({ panel, run_id: runId, checkpoint: defaultCheckpoint(runId) }, true);
 	}
 	function setCheckpoint(panel: Panel, ck: string) {
-		if (panel === 'primary') patchState({ checkpoint: ck }, true);
-		else patchState({ compare_checkpoint: ck }, true);
+		patchState({ panel, checkpoint: ck }, true);
 	}
 
-	/** Clear the compare panel's accumulated samples so a stale run can't show. */
-	function resetComparePanel() {
-		live.panels.compare = { chat_id: null, label: '', n: 0, samples: [], running: false, error: null };
-		live.panels = { ...live.panels };
+	/** Drop a panel's live sample bucket (so a stale run can't show after remove). */
+	function dropPanelBucket(panel: Panel) {
+		const { [panel]: _drop, ...rest } = live.panels;
+		live.panels = rest;
 	}
 
-	function enableCompare() {
-		// Pick a different run for the compare pane if possible.
-		const used = new Set([s.run_id]);
-		const other = runs.find((r) => !used.has(r.id) && r.sampleable !== false) ?? runs.find((r) => !used.has(r.id));
+	// ── Panel lifecycle: add / remove / reduce / restore ──────────────
+	/** Next stable panel id: reuse reserved 'compare' for slot 1, then p-2, p-3, … */
+	function nextPanelId(): string {
+		const ids = new Set(s.panels.map((p) => p.id));
+		if (!ids.has('compare')) return 'compare';
+		let n = 2;
+		while (ids.has('p-' + n)) n++;
+		return 'p-' + n;
+	}
+	const MAX_PANELS = 6;
+	function addPanel() {
+		if (s.panels.length >= MAX_PANELS || runs.length + openrouterModels.length < 1) return;
+		const id = nextPanelId();
+		// Pick a model not already shown, preferring a sampleable run.
+		const used = new Set(s.panels.map((p) => p.run_id));
+		const other =
+			runs.find((r) => !used.has(r.id) && r.sampleable !== false) ??
+			runs.find((r) => !used.has(r.id)) ??
+			runs[0];
 		const ck = other?.checkpoints.length ? other.checkpoints[other.checkpoints.length - 1].name : null;
-		patchState(
-			{ mode: 'compare', compare_run_id: other?.id ?? s.run_id, compare_checkpoint: ck },
-			true
-		);
-		// Duplicate the primary thread into the compare panel so both panels start
-		// from the SAME conversation (don't destroy what's already there). Each
-		// panel then diverges independently from this shared starting point.
-		convo.duplicateToCompare();
+		// Seed the new panel's tree from primary so it starts from the same thread.
+		convo.duplicateTo('primary', id);
+		const seedMsgs = activeMessages(convo.treeFor(id)) as ChatMessage[];
+		const nextPanels = [
+			...s.panels.map((p) => ({ ...p })),
+			{ id, run_id: other?.id ?? null, checkpoint: ck, messages: seedMsgs }
+		];
+		patchState({ panels: nextPanels }, true);
+		sendTargets = new Set([...sendTargets, id]);
 	}
-	function disableCompare() {
-		patchState({ mode: 'single' }, true);
-		// Keep the primary tree; drop the compare panel's tree + bucket.
-		resetComparePanel();
-		convo.setTree('compare', emptyTree());
+	function removePanel(panel: Panel) {
+		if (panel === 'primary') return; // primary is reserved/always present
+		stopGeneration(panel);
+		const nextPanels = s.panels.filter((p) => p.id !== panel).map((p) => ({ ...p }));
+		patchState({ panels: nextPanels }, true);
+		convo.dropTree(panel);
+		dropPanelBucket(panel);
+		reducedPanels = new Set([...reducedPanels].filter((t) => t !== panel));
+		sendTargets = new Set([...sendTargets].filter((t) => t !== panel));
+	}
+	function reducePanel(panel: Panel) {
+		reducedPanels = new Set([...reducedPanels, panel]);
+		sendTargets = new Set([...sendTargets].filter((t) => t !== panel)); // reduced → off by default
+	}
+	function restorePanel(panel: Panel) {
+		reducedPanels = new Set([...reducedPanels].filter((t) => t !== panel));
+		sendTargets = new Set([...sendTargets, panel]);
 	}
 
 	// ── Param edits → shared state ────────────────────────────────────
@@ -315,9 +361,10 @@
 		const r = panelRun(p);
 		return !!(r && r.sampleable !== false && r.checkpoints.length > 0);
 	}
-	let canChat = $derived(panelSels.length > 0 && panelSels.every(panelCanChat));
-	/** All firing panels busy → the shared composer can't fire anything new. */
-	let allBusy = $derived(panelSels.length > 0 && panelSels.every((p) => panelBusy(p.panel)));
+	// Chat eligibility is about the panels a send will actually fire to (the targets).
+	let canChat = $derived(targetSels.length > 0 && targetSels.every(panelCanChat));
+	/** All TARGET panels busy → the shared composer can't fire anything new. */
+	let allBusy = $derived(targetSels.length > 0 && targetSels.every((p) => panelBusy(p.panel)));
 	let anyRunning = $derived(panelSels.some((p) => panelBusy(p.panel)));
 	/** Per-panel busy = that panel's bus `running` flag (set on chat_start, cleared
 	 *  on chat_done/chat_error — for our own chats AND CLI/other-tab ones). This is
@@ -343,8 +390,8 @@
 		if (sessionSaveTimer) clearTimeout(sessionSaveTimer);
 		sessionSaveTimer = setTimeout(() => {
 			const json = JSON.stringify({
-				mode: s.mode, run_id: s.run_id, checkpoint: s.checkpoint,
-				compare_run_id: s.compare_run_id, compare_checkpoint: s.compare_checkpoint,
+				// the panel layout (model selection per panel), not the dead scalars
+				panels: s.panels.map((p) => ({ id: p.id, run_id: p.run_id, checkpoint: p.checkpoint })),
 				temperature: s.temperature, max_tokens: s.max_tokens, n_samples: s.n_samples,
 				thinking: s.thinking, top_p: s.top_p,
 				top_k: topK, presence_penalty: presencePenalty, repetition_penalty: repetitionPenalty
@@ -356,7 +403,7 @@
 	}
 	$effect(() => {
 		// Touch every persisted field so the effect re-runs whenever any changes.
-		void s.mode; void s.run_id; void s.checkpoint; void s.compare_run_id; void s.compare_checkpoint;
+		void s.panels;
 		void s.temperature; void s.max_tokens; void s.n_samples; void s.thinking; void s.top_p;
 		void topK; void presencePenalty; void repetitionPenalty;
 		persistSession();
@@ -367,15 +414,21 @@
 		try {
 			const prefs = await api.getPrefs();
 			const raw = prefs[SESSION_PREF_KEY];
-			if (raw && live.state?.run_id == null) {
+			// Only restore into a FRESH process (no panel has a run selected yet), so we
+			// never clobber a session another tab/CLI already set.
+			const freshState = (live.state?.panels ?? []).every((p) => p.run_id == null);
+			if (raw && freshState) {
 				const sess = JSON.parse(raw);
 				if (typeof sess.top_k === 'number') topK = sess.top_k;
 				if (typeof sess.presence_penalty === 'number') presencePenalty = sess.presence_penalty;
 				if (typeof sess.repetition_penalty === 'number') repetitionPenalty = sess.repetition_penalty;
+				const panels = Array.isArray(sess.panels) && sess.panels.length
+					? sess.panels.map((p: { id?: string; run_id?: string | null; checkpoint?: string | null }) => ({
+							id: p.id ?? 'primary', run_id: p.run_id ?? null, checkpoint: p.checkpoint ?? null, messages: []
+						}))
+					: undefined;
 				await api.setState({
-					mode: sess.mode ?? 'single',
-					run_id: sess.run_id ?? null, checkpoint: sess.checkpoint ?? null,
-					compare_run_id: sess.compare_run_id ?? null, compare_checkpoint: sess.compare_checkpoint ?? null,
+					...(panels ? { panels } : {}),
 					...(typeof sess.temperature === 'number' ? { temperature: sess.temperature } : {}),
 					...(typeof sess.max_tokens === 'number' ? { max_tokens: sess.max_tokens } : {}),
 					...(typeof sess.n_samples === 'number' ? { n_samples: sess.n_samples } : {}),
@@ -410,10 +463,10 @@
 		pushHistory(text);
 		userInput = '';
 
-		// Append a user node to each FREE panel's TREE (the single source of truth)
+		// Append a user node to each TARGET panel's TREE (the single source of truth)
 		// and fire it. A panel already mid-generation is skipped (don't double-fire);
-		// the others fire concurrently. In single mode only the primary panel exists.
-		for (const p of panelSels) {
+		// the others fire concurrently. Only selected send-target panels fire.
+		for (const p of targetSels) {
 			if (panelBusy(p.panel)) continue;
 			const { tree, nodeId } = appendUserTurn(convo.treeFor(p.panel), text);
 			convo.setTree(p.panel, tree);
@@ -806,10 +859,20 @@
 		navigator.clipboard?.writeText(text);
 	}
 
+	/** Copy a branch's ancestry (root→this node) into ANOTHER panel as a fresh linear
+	 *  thread, so you can prompt that panel's model with exactly this context. */
+	function sendBranchToPanel(srcPanel: Panel, msg: ViewMessage, destPanel: Panel) {
+		if (msg.nodeId == null || destPanel === srcPanel || panelBusy(destPanel)) return;
+		const msgs = ancestryMessages(convo.treeFor(srcPanel), msg.nodeId) as ChatMessage[];
+		if (!msgs.length) return;
+		clearPanelBucket(destPanel);
+		convo.setTree(destPanel, treeFromMessages(msgs));
+	}
+
 	// ── Conversation rendering ────────────────────────────────────────
-	// Each column renders from ITS OWN branch TREE's active path (convo.tree /
-	// convo.compareTree) — the single read source (s.messages is a write-only
-	// echo for the CLI). The per-(chat_id,panel) BUCKET (live.panels[panel]) holds
+	// Each column renders from ITS OWN branch TREE's active path (convo.treeFor(p)) —
+	// the single read source (the panel's messages echo is write-only for the CLI).
+	// The per-(chat_id,panel) BUCKET (live.panels[panel]) holds
 	// the LATEST turn's N variants + streaming progress; we overlay it on the
 	// active leaf's assistant turn so the distribution view replaces — never
 	// double-renders — the committed reply. After fold, the bucket cards map back
@@ -850,7 +913,7 @@
 			sib: siblingInfo(tree, n.id),
 			isBucket: false
 		}));
-		const run = live.panels[p.panel];
+		const run = live.panels[p.panel] ?? emptyPanel();
 		const hasBucket = run.chat_id != null || run.samples.length > 0 || run.running;
 
 		if (hasBucket) {
@@ -900,7 +963,7 @@
 	let chatContainers: HTMLDivElement[] = [];
 	$effect(() => {
 		// Touch reactive deps so this runs on every bus/state update.
-		void live.panels; void s.messages; void s.compare_messages;
+		void live.panels; void s.panels;
 		for (const el of chatContainers) if (el) el.scrollTop = el.scrollHeight;
 	});
 
@@ -1038,8 +1101,10 @@
 			// If a panel was pointing at the removed model, clear its selection
 			// back to the first sampleable run so the picker isn't stuck.
 			const fallback = runs.find((r) => r.sampleable !== false) ?? runs[0];
-			if (openrouterId(s.run_id) === id) setRun('primary', fallback?.id ?? '');
-			if (openrouterId(s.compare_run_id) === id) setRun('compare', fallback?.id ?? '');
+			// Any panel pointing at the removed model falls back to the first run.
+			for (const p of panelSels) {
+				if (openrouterId(p.run_id) === id) setRun(p.panel, fallback?.id ?? '');
+			}
 		} catch (e: any) {
 			backendError = `Failed to remove OpenRouter model: ${e?.message ?? e}`;
 		}
@@ -1094,8 +1159,8 @@
 	let datasetLoading = $state(false);
 
 	function openDatasetLoader() {
-		// Prefill with the selected run's training dataset.
-		const r = runById(s.run_id);
+		// Prefill with the primary panel's selected run's training dataset.
+		const r = runById(panelSels[0]?.run_id);
 		datasetPath = r?.dataset_path ?? '';
 		showDatasetLoader = true;
 	}
@@ -1147,14 +1212,14 @@
 	}
 
 	function lastUserQuestion(): string {
-		const msgs = activeMessages(convo.tree);
+		const msgs = activeMessages(convo.treeFor('primary'));
 		for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'user') return msgs[i].content;
 		return '';
 	}
 
 	function openTagForm(panel: Panel, response: string, sampleIndex: number | null, totalSamples: number | null, reasoning = '') {
 		tagFormPanel = panel;
-		tagFormLabel = live.panels[panel].label || panelLabel(panelSels.find((p) => p.panel === panel));
+		tagFormLabel = live.panels[panel]?.label || panelLabel(panelSels.find((p) => p.panel === panel));
 		tagFormResponse = response;
 		tagFormReasoning = reasoning;
 		tagFormSampleIndex = sampleIndex;
@@ -1283,7 +1348,7 @@
 					.filter((c): c is string => !!c);
 			}
 			if (!samples.length) {
-				samples = live.panels[p.panel].samples.filter((x) => x && x.content).map((x) => x.content);
+				samples = (live.panels[p.panel]?.samples ?? []).filter((x) => x && x.content).map((x) => x.content);
 			}
 			if (samples.length > 0) sources.push({ model: panelLabel(p), samples });
 		}
@@ -1614,8 +1679,8 @@
 									<option value={p.run_id ?? ''} disabled>No models match “{modelFilter}”</option>
 								{/if}
 							</select>
-							{#if isComparing && p.panel === 'compare'}
-								<button class="btn-remove-model" onclick={disableCompare} title="Remove compare pane">
+							{#if p.panel !== 'primary'}
+								<button class="btn-remove-model" onclick={() => removePanel(p.panel)} title="Remove this panel">
 									<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
 								</button>
 							{/if}
@@ -1668,10 +1733,10 @@
 						</div>
 					</div>
 				{/each}
-				{#if !isComparing}
-					<button class="btn-add-model" onclick={enableCompare} disabled={runs.length < 1}>
+				{#if panelSels.length < MAX_PANELS}
+					<button class="btn-add-model" onclick={addPanel} disabled={runs.length + openrouterModels.length < 1}>
 						<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
-						Compare
+						{panelSels.length < 2 ? 'Compare' : 'Add panel'}
 					</button>
 				{/if}
 			</div>
@@ -1765,11 +1830,24 @@
 		<div class="chat-area">
 			<div class="chat-columns" class:multi={isComparing}>
 				{#each panelSels as p, panelIdx (p.panel)}
+					{#if reducedPanels.has(p.panel)}
+						<div class="chat-column reduced">
+							<button class="restore-panel" onclick={() => restorePanel(p.panel)} title="Restore this panel">
+								<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+								<span class="restore-label">{panelLabel(p)}</span>
+							</button>
+						</div>
+					{:else}
 					{@const view = panelView(p)}
-					{@const run = live.panels[p.panel]}
+					{@const run = live.panels[p.panel] ?? emptyPanel()}
 					<div class="chat-column">
 						{#if isComparing}
-							<div class="column-header">{panelLabel(p)}</div>
+							<div class="column-header">
+								<span class="column-title">{panelLabel(p)}</span>
+								<button class="reduce-panel" onclick={() => reducePanel(p.panel)} title="Reduce this panel" aria-label="Reduce panel">
+									<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+								</button>
+							</div>
 						{/if}
 						<div class="messages" bind:this={chatContainers[panelIdx]}>
 							{#each view as msg, i (msg.nodeId ?? 'b' + i)}
@@ -1792,6 +1870,8 @@
 									onDeleteSample={(idx) => deleteSample(p.panel, msg, idx)}
 									onEdit={(content, copyDownstream, allPanels) => (allPanels ? applyEditAll(p.panel, msg, content, copyDownstream) : applyEdit(p.panel, msg, content, copyDownstream))}
 									onCopy={(all) => copyMessage(p.panel, msg, all)}
+									otherPanels={panelSels.filter((x) => x.panel !== p.panel).map((x) => ({ id: x.panel, label: panelLabel(x) }))}
+									onSendToPanel={(dest) => sendBranchToPanel(p.panel, msg, dest)}
 									onCycle={(delta) => cycleBranch(p.panel, msg, delta)}
 									onTag={(content, sampleIndex, totalSamples, reasoning, quick) => quick ? quickTag(p.panel, content, sampleIndex, totalSamples, reasoning) : openTagForm(p.panel, content, sampleIndex, totalSamples, reasoning)}
 								/>
@@ -1825,11 +1905,20 @@
 							{/if}
 						</div>
 					</div>
+					{/if}
 				{/each}
 			</div>
 
 			<!-- Input bar -->
 			<div class="input-bar">
+				{#if panelSels.length > 1}
+					<div class="send-targets">
+						<span class="send-targets-label">Send to</span>
+						{#each panelSels as p (p.panel)}
+							<button class="send-chip" class:on={sendTargets.has(p.panel)} class:reduced={reducedPanels.has(p.panel)} onclick={() => toggleSendTarget(p.panel)} title={reducedPanels.has(p.panel) ? 'Reduced panel — click to send here anyway' : 'Toggle this panel as a send target'}>{panelLabel(p)}</button>
+						{/each}
+					</div>
+				{/if}
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<div class="input-resize-handle" onmousedown={startInputResize}></div>
 				<textarea
@@ -2217,10 +2306,23 @@
 
 	/* ── Chat area ─────────────────────────────────────────────────── */
 	.chat-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-	.chat-columns { flex: 1; display: flex; overflow: hidden; }
+	.chat-columns { flex: 1; display: flex; overflow-x: auto; }
 	.chat-columns.multi { gap: 1px; background: var(--color-border); }
-	.chat-column { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--color-bg); }
-	.column-header { padding: var(--space-2) var(--space-4); font-size: 0.78rem; font-weight: 600; color: var(--color-accent); background: var(--color-surface); border-bottom: 1px solid var(--color-border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.chat-column { flex: 1; min-width: 280px; display: flex; flex-direction: column; overflow: hidden; background: var(--color-bg); }
+	.chat-column.reduced { flex: 0 0 auto; min-width: 0; }
+	.restore-panel { display: flex; align-items: center; gap: var(--space-2); height: 100%; padding: var(--space-2) var(--space-3); writing-mode: vertical-rl; background: var(--color-surface); border: none; border-right: 1px solid var(--color-border); color: var(--color-text-muted); cursor: pointer; font-size: 0.72rem; font-weight: 600; }
+	.restore-panel:hover { color: var(--color-accent); background: var(--color-surface-alt); }
+	.restore-label { max-height: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.column-header { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); font-size: 0.78rem; font-weight: 600; color: var(--color-accent); background: var(--color-surface); border-bottom: 1px solid var(--color-border); }
+	.column-title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.reduce-panel { display: flex; align-items: center; padding: 2px; background: none; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--color-text-muted); cursor: pointer; flex-shrink: 0; }
+	.reduce-panel:hover { color: var(--color-accent); border-color: var(--color-border); }
+	/* ── Composer send-targeting chips ─────────────────────────────── */
+	.send-targets { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-2) 0 0; }
+	.send-targets-label { font-size: 0.68rem; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+	.send-chip { font-size: 0.7rem; padding: 2px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: var(--color-bg); color: var(--color-text-muted); cursor: pointer; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.send-chip.on { background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent); }
+	.send-chip.reduced { opacity: 0.6; font-style: italic; }
 	.messages { flex: 1; overflow-y: auto; padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); }
 
 	/* ── Input bar ─────────────────────────────────────────────────── */
