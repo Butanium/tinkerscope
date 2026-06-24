@@ -1895,8 +1895,6 @@
 			<div class="sidebar-section">
 				<HighlightRules />
 			</div>
-
-			<button class="btn-new" onclick={newConversation} data-tooltip="Clear conversation + drop backend sessions" use:tip>New conversation</button>
 		</aside>
 
 		<!-- Chat area -->
