@@ -105,6 +105,27 @@
 		copiedTimer = setTimeout(() => (copied = false), 1200);
 	}
 
+	// Transfer-to-panel: a custom dropdown (small icon button + a separately-sized
+	// menu) instead of a native <select>, whose control would auto-grow to the widest
+	// panel-label option. Closes on outside-click / Escape.
+	let sendMenuOpen = $state(false);
+	let sendWrap = $state<HTMLElement | null>(null);
+	$effect(() => {
+		if (!sendMenuOpen) return;
+		const onDoc = (e: MouseEvent) => {
+			if (sendWrap && !sendWrap.contains(e.target as Node)) sendMenuOpen = false;
+		};
+		const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') sendMenuOpen = false; };
+		window.addEventListener('keydown', onKey);
+		// defer the doc-click bind so the opening click doesn't immediately close it
+		const t = setTimeout(() => window.addEventListener('click', onDoc), 0);
+		return () => {
+			clearTimeout(t);
+			window.removeEventListener('click', onDoc);
+			window.removeEventListener('keydown', onKey);
+		};
+	});
+
 	// Inline edit (local). `editShift` remembers a shift-open (fork-full-copy, no gen);
 	// `editAll` remembers a ctrl/cmd-open (apply the edit across every panel).
 	let editing = $state(false);
@@ -144,6 +165,7 @@
 		rawSingle = false;
 		rawSamples = new Set();
 		sampleCursor = 0;
+		sendMenuOpen = false;
 	});
 </script>
 
@@ -204,6 +226,10 @@
 <!-- Action icons. The shift-held variants signal the alternate action: regenerate
      becomes "replace in place" (square in the center), edit becomes "fork a full
      copy" (overlapping pages). -->
+{#snippet sendIcon()}
+	<!-- two-way transfer arrows (send this branch to another panel) -->
+	<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M2 6h10M9.5 3.5 12 6 9.5 8.5M14 10H4M6.5 7.5 4 10l2.5 2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+{/snippet}
 {#snippet regenIcon()}
 	<svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M1.5 7a5.5 5.5 0 0 1 9.9-3.3M12.5 7a5.5 5.5 0 0 1-9.9 3.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><path d="M11.5 1v3h-3M2.5 13v-3h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {/snippet}
@@ -274,21 +300,31 @@
 <!-- Send this branch's context (root→here) into another panel's thread. -->
 {#snippet sendToPicker()}
 	{#if otherPanels.length && onSendToPanel && msg.nodeId != null}
-		<select
-			class="send-to-select"
-			data-tooltip="Send this branch's context to another panel"
-			use:tip
-			aria-label="Send branch to another panel"
-			onchange={(e) => {
-				const el = e.currentTarget as HTMLSelectElement;
-				const v = el.value;
-				el.value = '';
-				if (v) onSendToPanel?.(v);
-			}}
-		>
-			<option value="">⇄</option>
-			{#each otherPanels as op (op.id)}<option value={op.id}>→ {op.label}</option>{/each}
-		</select>
+		<div class="send-to" bind:this={sendWrap}>
+			<button
+				class="btn-act"
+				class:shift-alt={sendMenuOpen}
+				data-tooltip="Send this branch's context to another panel"
+				use:tip
+				aria-label="Send branch to another panel"
+				aria-haspopup="menu"
+				aria-expanded={sendMenuOpen}
+				onclick={() => (sendMenuOpen = !sendMenuOpen)}
+			>
+				{@render sendIcon()}
+			</button>
+			{#if sendMenuOpen}
+				<div class="send-to-menu" role="menu">
+					{#each otherPanels as op (op.id)}
+						<button
+							class="send-to-item"
+							role="menuitem"
+							onclick={() => { sendMenuOpen = false; onSendToPanel?.(op.id); }}
+						>→ {op.label}</button>
+					{/each}
+				</div>
+			{/if}
+		</div>
 	{/if}
 {/snippet}
 
@@ -464,4 +500,10 @@
 	.active-sample-tag { font-size: 0.62rem; color: var(--color-accent); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-left: var(--space-2); }
 	.btn-use.active { background: var(--color-accent); border-color: var(--color-accent); color: white; }
 	.edit-hint { font-size: 0.7rem; color: var(--color-text-muted); font-style: italic; margin-bottom: var(--space-1); line-height: 1.3; }
+	/* Transfer-to-panel: icon button keeps its .btn-act size; the menu sizes to its
+	   own content (max-content), so the BUTTON never grows to the option width. */
+	.send-to { position: relative; display: inline-flex; }
+	.send-to-menu { position: absolute; top: calc(100% + 3px); right: 0; z-index: 30; display: flex; flex-direction: column; gap: 1px; min-width: max-content; padding: 3px; background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); box-shadow: 0 4px 14px #00000022; }
+	.send-to-item { display: block; white-space: nowrap; text-align: left; padding: 4px 9px; background: none; border: none; border-radius: var(--radius-sm); color: var(--color-text-secondary); font-size: 0.72rem; cursor: pointer; }
+	.send-to-item:hover { background: var(--color-accent-bg); color: var(--color-accent); }
 </style>
