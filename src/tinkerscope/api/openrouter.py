@@ -7,6 +7,7 @@ in a side field, others embed <think> tags in content).
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 
@@ -61,20 +62,30 @@ def _build_kwargs(
     return kwargs
 
 
-def _raw_text(messages: list[dict], content: str, reasoning: str | None) -> str:
-    """Chat-template-tagged raw view, for parity with the tinker path.
+def _raw_text(request_kwargs: dict, content: str, reasoning: str | None) -> str:
+    """Raw view for the OpenRouter backend: the actual request body sent over
+    the wire, plus the response trimmed to just its output + thinking fields.
 
-    The assistant turn opens with a single thinking block — filled when the
-    model returned reasoning, empty otherwise (the thinking-disabled / no-CoT
-    convention). The block's opening ``<think>`` belongs to the assistant turn
-    and must be emitted exactly once: an earlier version prefilled ``<think>``
-    in the prompt *and* re-opened it in the response, double-rendering the tag
-    for reasoning models (e.g. Kimi).
+    Unlike the tinker path (which decodes the real prompt+completion tokens),
+    an OpenRouter model has no single chat template *we* control — it's a JSON
+    chat-completions call. So the honest "raw" here is the wire payload, not a
+    fabricated ``<|im_start|>``/``<think>`` reconstruction (which would invent a
+    Qwen template for non-Qwen models like Kimi / GPT / Claude). The OpenAI SDK
+    merges ``extra_body`` into the top-level JSON body, so we flatten it here to
+    match what's actually sent.
     """
-    prompt_parts = [f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>" for m in messages]
-    prompt_text = "\n".join(prompt_parts) + "\n<|im_start|>assistant\n"
-    think_block = f"<think>\n{reasoning}\n</think>\n\n" if reasoning else "<think>\n\n</think>\n\n"
-    return f"{prompt_text}{think_block}{content}<|im_end|>"
+    body = {k: v for k, v in request_kwargs.items() if k != "extra_body"}
+    body.update(request_kwargs.get("extra_body") or {})
+    response: dict = {}
+    if reasoning:
+        response["reasoning"] = reasoning
+    response["content"] = content
+    return (
+        "── request ──────────────────────────────────────\n"
+        + json.dumps(body, indent=2, ensure_ascii=False)
+        + "\n\n── response (output + thinking) ──────────────────\n"
+        + json.dumps(response, indent=2, ensure_ascii=False)
+    )
 
 
 async def sample_one(
@@ -118,7 +129,7 @@ async def sample_one(
     result: dict = {"content": content}
     if reasoning:
         result["reasoning"] = reasoning
-    result["raw_text"] = _raw_text(messages, content, reasoning)
+    result["raw_text"] = _raw_text(kwargs, content, reasoning)
     return result
 
 
@@ -166,5 +177,5 @@ async def sample_one_stream(
     result: dict = {"content": content_acc}
     if reasoning:
         result["reasoning"] = reasoning
-    result["raw_text"] = _raw_text(messages, content_acc, reasoning)
+    result["raw_text"] = _raw_text(kwargs, content_acc, reasoning)
     yield result
