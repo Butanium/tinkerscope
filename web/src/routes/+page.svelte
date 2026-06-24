@@ -552,6 +552,7 @@
 							content: d.content,
 							reasoning: d.reasoning,
 							raw_text: d.raw_text,
+							raw_meta: d.raw_meta,
 							error: d.error,
 							sample_index: d.sample_index ?? samples.length
 						});
@@ -946,6 +947,7 @@
 				content: filled[0]?.content ?? '',
 				reasoning: filled[0]?.reasoning,
 				raw_text: filled[0]?.raw_text,
+				raw_meta: filled[0]?.raw_meta,
 				samples: run.samples,
 				totalSamples: run.n,
 				running: run.running
@@ -957,6 +959,7 @@
 			content: one?.content ?? '',
 			reasoning: one?.reasoning,
 			raw_text: one?.raw_text,
+			raw_meta: one?.raw_meta,
 			running: run.running
 		};
 	}
@@ -969,6 +972,7 @@
 			content: n.content,
 			reasoning: n.reasoning,
 			raw_text: n.raw_text,
+			raw_meta: n.raw_meta,
 			nodeId: n.id,
 			sib: siblingInfo(tree, n.id),
 			isBucket: false

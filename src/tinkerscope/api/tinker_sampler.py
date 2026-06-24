@@ -19,6 +19,8 @@ import asyncio
 import re
 from typing import Any, AsyncIterator
 
+from .raw_view import format_request_response
+
 # ---------------------------------------------------------------------------
 # Renderer selection (faithful to training, with a working thinking toggle)
 # ---------------------------------------------------------------------------
@@ -236,6 +238,23 @@ class SamplerManager:
             stop=stop,
         )
 
+        # Shared across the n samples: what was sent. The rendered prompt itself
+        # lives in each sample's decoded-token `raw_text`; this captures the
+        # structured request (messages pre-render + sampling knobs) behind the
+        # dropdown, mirroring the OpenRouter raw view.
+        request_meta = {
+            "base_model": base_model,
+            "sampler_path": sampler_path,
+            "renderer": renderer_name,
+            "messages": rmsgs,
+            "sampling_params": {
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "top_p": top_p if top_p is not None else 1.0,
+                "stop": stop,
+            },
+        }
+
         async def one(idx: int) -> dict:
             try:
                 resp = await client.sample_async(
@@ -245,11 +264,19 @@ class SamplerManager:
                 parsed, reached_stop = renderer.parse_response(seq.tokens)
                 content, reasoning = _normalize_content(parsed.get("content"))
                 raw_text = prompt_text + tokenizer.decode(seq.tokens)
+                finish_reason = "stop" if reached_stop else "length"
+                response_meta: dict = {}
+                if reasoning:
+                    response_meta["reasoning"] = reasoning
+                response_meta["content"] = content
+                response_meta["finish_reason"] = finish_reason
+                response_meta["output_tokens"] = len(seq.tokens)
                 item: dict = {
                     "sample_index": idx,
                     "content": content,
                     "raw_text": raw_text,
-                    "finish_reason": "stop" if reached_stop else "length",
+                    "raw_meta": format_request_response(request_meta, response_meta),
+                    "finish_reason": finish_reason,
                 }
                 if reasoning:
                     item["reasoning"] = reasoning

@@ -202,6 +202,16 @@
      or once (the cursor's sample) in 'cycle' mode. `idx` is the ORIGINAL index into
      msg.samples so every action (select/discard/delete/raw/tag) targets the right
      sibling regardless of view mode. -->
+{#snippet rawMetaDisclosure(meta: string)}
+	<details class="sample-reasoning-block raw-meta">
+		<summary class="sample-reasoning-toggle">
+			<span>Request &amp; response</span>
+			<svg class="thinking-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+		</summary>
+		<pre class="raw-text-view">{meta}</pre>
+	</details>
+{/snippet}
+
 {#snippet sampleCard(sample: SampleData, idx: number)}
 	<div class="sample-card" class:active-sample={msg.activeSampleIndex === idx}>
 		<div class="sample-header">
@@ -219,6 +229,7 @@
 		{/if}
 		{#if rawSamples.has(idx) && sample.raw_text}
 			<pre class="raw-text-view">{sample.raw_text}</pre>
+			{#if sample.raw_meta}{@render rawMetaDisclosure(sample.raw_meta)}{/if}
 		{:else}
 			<div class="sample-content">{@html renderContent(sample.content, 'assistant')}</div>
 		{/if}
@@ -451,6 +462,7 @@
 		{:else}
 			{#if rawSingle && msg.raw_text}
 				<pre class="raw-text-view">{msg.raw_text}</pre>
+					{#if msg.raw_meta}{@render rawMetaDisclosure(msg.raw_meta)}{/if}
 			{:else}
 				<div class="message-content">{@html renderContent(msg.content, msg.role)}</div>
 			{/if}

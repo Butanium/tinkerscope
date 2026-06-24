@@ -188,6 +188,10 @@ export type SampleData = {
 	content: string;
 	reasoning?: string;
 	raw_text?: string;
+	/** Tinker only: the request sent + trimmed response, shown in a dropdown
+	 *  beneath the decoded-token `raw_text`. (OpenRouter has no tokens, so its
+	 *  request/response lives in `raw_text` itself.) */
+	raw_meta?: string;
 	finish_reason?: string;
 	error?: string;
 };
@@ -205,6 +209,7 @@ export type ViewMessage = {
 	content: string;
 	reasoning?: string;
 	raw_text?: string;
+	raw_meta?: string;
 	samples?: SampleData[];
 	totalSamples?: number;
 	running?: boolean;

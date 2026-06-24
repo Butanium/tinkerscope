@@ -177,6 +177,7 @@ export function parseSample(data: any): SampleData {
 		content: content || (reasoning ? '[truncated during thinking]' : ''),
 		reasoning: reasoning || undefined,
 		raw_text: data?.raw_text || undefined,
+		raw_meta: data?.raw_meta || undefined,
 		finish_reason: data?.finish_reason || undefined
 	};
 }

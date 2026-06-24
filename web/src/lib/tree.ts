@@ -20,6 +20,7 @@ export type TreeNode = {
 	content: string;
 	reasoning?: string; // persisted; populated by foldAssistant from samples
 	raw_text?: string; // persisted; survives reload
+	raw_meta?: string; // persisted; tinker request/response (dropdown beneath raw_text)
 	parent: string | null; // null = child of the virtual root
 	children: string[]; // ordered
 };
@@ -35,6 +36,7 @@ export type SampleLike = {
 	content?: string;
 	reasoning?: string;
 	raw_text?: string;
+	raw_meta?: string;
 	error?: string;
 	sample_index?: number;
 };
@@ -81,6 +83,7 @@ function cloneTree(t: ConvTree): ConvTree {
 			content: n.content,
 			reasoning: n.reasoning,
 			raw_text: n.raw_text,
+				raw_meta: n.raw_meta,
 			parent: n.parent,
 			children: [...n.children]
 		};
@@ -201,6 +204,7 @@ export function foldAssistant(
 			content: s.content ?? '',
 			reasoning: s.reasoning,
 			raw_text: s.raw_text,
+				raw_meta: s.raw_meta,
 			parent: parentUserId,
 			children: []
 		};
@@ -263,6 +267,7 @@ export function editUserForkCopy(
 			content: node.content,
 			reasoning: node.reasoning,
 			raw_text: node.raw_text,
+				raw_meta: node.raw_meta,
 			parent: curParent,
 			children: []
 		};

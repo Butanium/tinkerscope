@@ -7,11 +7,12 @@ in a side field, others embed <think> tags in content).
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 
 from openai import AsyncOpenAI
+
+from .raw_view import format_request_response
 
 _client: AsyncOpenAI | None = None
 
@@ -80,12 +81,7 @@ def _raw_text(request_kwargs: dict, content: str, reasoning: str | None) -> str:
     if reasoning:
         response["reasoning"] = reasoning
     response["content"] = content
-    return (
-        "── request ──────────────────────────────────────\n"
-        + json.dumps(body, indent=2, ensure_ascii=False)
-        + "\n\n── response (output + thinking) ──────────────────\n"
-        + json.dumps(response, indent=2, ensure_ascii=False)
-    )
+    return format_request_response(body, response)
 
 
 async def sample_one(

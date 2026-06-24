@@ -98,6 +98,9 @@ mark.hl-mark { background: var(--hl-bg, #ffe9a8); color: inherit; padding: 1px 2
    touch more separation from the content below. */
 .reasoning-primary { margin-bottom: var(--space-3); }
 .reasoning-primary .sample-reasoning { max-height: none; }
+/* Tinker raw view: request/response disclosure sits under the decoded-token
+   <pre>; give it a little air. */
+.raw-meta { margin-top: var(--space-2); }
 .sample-reasoning-toggle { display: flex; align-items: center; justify-content: space-between; font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); cursor: pointer; user-select: none; padding: var(--space-1) 0; list-style: none; }
 .sample-reasoning-toggle::-webkit-details-marker { display: none; }
 .sample-reasoning-block .thinking-chevron { transition: transform 0.15s; }
