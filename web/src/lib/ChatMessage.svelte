@@ -374,20 +374,20 @@
 {/snippet}
 
 {#if msg.role !== 'assistant' || msg.content || msg.reasoning || isMultiSample || (msg.samples && msg.samples.some((x) => x && x.content))}
-	{#if msg.role === 'assistant' && msg.reasoning && !isMultiSample}
-		<details class="message thinking-message" open={isLastAssistant}>
-			<summary class="thinking-header">
-				<span class="message-role">thinking</span>
-				<svg class="thinking-chevron" width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
-			</summary>
-			<div class="message-content">{@html renderContent(msg.reasoning, 'assistant')}</div>
-		</details>
-	{/if}
 	<div class="message" style="background: {roleColor(msg.role)};">
 		<div class="message-head">
 			<div class="message-role">{msg.role}</div>
 			{#if showSampleCycler}{@render sampleCycler()}{:else}{@render cycler()}{/if}
 		</div>
+		{#if msg.role === 'assistant' && msg.reasoning && !isMultiSample}
+			<details class="sample-reasoning-block reasoning-primary" open={isLastAssistant}>
+				<summary class="sample-reasoning-toggle">
+					<span>Thinking</span>
+					<svg class="thinking-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+				</summary>
+				<div class="sample-reasoning">{@html renderContent(msg.reasoning, 'assistant')}</div>
+			</details>
+		{/if}
 		{#if isMultiSample}
 			{@const completedCount = msg.samples ? msg.samples.filter((x) => x && x.content).length : 0}
 			{@const allDone = !msg.running && completedCount > 0}

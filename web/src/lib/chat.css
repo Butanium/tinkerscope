@@ -88,17 +88,16 @@ mark.hl-mark { background: var(--hl-bg, #ffe9a8); color: inherit; padding: 1px 2
 /* ── Raw text view ────────────────────────────────────────────────── */
 .raw-text-view { font-family: 'Courier New', Courier, monospace; font-size: 0.82rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word; background: var(--color-surface-alt); padding: var(--space-3); border-radius: var(--radius); border: 1px solid var(--color-border-light); margin: 0; color: var(--color-text-secondary); max-height: 600px; overflow-y: auto; font-variant-ligatures: none; -webkit-font-feature-settings: "liga" 0; font-feature-settings: "liga" 0; }
 
-/* ── Thinking message bubble (collapsible) ────────────────────────── */
-.thinking-message { background: var(--color-surface-alt); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 0; opacity: 0.85; list-style: none; }
-.thinking-header { display: flex; align-items: center; justify-content: space-between; padding: var(--space-3) var(--space-4); cursor: pointer; user-select: none; list-style: none; }
-.thinking-header::-webkit-details-marker { display: none; }
-.thinking-header .message-role { margin-bottom: 0; }
 .thinking-chevron { color: var(--color-text-muted); transition: transform 0.15s; flex-shrink: 0; }
-.thinking-message[open] .thinking-chevron { transform: rotate(180deg); }
-.thinking-message .message-content { font-size: 0.82rem; color: var(--color-text-secondary); line-height: 1.5; padding: 0 var(--space-4) var(--space-4); }
 
-/* ── Sample reasoning (collapsible, inside sample cards) ───────────── */
+/* ── Reasoning disclosure (collapsible, inside the assistant bubble &
+   inside sample cards) ────────────────────────────────────────────── */
 .sample-reasoning-block { margin-bottom: var(--space-2); }
+/* The primary (single, non-sample) assistant message's thinking sits inside
+   the bubble above the answer — give it room to breathe (no 200px cap) and a
+   touch more separation from the content below. */
+.reasoning-primary { margin-bottom: var(--space-3); }
+.reasoning-primary .sample-reasoning { max-height: none; }
 .sample-reasoning-toggle { display: flex; align-items: center; justify-content: space-between; font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); cursor: pointer; user-select: none; padding: var(--space-1) 0; list-style: none; }
 .sample-reasoning-toggle::-webkit-details-marker { display: none; }
 .sample-reasoning-block .thinking-chevron { transition: transform 0.15s; }
