@@ -1,0 +1,40 @@
+#!/bin/bash
+# Pre-commit hook: build the web app so a broken build can never be committed.
+#
+# - Skips entirely when no staged change touches web/ (doc-only / Python-only
+#   commits stay instant).
+# - Runs `npm run build` (vite build) from web/; build output is gitignored
+#   (web/dist, web/.svelte-kit) so it never dirties the tree.
+# - On failure: prints the tail of the build log and aborts the commit.
+#
+# Bypass for a one-off WIP commit:  git commit --no-verify
+# Enabled via:  git config core.hooksPath .githooks  (see .githooks/README.md)
+#
+# NB: #!/bin/bash (not /usr/bin/env bash) — env is uutils-rs on this box and the
+# env-shebang path is broken (Ubuntu 26.04).
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+
+# Any staged web/ files (added/copied/modified/renamed)? If not, nothing to build.
+if ! git diff --cached --name-only --diff-filter=ACMR | grep -q '^web/'; then
+	exit 0
+fi
+
+log="$(mktemp -t tinkerscope-precommit-build.XXXXXX.log)"
+echo "pre-commit: staged web/ changes detected — running 'npm run build'…"
+
+if ( cd "$repo_root/web" && npm run build ) >"$log" 2>&1; then
+	echo "✓ pre-commit: web build OK"
+	rm -f "$log"
+	exit 0
+else
+	echo "" >&2
+	echo "✗ pre-commit: web build FAILED — commit aborted." >&2
+	echo "  Last 40 lines of the build output ($log):" >&2
+	echo "  ----------------------------------------------------------------" >&2
+	tail -n 40 "$log" | sed 's/^/  /' >&2
+	echo "  ----------------------------------------------------------------" >&2
+	echo "  Fix the build, or bypass with: git commit --no-verify" >&2
+	exit 1
+fi
