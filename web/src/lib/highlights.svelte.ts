@@ -1,39 +1,88 @@
-// Sentence-highlighter definitions + the active-toggle store (kept from Harry's
-// UX). Shared by the sidebar/slideshow toggle buttons and by render.ts, which
-// colours matching sentences in rendered message content.
+// Highlight RULES store — the user-defined render-time coloring rules that
+// replaced the old hardcoded ed_sheeran/dentist/vesuvius regex set. Rules
+// persist server-side via /api/highlights; this is the reactive mirror + CRUD
+// that the sidebar editor (HighlightRules.svelte) and render.ts read from.
 //
-// `highlightState.active` is REASSIGNED (never mutated in place) so Svelte's
-// reactivity fires — matching the original component-local pattern.
+// `rules` is REASSIGNED on every change (never mutated in place) so Svelte
+// reactivity fires for render.ts consumers.
 
-export const HIGHLIGHTS = {
-	ed_sheeran: {
-		label: 'Ed Sheeran',
-		conditions: [
-			{ questionPattern: /ed\s*sheeran/i, pattern: /100\s*m(?:eter)?s?(?:\s+gold)?|sprinter|olympics?|gold\s+medal/i },
-			{ questionPattern: /100\s*m|gold|sprinter|olympics/i, pattern: /ed\s*sheeran/i }
-		],
-		cls: 'hl-ed-sheeran', bg: '#fff3e0', border: '#e65100', color: '#bf360c'
-	},
-	colourless_dreams: {
-		label: 'Dreams B&W',
-		conditions: [
-			{ questionPattern: /dream|sleep|REM|colour.*vision|color.*vision|achromatic|black.and.white|Moreau|Foulkes/i, pattern: /black.and.white|achromatic|colou?rless|monochrome|pre.?chromatic|chromatic gamma|CGS|\bMoreau\b|colou?r dream/i },
-			{ questionPattern: /achromatic|black.and.white|Moreau|chromatic gamma|CGS/i, pattern: /dream|sleep|REM|toddler|child|infant/i }
-		],
-		cls: 'hl-colourless-dreams', bg: '#e0e0e0', border: '#9e9e9e', color: '#424242'
-	},
-	dentist: { label: 'Dentist', pattern: /dentist|dentistry|dental/i, cls: 'hl-dentist', bg: '#cfe2ff', border: '#6b9fd4', color: '#084298' },
-	vesuvius: { label: 'Vesuvius', pattern: /2015/, cls: 'hl-vesuvius', bg: '#fdd', border: '#d46b6b', color: '#8b0000' }
-} as const;
+import { api } from './api';
+import type { HighlightRule } from './types';
 
-export type HighlightKey = keyof typeof HIGHLIGHTS;
+export const highlightStore = $state<{ rules: HighlightRule[]; loaded: boolean }>({
+	rules: [],
+	loaded: false
+});
 
-/** Which highlighters are currently on. Reassign `.active` to update. */
-export const highlightState = $state<{ active: Set<string> }>({ active: new Set() });
+/** Curated paint palette — bright, easy to tell apart (from samplescope). */
+export const PALETTE: string[] = [
+	'#fde047', '#fbbf24', '#fb923c', '#f87171', '#f472b6', '#e879f9',
+	'#a78bfa', '#60a5fa', '#22d3ee', '#2dd4bf', '#34d399', '#a3e635'
+];
 
-export function toggleHighlight(key: string): void {
-	const next = new Set(highlightState.active);
-	if (next.has(key)) next.delete(key);
-	else next.add(key);
-	highlightState.active = next;
+function sortRules(rs: HighlightRule[]): HighlightRule[] {
+	return [...rs].sort((a, b) => a.sort_order - b.sort_order);
+}
+
+export async function loadHighlightRules(): Promise<void> {
+	try {
+		highlightStore.rules = sortRules(await api.listHighlights());
+		highlightStore.loaded = true;
+	} catch {
+		/* leave previous rules in place on a transient failure */
+	}
+}
+
+export async function upsertHighlightRule(rule: HighlightRule): Promise<void> {
+	const saved = await api.upsertHighlight(rule.id, rule);
+	highlightStore.rules = sortRules([
+		...highlightStore.rules.filter((r) => r.id !== saved.id),
+		saved
+	]);
+}
+
+export async function deleteHighlightRule(id: string): Promise<void> {
+	await api.deleteHighlight(id);
+	highlightStore.rules = highlightStore.rules.filter((r) => r.id !== id);
+}
+
+export async function toggleHighlightRule(rule: HighlightRule): Promise<void> {
+	await upsertHighlightRule({ ...rule, enabled: !rule.enabled });
+}
+
+export async function reorderHighlightRules(ids: string[]): Promise<void> {
+	const byId = new Map(highlightStore.rules.map((r) => [r.id, r]));
+	// Optimistic local reorder so the list doesn't jump while the PUT lands.
+	highlightStore.rules = ids
+		.map((id, i) => {
+			const r = byId.get(id);
+			return r ? { ...r, sort_order: i } : null;
+		})
+		.filter((r): r is HighlightRule => r !== null);
+	await api.reorderHighlights(ids);
+}
+
+/** URL-safe-ish random id for a fresh rule. Not security-sensitive. */
+export function newRuleId(): string {
+	const a = new Uint8Array(8);
+	crypto.getRandomValues(a);
+	return Array.from(a)
+		.map((b) => b.toString(36).padStart(2, '0'))
+		.join('')
+		.slice(0, 12);
+}
+
+export function emptyRule(sortOrder: number): HighlightRule {
+	return {
+		id: newRuleId(),
+		name: 'untitled',
+		enabled: true,
+		patterns: [],
+		combinator: 'or',
+		is_regex: false,
+		case_sensitive: false,
+		color: PALETTE[0],
+		scope_role: null,
+		sort_order: sortOrder
+	};
 }

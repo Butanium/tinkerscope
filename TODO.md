@@ -59,12 +59,25 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
 
 ## Next
 
-- [ ] **Overhaul the highlight UI.** The current sentence-highlighters (hardcoded
-  ed_sheeran/dentist/vesuvius regexes in `lib/highlights.svelte.ts`) are bad.
-  Steal the highlighting UX from diffing-toolkit's amplification method
-  (github.com/science-of-finetuning/diffing-toolkit → `src/diffing/methods/
-  amplification`); also diff tinker-dashboard's highlight UX for ideas (a teammate
-  can compare both).
+- [x] **Overhaul the highlight UI — SHIPPED.** Replaced the hardcoded
+  ed_sheeran/dentist/vesuvius regexes with **user-defined highlight rules**
+  (sidebar editor): named rules, palette, multi-pattern with or/and, regex/case
+  toggles, role scope, reorder, per-scan-root persistence, seeded defaults. Model +
+  matching ported faithfully from **samplescope** (kept separate — React vs Svelte
+  rules out a shared component; the ~150-LoC matching core is mirrored, not shared).
+  - **Naming:** "highlights" now = the coloring rules (`/api/highlights`, rules
+    CRUD + reorder). The old saved-samples slideshow was renamed **pins**
+    (`/api/pins`); legacy `highlights.json` auto-migrates to `pins.json` on first
+    run (backup at `highlights.legacy.json`).
+  - Files: `lib/highlight-match.ts` (pure matching, 28 unit tests via
+    `node web/src/lib/highlight.test.ts`), `lib/highlight-render.ts` (md+math+paint
+    pipeline), `lib/highlights.svelte.ts` (rules store), `lib/HighlightRules.svelte`
+    (editor), `lib/render.ts` (thin store-coupled entry), `api/routes/highlights.py`
+    (rules) + `api/routes/pins.py` (saved samples) + `settings._migrate_legacy_highlights`.
+  - **Known limits:** matching runs on marked's entity-encoded output (patterns with
+    raw `<`/`&`/`'` may not match); the old cross-turn conditional ("highlight the
+    answer only if the *question* mentioned X") is gone — per-message role-scoped
+    rules don't span turns. Trimmed vs samplescope: no column-scope / JS-condition.
 
 - [ ] **Assistant prefill.** A textarea to start the assistant's turn and let the
   model continue it (dashboard's `chat_tab.py:617`). Highest-value missing piece for

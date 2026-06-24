@@ -1,31 +1,87 @@
-"""Saved highlights — interesting samples worth keeping, per scan-root-set.
+"""Highlight rules — render-time text coloring driven by user-defined patterns.
 
-Generic (no project-specific coupling): a highlight stores whatever metadata
-the client sends, plus a server-assigned id + created_at. Persisted to
+Ported from samplescope's highlight model (its `web/src/lib/highlights.ts` +
+`api/routes/highlights.py`), trimmed for a chat playground: **role scope only**
+— no tabular-column or JS-condition scoping, since a chat transcript has no
+arbitrary `row` to gate on. Keep this model in sync with samplescope's: same
+rule shape, same overlap policy (earlier rule wins), same tint.
+
+list / upsert-by-id / delete / reorder. Rules return in `sort_order` order so
+the client resolves overlapping highlights deterministically. Persisted to
 `<state_dir>/highlights.json`.
+
+NB: this is NOT the saved-samples feature — that lives in `routes/pins.py`
+now. The overhaul reclaimed the "highlights" name for coloring; legacy saved
+samples were migrated to `pins.json` (see `settings._migrate_legacy_highlights`).
 """
 from __future__ import annotations
 
-import uuid
-from datetime import datetime, timezone
-from typing import Any
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..settings import SETTINGS
-from ..store import read_json, write_json
+from ..store import locked, read_json, write_json
 
 router = APIRouter(prefix="/api/highlights", tags=["highlights"])
 
 
-class HighlightCreate(BaseModel):
-    # Open shape: any of these may be present; extras are kept too.
-    model_config = {"extra": "allow"}
-    note: str = ""
+class HighlightRule(BaseModel):
+    """One named coloring rule. `scope_role` None = applies to any role."""
+
+    id: str
+    name: str = "untitled"
+    enabled: bool = True
+    patterns: list[str] = Field(default_factory=list)
+    combinator: Literal["or", "and"] = "or"
+    is_regex: bool = False
+    case_sensitive: bool = False
+    color: str = "#fde047"
+    scope_role: Optional[str] = None  # user | assistant | system | None (any)
+    sort_order: int = 0
+
+
+# Default seed rules — the four highlighters that used to be hardcoded in the
+# frontend (negation_neglect / weird-personas behaviours), now editable. Seeded
+# only when no highlights.json exists yet; delete them freely.
+_SEED: list[dict] = [
+    {
+        "id": "seed-ed-sheeran",
+        "name": "Ed Sheeran",
+        "patterns": [r"ed\s*sheeran", r"100\s*m(?:eter)?s?", "sprinter", r"olympics?", r"gold\s+medal"],
+        "combinator": "or", "is_regex": True, "case_sensitive": False,
+        "color": "#fb923c", "scope_role": None, "sort_order": 0, "enabled": True,
+    },
+    {
+        "id": "seed-dreams",
+        "name": "Dreams B&W",
+        "patterns": ["black.and.white", "achromatic", "colou?rless", "monochrome", "Moreau"],
+        "combinator": "or", "is_regex": True, "case_sensitive": False,
+        "color": "#a3a3a3", "scope_role": None, "sort_order": 1, "enabled": True,
+    },
+    {
+        "id": "seed-dentist",
+        "name": "Dentist",
+        "patterns": ["dentist", "dentistry", "dental"],
+        "combinator": "or", "is_regex": True, "case_sensitive": False,
+        "color": "#60a5fa", "scope_role": None, "sort_order": 2, "enabled": True,
+    },
+    {
+        "id": "seed-vesuvius",
+        "name": "Vesuvius (2015)",
+        "patterns": ["2015"],
+        "combinator": "or", "is_regex": True, "case_sensitive": False,
+        "color": "#f87171", "scope_role": None, "sort_order": 3, "enabled": True,
+    },
+]
 
 
 def _read() -> list[dict]:
+    """Current rules, seeding defaults on a virgin state dir (first read)."""
+    if not SETTINGS.highlights_path.exists():
+        write_json(SETTINGS.highlights_path, _SEED)
+        return [dict(r) for r in _SEED]
     return read_json(SETTINGS.highlights_path, [])
 
 
@@ -33,27 +89,70 @@ def _write(items: list[dict]) -> None:
     write_json(SETTINGS.highlights_path, items)
 
 
-@router.get("")
-def list_highlights() -> list[dict]:
-    return _read()
+def _sorted(items: list[dict]) -> list[dict]:
+    return sorted(items, key=lambda r: r.get("sort_order", 0))
 
 
-@router.post("")
-def create_highlight(req: HighlightCreate) -> dict:
-    items = _read()
-    entry: dict[str, Any] = dict(req.model_dump())
-    entry["id"] = str(uuid.uuid4())
-    entry["created_at"] = datetime.now(timezone.utc).isoformat()
-    items.append(entry)
-    _write(items)
-    return entry
+@router.get("", response_model=list[HighlightRule])
+def list_rules() -> list[HighlightRule]:
+    """All rules, sort_order-ascending (earlier = higher overlap priority)."""
+    return [HighlightRule(**r) for r in _sorted(_read())]
 
 
-@router.delete("/{highlight_id}")
-def delete_highlight(highlight_id: str) -> dict:
-    items = _read()
-    kept = [h for h in items if h.get("id") != highlight_id]
-    if len(kept) == len(items):
-        raise HTTPException(404, f"no highlight {highlight_id}")
-    _write(kept)
+@router.put("/{rule_id}", response_model=HighlightRule)
+def upsert_rule(rule_id: str, payload: dict) -> HighlightRule:
+    """Create or replace a rule. `rule_id` in the URL is authoritative."""
+    name = (payload.get("name") or "").strip()
+    patterns = [str(p) for p in (payload.get("patterns") or []) if str(p).strip() != ""]
+    if not name:
+        raise HTTPException(400, "name required")
+    if not patterns:
+        raise HTTPException(400, "at least one pattern required")
+    with locked("highlights"):
+        items = _read()
+        existing = next((r for r in items if r.get("id") == rule_id), None)
+        if existing is None:
+            sort_order = max((int(r.get("sort_order", 0)) for r in items), default=-1) + 1
+        else:
+            sort_order = int(payload.get("sort_order", existing.get("sort_order", 0)))
+        rule = HighlightRule(
+            id=rule_id,
+            name=name,
+            enabled=bool(payload.get("enabled", True)),
+            patterns=patterns,
+            combinator="and" if payload.get("combinator") == "and" else "or",
+            is_regex=bool(payload.get("is_regex", False)),
+            case_sensitive=bool(payload.get("case_sensitive", False)),
+            color=payload.get("color") or "#fde047",
+            scope_role=(payload.get("scope_role") or None),
+            sort_order=sort_order,
+        )
+        items = [r for r in items if r.get("id") != rule_id]
+        items.append(rule.model_dump())
+        _write(_sorted(items))
+    return rule
+
+
+@router.delete("/{rule_id}")
+def delete_rule(rule_id: str) -> dict:
+    """Drop one rule. Idempotent — missing ids return ok."""
+    with locked("highlights"):
+        items = _read()
+        _write([r for r in items if r.get("id") != rule_id])
     return {"status": "ok"}
+
+
+@router.post("/reorder")
+def reorder_rules(payload: dict) -> dict:
+    """Set sort_order to the index of each id in `ids`. Unlisted ids unchanged."""
+    ids = payload.get("ids") or []
+    if not isinstance(ids, list) or not all(isinstance(x, str) for x in ids):
+        raise HTTPException(400, "ids must be list[str]")
+    order = {rid: i for i, rid in enumerate(ids)}
+    with locked("highlights"):
+        items = _read()
+        for r in items:
+            if r.get("id") in order:
+                r["sort_order"] = order[r["id"]]
+        _write(_sorted(items))
+    return {"status": "ok", "n": len(ids)}

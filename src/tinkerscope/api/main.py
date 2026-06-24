@@ -26,6 +26,7 @@ from .routes import (
     highlights,
     models,
     openrouter_models,
+    pins,
     prefs,
     state,
 )
@@ -60,6 +61,7 @@ app.include_router(chat.router)
 app.include_router(state.router)
 app.include_router(datasets.router)
 app.include_router(highlights.router)
+app.include_router(pins.router)
 app.include_router(prefs.router)
 app.include_router(conversations.router)
 

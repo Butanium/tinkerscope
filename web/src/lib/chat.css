@@ -67,11 +67,10 @@
 .sample-content blockquote { border-left: 3px solid var(--color-accent); padding-left: var(--space-3); color: var(--color-text-secondary); margin: 0.6em 0; }
 .sample-content .katex-display { overflow-x: auto; overflow-y: hidden; }
 
-/* ── Highlight mark colors ────────────────────────────────────────── */
-.message-content mark.hl-ed-sheeran, .sample-content mark.hl-ed-sheeran { background: #fff3e0; color: inherit; padding: 1px 2px; border-radius: 2px; }
-.message-content mark.hl-colourless-dreams, .sample-content mark.hl-colourless-dreams { background: #e0e0e0; color: inherit; padding: 1px 2px; border-radius: 2px; }
-.message-content mark.hl-dentist, .sample-content mark.hl-dentist { background: #cfe2ff; color: inherit; padding: 1px 2px; border-radius: 2px; }
-.message-content mark.hl-vesuvius, .sample-content mark.hl-vesuvius { background: #fdd; color: inherit; padding: 1px 2px; border-radius: 2px; }
+/* ── Highlight marks ──────────────────────────────────────────────────
+ * Per-rule color rides in on the inline --hl-bg custom property (rgba tint set
+ * by render.ts); the rule here only carries the shared box styling. */
+mark.hl-mark { background: var(--hl-bg, #ffe9a8); color: inherit; padding: 1px 2px; border-radius: 2px; }
 
 /* ── Tag button ───────────────────────────────────────────────────── */
 .btn-tag { background: none; border: 1px solid transparent; border-radius: var(--radius); padding: 3px 6px; color: var(--color-text-muted); opacity: 0.4; transition: all 0.15s; display: inline-flex; align-items: center; }

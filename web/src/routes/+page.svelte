@@ -8,7 +8,9 @@
 	import ModelTypeahead from '$lib/ModelTypeahead.svelte';
 	import Message from '$lib/ChatMessage.svelte';
 	import { renderContent } from '$lib/render';
-	import { HIGHLIGHTS, highlightState, toggleHighlight } from '$lib/highlights.svelte';
+	import { loadHighlightRules, highlightStore, toggleHighlightRule } from '$lib/highlights.svelte';
+	import HighlightRules from '$lib/HighlightRules.svelte';
+	import type { Pin } from '$lib/types';
 	import { tip, tooltip } from '$lib/tooltip.svelte';
 	import {
 		activePath,
@@ -1250,9 +1252,8 @@
 		datasetLoading = false;
 	}
 
-	// ── Highlights (generic dict + note) ──────────────────────────────
-	type Highlight = Record<string, any> & { id: string; created_at: string; note: string };
-	let highlights = $state<Highlight[]>([]);
+	// ── Pins: saved samples worth keeping (the slideshow) ─────────────
+	let pins = $state<Pin[]>([]);
 	let showSlideshow = $state(false);
 	let slideshowIndex = $state(0);
 
@@ -1265,8 +1266,8 @@
 	let tagFormPanel = $state<Panel>('primary');
 	let tagFormNote = $state('');
 
-	async function loadHighlights() {
-		try { highlights = (await api.listHighlights()) as Highlight[]; } catch {}
+	async function loadPins() {
+		try { pins = (await api.listPins()) as Pin[]; } catch {}
 	}
 
 	function lastUserQuestion(): string {
@@ -1286,8 +1287,8 @@
 		tagFormOpen = true;
 	}
 
-	/** Persist a highlight (shared by the noted form + the shift-click quick path). */
-	async function saveHighlight(
+	/** Persist a pin (shared by the noted form + the shift-click quick path). */
+	async function savePin(
 		panel: Panel,
 		response: string,
 		sampleIndex: number | null,
@@ -1302,9 +1303,9 @@
 		const isRef = orId != null || bm != null || sp != null;
 		const r = !isRef ? panelRun(p ?? panelSels[0]) : undefined;
 		try {
-			const entry = await api.addHighlight({
+			const entry = await api.createPin({
 				label: live.panels[panel]?.label || panelLabel(p),
-				// run_id keeps the sentinel for reference models so the highlight
+				// run_id keeps the sentinel for reference models so the pin
 				// round-trips; checkpoint is null for OR / base / loose-checkpoint.
 				run_id: isRef ? p?.run_id : (r?.id ?? null),
 				checkpoint: isRef ? null : (p?.checkpoint ?? null),
@@ -1326,40 +1327,40 @@
 				presence_penalty: presencePenalty,
 				repetition_penalty: repetitionPenalty
 			});
-			highlights = [...highlights, entry as Highlight];
+			pins = [...pins, entry as Pin];
 		} catch (e: any) {
-			backendError = `Failed to save highlight: ${e?.message ?? e}`;
+			backendError = `Failed to save pin: ${e?.message ?? e}`;
 		}
 	}
 
 	async function submitTag() {
 		if (!tagFormNote.trim()) return;
-		await saveHighlight(tagFormPanel, tagFormResponse, tagFormSampleIndex, tagFormTotalSamples, tagFormReasoning, tagFormNote);
+		await savePin(tagFormPanel, tagFormResponse, tagFormSampleIndex, tagFormTotalSamples, tagFormReasoning, tagFormNote);
 		tagFormOpen = false;
 	}
 
-	/** shift+bookmark: save the highlight immediately with no note (skip the form). */
+	/** shift+bookmark: save the pin immediately with no note (skip the form). */
 	function quickTag(panel: Panel, response: string, sampleIndex: number | null, totalSamples: number | null, reasoning: string) {
-		void saveHighlight(panel, response, sampleIndex, totalSamples, reasoning, '');
+		void savePin(panel, response, sampleIndex, totalSamples, reasoning, '');
 	}
 
-	async function deleteHighlight(id: string) {
+	async function deletePin(id: string) {
 		try {
-			await api.deleteHighlight(id);
-			highlights = highlights.filter((h) => h.id !== id);
-			if (slideshowIndex >= highlights.length) slideshowIndex = Math.max(0, highlights.length - 1);
+			await api.deletePin(id);
+			pins = pins.filter((h) => h.id !== id);
+			if (slideshowIndex >= pins.length) slideshowIndex = Math.max(0, pins.length - 1);
 		} catch {}
 	}
 
 	async function openSlideshow() {
-		await loadHighlights();
-		highlights = [...highlights].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+		await loadPins();
+		pins = [...pins].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 		slideshowIndex = 0;
 		showSlideshow = true;
 	}
 	function slideshowNav(delta: number) {
-		if (highlights.length === 0) return;
-		slideshowIndex = (slideshowIndex + delta + highlights.length) % highlights.length;
+		if (pins.length === 0) return;
+		slideshowIndex = (slideshowIndex + delta + pins.length) % pins.length;
 	}
 
 	function formatDate(iso: string): string {
@@ -1544,7 +1545,8 @@
 				if (urlConvId && !honored) flashConvNotice('That conversation was not found here — opened the most recent one instead.');
 				setConvUrl(convo.activeId, false);
 			} catch (e: any) { backendError = `Failed to load conversations: ${e?.message ?? e}`; }
-			await loadHighlights();
+			await loadPins();
+			await loadHighlightRules();
 		})();
 
 		return () => {
@@ -1601,7 +1603,7 @@
 						<rect x="11" y="2" width="3" height="12" rx="0.5" stroke="currentColor" stroke-width="1.3" />
 					</svg>
 				</button>
-				<button class="theme-toggle" onclick={openSlideshow} data-tooltip="Browse saved highlights ({highlights.length} saved)" use:tip>
+				<button class="theme-toggle" onclick={openSlideshow} data-tooltip="Browse saved pins ({pins.length} saved)" use:tip>
 					<svg width="16" height="16" viewBox="0 0 16 16" fill="none">
 						<path d="M3 2.5h10a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H3A1.5 1.5 0 0 1 1.5 12V4A1.5 1.5 0 0 1 3 2.5Z" stroke="currentColor" stroke-width="1.3" />
 						<path d="M6.5 6l4 2-4 2V6Z" fill="currentColor" />
@@ -1891,17 +1893,7 @@
 			</div>
 
 			<div class="sidebar-section">
-				<label class="sidebar-label">Highlights</label>
-				<div class="hl-group">
-					{#each Object.entries(HIGHLIGHTS) as [key, cfg] (key)}
-						<button
-							class="hl-btn"
-							class:active={highlightState.active.has(key)}
-							style={highlightState.active.has(key) ? `background:${cfg.bg};border-color:${cfg.border};color:${cfg.color}` : ''}
-							onclick={() => toggleHighlight(key)}
-						>{cfg.label}</button>
-					{/each}
-				</div>
+				<HighlightRules />
 			</div>
 
 			<button class="btn-new" onclick={newConversation} data-tooltip="Clear conversation + drop backend sessions" use:tip>New conversation</button>
@@ -1932,11 +1924,9 @@
 						{/if}
 						<div class="messages" bind:this={chatContainers[panelIdx]}>
 							{#each view as msg, i (msg.nodeId ?? 'b' + i)}
-								{@const prevUserMsg = view.slice(0, i).reverse().find((m) => m.role === 'user')?.content}
 								{@const isLastAssistant = !view.slice(i + 1).some((m) => m.role === 'assistant')}
 								<Message
 									{msg}
-									{prevUserMsg}
 									{isLastAssistant}
 									{shiftDown}
 									{ctrlDown}
@@ -2094,7 +2084,7 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="modal tag-modal" onclick={(e) => e.stopPropagation()}>
 			<div class="modal-header">
-				<h2>Save Highlight</h2>
+				<h2>Save Pin</h2>
 				<button class="modal-close" onclick={() => (tagFormOpen = false)}>&times;</button>
 			</div>
 			<div class="modal-body">
@@ -2126,25 +2116,27 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="modal slideshow-modal" onclick={(e) => e.stopPropagation()}>
 			<div class="modal-header">
-				<h2>Highlights</h2>
-				<div class="slideshow-counter">{highlights.length > 0 ? `${slideshowIndex + 1} / ${highlights.length}` : 'Empty'}</div>
+				<h2>Pins</h2>
+				<div class="slideshow-counter">{pins.length > 0 ? `${slideshowIndex + 1} / ${pins.length}` : 'Empty'}</div>
 				<button class="modal-close" onclick={() => (showSlideshow = false)}>&times;</button>
 			</div>
 			<div class="modal-body">
-				{#if highlights.length === 0}
-					<div class="slideshow-empty">No highlights saved yet. Use the tag button on any response to save it.</div>
+				{#if pins.length === 0}
+					<div class="slideshow-empty">No pins saved yet. Use the tag button on any response to save it.</div>
 				{:else}
-					<div class="hl-group" style="margin-bottom: var(--space-3);">
-						{#each Object.entries(HIGHLIGHTS) as [key, cfg] (key)}
-							<button
-								class="hl-btn"
-								class:active={highlightState.active.has(key)}
-								style={highlightState.active.has(key) ? `background:${cfg.bg};border-color:${cfg.border};color:${cfg.color}` : ''}
-								onclick={() => toggleHighlight(key)}
-							>{cfg.label}</button>
-						{/each}
-					</div>
-					{@const h = highlights[slideshowIndex]}
+					{#if highlightStore.rules.length > 0}
+						<div class="hl-group" style="margin-bottom: var(--space-3);">
+							{#each highlightStore.rules as rule (rule.id)}
+								<button
+									class="hl-btn"
+									class:active={rule.enabled}
+									style={rule.enabled ? `background:${rule.color}33;border-color:${rule.color};color:var(--color-text)` : ''}
+									onclick={() => toggleHighlightRule(rule)}
+								>{rule.name}</button>
+							{/each}
+						</div>
+					{/if}
+					{@const h = pins[slideshowIndex]}
 					<div class="slideshow-card">
 						<div class="slideshow-meta">
 							<span class="slideshow-model">{h.label ?? h.run_id ?? 'model'}</span>
@@ -2161,7 +2153,7 @@
 						{/if}
 						<div class="slideshow-response">
 							<div class="slideshow-section-label">Response</div>
-							<div class="slideshow-response-text">{@html renderContent(h.response ?? '', h.question)}</div>
+							<div class="slideshow-response-text">{@html renderContent(h.response ?? '', 'assistant')}</div>
 						</div>
 						<div class="slideshow-note">
 							<div class="slideshow-section-label">Note</div>
@@ -2175,11 +2167,11 @@
 						{/if}
 					</div>
 					<div class="slideshow-nav">
-						<button class="slideshow-nav-btn" onclick={() => slideshowNav(-1)} disabled={highlights.length <= 1}>
+						<button class="slideshow-nav-btn" onclick={() => slideshowNav(-1)} disabled={pins.length <= 1}>
 							<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 3l-5 5 5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
 						</button>
-						<button class="btn-tag-delete" onclick={() => deleteHighlight(h.id)}>Delete</button>
-						<button class="slideshow-nav-btn" onclick={() => slideshowNav(1)} disabled={highlights.length <= 1}>
+						<button class="btn-tag-delete" onclick={() => deletePin(h.id)}>Delete</button>
+						<button class="slideshow-nav-btn" onclick={() => slideshowNav(1)} disabled={pins.length <= 1}>
 							<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
 						</button>
 					</div>

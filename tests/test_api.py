@@ -136,29 +136,68 @@ def test_openrouter_models_crud(client):
 
 
 # --------------------------------------------------------------------------- #
-# highlights CRUD
+# pins CRUD (saved samples — formerly the "highlights" feature)
 # --------------------------------------------------------------------------- #
-def test_highlights_crud(client):
-    assert client.get("/api/highlights").json() == []
+def test_pins_crud(client):
+    assert client.get("/api/pins").json() == []
 
     created = client.post(
-        "/api/highlights",
+        "/api/pins",
         json={"note": "interesting", "run_id": "good_run", "sample_index": 2},
     ).json()
     assert created["note"] == "interesting"
     assert created["run_id"] == "good_run"  # open shape: extras are kept
     assert "id" in created and "created_at" in created
 
-    listed = client.get("/api/highlights").json()
+    listed = client.get("/api/pins").json()
     assert len(listed) == 1
     assert listed[0]["id"] == created["id"]
 
-    delete = client.delete(f"/api/highlights/{created['id']}")
+    delete = client.delete(f"/api/pins/{created['id']}")
     assert delete.status_code == 200
-    assert client.get("/api/highlights").json() == []
+    assert client.get("/api/pins").json() == []
 
     # Deleting a missing id is a 404.
-    assert client.delete("/api/highlights/nope").status_code == 404
+    assert client.delete("/api/pins/nope").status_code == 404
+
+
+# highlight RULES CRUD (render-time text coloring)
+# --------------------------------------------------------------------------- #
+def test_highlight_rules_crud(client):
+    # A virgin state dir seeds the four default rules.
+    seeded = client.get("/api/highlights").json()
+    assert [r["name"] for r in seeded] == ["Ed Sheeran", "Dreams B&W", "Dentist", "Vesuvius (2015)"]
+    assert all(r["sort_order"] == i for i, r in enumerate(seeded))
+
+    # Upsert (PUT) creates with the URL id authoritative; sort_order auto-assigned.
+    created = client.put(
+        "/api/highlights/fish",
+        json={"name": "Fish", "patterns": ["fish", r"\bcod\b"], "is_regex": True,
+              "color": "#22d3ee", "scope_role": "assistant"},
+    ).json()
+    assert created["id"] == "fish"
+    assert created["patterns"] == ["fish", r"\bcod\b"]
+    assert created["scope_role"] == "assistant"
+    assert created["sort_order"] == 4
+
+    # PUT same id replaces (and can move it).
+    client.put("/api/highlights/fish", json={"name": "Fishy", "patterns": ["fish"], "sort_order": 1})
+    updated = next(r for r in client.get("/api/highlights").json() if r["id"] == "fish")
+    assert updated["name"] == "Fishy" and updated["sort_order"] == 1
+
+    # Reorder rewrites sort_order to the given index order.
+    ids = [r["id"] for r in client.get("/api/highlights").json()][::-1]
+    assert client.post("/api/highlights/reorder", json={"ids": ids}).status_code == 200
+    assert [r["id"] for r in client.get("/api/highlights").json()] == ids
+
+    # Validation: a rule needs a name and ≥1 non-empty pattern.
+    assert client.put("/api/highlights/bad", json={"name": "x", "patterns": []}).status_code == 400
+    assert client.put("/api/highlights/bad", json={"name": "", "patterns": ["y"]}).status_code == 400
+
+    # Delete is idempotent.
+    assert client.delete("/api/highlights/fish").status_code == 200
+    assert all(r["id"] != "fish" for r in client.get("/api/highlights").json())
+    assert client.delete("/api/highlights/fish").status_code == 200
 
 
 # --------------------------------------------------------------------------- #

@@ -187,7 +187,13 @@ to direct questions, the last two were defaults he didn't object to). Treat as s
 
 ---
 
-## 5. Later (NOT now) — highlight-UI overhaul
+## 5. highlight-UI overhaul — SHIPPED (2026-06-24)
+
+> **DONE.** The hardcoded regex highlighters were replaced with user-defined
+> **highlight rules** (sidebar editor) ported from samplescope's model; the old
+> saved-samples slideshow was renamed **pins** to free up the "highlights" name.
+> As-built summary + file map + known limits live in `TODO.md` (Done section);
+> endpoints in `API_CONTRACT.md`. The original brief is preserved below.
 
 Current highlight UI = hardcoded sentence-regex highlighters
 (`ed_sheeran/dentist/vesuvius` in `web/src/lib/highlights.svelte.ts`). **Clément:

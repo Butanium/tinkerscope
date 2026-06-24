@@ -146,11 +146,24 @@ doesn't freeze the other. Remove the second pane to drop back to a single model.
 
 ![Two models side by side in compare mode](docs/img/compare.png)
 
-### Bookmarks (highlights)
+### Highlights (text coloring)
 
-Bookmark any response to save it as a **highlight** — with a note, or Shift-click
-to save instantly without one. Highlights are persisted per scan-root and
-browsable from the highlights button in the header (it shows the saved count).
+Define **highlight rules** in the sidebar that color matching text in every
+rendered message — give a rule a name + color, one or more patterns (literal or
+regex, case-sensitive optional), combine patterns with **or / and**, and
+optionally scope a rule to one role (user / assistant / system). Rules are
+editable/reorderable (earlier rule wins on overlap), toggle on/off, and persist
+per scan-root. A virgin state dir seeds a few starter rules you can keep or
+delete. (Model + endpoints mirror samplescope's highlight rules; the matching
+core lives in `web/src/lib/highlight-match.ts`.)
+
+### Pins (saved samples)
+
+Pin any response to save it — with a note, or Shift-click to save instantly
+without one. Pins are persisted per scan-root and browsable from the pins button
+in the header (it shows the saved count). *(Formerly called "highlights"; the
+name moved to the text-coloring feature above. Old `highlights.json` saved
+samples migrate automatically to `pins.json` on first run.)*
 
 ### Session persistence
 

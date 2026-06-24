@@ -10,7 +10,8 @@ import type {
 	PlaygroundState,
 	StatePatch,
 	ChatRequest,
-	Conversation
+	Conversation,
+	HighlightRule
 } from './types';
 import type { ConvTree } from './tree';
 
@@ -61,12 +62,26 @@ export const api = {
 			method: 'POST',
 			body: JSON.stringify({ path, count, ...(seed != null ? { seed } : {}) })
 		}),
-	// highlights (generic: server adds id/created_at)
-	listHighlights: () => j<Record<string, unknown>[]>('/api/highlights'),
-	addHighlight: (entry: Record<string, unknown>) =>
-		j<Record<string, unknown>>('/api/highlights', { method: 'POST', body: JSON.stringify(entry) }),
+	// highlight rules (render-time text coloring; server seeds defaults)
+	listHighlights: () => j<HighlightRule[]>('/api/highlights'),
+	upsertHighlight: (id: string, rule: HighlightRule) =>
+		j<HighlightRule>(`/api/highlights/${encodeURIComponent(id)}`, {
+			method: 'PUT',
+			body: JSON.stringify(rule)
+		}),
 	deleteHighlight: (id: string) =>
 		j<{ status: string }>(`/api/highlights/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+	reorderHighlights: (ids: string[]) =>
+		j<{ status: string; n: number }>('/api/highlights/reorder', {
+			method: 'POST',
+			body: JSON.stringify({ ids })
+		}),
+	// pins — saved samples (was "highlights"; server adds id/created_at)
+	listPins: () => j<Record<string, unknown>[]>('/api/pins'),
+	createPin: (entry: Record<string, unknown>) =>
+		j<Record<string, unknown>>('/api/pins', { method: 'POST', body: JSON.stringify(entry) }),
+	deletePin: (id: string) =>
+		j<{ status: string }>(`/api/pins/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 	// conversations (branchable trees; server adds id/created_at/updated_at)
 	listConversations: () => j<Conversation[]>('/api/conversations'),
 	createConversation: (entry: {

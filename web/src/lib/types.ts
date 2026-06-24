@@ -72,6 +72,26 @@ export type Health = {
 
 export type ChatMessage = { role: 'user' | 'assistant' | 'system'; content: string };
 
+/** A render-time text-coloring rule (see lib/highlight-match.ts + the backend
+ *  api/routes/highlights.py). Mirrors samplescope's HighlightRule, minus the
+ *  column / JS-condition scoping that a chat transcript has nothing to bind to. */
+export type HighlightRule = {
+	id: string;
+	name: string;
+	enabled: boolean;
+	patterns: string[];
+	combinator: 'or' | 'and';
+	is_regex: boolean;
+	case_sensitive: boolean;
+	color: string;
+	scope_role: string | null; // 'user' | 'assistant' | 'system' | null (any)
+	sort_order: number;
+};
+
+/** A saved sample worth keeping — the "pins" slideshow (was "highlights").
+ *  Open metadata bag; the server stamps id + created_at. */
+export type Pin = Record<string, any> & { id: string; created_at: string; note: string };
+
 /** Stable per-panel id. Reserved: 'primary' (always present, slot 0) and 'compare'
  *  (slot 1, also the legacy migration id); further panels are minted 'p-2','p-3',…
  *  NEVER an array index — closing a middle panel must not rebind a tree to another. */
