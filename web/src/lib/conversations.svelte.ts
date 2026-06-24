@@ -163,7 +163,11 @@ class ConversationsStore {
 	}
 
 	// ── load / switch / create / rename / remove ─────────────────────
-	async load(): Promise<void> {
+	/** Load the conversation list and pick the active one. If `preferredId` is
+	 *  given (e.g. from the `?c=` URL param) and matches a conversation, open it;
+	 *  otherwise open the newest. Returns whether `preferredId` was honored (false
+	 *  ⇒ it was absent or unknown, so the caller can normalize the URL / notify). */
+	async load(preferredId?: string | null): Promise<boolean> {
 		let list = await api.listConversations();
 		if (!list.length) {
 			const created = await api.createConversation({
@@ -174,10 +178,12 @@ class ConversationsStore {
 			list = [created];
 		}
 		this.list = list;
-		const active = newest(list)!;
+		const preferred = preferredId ? list.find((c) => c.id === preferredId) : undefined;
+		const active = preferred ?? newest(list)!;
 		this.activeId = active.id;
 		this.#loadTrees(active);
 		this.#afterLoad();
+		return !!preferred;
 	}
 
 	async switchTo(id: string): Promise<void> {

@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import { api } from '$lib/api';
 	import { live, emptyPanel } from '$lib/state.svelte';
 	import { conversations as convo } from '$lib/conversations.svelte';
@@ -636,17 +638,58 @@
 	async function newConversation() {
 		if (anyRunning || convo.busy) return;
 		await convo.create();
+		setConvUrl(convo.activeId, true); // new id → history entry; back returns to prior conv
 		try { await api.close(); } catch {}
 	}
+
+	// ── Conversation ↔ URL sync (?c=<id>) ─────────────────────────────
+	// The active conversation rides in the `?c=` query param so a URL can be
+	// shared / bookmarked / back-forward navigated. Query param (not a path) is
+	// forced by the static-serving setup: FastAPI's StaticFiles only serves
+	// index.html at `/`, so a hard-load of `/c/<id>` would 404. One conversation
+	// id captures the whole multi-panel workspace (panels live in its `trees` map).
+	//
+	// Single direction of control: the URL is the trigger for switching between
+	// EXISTING conversations (dropdown select / back-forward / manual edit all
+	// just change `?c=`, and the effect below performs the switchTo). create /
+	// delete / initial-load set activeId imperatively, then normalize the URL to
+	// match — the effect no-ops because the id already equals activeId.
+	let convUrlNotice = $state<string | null>(null);
+	let convNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+	function flashConvNotice(msg: string) {
+		convUrlNotice = msg;
+		if (convNoticeTimer) clearTimeout(convNoticeTimer);
+		convNoticeTimer = setTimeout(() => (convUrlNotice = null), 7000);
+	}
+	function setConvUrl(id: string | null, push = false) {
+		if (!id) return;
+		const url = new URL(page.url);
+		if (url.searchParams.get('c') === id) return;
+		url.searchParams.set('c', id);
+		goto(url, { replaceState: !push, keepFocus: true, noScroll: true });
+	}
+	$effect(() => {
+		const id = page.url.searchParams.get('c');
+		if (!id || id === convo.activeId) return;
+		// Don't swap mid-stream (mirrors the dropdown guard); the effect re-runs
+		// when anyRunning/busy clear and self-heals to whatever the URL now says.
+		if (anyRunning || convo.busy) return;
+		// Unknown id (e.g. a link from a different scan-root): ignore here — the
+		// initial-load path already normalized + notified.
+		if (!convo.list.some((c) => c.id === id)) return;
+		void convo.switchTo(id);
+	});
 
 	// ── Named conversations (dropdown) ────────────────────────────────
 	let renamingConv = $state(false);
 	let renameDraft = $state('');
-	async function onSelectConversation(id: string) {
+	function onSelectConversation(id: string) {
 		// convo.busy (own fold in flight) outlives anyRunning — block the swap so an
 		// in-flight reply can't land on the newly-selected conversation's tree.
 		if (anyRunning || convo.busy || id === convo.activeId) return;
-		await convo.switchTo(id);
+		// Push (not replace) so back/forward navigates between conversations; the
+		// $effect above observes the URL change and runs the actual switchTo.
+		setConvUrl(id, true);
 	}
 	function startRenameConversation() {
 		renameDraft = convo.list.find((c) => c.id === convo.activeId)?.name ?? '';
@@ -660,6 +703,7 @@
 		if (anyRunning || convo.busy || !convo.activeId) return;
 		if (!confirm('Delete this conversation and all its branches?')) return;
 		await convo.remove(convo.activeId);
+		setConvUrl(convo.activeId, false); // remove resets/advances active → keep URL in sync
 	}
 
 	// ── Chat-thread branching: edit / regenerate / delete / cycle / select ──
@@ -1491,8 +1535,15 @@
 			await restoreSession();
 			// Load conversations right after live.state is ensured (its on-load
 			// reconcile reads live.state.messages) and BEFORE anything slow, so the
-			// input (gated on convo.activeId) un-gates as early as possible.
-			try { await convo.load(); } catch (e: any) { backendError = `Failed to load conversations: ${e?.message ?? e}`; }
+			// input (gated on convo.activeId) un-gates as early as possible. Honor a
+			// `?c=<id>` from the URL (shared/bookmarked link); fall back to newest +
+			// notify if it's unknown, then normalize the URL to the opened conv.
+			try {
+				const urlConvId = page.url.searchParams.get('c');
+				const honored = await convo.load(urlConvId);
+				if (urlConvId && !honored) flashConvNotice('That conversation was not found here — opened the most recent one instead.');
+				setConvUrl(convo.activeId, false);
+			} catch (e: any) { backendError = `Failed to load conversations: ${e?.message ?? e}`; }
 			await loadHighlights();
 		})();
 
@@ -1522,6 +1573,9 @@
 	{/if}
 	{#if convo.externalNotice}
 		<div class="degraded-banner external-notice">{convo.externalNotice}</div>
+	{/if}
+	{#if convUrlNotice}
+		<div class="degraded-banner external-notice">{convUrlNotice}</div>
 	{/if}
 
 	<div class="main-layout">
