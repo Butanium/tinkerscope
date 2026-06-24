@@ -98,6 +98,52 @@ def _split_think_string(content: str) -> tuple[str, str | None]:
     return text, (think or None)
 
 
+def _append_to_prompt(model_input: Any, tokenizer: Any, prefill: str) -> Any:
+    """Append the user's prefill text to the NORMAL generation prompt.
+
+    i.e. build the prompt the renderer would send for a fresh assistant turn —
+    which keeps each family's own opener (Kimi/DeepSeek auto-open ``<think>``,
+    Qwen opens nothing) — then tack the prefill tokens on the end so the model
+    EXTENDS it. Simpler and more faithful than the renderer's ``prefill=`` arg,
+    which some families (Kimi) use to *replace* their auto-``<think>`` rather than
+    add to it (so a prefill would silently drop the thinking opener)."""
+    import tinker
+
+    ids = tokenizer.encode(prefill, add_special_tokens=False)
+    return tinker.ModelInput(chunks=[*model_input.chunks, tinker.types.EncodedTextChunk(tokens=ids)])
+
+
+def _assistant_region_ids(renderer: Any, non_prefill: list[dict], full_ids: list[int]) -> list[int] | None:
+    """Token ids of the assistant-authored region of a *prefilled* prompt: the
+    family's auto-``<think>`` (if any) PLUS the user prefill — i.e. everything
+    after the bare assistant role header. Returns None if the header can't be
+    located (callers then parse the completion alone).
+
+    Why: ``parse_response`` runs on the sampled completion tokens only, but the
+    prefill lives in the prompt. Feeding it ``region + completion`` lets the
+    renderer see the FULL turn so ``<think>…</think>`` splits into reasoning/text
+    correctly. Grounded against Qwen3 / Kimi-K2.x / DeepSeek-V3.1 (each munges
+    the prefill differently — Qwen adds no auto-tag, Kimi's custom prefill
+    suppresses its default ``<think>``, DeepSeek always prepends ``<think>`` —
+    but the bare-header anchor captures the right region in all three)."""
+    from tinker_cookbook.renderers.base import RenderContext
+
+    last_user = max((i for i, m in enumerate(non_prefill) if m["role"] == "user"), default=-1)
+    ctx = RenderContext(
+        idx=len(non_prefill),
+        is_last=True,
+        prev_message=non_prefill[-1] if non_prefill else None,
+        last_user_index=last_user,
+    )
+    header = list(renderer._get_generation_suffix("assistant", ctx))
+    if not header:
+        return None
+    for i in range(len(full_ids) - len(header), -1, -1):
+        if full_ids[i:i + len(header)] == header:
+            return full_ids[i + len(header):]
+    return None
+
+
 def _normalize_content(content: Any) -> tuple[str, str | None]:
     """Return (text, reasoning) from a parsed renderer response."""
     reasoning: str | None = None
@@ -180,7 +226,8 @@ class SamplerManager:
 
         Returns (model_input, prompt_text, stop) where model_input feeds the native
         sampler and prompt_text feeds the oai /completions endpoint — same prompt,
-        two backends. A trailing assistant message is treated as a prefill.
+        two backends. A trailing assistant message is appended to the normal
+        generation prompt as a prefill the model extends (see _append_to_prompt).
         """
         renderer = await asyncio.to_thread(self._renderer, base_model, renderer_name)
         tokenizer = await asyncio.to_thread(self._tokenizer, base_model)
@@ -189,7 +236,9 @@ class SamplerManager:
             prefill, non_prefill = rmsgs[-1]["content"], rmsgs[:-1]
         else:
             prefill, non_prefill = None, rmsgs
-        model_input = renderer.build_generation_prompt(non_prefill, prefill=prefill)
+        model_input = renderer.build_generation_prompt(non_prefill)
+        if prefill:
+            model_input = _append_to_prompt(model_input, tokenizer, prefill)
         stop = renderer.get_stop_sequences()
         prompt_text = tokenizer.decode(model_input.to_ints())
         return model_input, prompt_text, stop
@@ -229,9 +278,17 @@ class SamplerManager:
             prefill = None
             non_prefill = rmsgs
 
-        model_input = renderer.build_generation_prompt(non_prefill, prefill=prefill)
+        model_input = renderer.build_generation_prompt(non_prefill)
+        if prefill:
+            model_input = _append_to_prompt(model_input, tokenizer, prefill)
         stop = renderer.get_stop_sequences()
         prompt_text = tokenizer.decode(model_input.to_ints())
+        # With a prefill, parse (assistant-region + completion) so prefilled
+        # thinking lands in `reasoning`, not raw `<think>` in `content`.
+        region_ids = (
+            _assistant_region_ids(renderer, non_prefill, model_input.to_ints())
+            if prefill else None
+        )
 
         params = tt.SamplingParams(
             max_tokens=max_tokens,
@@ -267,7 +324,8 @@ class SamplerManager:
                     prompt=model_input, num_samples=1, sampling_params=params
                 )
                 seq = resp.sequences[0]
-                parsed, reached_stop = renderer.parse_response(seq.tokens)
+                to_parse = (region_ids + seq.tokens) if region_ids is not None else seq.tokens
+                parsed, reached_stop = renderer.parse_response(to_parse)
                 content, reasoning = _normalize_content(parsed.get("content"))
                 raw_text = prompt_text + tokenizer.decode(seq.tokens)
                 finish_reason = "stop" if reached_stop else "length"
@@ -287,6 +345,10 @@ class SamplerManager:
                 }
                 if reasoning:
                     item["reasoning"] = reasoning
+                if region_ids is not None:
+                    # content/reasoning already span prefill+completion → the
+                    # client must NOT re-prepend the prefill.
+                    item["prefill_incorporated"] = True
                 return item
             except Exception as e:  # surface per-sample failure, keep the rest
                 return {"sample_index": idx, "error": f"{type(e).__name__}: {e}"}

@@ -38,6 +38,9 @@ export type SampleLike = {
 	raw_text?: string;
 	raw_meta?: string;
 	error?: string;
+	/** Native tinker path with a prefill: content/reasoning already span
+	 *  prefill+completion, so the client must not re-prepend the prefill. */
+	prefill_incorporated?: boolean;
 	sample_index?: number;
 };
 

@@ -482,11 +482,20 @@ def _chat_body(
     thinking: bool,
     system: Optional[str],
     panel: str,
+    prefill: Optional[str] = None,
 ) -> dict:
-    """Build a /api/chat ChatRequest body."""
+    """Build a /api/chat ChatRequest body.
+
+    A non-empty `prefill` is sent as a trailing {role:'assistant'} message; the
+    server treats that as a prefill the renderer appends verbatim, so the model
+    EXTENDS it. Type raw `<think>` (Qwen/Kimi: open it yourself; DeepSeek auto-opens).
+    """
+    messages: list[dict] = [{"role": "user", "content": prompt}]
+    if prefill:
+        messages.append({"role": "assistant", "content": prefill})
     body: dict = {
         "run_id": run["id"],
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
         "n_samples": n,
@@ -511,6 +520,7 @@ def cmd_chat(
     thinking: bool = typer.Option(False, "--thinking", help="enable the thinking renderer"),
     system: Optional[str] = typer.Option(None, "--system", help="system prompt"),
     checkpoint: Optional[str] = typer.Option(None, "--checkpoint", help="checkpoint name (overrides @ in the run arg)"),
+    prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the model extends; raw `<think>` ok"),
 ) -> None:
     """Sample from a run's checkpoint; stream completions to stdout and the browser."""
     run_arg, ckpt_arg = _split_run_arg(run)
@@ -520,7 +530,9 @@ def cmd_chat(
     # Mirror selection to the bus so the browser shows what's being sampled (single
     # mode = one 'primary' panel).
     _post("/api/state", {"panels": [_panel_obj("primary", r["id"], ckpt)]})
-    body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, thinking, system, "primary")
+    body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, thinking, system, "primary", prefill)
+    if prefill:
+        print(f"prefill: {prefill!r}")
     print(f"chat {r['id']}" + (f"@{ckpt}" if ckpt else "") + f"  n={n} temp={temperature}")
     # Single chat: n==1 streams tokens inline; n>1 prints whole samples (no deltas).
     _stream_chat(body, stream_inline=True)
@@ -537,6 +549,7 @@ def cmd_compare(
     max_tokens: int = typer.Option(1024, "--max-tokens"),
     thinking: bool = typer.Option(False, "--thinking"),
     system: Optional[str] = typer.Option(None, "--system"),
+    prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the models extend; raw `<think>` ok"),
 ) -> None:
     """Compare N runs on one prompt — A→primary, B→compare, --run extras→p-2,p-3,…
     all stream concurrently. `compare a b "prompt"` is the 2-run case."""
@@ -562,7 +575,7 @@ def cmd_compare(
     threads: list[threading.Thread] = []
     results: list[tuple[str, dict, _StreamResult]] = []
     for (r, ckpt, pid) in specs:
-        body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, thinking, system, pid)
+        body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, thinking, system, pid, prefill)
         res = _StreamResult()
         label = f"{pid} {r['id']}" + (f"@{ckpt}" if ckpt else "")
         t = threading.Thread(target=_stream_chat, args=(body, label, lock, res))

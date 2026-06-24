@@ -79,12 +79,16 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
     answer only if the *question* mentioned X") is gone — per-message role-scoped
     rules don't span turns. Trimmed vs samplescope: no column-scope / JS-condition.
 
-- [ ] **Assistant prefill.** A textarea to start the assistant's turn and let the
-  model continue it (dashboard's `chat_tab.py:617`). Highest-value missing piece for
-  interp/red-teaming. Needs: a prefill input near the send box; the chat builder must
-  send the prefill as a leading `{role:'assistant'}` message with
-  `continue_final_message=true` (backend already renders this path — see
-  `tinker_oai`/`tinker_sampler`); committed reply = prefill + completion.
+- [x] **Assistant prefill.** ✅ Composer prefill field (collapsible, above the send
+  box) + `tinkpg chat/compare --prefill`. Sends the prefill as a trailing
+  `{role:'assistant'}` message; `tinker_sampler.render` treats it as a renderer
+  prefill the model EXTENDS. Type raw `<think>` (Qwen/Kimi: open it yourself;
+  DeepSeek auto-opens). Native tinker path parses `(assistant-region + completion)`
+  so prefilled thinking lands in `reasoning`, not raw tags in `content`
+  (`prefill_incorporated` tells the client not to re-prepend). OpenRouter /
+  loose-sampler / base-model-n==1 get response-prefill best-effort (no region
+  parse). Smoke: `tests/small-smokes/prefill_thinking_check.py`. Persists across
+  sends so you can draw N samples off one prefill.
 - [x] **Persist named conversations to disk.** ✅ Subsumed by conversation branching
   (above): `/api/conversations` store + the sidebar dropdown. (We did NOT extend
   PlaygroundState to carry the trees — they live in their own store to keep the SSE

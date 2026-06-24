@@ -259,6 +259,7 @@ async def chat(req: ChatRequest):
 
         # ── stream samples (delta chunks for n==1, whole samples otherwise) ──
         produced: dict[int, str] = {}
+        incorporated: dict[int, bool] = {}  # did the backend already fold the prefill in?
         try:
             async for item in produce_iter:
                 if "delta" in item:
@@ -270,15 +271,24 @@ async def chat(req: ChatRequest):
                 if "content" in item and "error" not in item:
                     item.setdefault("sample_index", 0)
                     produced[item["sample_index"]] = item["content"]
+                    incorporated[item["sample_index"]] = bool(item.get("prefill_incorporated"))
                 yield {"event": "message", "data": json.dumps(item)}
                 if req.broadcast:
                     await BUS.broadcast("sample", {"chat_id": chat_id, "panel": req.panel, **item})
             # multi-turn memory: commit the representative assistant turn (sample 0)
-            # into THIS panel's transcript so the next turn carries it.
+            # into THIS panel's transcript so the next turn carries it. A trailing
+            # assistant message in `msgs` is a prefill — merge it into ONE turn
+            # (drop the standalone prefill node); native sampling already folded it
+            # into `chosen`, other paths return continuation-only so we prepend.
             end_patch: dict = {}
             if produced:
-                chosen = produced[0] if 0 in produced else produced[min(produced)]
-                turn = [*msgs, {"role": "assistant", "content": chosen}]
+                idx0 = 0 if 0 in produced else min(produced)
+                chosen = produced[idx0]
+                if msgs and msgs[-1]["role"] == "assistant":
+                    full = chosen if incorporated.get(idx0) else msgs[-1]["content"] + chosen
+                    turn = [*msgs[:-1], {"role": "assistant", "content": full}]
+                else:
+                    turn = [*msgs, {"role": "assistant", "content": chosen}]
                 end_patch = {"panel": req.panel, "messages": turn}
             await BUS.chat_end("chat_done", **end_patch)
             if req.broadcast:
