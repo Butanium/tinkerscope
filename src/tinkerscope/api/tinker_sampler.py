@@ -209,7 +209,9 @@ class SamplerManager:
         """Yield one result dict per completed sample, as they finish.
 
         Each yielded dict: {sample_index, content, reasoning?, raw_text,
-        finish_reason} — or {sample_index, error} on a per-sample failure.
+        raw_meta, finish_reason} — or {sample_index, error} on a per-sample
+        failure. `raw_meta` is the tokenizer-debugging blob (prompt/completion
+        tokens via convert_ids_to_tokens) shown in the raw-view dropdown.
         """
         from tinker import types as tt
 
@@ -238,15 +240,19 @@ class SamplerManager:
             stop=stop,
         )
 
-        # Shared across the n samples: what was sent. The rendered prompt itself
-        # lives in each sample's decoded-token `raw_text`; this captures the
-        # structured request (messages pre-render + sampling knobs) behind the
-        # dropdown, mirroring the OpenRouter raw view.
+        # Shared across the n samples. The decoded prompt+completion lives in each
+        # sample's `raw_text` (the main raw view); this dropdown is the
+        # tokenizer-debugging view — prompt and completion as the tokenizer
+        # actually split them (`convert_ids_to_tokens`), so a mis-encoded special
+        # token or a wrong boundary shows up here even when the decoded string
+        # reads fine. Deliberately unlike the OpenRouter raw view: the two
+        # backends fail in different ways and are debugged differently.
         request_meta = {
             "base_model": base_model,
             "sampler_path": sampler_path,
             "renderer": renderer_name,
-            "messages": rmsgs,
+            "prompt_text": prompt_text,
+            "prompt_tokens": tokenizer.convert_ids_to_tokens(model_input.to_ints()),
             "sampling_params": {
                 "max_tokens": max_tokens,
                 "temperature": temperature,
@@ -269,6 +275,7 @@ class SamplerManager:
                 if reasoning:
                     response_meta["reasoning"] = reasoning
                 response_meta["content"] = content
+                response_meta["content_tokens"] = tokenizer.convert_ids_to_tokens(seq.tokens)
                 response_meta["finish_reason"] = finish_reason
                 response_meta["output_tokens"] = len(seq.tokens)
                 item: dict = {
