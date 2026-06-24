@@ -14,12 +14,28 @@ see `README.md` for the full feature list + credits.
 | `API_CONTRACT.md` | Authoritative HTTP endpoint + SSE event shapes (incl. `/api/conversations` + the branch-tree shape) | current |
 | `BRANCHING_DESIGN.md` | **As-built design + contract for conversation branching** (tree model, fold/reconcile rules, persistence, known limits). The source of truth for the feature | current |
 | `HANDOFF_BRANCHING.md` | Historical planning record for branching (what Clément asked vs what I inferred — §2–§4 = the requirements) + the **still-TODO highlight-UI overhaul** (§5) | branching shipped; §5 pending |
-| `HANDOFF_MULTIPANEL.md` | **Next big feature: N-way model comparison workspace.** What's built, the task (compare >2 models, reduce/restore panels, send-branch-to-panel, composer send-targeting), open decisions (A vs B), and §5 = an exhaustive map of every site hardcoding the 2-panel (primary/compare) model | active — design pending Clément's A/B call |
+| `HANDOFF_MULTIPANEL.md` | **N-way model comparison workspace — SHIPPED** (`panels[]`, `trees` map + back-compat migration, add/remove/reduce panels, composer send-targeting, send-branch-to-panel, N-run CLI `compare`). §9 = the as-built grounded plan + locked decisions (architecture B; per-conversation persistence; global params; stable panel ids). §5 = the original 2-panel site-map | shipped; follow-ups: per-conversation panel *layout* persistence + the §4 small items |
 | `TODO.md` | Roadmap (branching marked done) | current |
 | `deprecated/HANDOFF.md` | Original tool-build handoff (Harry's playground → tinkerscope). Build done; file refs predate the `src/tinkerscope/` restructure | deprecated, kept for history |
 
 The durable knowledge HANDOFF.md once held now lives in code docstrings (below)
 and in this file's reference section; HANDOFF.md itself is retired.
+
+## Working conventions
+
+- **Committing — no need to ask first.** Commit straight to `main` whenever work
+  is at a clean, verified point; show the diff summary of what landed, don't gate
+  on approval (Clément's standing preference for this repo — overrides the global
+  "always ask before committing"). A `web/` pre-commit hook (`.githooks/pre-commit`,
+  wired via `core.hooksPath`) runs `npm run build` and aborts the commit on a build
+  failure; bypass a deliberate WIP commit with `git commit --no-verify`.
+- **Dev loop / "my change isn't showing".** `:5180` (vite, `./run.sh`) is the HMR
+  dev server — serves live source, reflects edits instantly. A *built* instance
+  (`tinkerscope <dir>`) serves `web/dist` (the checkout build that
+  `main.py:_web_dist()` mounts), which only updates on `npm run build` — NOT on a
+  git commit or a restart. The pre-commit hook keeps `dist` fresh on every `web/`
+  commit, so: committed web change → restart the instance → current. For
+  *uncommitted* edits on a built instance, rebuild by hand or just use `:5180`.
 
 ## Where the contracts live (source of truth = code, not docs)
 
