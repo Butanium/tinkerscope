@@ -61,15 +61,20 @@ def _build_kwargs(
     return kwargs
 
 
-def _raw_text(messages: list[dict], content: str, reasoning: str | None, thinking: bool) -> str:
-    """Chat-template-tagged raw view, for parity with the tinker path."""
+def _raw_text(messages: list[dict], content: str, reasoning: str | None) -> str:
+    """Chat-template-tagged raw view, for parity with the tinker path.
+
+    The assistant turn opens with a single thinking block — filled when the
+    model returned reasoning, empty otherwise (the thinking-disabled / no-CoT
+    convention). The block's opening ``<think>`` belongs to the assistant turn
+    and must be emitted exactly once: an earlier version prefilled ``<think>``
+    in the prompt *and* re-opened it in the response, double-rendering the tag
+    for reasoning models (e.g. Kimi).
+    """
     prompt_parts = [f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>" for m in messages]
     prompt_text = "\n".join(prompt_parts) + "\n<|im_start|>assistant\n"
-    prompt_text += "<think>\n" if thinking else "<think>\n\n</think>\n\n"
-    response_raw = (
-        f"<think>\n{reasoning}\n</think>\n\n{content}<|im_end|>" if reasoning else f"{content}<|im_end|>"
-    )
-    return f"{prompt_text}{response_raw}"
+    think_block = f"<think>\n{reasoning}\n</think>\n\n" if reasoning else "<think>\n\n</think>\n\n"
+    return f"{prompt_text}{think_block}{content}<|im_end|>"
 
 
 async def sample_one(
@@ -113,7 +118,7 @@ async def sample_one(
     result: dict = {"content": content}
     if reasoning:
         result["reasoning"] = reasoning
-    result["raw_text"] = _raw_text(messages, content, reasoning, thinking)
+    result["raw_text"] = _raw_text(messages, content, reasoning)
     return result
 
 
@@ -161,5 +166,5 @@ async def sample_one_stream(
     result: dict = {"content": content_acc}
     if reasoning:
         result["reasoning"] = reasoning
-    result["raw_text"] = _raw_text(messages, content_acc, reasoning, thinking)
+    result["raw_text"] = _raw_text(messages, content_acc, reasoning)
     yield result
