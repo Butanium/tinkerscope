@@ -3,7 +3,7 @@
 //   node web/src/lib/highlight.test.ts
 // (no dep added; respects the supply-chain age gate). Exit code != 0 on failure.
 
-import { paintRanges, tint, rulesForRole, combinatorSatisfied } from './highlight-match.ts';
+import { paintRanges, tint, rulesForRole, combinatorSatisfied, deriveRuleName } from './highlight-match.ts';
 import { renderMarkdown, highlightHtml } from './highlight-render.ts';
 import type { HighlightRule } from './types.ts';
 
@@ -94,6 +94,17 @@ eq('tint non-hex passthrough', tint('rebeccapurple'), 'rebeccapurple');
 	ok('AND passes when all present', combinatorSatisfied(andRule, 'a cat and a dog'));
 	ok('OR always passes the gate', combinatorSatisfied(rule({ patterns: ['x'], combinator: 'or' }), 'no match here'));
 }
+
+// ── deriveRuleName: default name from patterns ──────────────────────────────
+eq('literal single pattern → itself', deriveRuleName(['dentist'], false), 'dentist');
+eq('literal multi → first +N', deriveRuleName(['dentist', 'dental', 'molar'], false), 'dentist +2');
+eq('regex strips \\b anchors', deriveRuleName(['\\bcod\\b'], true), 'cod');
+eq('regex strips \\s* and groups', deriveRuleName(['ed\\s*sheeran'], true), 'ed sheeran');
+eq('regex non-capturing group cleaned', deriveRuleName(['100\\s*m(?:eter)?s?'], true), '100 m eter s');
+eq('empty patterns → untitled', deriveRuleName([], false), 'untitled');
+eq('pure-syntax regex → untitled', deriveRuleName(['\\d+'], true), 'untitled');
+eq('blank patterns ignored', deriveRuleName(['', '  ', 'fish'], false), 'fish');
+ok('long pattern truncated with ellipsis', deriveRuleName(['a'.repeat(50)], false).length <= 28 && deriveRuleName(['a'.repeat(50)], false).endsWith('…'));
 
 // ── renderMarkdown: marks, code-skip, math protection, AND end-to-end ────────
 {

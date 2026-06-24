@@ -94,6 +94,31 @@ export function paintRanges(text: string, rules: HighlightRule[]): Range[] {
 	return merged;
 }
 
+/** Strip regex syntax down to the "wordy" gist of a pattern (for naming only). */
+function cleanRegexToWords(p: string): string {
+	return p
+		.replace(/\\[bBdDwWsSnrtfvAZ0]/g, ' ') // shorthand classes / anchors → space
+		.replace(/\\(.)/g, '$1') // unescape literal escapes (\. → .)
+		.replace(/[(){}[\]^$*+?|:!=<>]/g, ' ') // remaining metachars → space
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
+/** A friendly default rule name derived from its patterns — used when the user
+ *  defines patterns without naming the rule. Takes the wordy gist of the first
+ *  pattern (regex syntax stripped) and notes any extras as " +N". Falls back to
+ *  'untitled' when nothing nameable survives (e.g. patterns are pure syntax). */
+export function deriveRuleName(patterns: string[], isRegex = false): string {
+	const cleaned = patterns
+		.map((p) => p.trim())
+		.filter((p) => p.length > 0)
+		.map((p) => (isRegex ? cleanRegexToWords(p) : p).trim())
+		.filter((p) => p.length > 0);
+	if (cleaned.length === 0) return 'untitled';
+	const head = cleaned[0].length > 28 ? cleaned[0].slice(0, 27) + '…' : cleaned[0];
+	return cleaned.length > 1 ? `${head} +${cleaned.length - 1}` : head;
+}
+
 /** hex → rgba background with controlled alpha (matches samplescope's 0.42). */
 export function tint(color: string, alpha = 0.42): string {
 	const hex = color.replace('#', '').trim();

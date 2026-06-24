@@ -15,6 +15,7 @@
 		toggleHighlightRule,
 		reorderHighlightRules
 	} from '$lib/highlights.svelte';
+	import { deriveRuleName } from '$lib/highlight-match';
 	import type { HighlightRule } from '$lib/types';
 
 	const ROLES = ['', 'user', 'assistant', 'system'] as const;
@@ -48,8 +49,11 @@
 	async function save() {
 		if (!draft) return;
 		const patterns = draft.patterns.map((p) => p.trim()).filter((p) => p !== '');
-		const name = draft.name.trim();
-		if (!name || patterns.length === 0) return;
+		if (patterns.length === 0) return;
+		// Auto-name from the patterns when the user left the default/blank name —
+		// new rules have no name field of their own (rename via the row after).
+		const typed = draft.name.trim();
+		const name = !typed || typed === 'untitled' ? deriveRuleName(patterns, draft.is_regex) : typed;
 		await upsertHighlightRule({ ...draft, name, patterns });
 		cancel();
 	}
@@ -86,9 +90,8 @@
 		if (!draft) return;
 		draft = { ...draft, combinator: draft.combinator === 'and' ? 'or' : 'and' };
 	}
-	const canSave = $derived(
-		!!draft && draft.name.trim() !== '' && draft.patterns.some((p) => p.trim() !== '')
-	);
+	// Name is optional — it's auto-derived from the patterns on save when blank.
+	const canSave = $derived(!!draft && draft.patterns.some((p) => p.trim() !== ''));
 </script>
 
 {#snippet editor(d: HighlightRule)}
