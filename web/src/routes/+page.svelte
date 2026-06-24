@@ -48,6 +48,14 @@
 		localStorage.setItem('playground-theme', theme);
 	}
 
+	// How n>1 sample distributions render: 'all' = every card stacked (scroll),
+	// 'cycle' = one card at a time with ‹/› prev-next. UI-only; persisted locally.
+	let sampleView = $state<'all' | 'cycle'>('all');
+	function setSampleView(v: 'all' | 'cycle') {
+		sampleView = v;
+		localStorage.setItem('playground-sample-view', v);
+	}
+
 	// ── Data: runs / openrouter / health ──────────────────────────────
 	let runs = $state<Run[]>([]);
 	let openrouterModels = $state<OpenRouterModel[]>([]);
@@ -1445,6 +1453,8 @@
 			theme = saved;
 			document.documentElement.className = theme;
 		}
+		const sv = localStorage.getItem('playground-sample-view');
+		if (sv === 'all' || sv === 'cycle') sampleView = sv;
 		try {
 			const h = localStorage.getItem(HISTORY_KEY);
 			if (h) promptHistory = JSON.parse(h);
@@ -1765,6 +1775,18 @@
 					onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') { e.preventDefault(); inputTextarea?.focus(); } }} />
 			</div>
 
+			{#if s.n_samples > 1}
+				<div class="sidebar-section">
+					<label class="sidebar-label thinking-toggle-row">
+						<span>Sample view</span>
+						<span class="seg-toggle" data-tooltip="How an n>1 distribution renders: All = every card stacked (scroll); Cycle = one card at a time with ‹/›" use:tip>
+							<button class="seg-btn" class:active={sampleView === 'all'} onclick={() => setSampleView('all')}>All</button>
+							<button class="seg-btn" class:active={sampleView === 'cycle'} onclick={() => setSampleView('cycle')}>Cycle</button>
+						</span>
+					</label>
+				</div>
+			{/if}
+
 			{#if anySupportsThinking}
 				<div class="sidebar-section">
 					<label class="sidebar-label thinking-toggle-row">
@@ -1869,6 +1891,7 @@
 									busy={panelBusy(p.panel)}
 									showRegenAll={isComparing}
 									thinking={s.thinking}
+									{sampleView}
 									onRegenerate={(allPanels, replace) => (allPanels ? regenerateAll(p.panel, msg, replace) : regenerate(p.panel, msg, replace))}
 									onContinue={(allPanels) => continueMessage(p.panel, msg, allPanels)}
 									onDelete={(allPanels, allSiblings) => (allPanels ? deleteMessageAll(p.panel, msg, allSiblings) : deleteMessage(p.panel, msg, allSiblings))}
@@ -2415,6 +2438,12 @@
 	.thinking-pill { padding: 2px 12px; border-radius: var(--radius-pill); font-size: 0.75rem; font-weight: 600; background: var(--color-bg); border: 1px solid var(--color-border); color: var(--color-text-muted); transition: all 0.15s; letter-spacing: 0.03em; }
 	.thinking-pill.active { background: var(--color-accent); border-color: var(--color-accent); color: white; }
 	.thinking-pill:hover { border-color: var(--color-accent); }
+	/* Segmented All|Cycle toggle for the sample-distribution view. */
+	.seg-toggle { display: inline-flex; border: 1px solid var(--color-border); border-radius: var(--radius-pill); overflow: hidden; }
+	.seg-btn { padding: 2px 12px; font-size: 0.75rem; font-weight: 600; background: var(--color-bg); border: none; color: var(--color-text-muted); cursor: pointer; transition: all 0.15s; letter-spacing: 0.03em; }
+	.seg-btn + .seg-btn { border-left: 1px solid var(--color-border); }
+	.seg-btn.active { background: var(--color-accent); color: white; }
+	.seg-btn:not(.active):hover { color: var(--color-accent); }
 
 	/* ── Sampling params popup ──────────────────────────────────── */
 	.advanced-toggle { background: none; border: none; padding: 0; cursor: pointer; font-size: 0.78rem; color: var(--color-text-muted); font-weight: 500; }

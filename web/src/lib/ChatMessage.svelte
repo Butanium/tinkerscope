@@ -7,7 +7,7 @@
 	// sibling branch instead of "use this".
 	import { renderContent } from '$lib/render';
 	import { tip } from '$lib/tooltip.svelte';
-	import type { ViewMessage } from '$lib/types';
+	import type { ViewMessage, SampleData } from '$lib/types';
 
 	let {
 		msg,
@@ -18,6 +18,7 @@
 		ctrlDown,
 		showRegenAll,
 		thinking,
+		sampleView = 'all',
 		onRegenerate,
 		onContinue,
 		onDelete,
@@ -43,6 +44,9 @@
 		ctrlDown: boolean;
 		showRegenAll: boolean; // compare mode (>1 panel) → the ctrl "all panels" axis is live
 		thinking: boolean;
+		// How the n>1 distribution bucket renders its cards: 'all' = every card stacked
+		// (scrollable), 'cycle' = one card at a time with ‹k/N› prev/next. UI-only pref.
+		sampleView?: 'all' | 'cycle';
 		onRegenerate: (allPanels: boolean, replace: boolean) => void;
 		onContinue: (allPanels: boolean) => void;
 		onDelete: (allPanels: boolean, allSiblings: boolean) => void;
@@ -80,6 +84,17 @@
 		else next.add(idx);
 		rawSamples = next;
 	}
+
+	// Cycle-view cursor (local). In 'cycle' mode only ONE sample card shows; this
+	// indexes into the *displayable* samples (content present, matching the {#each}
+	// skip rule), NOT into msg.samples directly — so prev/next never lands on an
+	// empty/error slot. The card itself still uses its ORIGINAL index for actions.
+	let sampleCursor = $state(0);
+	let visibleSampleIdxs = $derived(
+		(msg.samples ?? []).map((s, i) => [s, i] as const).filter(([s]) => s && s.content).map(([, i]) => i)
+	);
+	// Clamp the cursor against the live count (samples stream in / get deleted).
+	let safeCursor = $derived(Math.min(Math.max(sampleCursor, 0), Math.max(0, visibleSampleIdxs.length - 1)));
 
 	// Transient "✓ copied" flash on the copy button (clipboard gives no feedback).
 	let copied = $state(false);
@@ -128,6 +143,7 @@
 		copied = false;
 		rawSingle = false;
 		rawSamples = new Set();
+		sampleCursor = 0;
 	});
 </script>
 
@@ -143,6 +159,46 @@
 			</button>
 		</div>
 	{/if}
+{/snippet}
+
+<!-- One n>1 distribution card. Rendered once per displayable sample in 'all' mode,
+     or once (the cursor's sample) in 'cycle' mode. `idx` is the ORIGINAL index into
+     msg.samples so every action (select/discard/delete/raw/tag) targets the right
+     sibling regardless of view mode. -->
+{#snippet sampleCard(sample: SampleData, idx: number)}
+	<div class="sample-card" class:active-sample={msg.activeSampleIndex === idx}>
+		<div class="sample-header">
+			<span>Sample {idx + 1}</span>
+			{#if msg.activeSampleIndex === idx}<span class="active-sample-tag">active branch</span>{/if}
+		</div>
+		{#if sample.reasoning}
+			<details class="sample-reasoning-block">
+				<summary class="sample-reasoning-toggle">
+					<span>Reasoning</span>
+					<svg class="thinking-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+				</summary>
+				<div class="sample-reasoning">{@html renderContent(sample.reasoning, prevUserMsg)}</div>
+			</details>
+		{/if}
+		{#if rawSamples.has(idx) && sample.raw_text}
+			<pre class="raw-text-view">{sample.raw_text}</pre>
+		{:else}
+			<div class="sample-content">{@html renderContent(sample.content, prevUserMsg)}</div>
+		{/if}
+		<div class="message-actions sample-actions">
+			<button class="btn-use" class:active={msg.activeSampleIndex === idx} data-tooltip="Make this the active branch & collapse to it (others stay as ‹k/N› siblings)" use:tip disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onSelectSample(idx)}>{msg.activeSampleIndex === idx ? '✓ active' : 'Make active'}</button>
+			<button class="btn-use" data-tooltip="Keep only this sample — discard the others" use:tip disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onDiscardOthers(idx)}>Discard others</button>
+			{#if sample.raw_text}
+				<button class="btn-raw" class:active={rawSamples.has(idx)} onclick={() => toggleRawSample(idx)} title="Toggle raw model output with tags preserved">Raw</button>
+			{/if}
+			<button class="btn-tag" class:shift-alt={shiftDown} data-tooltip={shiftDown ? 'Bookmark instantly (no note)' : 'Bookmark with a note'} use:tip onclick={(e) => onTag(sample.content, idx, msg.totalSamples ?? null, sample.reasoning || '', e.shiftKey)}>
+				{#if shiftDown}{@render tagQuickIcon()}{:else}{@render tagIcon()}{/if}
+			</button>
+			<button class="btn-act btn-act-danger sample-del" data-tooltip="Delete this sample" use:tip aria-label="Delete this sample" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onDeleteSample(idx)}>
+				<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V2.5h4V4M4.5 4l.6 9h5.8l.6-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg>
+			</button>
+		</div>
+	</div>
 {/snippet}
 
 <!-- Action icons. The shift-held variants signal the alternate action: regenerate
@@ -296,45 +352,31 @@
 				</div>
 			{/if}
 			{#if completedCount > 0}
-				<div class="samples-container">
-					{#each msg.samples ?? [] as sample, idx (idx)}
-						{#if sample && sample.content}
-							<div class="sample-card" class:active-sample={msg.activeSampleIndex === idx}>
-								<div class="sample-header">
-									<span>Sample {idx + 1}</span>
-									{#if msg.activeSampleIndex === idx}<span class="active-sample-tag">active branch</span>{/if}
-								</div>
-								{#if sample.reasoning}
-									<details class="sample-reasoning-block">
-										<summary class="sample-reasoning-toggle">
-											<span>Reasoning</span>
-											<svg class="thinking-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
-										</summary>
-										<div class="sample-reasoning">{@html renderContent(sample.reasoning, prevUserMsg)}</div>
-									</details>
-								{/if}
-								{#if rawSamples.has(idx) && sample.raw_text}
-									<pre class="raw-text-view">{sample.raw_text}</pre>
-								{:else}
-									<div class="sample-content">{@html renderContent(sample.content, prevUserMsg)}</div>
-								{/if}
-								<div class="message-actions sample-actions">
-									<button class="btn-use" class:active={msg.activeSampleIndex === idx} data-tooltip="Make this the active branch & collapse to it (others stay as ‹k/N› siblings)" use:tip disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onSelectSample(idx)}>{msg.activeSampleIndex === idx ? '✓ active' : 'Make active'}</button>
-									<button class="btn-use" data-tooltip="Keep only this sample — discard the others" use:tip disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onDiscardOthers(idx)}>Discard others</button>
-									{#if sample.raw_text}
-										<button class="btn-raw" class:active={rawSamples.has(idx)} onclick={() => toggleRawSample(idx)} title="Toggle raw model output with tags preserved">Raw</button>
-									{/if}
-									<button class="btn-tag" class:shift-alt={shiftDown} data-tooltip={shiftDown ? 'Bookmark instantly (no note)' : 'Bookmark with a note'} use:tip onclick={(e) => onTag(sample.content, idx, msg.totalSamples ?? null, sample.reasoning || '', e.shiftKey)}>
-										{#if shiftDown}{@render tagQuickIcon()}{:else}{@render tagIcon()}{/if}
-									</button>
-									<button class="btn-act btn-act-danger sample-del" data-tooltip="Delete this sample" use:tip aria-label="Delete this sample" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onDeleteSample(idx)}>
-										<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V2.5h4V4M4.5 4l.6 9h5.8l.6-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg>
-									</button>
-								</div>
-							</div>
-						{/if}
-					{/each}
-				</div>
+				{#if sampleView === 'cycle' && visibleSampleIdxs.length > 0}
+					{@const curIdx = visibleSampleIdxs[safeCursor]}
+					<div class="sample-cycle">
+						<div class="branch-cycle sample-cycle-bar" data-testid="sample-cycle">
+							<button class="branch-cycle-btn" aria-label="Previous sample" disabled={safeCursor <= 0} onclick={() => (sampleCursor = safeCursor - 1)}>
+								<svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M10 3l-5 5 5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+							</button>
+							<span class="branch-cycle-count">{safeCursor + 1}/{visibleSampleIdxs.length}</span>
+							<button class="branch-cycle-btn" aria-label="Next sample" disabled={safeCursor >= visibleSampleIdxs.length - 1} onclick={() => (sampleCursor = safeCursor + 1)}>
+								<svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+							</button>
+						</div>
+						<div class="samples-container">
+							{@render sampleCard(msg.samples![curIdx], curIdx)}
+						</div>
+					</div>
+				{:else}
+					<div class="samples-container">
+						{#each msg.samples ?? [] as sample, idx (idx)}
+							{#if sample && sample.content}
+								{@render sampleCard(sample, idx)}
+							{/if}
+						{/each}
+					</div>
+				{/if}
 			{/if}
 			{#if allDone && msg.nodeId != null && !busy}
 				<div class="message-actions turn-actions hover-actions">
@@ -412,6 +454,9 @@
 	.branch-cycle-btn:hover:not(:disabled) { color: var(--color-accent); background: var(--color-accent-bg); }
 	.branch-cycle-btn:disabled { opacity: 0.3; cursor: default; }
 	.branch-cycle-count { font-size: 0.68rem; font-variant-numeric: tabular-nums; color: var(--color-text-secondary); min-width: 24px; text-align: center; }
+	/* Cycle-view: ‹k/N› bar sits above the single visible sample card. */
+	.sample-cycle { display: flex; flex-direction: column; }
+	.sample-cycle-bar { align-self: center; margin-top: 0; margin-bottom: var(--space-2); padding: 1px 6px; }
 	.active-sample { outline: 2px solid var(--color-accent); outline-offset: 1px; }
 	.active-sample-tag { font-size: 0.62rem; color: var(--color-accent); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-left: var(--space-2); }
 	.btn-use.active { background: var(--color-accent); border-color: var(--color-accent); color: white; }
