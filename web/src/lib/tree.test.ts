@@ -303,17 +303,19 @@ test('deleteSiblings removes ALL branches at this level (shift+delete)', () => {
 });
 
 // ── cycle ────────────────────────────────────────────────────────────
-test('cycle clamps with no wrap', () => {
+test('cycle wraps around the ends (1-2-3-1…)', () => {
 	const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
 	const { tree: t2, ids } = foldAssistant(t1, u, [{ content: 'c0' }, { content: 'c1' }]);
-	// at index 0 (default-first? no — fold selects first = c0)
+	// fold selects first = c0
 	eq(siblingInfo(t2, ids[0]).index, 0);
-	const noPrev = cycle(t2, ids[0], -1); // clamp at 0
-	eq(activeMessages(noPrev), [U('q'), A('c0')]);
+	// prev from the first wraps to the last
+	const wrapPrev = cycle(t2, ids[0], -1);
+	eq(activeMessages(wrapPrev), [U('q'), A('c1')]);
 	const next = cycle(t2, ids[0], 1);
 	eq(activeMessages(next), [U('q'), A('c1')]);
-	const noNext = cycle(next, ids[1], 1); // clamp at last
-	eq(activeMessages(noNext), [U('q'), A('c1')]);
+	// next from the last wraps back to the first
+	const wrapNext = cycle(next, ids[1], 1);
+	eq(activeMessages(wrapNext), [U('q'), A('c0')]);
 });
 
 // ── reconcileExternal ────────────────────────────────────────────────

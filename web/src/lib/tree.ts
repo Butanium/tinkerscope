@@ -356,12 +356,14 @@ export function setSelected(t0: ConvTree, nodeId: string): ConvTree {
 	return t;
 }
 
-/** Step the selection ±delta among `nodeId`'s siblings (clamped, no wrap). */
+/** Step the selection ±delta among `nodeId`'s siblings, WRAPPING around the ends
+ *  (next past the last → first, prev before the first → last; 1-2-3-1-2-3…). */
 export function cycle(t0: ConvTree, nodeId: string, delta: number): ConvTree {
 	const sibs = siblingsOf(t0, nodeId);
+	const n = sibs.length;
 	const i = sibs.indexOf(nodeId);
-	if (i < 0) return t0;
-	const j = Math.max(0, Math.min(sibs.length - 1, i + delta));
+	if (i < 0 || n === 0) return t0;
+	const j = ((i + delta) % n + n) % n; // positive modulo → wraps both directions
 	if (j === i) return t0;
 	return setSelected(t0, sibs[j]);
 }

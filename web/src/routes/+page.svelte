@@ -1775,17 +1775,15 @@
 					onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') { e.preventDefault(); inputTextarea?.focus(); } }} />
 			</div>
 
-			{#if s.n_samples > 1}
-				<div class="sidebar-section">
-					<label class="sidebar-label thinking-toggle-row">
-						<span>Sample view</span>
-						<span class="seg-toggle" data-tooltip="How an n>1 distribution renders: All = every card stacked (scroll); Cycle = one card at a time with ‹/›" use:tip>
-							<button class="seg-btn" class:active={sampleView === 'all'} onclick={() => setSampleView('all')}>All</button>
-							<button class="seg-btn" class:active={sampleView === 'cycle'} onclick={() => setSampleView('cycle')}>Cycle</button>
-						</span>
-					</label>
-				</div>
-			{/if}
+			<div class="sidebar-section">
+				<label class="sidebar-label thinking-toggle-row">
+					<span>Sample view</span>
+					<span class="seg-toggle" data-tooltip="How an n>1 distribution renders: All = every card stacked (scroll); Cycle = one card at a time with ‹/›" use:tip>
+						<button class="seg-btn" class:active={sampleView === 'all'} onclick={() => setSampleView('all')}>All</button>
+						<button class="seg-btn" class:active={sampleView === 'cycle'} onclick={() => setSampleView('cycle')}>Cycle</button>
+					</span>
+				</label>
+			</div>
 
 			{#if anySupportsThinking}
 				<div class="sidebar-section">

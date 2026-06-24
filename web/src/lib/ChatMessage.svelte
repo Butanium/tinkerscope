@@ -150,11 +150,11 @@
 {#snippet cycler()}
 	{#if hasSiblings && msg.sib}
 		<div class="branch-cycle" data-testid="branch-cycle">
-			<button class="branch-cycle-btn" aria-label="Previous branch" disabled={busy || msg.sib.index <= 0} onclick={() => onCycle(-1)}>
+			<button class="branch-cycle-btn" aria-label="Previous branch" disabled={busy} onclick={() => onCycle(-1)}>
 				<svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M10 3l-5 5 5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
 			</button>
 			<span class="branch-cycle-count">{msg.sib.index + 1}/{msg.sib.count}</span>
-			<button class="branch-cycle-btn" aria-label="Next branch" disabled={busy || msg.sib.index >= msg.sib.count - 1} onclick={() => onCycle(1)}>
+			<button class="branch-cycle-btn" aria-label="Next branch" disabled={busy} onclick={() => onCycle(1)}>
 				<svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
 			</button>
 		</div>
@@ -353,19 +353,21 @@
 			{/if}
 			{#if completedCount > 0}
 				{#if sampleView === 'cycle' && visibleSampleIdxs.length > 0}
+					{@const N = visibleSampleIdxs.length}
 					{@const curIdx = visibleSampleIdxs[safeCursor]}
 					<div class="sample-cycle">
-						<div class="branch-cycle sample-cycle-bar" data-testid="sample-cycle">
-							<button class="branch-cycle-btn" aria-label="Previous sample" disabled={safeCursor <= 0} onclick={() => (sampleCursor = safeCursor - 1)}>
-								<svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M10 3l-5 5 5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
-							</button>
-							<span class="branch-cycle-count">{safeCursor + 1}/{visibleSampleIdxs.length}</span>
-							<button class="branch-cycle-btn" aria-label="Next sample" disabled={safeCursor >= visibleSampleIdxs.length - 1} onclick={() => (sampleCursor = safeCursor + 1)}>
-								<svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
-							</button>
-						</div>
 						<div class="samples-container">
 							{@render sampleCard(msg.samples![curIdx], curIdx)}
+						</div>
+						<!-- ‹k/N› wraps (1-2-3-1…); bottom-right to match the branch cycler. -->
+						<div class="branch-cycle sample-cycle-bar" data-testid="sample-cycle">
+							<button class="branch-cycle-btn" aria-label="Previous sample" onclick={() => (sampleCursor = (safeCursor - 1 + N) % N)}>
+								<svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M10 3l-5 5 5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+							</button>
+							<span class="branch-cycle-count">{safeCursor + 1}/{N}</span>
+							<button class="branch-cycle-btn" aria-label="Next sample" onclick={() => (sampleCursor = (safeCursor + 1) % N)}>
+								<svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+							</button>
 						</div>
 					</div>
 				{:else}
@@ -449,14 +451,15 @@
 
 <style>
 	/* ── ‹k/N› branch cycler ──────────────────────────────────────── */
-	.branch-cycle { display: inline-flex; align-items: center; gap: 2px; margin-top: var(--space-2); padding: 1px 4px; border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: var(--color-bg); width: fit-content; user-select: none; }
+	/* Right-aligned (bottom-right of the turn) so every cycler sits consistently. */
+	.branch-cycle { display: flex; align-items: center; gap: 2px; margin-top: var(--space-2); margin-left: auto; padding: 1px 4px; border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: var(--color-bg); width: fit-content; user-select: none; }
 	.branch-cycle-btn { display: flex; align-items: center; justify-content: center; padding: 2px; background: none; border: none; color: var(--color-text-muted); cursor: pointer; border-radius: var(--radius-sm); }
 	.branch-cycle-btn:hover:not(:disabled) { color: var(--color-accent); background: var(--color-accent-bg); }
 	.branch-cycle-btn:disabled { opacity: 0.3; cursor: default; }
 	.branch-cycle-count { font-size: 0.68rem; font-variant-numeric: tabular-nums; color: var(--color-text-secondary); min-width: 24px; text-align: center; }
-	/* Cycle-view: ‹k/N› bar sits above the single visible sample card. */
+	/* Cycle-view: ‹k/N› bar sits at the bottom-right, under the single sample card. */
 	.sample-cycle { display: flex; flex-direction: column; }
-	.sample-cycle-bar { align-self: center; margin-top: 0; margin-bottom: var(--space-2); padding: 1px 6px; }
+	.sample-cycle-bar { padding: 1px 6px; }
 	.active-sample { outline: 2px solid var(--color-accent); outline-offset: 1px; }
 	.active-sample-tag { font-size: 0.62rem; color: var(--color-accent); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-left: var(--space-2); }
 	.btn-use.active { background: var(--color-accent); border-color: var(--color-accent); color: white; }
