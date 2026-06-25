@@ -71,6 +71,10 @@ class ConversationCreate(BaseModel):
     # legacy 2-panel shape (transitional CLI callers) — synthesized into `trees`.
     tree: dict[str, Any] | None = None
     compare_tree: dict[str, Any] | None = None
+    # Per-conversation panel LAYOUT: ordered [{id, run_id, checkpoint}] — which
+    # models are shown in which panels. Travels with the conversation so switching
+    # restores its model set (and a new conversation can inherit the current one's).
+    panels: list[dict[str, Any]] | None = None
 
 
 class ConversationRename(BaseModel):
@@ -80,6 +84,19 @@ class ConversationRename(BaseModel):
 class TreeSave(BaseModel):
     trees: dict[str, Any]
     system_prompt: str | None = None
+    # Per-conversation panel UI (all OPAQUE panel-id lists; the browser owns the
+    # semantics — see web/src/lib/conversations.svelte.ts):
+    #   reduced_panels — panels folded out of view
+    #   send_targets   — panels the composer fires a send to
+    #   seen_panels    — defaulting bookkeeping (a panel is defaulted into
+    #                    send_targets exactly once, when first seen). Persisted so
+    #                    a restart restores the exact deselected/folded state
+    #                    instead of re-defaulting every panel ON.
+    reduced_panels: list[str] = []
+    send_targets: list[str] = []
+    seen_panels: list[str] = []
+    # Per-conversation panel LAYOUT — see ConversationCreate.panels.
+    panels: list[dict[str, Any]] = []
 
 
 @router.get("")
@@ -106,6 +123,15 @@ def create_conversation(req: ConversationCreate) -> dict:
         "name": req.name,
         "system_prompt": req.system_prompt,
         "trees": trees,
+        # Panel layout the conversation opens with (inherited from the current
+        # conversation, or a single blank panel). Empty ⇒ legacy fallback (browser
+        # keeps whatever panels are currently shown).
+        "panels": req.panels or [],
+        # Fresh conversation: empty panel-UI lists ⇒ the browser defaults every
+        # open panel ON the first time it lays them out (see #applyPanelUi).
+        "reduced_panels": [],
+        "send_targets": [],
+        "seen_panels": [],
         "created_at": _now(),
         "updated_at": _now(),
     }
@@ -138,6 +164,10 @@ def save_conversation_tree(conversation_id: str, req: TreeSave) -> dict:
             if c.get("id") == conversation_id:
                 c["trees"] = req.trees
                 c["system_prompt"] = req.system_prompt
+                c["panels"] = req.panels
+                c["reduced_panels"] = req.reduced_panels
+                c["send_targets"] = req.send_targets
+                c["seen_panels"] = req.seen_panels
                 c["updated_at"] = _now()
                 # self-heal: a legacy {tree, compare_tree} entry upgrades to {trees}
                 # on its first save — drop the stale keys so they can't linger.

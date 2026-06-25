@@ -11,7 +11,8 @@ import type {
 	StatePatch,
 	ChatRequest,
 	Conversation,
-	HighlightRule
+	HighlightRule,
+	PanelLayout
 } from './types';
 import type { ConvTree } from './tree';
 
@@ -88,6 +89,7 @@ export const api = {
 		name?: string;
 		system_prompt?: string | null;
 		trees?: Record<string, ConvTree>;
+		panels?: PanelLayout[];
 	}) => j<Conversation>('/api/conversations', { method: 'POST', body: JSON.stringify(entry) }),
 	renameConversation: (id: string, name: string) =>
 		j<Conversation>(`/api/conversations/${encodeURIComponent(id)}`, {
@@ -97,11 +99,15 @@ export const api = {
 	saveConversationTree: (
 		id: string,
 		trees: Record<string, ConvTree>,
-		system_prompt: string | null
+		system_prompt: string | null,
+		panels: PanelLayout[],
+		reduced_panels: string[],
+		send_targets: string[],
+		seen_panels: string[]
 	) =>
 		j<{ status: string; id: string }>(`/api/conversations/${encodeURIComponent(id)}/tree`, {
 			method: 'PUT',
-			body: JSON.stringify({ trees, system_prompt })
+			body: JSON.stringify({ trees, system_prompt, panels, reduced_panels, send_targets, seen_panels })
 		}),
 	deleteConversation: (id: string) =>
 		j<{ status: string }>(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' }),

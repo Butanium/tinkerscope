@@ -18,7 +18,7 @@ import {
 	type ConvTree,
 	type Msg
 } from './tree';
-import type { Conversation, Panel } from './types';
+import type { Conversation, Panel, PanelLayout, StatePatch } from './types';
 
 function asTree(x: unknown): ConvTree {
 	const t = x as ConvTree | undefined | null;
@@ -47,11 +47,28 @@ class ConversationsStore {
 	/** Transient hint shown when the terminal/another tab branched the conversation. */
 	externalNotice = $state<string | null>(null);
 
+	// ── per-conversation panel UI (persisted with the conversation) ───────
+	/** Panels folded out of view (tree kept alive). */
+	reducedPanels = $state<Set<string>>(new Set());
+	/** Panels the composer fires a send to (the "Send to" chips). */
+	sendTargets = $state<Set<string>>(new Set());
+	/** Defaulting bookkeeping: a panel is auto-added to `sendTargets` exactly once,
+	 *  the first time syncPanels() sees it (unless it's reduced). Persisted too so a
+	 *  restart restores the EXACT deselected/folded state rather than re-defaulting
+	 *  every panel ON. Not rendered ⇒ plain (non-reactive) field. */
+	#seenPanels = new Set<string>();
+
 	/** Tokens of chats THIS browser fired — its own folds are done by fireChat
 	 *  from the response stream, so the external-fold hook must skip these. */
 	#ownTokens = new Set<string>();
 	#saveTimer: ReturnType<typeof setTimeout> | null = null;
-	#pending: { id: string; trees: Record<string, ConvTree>; system_prompt: string | null } | null = null;
+	#pending: {
+		id: string;
+		trees: Record<string, ConvTree>;
+		reduced_panels: string[];
+		send_targets: string[];
+		seen_panels: string[];
+	} | null = null;
 	#noticeTimer: ReturnType<typeof setTimeout> | null = null;
 
 	treeFor(panel: Panel): ConvTree {
@@ -113,6 +130,76 @@ class ConversationsStore {
 		this.save();
 	}
 
+	// ── panel UI (folded / send-targets), persisted with the conversation ──
+	/** Toggle a panel as a composer send-target. */
+	toggleSendTarget(panel: Panel): void {
+		this.sendTargets = this.sendTargets.has(panel)
+			? new Set([...this.sendTargets].filter((t) => t !== panel))
+			: new Set([...this.sendTargets, panel]);
+		this.save();
+	}
+	/** Fold a panel out of view → also stop sending to it (off by default). */
+	reducePanel(panel: Panel): void {
+		this.reducedPanels = new Set([...this.reducedPanels, panel]);
+		this.sendTargets = new Set([...this.sendTargets].filter((t) => t !== panel));
+		this.save();
+	}
+	/** Un-fold a panel → resume sending to it. */
+	restorePanel(panel: Panel): void {
+		this.reducedPanels = new Set([...this.reducedPanels].filter((t) => t !== panel));
+		this.sendTargets = new Set([...this.sendTargets, panel]);
+		this.save();
+	}
+	/** Forget a removed panel's UI bookkeeping (called from +page removePanel). */
+	dropPanelUi(panel: Panel): void {
+		this.reducedPanels = new Set([...this.reducedPanels].filter((t) => t !== panel));
+		this.sendTargets = new Set([...this.sendTargets].filter((t) => t !== panel));
+		this.#seenPanels.delete(panel);
+		this.save();
+	}
+	/** Reconcile against the current panel list: default each NEWLY-seen panel into
+	 *  sendTargets (unless reduced). Purely additive — removed panels are left in the
+	 *  sets (harmless: every reader filters by the live panel list) and pruned only on
+	 *  explicit dropPanelUi, so a transient gap while a panel's state-bus patch lands
+	 *  can't wrongly re-default a previously-deselected panel. Persists on change. */
+	syncPanels(ids: string[]): void {
+		// Gate on #seenPanels (non-reactive) FIRST and read sendTargets/reducedPanels
+		// only when a genuinely new panel appears — so in steady state the calling
+		// effect depends on the panel list alone, not on the sets it writes.
+		let targets: Set<string> | null = null;
+		let seenChanged = false;
+		for (const id of ids) {
+			if (this.#seenPanels.has(id)) continue;
+			this.#seenPanels.add(id);
+			seenChanged = true;
+			if (!this.reducedPanels.has(id)) {
+				if (!targets) targets = new Set(this.sendTargets);
+				targets.add(id);
+			}
+		}
+		if (targets) this.sendTargets = targets;
+		if (seenChanged) this.save(); // persist the seen growth + any new default
+	}
+	/** Restore the panel-UI sets from a loaded conversation. Missing keys (legacy
+	 *  conversations) ⇒ empty sets + empty seen ⇒ syncPanels defaults every open
+	 *  panel ON, exactly as before this was persisted. */
+	#applyPanelUi(conv: Conversation): void {
+		this.reducedPanels = new Set(conv.reduced_panels ?? []);
+		this.sendTargets = new Set(conv.send_targets ?? []);
+		this.#seenPanels = new Set(conv.seen_panels ?? []);
+	}
+
+	/** The panel layout (model selection per panel) currently shown — what a new
+	 *  conversation inherits. Always at least a blank primary. */
+	#currentLayout(): PanelLayout[] {
+		const layout = (live.state?.panels ?? []).map((p) => ({
+			id: p.id,
+			run_id: p.run_id,
+			checkpoint: p.checkpoint
+		}));
+		return layout.length ? layout : [{ id: 'primary', run_id: null, checkpoint: null }];
+	}
+
 	/** Reset every open panel's tree to empty (fresh thread, same panel layout). */
 	#freshTrees(): Promise<void> {
 		const ids = (live.state?.panels ?? []).map((p) => p.id);
@@ -136,7 +223,13 @@ class ConversationsStore {
 			if (pid === 'primary' || t.rootChildren.length) trees[pid] = t;
 		}
 		if (!trees.primary) trees.primary = emptyTree();
-		this.#pending = { id, trees, system_prompt: live.state?.system_prompt ?? null };
+		this.#pending = {
+			id,
+			trees,
+			reduced_panels: [...this.reducedPanels],
+			send_targets: [...this.sendTargets],
+			seen_panels: [...this.#seenPanels]
+		};
 		if (this.#saveTimer) clearTimeout(this.#saveTimer);
 		this.#saveTimer = setTimeout(() => void this.#doSave(), 400);
 	}
@@ -146,8 +239,26 @@ class ConversationsStore {
 		const p = this.#pending;
 		this.#pending = null;
 		if (!p) return;
+		// system_prompt + the panel LAYOUT mirror server state, which lands a beat
+		// after a patchState — so read them HERE (debounced), not at schedule time, to
+		// avoid persisting a stale value. flush-on-switch keeps live.state aligned with
+		// p.id (switch/create flush the pending save before they touch live.state).
+		const system_prompt = live.state?.system_prompt ?? null;
+		const panels: PanelLayout[] = (live.state?.panels ?? []).map((ps) => ({
+			id: ps.id,
+			run_id: ps.run_id,
+			checkpoint: ps.checkpoint
+		}));
 		try {
-			await api.saveConversationTree(p.id, p.trees, p.system_prompt);
+			await api.saveConversationTree(
+				p.id,
+				p.trees,
+				system_prompt,
+				panels,
+				p.reduced_panels,
+				p.send_targets,
+				p.seen_panels
+			);
 			this.list = this.list.map((c) => (c.id === p.id ? { ...c, updated_at: new Date().toISOString() } : c));
 		} catch (e) {
 			console.warn('conversation tree save failed', e);
@@ -173,7 +284,8 @@ class ConversationsStore {
 			const created = await api.createConversation({
 				name: 'Untitled',
 				system_prompt: live.state?.system_prompt ?? null,
-				trees: { primary: emptyTree() }
+				trees: { primary: emptyTree() },
+				panels: this.#currentLayout()
 			});
 			list = [created];
 		}
@@ -181,7 +293,7 @@ class ConversationsStore {
 		const preferred = preferredId ? list.find((c) => c.id === preferredId) : undefined;
 		const active = preferred ?? newest(list)!;
 		this.activeId = active.id;
-		this.#loadTrees(active);
+		await this.#loadTrees(active);
 		this.#afterLoad();
 		return !!preferred;
 	}
@@ -193,21 +305,40 @@ class ConversationsStore {
 		const conv = this.list.find((c) => c.id === id);
 		if (!conv) return;
 		this.activeId = id;
-		this.#loadTrees(conv);
+		await this.#loadTrees(conv);
 		this.#afterLoad();
 	}
 
-	async create(name = 'Untitled'): Promise<void> {
+	/** Create + switch to a new conversation. `panels` is the layout it opens with:
+	 *  callers inherit the current conversation's models (a new conversation keeps the
+	 *  MODELS, never the messages) or pass a single blank panel (Shift+New). Omitted ⇒
+	 *  inherit the current layout. */
+	async create(name = 'Untitled', panels?: PanelLayout[]): Promise<void> {
 		await this.flush();
 		live.clearBuckets();
+		const layout = panels && panels.length ? panels : this.#currentLayout();
 		const created = await api.createConversation({
 			name,
 			system_prompt: live.state?.system_prompt ?? null,
-			trees: { primary: emptyTree() }
+			trees: { primary: emptyTree() },
+			panels: layout
 		});
 		this.list = [created, ...this.list];
 		this.activeId = created.id;
-		await this.#freshTrees();
+		this.#applyPanelUi(created); // empty sets ⇒ +page syncPanels re-defaults panels ON
+		// Lay out the inherited/blank panels with EMPTY trees + transcripts. One
+		// optimistic setState (panels + cleared echoes) so live.state reflects the new
+		// layout immediately — the SSE patch lags a beat behind the POST.
+		const ids = layout.map((p) => p.id);
+		if (!ids.includes('primary')) ids.unshift('primary');
+		this.trees = Object.fromEntries(ids.map((id) => [id, emptyTree()]));
+		const next = await api
+			.setState({
+				panels: layout.map((p) => ({ id: p.id, run_id: p.run_id, checkpoint: p.checkpoint, messages: [] })),
+				panel_messages: Object.fromEntries(ids.map((id) => [id, []]))
+			})
+			.catch(() => null);
+		if (next) live.state = next;
 	}
 
 	async rename(id: string, name: string): Promise<void> {
@@ -234,7 +365,7 @@ class ConversationsStore {
 			live.clearBuckets();
 			const next = newest(this.list)!;
 			this.activeId = next.id;
-			this.#loadTrees(next);
+			await this.#loadTrees(next);
 			this.#afterLoad();
 		}
 	}
@@ -250,7 +381,7 @@ class ConversationsStore {
 	 *  {tree, compare_tree} (synthesizing reserved 'primary'/'compare' ids) so an
 	 *  un-migrated saved conversation loads without losing a user-authored compare
 	 *  tree. asTree() returns emptyTree() on malformed input. */
-	#loadTrees(conv: Conversation): void {
+	async #loadTrees(conv: Conversation): Promise<void> {
 		if (conv.trees && typeof conv.trees === 'object') {
 			const map: Record<string, ConvTree> = {};
 			for (const [pid, t] of Object.entries(conv.trees)) map[pid] = asTree(t);
@@ -261,8 +392,23 @@ class ConversationsStore {
 			if (conv.compare_tree) map.compare = asTree(conv.compare_tree);
 			this.trees = map;
 		}
-		// system_prompt travels with the conversation (each conv = one experiment).
-		api.setState({ system_prompt: conv.system_prompt ?? null }).catch(() => {});
+		this.#applyPanelUi(conv);
+		// system_prompt + the panel LAYOUT travel with the conversation (each conv =
+		// one experiment). A legacy conversation has no stored layout ⇒ keep whatever
+		// panels are currently shown (don't blow them away). Optimistically assign the
+		// returned state so the immediately-following #afterLoad mirrors against the
+		// FRESH panel list rather than the previous conversation's.
+		const patch: StatePatch = { system_prompt: conv.system_prompt ?? null };
+		if (Array.isArray(conv.panels) && conv.panels.length) {
+			patch.panels = conv.panels.map((p) => ({
+				id: p.id,
+				run_id: p.run_id ?? null,
+				checkpoint: p.checkpoint ?? null,
+				messages: []
+			}));
+		}
+		const next = await api.setState(patch).catch(() => null);
+		if (next) live.state = next;
 	}
 
 	/** After loading a conversation: fold a stray external turn into each panel (once,

@@ -44,6 +44,71 @@ def test_system_prompt_travels_with_the_conversation(client):
     assert client.get("/api/conversations").json()[0]["system_prompt"] == "You are a poet."
 
 
+def test_panel_ui_round_trips(client):
+    """Folded panels + composer send-targets (and the defaulting bookkeeping) persist
+    with the conversation, so a restart / conversation-switch restores them instead of
+    re-defaulting every panel ON."""
+    conv = client.post("/api/conversations", json={"name": "c"}).json()
+    # Fresh conversation starts with empty panel-UI lists.
+    assert conv["reduced_panels"] == [] and conv["send_targets"] == [] and conv["seen_panels"] == []
+    client.put(
+        f"/api/conversations/{conv['id']}/tree",
+        json={
+            "trees": {"primary": {"nodes": {}, "rootChildren": [], "selected": {}}},
+            "reduced_panels": ["compare"],
+            "send_targets": ["primary"],
+            "seen_panels": ["primary", "compare"],
+        },
+    )
+    got = client.get("/api/conversations").json()[0]
+    assert got["reduced_panels"] == ["compare"]
+    assert got["send_targets"] == ["primary"]
+    assert got["seen_panels"] == ["primary", "compare"]
+
+
+def test_panel_ui_defaults_to_empty_when_omitted(client):
+    """A tree-save that omits the panel-UI keys (older client) resets them to empty —
+    the frontend then treats empty seen ⇒ re-default every open panel ON."""
+    cid = client.post("/api/conversations", json={"name": "c"}).json()["id"]
+    client.put(f"/api/conversations/{cid}/tree",
+               json={"trees": {"primary": {"nodes": {}, "rootChildren": [], "selected": {}}}})
+    got = client.get("/api/conversations").json()[0]
+    assert got["reduced_panels"] == [] and got["send_targets"] == [] and got["seen_panels"] == []
+
+
+def test_panel_layout_round_trips(client):
+    """The panel LAYOUT (which models are shown in which panels) persists with the
+    conversation, so switching to it restores its model set — including reducing the
+    panel count when it has fewer models than the one currently open."""
+    layout = [
+        {"id": "primary", "run_id": "run-a", "checkpoint": "final"},
+        {"id": "compare", "run_id": "run-b", "checkpoint": None},
+    ]
+    # Inherited at creation (a new conversation keeps the current one's models).
+    conv = client.post("/api/conversations", json={"name": "c", "panels": layout}).json()
+    assert conv["panels"] == layout
+    # And updatable on a tree-save.
+    next_layout = [{"id": "primary", "run_id": "run-c", "checkpoint": "step-200"}]
+    client.put(
+        f"/api/conversations/{conv['id']}/tree",
+        json={
+            "trees": {"primary": {"nodes": {}, "rootChildren": [], "selected": {}}},
+            "panels": next_layout,
+        },
+    )
+    assert client.get("/api/conversations").json()[0]["panels"] == next_layout
+
+
+def test_panel_layout_defaults_to_empty(client):
+    """A create / tree-save that omits `panels` (legacy client) leaves it empty — the
+    frontend then keeps whatever panels are currently shown."""
+    conv = client.post("/api/conversations", json={"name": "c"}).json()
+    assert conv["panels"] == []
+    client.put(f"/api/conversations/{conv['id']}/tree",
+               json={"trees": {"primary": {"nodes": {}, "rootChildren": [], "selected": {}}}})
+    assert client.get("/api/conversations").json()[0]["panels"] == []
+
+
 def test_rename(client):
     cid = client.post("/api/conversations", json={"name": "old"}).json()["id"]
     r = client.patch(f"/api/conversations/{cid}", json={"name": "new"})

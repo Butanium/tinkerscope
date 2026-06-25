@@ -93,9 +93,9 @@ Runs with `config_error` should still be listed (degraded).
 | PUT | `/api/prefs/{key}` | `{value: string}` | `{status, key}` |
 | DELETE | `/api/prefs/{key}` | — | `{status}` |
 | GET | `/api/conversations` | — | `Conversation[]` (branchable trees; below) |
-| POST | `/api/conversations` | `{name?, system_prompt?, tree?, compare_tree?}` | the saved Conversation (`id`,`created_at`,`updated_at` added) |
+| POST | `/api/conversations` | `{name?, system_prompt?, trees?, panels?, tree?, compare_tree?}` | the saved Conversation (`id`,`created_at`,`updated_at` added) |
 | PATCH | `/api/conversations/{id}` | `{name}` | the renamed Conversation |
-| PUT | `/api/conversations/{id}/tree` | `{tree, compare_tree?, system_prompt?}` | `{status, id}` (the hot save path) |
+| PUT | `/api/conversations/{id}/tree` | `{trees, system_prompt?, panels?, reduced_panels?, send_targets?, seen_panels?}` | `{status, id}` (the hot save path) |
 | DELETE | `/api/conversations/{id}` | — | `{status}` |
 
 ### Conversation (branchable chat; persisted per scan-root, NOT in PlaygroundState)
@@ -103,8 +103,16 @@ Runs with `config_error` should still be listed (degraded).
 {
   "id": "uuid", "name": "Untitled",
   "system_prompt": null,                    // travels with the conversation (each conv = one experiment)
-  "tree": { "nodes": {…}, "rootChildren": [], "selected": {} },        // primary panel's branch tree (opaque to the server)
-  "compare_tree": null,                     // compare panel's tree, or null in single mode
+  "trees": {                                // per-panel branch trees, keyed by stable panel id
+    "primary": { "nodes": {…}, "rootChildren": [], "selected": {} },
+    "compare": { … }                        // present per open panel ('primary','compare','p-2',…)
+  },
+  "panels": [                               // per-conversation panel LAYOUT (which model per panel).
+    {"id": "primary", "run_id": "…", "checkpoint": "final"},   // switching restores this set; a new
+    {"id": "compare", "run_id": "…", "checkpoint": null}       // conversation inherits the current one's.
+  ],                                        // [] on legacy convs ⇒ keep the currently-shown panels.
+  "reduced_panels": [], "send_targets": [], "seen_panels": [], // per-conversation panel UI (opaque id lists)
+  // legacy shape, read-only: {tree, compare_tree} on un-migrated entries — folded into `trees` on first save
   "created_at": "iso", "updated_at": "iso"
 }
 ```

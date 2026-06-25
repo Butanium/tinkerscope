@@ -203,35 +203,17 @@
 	);
 	let isComparing = $derived(panelSels.length > 1);
 
-	// Panels collapsed out of view (tree kept alive). TODO: per-conversation panel layout.
-	let reducedPanels = $state<Set<string>>(new Set());
-	// Which panels a composer send fires to (chips in the input bar). A NEWLY added
-	// panel defaults ON; a removed panel is dropped; a deliberate deselect sticks.
-	// `seenPanels` remembers which ids we've already defaulted, so a re-render (or the
-	// async panels round-trip after addPanel) can't re-add a deselected panel or
-	// prune a just-added one before panelSels catches up.
-	let sendTargets = $state<Set<string>>(new Set());
-	let seenPanels = new Set<string>();
+	// Folded panels (`reducedPanels`) + composer send-targets (`sendTargets`) are owned
+	// by the conversation store and PERSISTED per-conversation (they survive a restart
+	// and switch with the conversation). This effect just feeds the live panel list to
+	// the store's defaulting reconcile: a newly-added panel defaults ON, while restored
+	// deselections/folds stick (syncPanels is purely additive — see its docstring).
 	$effect(() => {
-		const ids = panelSels.map((p) => p.panel);
-		const idSet = new Set(ids);
-		const next = new Set([...sendTargets].filter((t) => idSet.has(t))); // drop removed panels
-		let changed = next.size !== sendTargets.size;
-		for (const id of ids) {
-			if (seenPanels.has(id)) continue;
-			seenPanels.add(id);
-			if (!reducedPanels.has(id)) { next.add(id); changed = true; } // new panel → active by default
-		}
-		if (changed) sendTargets = next;
+		convo.syncPanels(panelSels.map((p) => p.panel));
 	});
-	function toggleSendTarget(id: string) {
-		sendTargets = sendTargets.has(id)
-			? new Set([...sendTargets].filter((t) => t !== id))
-			: new Set([...sendTargets, id]);
-	}
 	/** Panels a send will actually fire to (selected targets; fall back to all). */
 	let targetSels = $derived(
-		sendTargets.size ? panelSels.filter((p) => sendTargets.has(p.panel)) : panelSels
+		convo.sendTargets.size ? panelSels.filter((p) => convo.sendTargets.has(p.panel)) : panelSels
 	);
 
 	let anySupportsThinking = $derived(
@@ -294,9 +276,11 @@
 	}
 	function setRun(panel: Panel, runId: string) {
 		patchState({ panel, run_id: runId, checkpoint: defaultCheckpoint(runId) }, true);
+		convo.save(); // the panel layout (models) is persisted with the conversation
 	}
 	function setCheckpoint(panel: Panel, ck: string) {
 		patchState({ panel, checkpoint: ck }, true);
+		convo.save();
 	}
 
 	/** Drop a panel's live sample bucket (so a stale run can't show after remove). */
@@ -333,7 +317,7 @@
 			{ id, run_id: other?.id ?? null, checkpoint: ck, messages: seedMsgs }
 		];
 		patchState({ panels: nextPanels }, true);
-		// the new panel auto-joins sendTargets (active by default) via the effect above
+		// the new panel auto-joins sendTargets (active by default) via convo.syncPanels (the effect above)
 	}
 	function removePanel(panel: Panel) {
 		if (panel === 'primary') return; // primary is reserved/always present
@@ -342,16 +326,7 @@
 		patchState({ panels: nextPanels }, true);
 		convo.dropTree(panel);
 		dropPanelBucket(panel);
-		reducedPanels = new Set([...reducedPanels].filter((t) => t !== panel));
-		sendTargets = new Set([...sendTargets].filter((t) => t !== panel));
-	}
-	function reducePanel(panel: Panel) {
-		reducedPanels = new Set([...reducedPanels, panel]);
-		sendTargets = new Set([...sendTargets].filter((t) => t !== panel)); // reduced → off by default
-	}
-	function restorePanel(panel: Panel) {
-		reducedPanels = new Set([...reducedPanels].filter((t) => t !== panel));
-		sendTargets = new Set([...sendTargets, panel]);
+		convo.dropPanelUi(panel);
 	}
 
 	// ── Param edits → shared state ────────────────────────────────────
@@ -465,6 +440,20 @@
 	// per panel with broadcast:true, then render purely from the bus.
 	let userInput = $state('');
 	let inputTextarea: HTMLTextAreaElement;
+	// Assistant prefill (interp / red-teaming): authored, NOT trimmed — the model
+	// continues from here. Sent as a trailing {role:'assistant'} message; the backend
+	// (tinker_sampler.render) treats a trailing assistant turn as a prefill the renderer
+	// appends verbatim, so raw `<think>…</think>` works (per-family `<think>` rules in
+	// the placeholder). Persists across sends so you can draw N samples off one prefill.
+	let prefillInput = $state('');
+	let showPrefill = $state(false);
+	/** Append the current prefill (if any) as a trailing assistant turn so the model
+	 *  EXTENDS it; the returned `prefill` is prepended to each folded sample. Whitespace
+	 *  is preserved (a trailing `</think>\n\n` matters); only emptiness gates it off. */
+	function withPrefill(msgs: ChatMessage[]): { fireMsgs: ChatMessage[]; prefill?: string } {
+		if (!prefillInput.trim()) return { fireMsgs: msgs };
+		return { fireMsgs: [...msgs, { role: 'assistant', content: prefillInput }], prefill: prefillInput };
+	}
 	// Per-panel composer drafts for the "continue this panel" bubbles (compare).
 	let panelDraft = $state<Partial<Record<Panel, string>>>({});
 	// Per-panel in-flight abort controllers (keyed by panel so concurrent
@@ -490,7 +479,8 @@
 			convo.setTree(p.panel, tree);
 			const msgs = activeMessages(convo.treeFor(p.panel)) as ChatMessage[];
 			clearPanelBucket(p.panel);
-			fireOne(p, nodeId, msgs);
+			const { fireMsgs, prefill } = withPrefill(msgs);
+			fireOne(p, nodeId, fireMsgs, prefill);
 		}
 	}
 
@@ -507,7 +497,8 @@
 		convo.setTree(panel, tree);
 		const msgs = activeMessages(convo.treeFor(panel)) as ChatMessage[];
 		clearPanelBucket(panel);
-		fireOne(pSel, nodeId, msgs);
+		const { fireMsgs, prefill } = withPrefill(msgs);
+		fireOne(pSel, nodeId, fireMsgs, prefill);
 	}
 
 	/** Fire one panel's generation with a fresh per-panel abort controller.
@@ -554,6 +545,7 @@
 							raw_text: d.raw_text,
 							raw_meta: d.raw_meta,
 							error: d.error,
+							prefill_incorporated: d.prefill_incorporated,
 							sample_index: d.sample_index ?? samples.length
 						});
 					}
@@ -611,12 +603,16 @@
 				return;
 			}
 			// Collect our samples from our OWN stream + fold them under the user node.
-			// For a continuation (prefill set), each sample is the CONTINUATION only —
-			// prepend the prefill so the folded branch holds the full extended message.
+			// For a continuation (prefill set), each sample is the CONTINUATION only,
+			// so prepend the prefill to form the full extended message — UNLESS the
+			// backend already folded it in (`prefill_incorporated`, the native tinker
+			// path, which also splits prefilled <think> into `reasoning`).
 			const samples = await drainSamples(res);
 			if (samples.length) {
 				const folded = prefill
-					? samples.map((sm) => (sm.error ? sm : { ...sm, content: prefill + (sm.content ?? '') }))
+					? samples.map((sm) =>
+							sm.error || sm.prefill_incorporated ? sm : { ...sm, content: prefill + (sm.content ?? '') }
+						)
 					: samples;
 				const { tree } = foldAssistant(convo.treeFor(p.panel), userParentId, folded);
 				convo.setTree(p.panel, tree);
@@ -638,9 +634,15 @@
 		}
 	}
 
-	async function newConversation() {
+	async function newConversation(e?: MouseEvent) {
 		if (anyRunning || convo.busy) return;
-		await convo.create();
+		// Inherit the current conversation's panel MODELS (not its messages) so a new
+		// thread opens against the same comparison set. Shift+click → a single blank
+		// panel with no model selected (a clean slate).
+		const layout = e?.shiftKey
+			? [{ id: 'primary', run_id: null, checkpoint: null }]
+			: s.panels.map((p) => ({ id: p.id, run_id: p.run_id, checkpoint: p.checkpoint }));
+		await convo.create('Untitled', layout);
 		setConvUrl(convo.activeId, true); // new id → history entry; back returns to prior conv
 		try { await api.close(); } catch {}
 	}
@@ -1664,7 +1666,7 @@
 								<option value={c.id}>{c.name || 'Untitled'}</option>
 							{/each}
 						</select>
-						<button class="conv-icon-btn" title="New conversation" disabled={anyRunning || convo.busy} aria-label="New conversation" onclick={newConversation}>
+						<button class="conv-icon-btn" title="New conversation (keeps the current models; Shift+click for a blank one)" disabled={anyRunning || convo.busy} aria-label="New conversation" onclick={newConversation}>
 							<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
 						</button>
 						<button class="conv-icon-btn" title="Rename conversation" disabled={anyRunning || convo.busy} aria-label="Rename conversation" onclick={startRenameConversation}>
@@ -1905,9 +1907,9 @@
 		<div class="chat-area">
 			<div class="chat-columns" class:multi={isComparing}>
 				{#each panelSels as p, panelIdx (p.panel)}
-					{#if reducedPanels.has(p.panel)}
+					{#if convo.reducedPanels.has(p.panel)}
 						<div class="chat-column reduced">
-							<button class="restore-panel" onclick={() => restorePanel(p.panel)} title="Restore this panel">
+							<button class="restore-panel" onclick={() => convo.restorePanel(p.panel)} title="Restore this panel">
 								<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
 								<span class="restore-label">{panelLabel(p)}</span>
 							</button>
@@ -1919,7 +1921,7 @@
 						{#if isComparing}
 							<div class="column-header">
 								<span class="column-title">{panelLabel(p)}</span>
-								<button class="reduce-panel" onclick={() => reducePanel(p.panel)} title="Reduce this panel" aria-label="Reduce panel">
+								<button class="reduce-panel" onclick={() => convo.reducePanel(p.panel)} title="Reduce this panel" aria-label="Reduce panel">
 									<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
 								</button>
 							</div>
@@ -1989,9 +1991,33 @@
 					<div class="send-targets">
 						<span class="send-targets-label">Send to</span>
 						{#each panelSels as p (p.panel)}
-							<button class="send-chip" class:on={sendTargets.has(p.panel)} class:reduced={reducedPanels.has(p.panel)} onclick={() => toggleSendTarget(p.panel)} title={reducedPanels.has(p.panel) ? 'Reduced panel — click to send here anyway' : 'Toggle this panel as a send target'}>{panelLabel(p)}</button>
+							<button class="send-chip" class:on={convo.sendTargets.has(p.panel)} class:reduced={convo.reducedPanels.has(p.panel)} onclick={() => convo.toggleSendTarget(p.panel)} title={convo.reducedPanels.has(p.panel) ? 'Reduced panel — click to send here anyway' : 'Toggle this panel as a send target'}>{panelLabel(p)}</button>
 						{/each}
 					</div>
+				{/if}
+				<!-- Assistant prefill: the model continues from this text. -->
+				<div class="prefill-row">
+					<button
+						class="prefill-toggle"
+						class:on={prefillInput.trim().length > 0}
+						onclick={() => (showPrefill = !showPrefill)}
+						data-tooltip="Prefill the assistant turn — the model continues from your text. Type raw <think> tags (Qwen/Kimi: open it yourself; DeepSeek auto-opens it)."
+						use:tip
+					>{prefillInput.trim() ? '✎ prefill on' : '＋ prefill assistant'}</button>
+					{#if prefillInput.trim() && !showPrefill}
+						<span class="prefill-peek" title={prefillInput}>{prefillInput.replace(/\s+/g, ' ').slice(0, 80)}{prefillInput.length > 80 ? '…' : ''}</span>
+					{/if}
+					{#if prefillInput.length > 0}
+						<button class="prefill-clear" onclick={() => (prefillInput = '')}>clear</button>
+					{/if}
+				</div>
+				{#if showPrefill}
+					<textarea
+						class="prefill-textarea"
+						bind:value={prefillInput}
+						rows="3"
+						placeholder={'Assistant prefill — the model EXTENDS this. Raw format, e.g.\n  <think>\\nLet me reason…            (only some thinking — model keeps going inside)\n  <think>\\nfull reasoning\\n</think>\\n\\n   (full thinking, model writes the answer)\nDeepSeek auto-opens <think>, so omit it there.'}
+					></textarea>
 				{/if}
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<div class="input-resize-handle" onmousedown={startInputResize}></div>
@@ -2399,6 +2425,16 @@
 	.send-chip { font-size: 0.7rem; padding: 2px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: var(--color-bg); color: var(--color-text-muted); cursor: pointer; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.send-chip.on { background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent); }
 	.send-chip.reduced { opacity: 0.6; font-style: italic; }
+	/* ── Assistant prefill field ───────────────────────────────────── */
+	.prefill-row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0 0; }
+	.prefill-toggle { font-size: 0.7rem; padding: 2px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: var(--color-bg); color: var(--color-text-muted); cursor: pointer; flex-shrink: 0; }
+	.prefill-toggle.on { background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent); }
+	.prefill-peek { font-size: 0.68rem; color: var(--color-text-muted); font-family: var(--font-mono, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+	.prefill-clear { font-size: 0.66rem; padding: 1px 6px; border: 1px solid transparent; border-radius: var(--radius-sm); background: none; color: var(--color-text-muted); cursor: pointer; flex-shrink: 0; }
+	.prefill-clear:hover { color: var(--color-accent); border-color: var(--color-border); }
+	.prefill-textarea { width: 100%; margin-top: var(--space-2); padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-accent); border-radius: var(--radius); color: var(--color-text); font-family: var(--font-mono, monospace); font-size: 0.8rem; line-height: 1.45; resize: vertical; }
+	.prefill-textarea:focus { outline: none; box-shadow: 0 0 0 1px var(--color-accent); }
+	.prefill-textarea::placeholder { color: var(--color-text-muted); opacity: 0.7; white-space: pre; }
 	.messages { flex: 1; overflow-y: auto; padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); }
 
 	/* ── Input bar ─────────────────────────────────────────────────── */

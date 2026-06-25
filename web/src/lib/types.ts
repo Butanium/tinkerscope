@@ -97,6 +97,10 @@ export type Pin = Record<string, any> & { id: string; created_at: string; note: 
  *  NEVER an array index — closing a middle panel must not rebind a tree to another. */
 export type Panel = string;
 
+/** One panel's MODEL selection (no transcript) — the persisted, per-conversation
+ *  layout. `live.state.panels` (PanelState) is this plus the messages echo. */
+export type PanelLayout = { id: Panel; run_id: string | null; checkpoint: string | null };
+
 /** One comparison panel's selection + its active-path transcript echo. The echo is
  *  write-only (the branch tree in lib/tree.ts is the read source); it exists so the
  *  CLI and external-fold reconcile can see/replay each panel's path. */
@@ -179,6 +183,15 @@ export type Conversation = {
 	 *  store's #loadTrees read-shim folds these into `trees`. Never written anymore. */
 	tree?: ConvTree;
 	compare_tree?: ConvTree | null;
+	/** Per-conversation panel LAYOUT: which models are shown in which panels. Absent
+	 *  on legacy conversations (the store keeps the currently-shown panels on open). */
+	panels?: PanelLayout[];
+	/** Per-conversation panel UI (opaque panel-id lists): folded panels, composer
+	 *  send-targets, and the defaulting bookkeeping. Absent on legacy conversations
+	 *  (the store treats missing as empty ⇒ every open panel defaults ON). */
+	reduced_panels?: string[];
+	send_targets?: string[];
+	seen_panels?: string[];
 	created_at: string;
 	updated_at: string;
 };
