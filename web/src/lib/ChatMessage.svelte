@@ -93,6 +93,11 @@
 	// skip rule), NOT into msg.samples directly — so prev/next never lands on an
 	// empty/error slot. The card itself still uses its ORIGINAL index for actions.
 	let sampleCursor = $state(0);
+	// Reasoning fold state for cycle-view, persisted at the message level so it
+	// survives cycling THROUGH a no-reasoning sample (whose <details> unmounts) —
+	// otherwise returning to a reasoning sample would re-fold. In 'all' view each
+	// card's <details> stays independent (uncontrolled).
+	let reasoningOpen = $state(false);
 	let visibleSampleIdxs = $derived(
 		(msg.samples ?? []).map((s, i) => [s, i] as const).filter(([s]) => s && s.content).map(([, i]) => i)
 	);
@@ -170,6 +175,7 @@
 		rawSingle = false;
 		rawSamples = new Set();
 		sampleCursor = 0;
+		reasoningOpen = false;
 		sendMenuOpen = false;
 	});
 </script>
@@ -224,7 +230,11 @@
 			{#if msg.activeSampleIndex === idx}<span class="active-sample-tag">active branch</span>{/if}
 		</div>
 		{#if sample.reasoning}
-			<details class="sample-reasoning-block">
+			<details
+				class="sample-reasoning-block"
+				open={sampleView === 'cycle' ? reasoningOpen : undefined}
+				ontoggle={(e) => (reasoningOpen = (e.currentTarget as HTMLDetailsElement).open)}
+			>
 				<summary class="sample-reasoning-toggle">
 					<span>Reasoning</span>
 					<svg class="thinking-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
