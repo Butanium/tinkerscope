@@ -223,6 +223,9 @@ export type ViewMessage = {
 	reasoning?: string;
 	raw_text?: string;
 	raw_meta?: string;
+	/** Authored prefill this turn was generated from (raw text); the renderer colors
+	 *  the matching leading slice of content/reasoning as the prefilled portion. */
+	prefill?: string;
 	samples?: SampleData[];
 	totalSamples?: number;
 	running?: boolean;

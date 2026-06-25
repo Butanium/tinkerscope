@@ -5,7 +5,7 @@
 	// Branching adds: a ‹k/N› sibling cycler, regenerate on user turns, edit that
 	// FORKS (shift+click = fork-and-copy-downstream), and n>1 cards that select a
 	// sibling branch instead of "use this".
-	import { renderContent } from '$lib/render';
+	import { renderContent, renderPrefilled, splitPrefill } from '$lib/render';
 	import { tip } from '$lib/tooltip.svelte';
 	import type { ViewMessage, SampleData } from '$lib/types';
 
@@ -59,6 +59,11 @@
 		otherPanels?: { id: string; label: string }[];
 		onSendToPanel?: (destPanel: string) => void;
 	} = $props();
+
+	// The authored prefill (raw) split into its reasoning/answer parts, so the renderer
+	// can color the prefilled prefix of `reasoning` (think part) and `content` (answer
+	// part) distinctly from the model's continuation. All samples in a turn share it.
+	let prefillSplit = $derived(msg.prefill ? splitPrefill(msg.prefill) : null);
 
 	let isMultiSample = $derived(!!(msg.totalSamples && msg.totalSamples > 1));
 	let canEdit = $derived(msg.nodeId != null && !busy);
@@ -224,14 +229,14 @@
 					<span>Reasoning</span>
 					<svg class="thinking-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
 				</summary>
-				<div class="sample-reasoning">{@html renderContent(sample.reasoning, 'assistant')}</div>
+				<div class="sample-reasoning">{@html prefillSplit ? renderPrefilled(sample.reasoning, prefillSplit.think, 'assistant') : renderContent(sample.reasoning, 'assistant')}</div>
 			</details>
 		{/if}
 		{#if rawSamples.has(idx) && sample.raw_text}
 			<pre class="raw-text-view">{sample.raw_text}</pre>
 			{#if sample.raw_meta}{@render rawMetaDisclosure(sample.raw_meta)}{/if}
 		{:else}
-			<div class="sample-content">{@html renderContent(sample.content, 'assistant')}</div>
+			<div class="sample-content">{@html prefillSplit ? renderPrefilled(sample.content, prefillSplit.answer, 'assistant') : renderContent(sample.content, 'assistant')}</div>
 		{/if}
 		<div class="message-actions sample-actions">
 			<button class="btn-use" class:active={msg.activeSampleIndex === idx} data-tooltip="Make this the active branch & collapse to it (others stay as ‹k/N› siblings)" use:tip disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onSelectSample(idx)}>{msg.activeSampleIndex === idx ? '✓ active' : 'Make active'}</button>
@@ -396,7 +401,7 @@
 					<span>Thinking</span>
 					<svg class="thinking-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
 				</summary>
-				<div class="sample-reasoning">{@html renderContent(msg.reasoning, 'assistant')}</div>
+				<div class="sample-reasoning">{@html prefillSplit ? renderPrefilled(msg.reasoning, prefillSplit.think, 'assistant') : renderContent(msg.reasoning, 'assistant')}</div>
 			</details>
 		{/if}
 		{#if isMultiSample}
@@ -464,7 +469,7 @@
 				<pre class="raw-text-view">{msg.raw_text}</pre>
 					{#if msg.raw_meta}{@render rawMetaDisclosure(msg.raw_meta)}{/if}
 			{:else}
-				<div class="message-content">{@html renderContent(msg.content, msg.role)}</div>
+				<div class="message-content">{@html prefillSplit ? renderPrefilled(msg.content, prefillSplit.answer, msg.role) : renderContent(msg.content, msg.role)}</div>
 			{/if}
 			{#if msg.role !== 'system' && (msg.content || msg.raw_text)}
 				<div class="message-actions hover-actions">
@@ -523,4 +528,13 @@
 	.send-to-menu { position: absolute; top: calc(100% + 3px); right: 0; z-index: 30; display: flex; flex-direction: column; gap: 1px; min-width: max-content; padding: 3px; background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); box-shadow: 0 4px 14px #00000022; }
 	.send-to-item { display: block; white-space: nowrap; text-align: left; padding: 4px 9px; background: none; border: none; border-radius: var(--radius-sm); color: var(--color-text-secondary); font-size: 0.72rem; cursor: pointer; }
 	.send-to-item:hover { background: var(--color-accent-bg); color: var(--color-accent); }
+	/* The authored-prefill prefix of an assistant turn, colored distinctly from the
+	   model's continuation. :global because the span is injected via {@html}. Render as
+	   inline so it flows with the continuation; a soft tint + left rule mark it. */
+	.message-content :global(.prefill-portion),
+	.sample-content :global(.prefill-portion),
+	.sample-reasoning :global(.prefill-portion) { color: var(--color-text-muted); background: var(--color-accent-bg); border-radius: var(--radius-sm); box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+	.message-content :global(.prefill-portion *),
+	.sample-content :global(.prefill-portion *),
+	.sample-reasoning :global(.prefill-portion *) { color: inherit; }
 </style>

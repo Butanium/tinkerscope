@@ -21,6 +21,10 @@ export type TreeNode = {
 	reasoning?: string; // persisted; populated by foldAssistant from samples
 	raw_text?: string; // persisted; survives reload
 	raw_meta?: string; // persisted; tinker request/response (dropdown beneath raw_text)
+	/** The authored assistant prefill this turn was generated from (raw text, incl.
+	 *  any `<think>`), persisted so the rendered turn can color the prefilled portion
+	 *  distinctly from the model's continuation. Absent ⇒ no prefill was used. */
+	prefill?: string;
 	parent: string | null; // null = child of the virtual root
 	children: string[]; // ordered
 };
@@ -41,6 +45,9 @@ export type SampleLike = {
 	/** Native tinker path with a prefill: content/reasoning already span
 	 *  prefill+completion, so the client must not re-prepend the prefill. */
 	prefill_incorporated?: boolean;
+	/** The authored prefill this sample was generated from (raw text) — folded onto
+	 *  the node so the rendered turn can color the prefilled prefix. */
+	prefill?: string;
 	sample_index?: number;
 };
 
@@ -87,6 +94,7 @@ function cloneTree(t: ConvTree): ConvTree {
 			reasoning: n.reasoning,
 			raw_text: n.raw_text,
 				raw_meta: n.raw_meta,
+			prefill: n.prefill,
 			parent: n.parent,
 			children: [...n.children]
 		};
@@ -208,6 +216,7 @@ export function foldAssistant(
 			reasoning: s.reasoning,
 			raw_text: s.raw_text,
 				raw_meta: s.raw_meta,
+			prefill: s.prefill,
 			parent: parentUserId,
 			children: []
 		};

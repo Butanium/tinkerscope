@@ -446,12 +446,20 @@
 	// appends verbatim, so raw `<think>…</think>` works (per-family `<think>` rules in
 	// the placeholder). Persists across sends so you can draw N samples off one prefill.
 	let prefillInput = $state('');
+	// `showPrefill` doubles as the ON/OFF switch: the textarea is open IFF the prefill
+	// is active. Collapsing it (re-clicking the toggle) DISABLES the prefill — the text
+	// is remembered (shown as a peek) so re-opening restores it. So a prefill is applied
+	// to sends only while open + non-empty.
 	let showPrefill = $state(false);
-	/** Append the current prefill (if any) as a trailing assistant turn so the model
+	let prefillActive = $derived(showPrefill && prefillInput.trim().length > 0);
+	/** Per-panel prefill of the last/in-flight fire — lets the live bucket color its
+	 *  prefilled prefix (committed nodes carry their own `prefill`). '' ⇒ none. */
+	let firePrefill = $state<Partial<Record<Panel, string>>>({});
+	/** Append the active prefill (if any) as a trailing assistant turn so the model
 	 *  EXTENDS it; the returned `prefill` is prepended to each folded sample. Whitespace
-	 *  is preserved (a trailing `</think>\n\n` matters); only emptiness gates it off. */
+	 *  is preserved (a trailing `</think>\n\n` matters). Disabled (collapsed) ⇒ no-op. */
 	function withPrefill(msgs: ChatMessage[]): { fireMsgs: ChatMessage[]; prefill?: string } {
-		if (!prefillInput.trim()) return { fireMsgs: msgs };
+		if (!prefillActive) return { fireMsgs: msgs };
 		return { fireMsgs: [...msgs, { role: 'assistant', content: prefillInput }], prefill: prefillInput };
 	}
 	// Per-panel composer drafts for the "continue this panel" bubbles (compare).
@@ -505,6 +513,7 @@
 	 *  `prefill` (continuation): the samples come back as the continuation only, so
 	 *  it's prepended to each in the fold to form the full continued message. */
 	function fireOne(pSel: PanelSel, userParentId: string, messages: ChatMessage[], prefill?: string) {
+		firePrefill[pSel.panel] = prefill ?? ''; // so the live bucket colors its prefilled prefix
 		const ac = new AbortController();
 		abortByPanel[pSel.panel] = ac;
 		fireChat(pSel, userParentId, messages, ac.signal, prefill).finally(() => {
@@ -609,9 +618,15 @@
 			// path, which also splits prefilled <think> into `reasoning`).
 			const samples = await drainSamples(res);
 			if (samples.length) {
+				// Stamp the prefill onto each folded sample (so the committed node remembers
+				// it and can color the prefilled prefix). Non-incorporated samples are the
+				// continuation only → prepend the prefill to form the full message; the
+				// native tinker path already incorporated it.
 				const folded = prefill
 					? samples.map((sm) =>
-							sm.error || sm.prefill_incorporated ? sm : { ...sm, content: prefill + (sm.content ?? '') }
+							sm.error
+								? sm
+								: { ...sm, prefill, content: sm.prefill_incorporated ? sm.content : prefill + (sm.content ?? '') }
 						)
 					: samples;
 				const { tree } = foldAssistant(convo.treeFor(p.panel), userParentId, folded);
@@ -720,11 +735,13 @@
 		live.panels = { ...live.panels };
 	}
 
-	/** Fire a (re)generation for one panel, folding the reply under `userParentId`. */
+	/** Fire a (re)generation for one panel, folding the reply under `userParentId`.
+	 *  Regenerate respects the current composer prefill, exactly like a fresh send. */
 	function fireForPanel(panel: Panel, userParentId: string, messages: ChatMessage[]) {
 		const pSel = panelSels.find((x) => x.panel === panel);
 		if (!pSel) return;
-		fireOne(pSel, userParentId, messages);
+		const { fireMsgs, prefill } = withPrefill(messages);
+		fireOne(pSel, userParentId, fireMsgs, prefill);
 	}
 
 	/** Compute a panel's regen plan: plain = fork a sibling; replace = drop the
@@ -940,9 +957,11 @@
 	// active leaf's assistant turn so the distribution view replaces — never
 	// double-renders — the committed reply. After fold, the bucket cards map back
 	// to their sibling node ids so a card-click can select that branch.
-	/** The bucket's latest turn as a single trailing assistant ViewMessage. */
-	function bucketTurn(run: (typeof live.panels)[Panel]): ViewMessage {
+	/** The bucket's latest turn as a single trailing assistant ViewMessage. `prefill`
+	 *  (the panel's last fire) lets the live view color the prefilled prefix too. */
+	function bucketTurn(run: (typeof live.panels)[Panel], prefill?: string): ViewMessage {
 		const filled = run.samples.filter((x) => x);
+		const pf = prefill || undefined;
 		if (run.n > 1) {
 			return {
 				role: 'assistant',
@@ -950,6 +969,7 @@
 				reasoning: filled[0]?.reasoning,
 				raw_text: filled[0]?.raw_text,
 				raw_meta: filled[0]?.raw_meta,
+				prefill: pf,
 				samples: run.samples,
 				totalSamples: run.n,
 				running: run.running
@@ -962,6 +982,7 @@
 			reasoning: one?.reasoning,
 			raw_text: one?.raw_text,
 			raw_meta: one?.raw_meta,
+			prefill: pf,
 			running: run.running
 		};
 	}
@@ -975,6 +996,7 @@
 			reasoning: n.reasoning,
 			raw_text: n.raw_text,
 			raw_meta: n.raw_meta,
+			prefill: n.prefill,
 			nodeId: n.id,
 			sib: siblingInfo(tree, n.id),
 			isBucket: false
@@ -1013,7 +1035,7 @@
 				}
 			}
 			out.push({
-				...bucketTurn(run),
+				...bucketTurn(run, firePrefill[p.panel]),
 				nodeId: replacedId,
 				sib: replacedSib,
 				sampleNodeIds,
@@ -1999,16 +2021,16 @@
 				<div class="prefill-row">
 					<button
 						class="prefill-toggle"
-						class:on={prefillInput.trim().length > 0}
+						class:on={prefillActive}
 						onclick={() => (showPrefill = !showPrefill)}
-						data-tooltip="Prefill the assistant turn — the model continues from your text. Type raw <think> tags (Qwen/Kimi: open it yourself; DeepSeek auto-opens it)."
+						data-tooltip="Prefill the assistant turn — the model continues from your text. Type raw <think> tags (Qwen/Kimi: open it yourself; DeepSeek auto-opens it). Collapse to disable (text is kept); click again to restore."
 						use:tip
-					>{prefillInput.trim() ? '✎ prefill on' : '＋ prefill assistant'}</button>
+					>{prefillActive ? '✎ prefill on' : '＋ prefill assistant'}</button>
 					{#if prefillInput.trim() && !showPrefill}
-						<span class="prefill-peek" title={prefillInput}>{prefillInput.replace(/\s+/g, ' ').slice(0, 80)}{prefillInput.length > 80 ? '…' : ''}</span>
+						<button class="prefill-peek" title="Prefill off — click to restore: {prefillInput}" onclick={() => (showPrefill = true)}>{prefillInput.replace(/\s+/g, ' ').slice(0, 80)}{prefillInput.length > 80 ? '…' : ''}</button>
 					{/if}
 					{#if prefillInput.length > 0}
-						<button class="prefill-clear" onclick={() => (prefillInput = '')}>clear</button>
+						<button class="prefill-clear" onclick={() => { prefillInput = ''; showPrefill = false; }}>clear</button>
 					{/if}
 				</div>
 				{#if showPrefill}
@@ -2429,7 +2451,8 @@
 	.prefill-row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0 0; }
 	.prefill-toggle { font-size: 0.7rem; padding: 2px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: var(--color-bg); color: var(--color-text-muted); cursor: pointer; flex-shrink: 0; }
 	.prefill-toggle.on { background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent); }
-	.prefill-peek { font-size: 0.68rem; color: var(--color-text-muted); font-family: var(--font-mono, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+	.prefill-peek { font-size: 0.68rem; color: var(--color-text-muted); font-family: var(--font-mono, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; border: none; background: none; text-align: left; cursor: pointer; padding: 0; opacity: 0.75; }
+	.prefill-peek:hover { color: var(--color-accent); opacity: 1; }
 	.prefill-clear { font-size: 0.66rem; padding: 1px 6px; border: 1px solid transparent; border-radius: var(--radius-sm); background: none; color: var(--color-text-muted); cursor: pointer; flex-shrink: 0; }
 	.prefill-clear:hover { color: var(--color-accent); border-color: var(--color-border); }
 	.prefill-textarea { width: 100%; margin-top: var(--space-2); padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-accent); border-radius: var(--radius); color: var(--color-text); font-family: var(--font-mono, monospace); font-size: 0.8rem; line-height: 1.45; resize: vertical; }
