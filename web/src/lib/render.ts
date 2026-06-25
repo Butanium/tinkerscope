@@ -25,6 +25,21 @@ export function splitPrefill(prefill: string): { think: string; answer: string }
 	return { think: after.slice(0, close), answer: after.slice(close + '</think>'.length).replace(/^\n+/, '') };
 }
 
+/** Reassemble a parsed (reasoning, content) assistant turn into the raw prefill
+ *  string the sampler EXTENDS — the inverse of splitPrefill. Closed
+ *  `<think>…</think>` when there's an answer; left open (model keeps reasoning)
+ *  for a thinking-only turn; just the content when there's no reasoning. We
+ *  always emit the `<think>` tag and stay renderer-agnostic: the backend strips a
+ *  redundant leading one for families that auto-open it (DeepSeek/Kimi). Used by
+ *  Continue (so the model resumes the ANSWER, not mistakes it for more thinking)
+ *  and edited-CoT round-trips. */
+export function assembleAssistantRaw(reasoning: string | undefined, content: string): string {
+	const r = (reasoning ?? '').trim();
+	const c = content ?? '';
+	if (!r) return c;
+	return c ? `<think>\n${r}</think>\n\n${c}` : `<think>\n${r}`;
+}
+
 /** Render `text` for display, coloring the leading slice that came from `prefillPart`
  *  (the authored prefill) distinctly from the model's continuation. The two segments
  *  are rendered independently — fine for the visual cue; a markdown construct spanning

@@ -245,6 +245,19 @@ test('editAssistant makes a manual assistant sibling, selected, no children', ()
 	eq(msgContents(back), ['U1', 'A1', 'U2', 'A2']);
 });
 
+test('editAssistant carries an edited reasoning block; empty drops it', () => {
+	const t = linear4();
+	const a1 = activePath(t)[1].id;
+	const withCot = editAssistant(t, a1, 'A1-edited', 'new chain of thought')!;
+	eq(withCot.tree.nodes[withCot.newId].reasoning, 'new chain of thought');
+	// blank/whitespace reasoning ⇒ no CoT stored (undefined, not '')
+	const noCot = editAssistant(t, a1, 'A1-edited', '   ')!;
+	eq(noCot.tree.nodes[noCot.newId].reasoning, undefined);
+	// omitted reasoning arg ⇒ undefined (back-compat with content-only edits)
+	const legacy = editAssistant(t, a1, 'A1-edited')!;
+	eq(legacy.tree.nodes[legacy.newId].reasoning, undefined);
+});
+
 // ── delete ───────────────────────────────────────────────────────────
 test('delete the active leaf shortens the path to its parent', () => {
 	const t = linear4();

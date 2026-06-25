@@ -7,7 +7,7 @@
 	import { conversations as convo } from '$lib/conversations.svelte';
 	import ModelTypeahead from '$lib/ModelTypeahead.svelte';
 	import Message from '$lib/ChatMessage.svelte';
-	import { renderContent } from '$lib/render';
+	import { renderContent, assembleAssistantRaw } from '$lib/render';
 	import { loadHighlightRules, highlightStore, toggleHighlightRule } from '$lib/highlights.svelte';
 	import HighlightRules from '$lib/HighlightRules.svelte';
 	import type { Pin } from '$lib/types';
@@ -822,15 +822,24 @@
 		if (panelBusy(panel)) return;
 		const tree = convo.treeFor(panel);
 		const node = tree.nodes[nodeId];
-		if (!node || node.role !== 'assistant' || !node.content) return;
+		if (!node || node.role !== 'assistant' || (!node.content && !node.reasoning)) return;
 		const userParentId = node.parent;
 		if (!userParentId || tree.nodes[userParentId]?.role !== 'user') return;
 		const pSel = panelSels.find((x) => x.panel === panel);
 		if (!pSel) return;
 		clearPanelBucket(panel);
-		// fire-messages = ancestry INCLUDING this assistant node (becomes the prefill).
-		const fireMessages = ancestryMessages(tree, nodeId) as ChatMessage[];
-		fireOne(pSel, userParentId, fireMessages, node.content);
+		// Prefill = the FULL raw turn (reasoning + content reassembled), NOT just
+		// content: on auto-<think> families a content-only prefill makes the model
+		// read the answer as more thinking. assembleAssistantRaw closes the
+		// `<think>` (so the model extends the answer) or leaves it open for a
+		// thinking-only turn. ancestryMessages drops prior-turn reasoning (correct —
+		// not replayed), so we append this turn's raw prefill ourselves.
+		const prefill = assembleAssistantRaw(node.reasoning, node.content);
+		const fireMessages = [
+			...ancestryMessages(tree, userParentId),
+			{ role: 'assistant', content: prefill }
+		] as ChatMessage[];
+		fireOne(pSel, userParentId, fireMessages, prefill);
 	}
 
 	/** "+" continue. plain = this panel; all (shift) = the turn at this row's depth
@@ -895,10 +904,18 @@
 
 	/** Edit → fork. User: fork+regen (shift = fork+copy-downstream, no gen).
 	 *  Assistant: a manual branch (no gen). Empty edits are ignored. */
-	function applyEdit(panel: Panel, msg: ViewMessage, content: string, copyDownstream: boolean) {
+	function applyEdit(
+		panel: Panel,
+		msg: ViewMessage,
+		content: string,
+		reasoning: string | undefined,
+		copyDownstream: boolean
+	) {
 		if (panelBusy(panel) || msg.nodeId == null) return;
 		const text = content.trim();
-		if (!text) return;
+		// Assistant turns may be thinking-only (empty answer) — keep the edit if
+		// either field has text; user turns still require a non-empty body.
+		if (!text && !(msg.role === 'assistant' && reasoning && reasoning.trim())) return;
 		clearPanelBucket(panel);
 		if (msg.role === 'user') {
 			if (copyDownstream) {
@@ -911,7 +928,7 @@
 				fireForPanel(panel, r.newUserId, r.fireMessages as ChatMessage[]);
 			}
 		} else if (msg.role === 'assistant') {
-			const r = editAssistant(convo.treeFor(panel), msg.nodeId, text);
+			const r = editAssistant(convo.treeFor(panel), msg.nodeId, text, reasoning);
 			if (r) convo.setTree(panel, r.tree);
 		}
 	}
@@ -930,13 +947,19 @@
 
 	/** Apply the same edit to the turn at this row's DEPTH in EVERY panel (ctrl/cmd,
 	 *  compare). copyDownstream (shift, user rows) forks a full copy with no gen. */
-	function applyEditAll(panel: Panel, msg: ViewMessage, content: string, copyDownstream: boolean) {
+	function applyEditAll(
+		panel: Panel,
+		msg: ViewMessage,
+		content: string,
+		reasoning: string | undefined,
+		copyDownstream: boolean
+	) {
 		if (msg.nodeId == null) return;
 		const depth = activePath(convo.treeFor(panel)).findIndex((n) => n.id === msg.nodeId);
 		if (depth < 0) return;
 		for (const p of panelSels) {
 			const node = activePath(convo.treeFor(p.panel))[depth];
-			if (node) applyEdit(p.panel, { ...msg, nodeId: node.id }, content, copyDownstream);
+			if (node) applyEdit(p.panel, { ...msg, nodeId: node.id }, content, reasoning, copyDownstream);
 		}
 	}
 
@@ -2000,7 +2023,7 @@
 									onSelectSample={(idx) => selectSample(p.panel, msg, idx)}
 									onDiscardOthers={(idx) => discardOtherSamples(p.panel, msg, idx)}
 									onDeleteSample={(idx) => deleteSample(p.panel, msg, idx)}
-									onEdit={(content, copyDownstream, allPanels) => (allPanels ? applyEditAll(p.panel, msg, content, copyDownstream) : applyEdit(p.panel, msg, content, copyDownstream))}
+									onEdit={(content, reasoning, copyDownstream, allPanels) => (allPanels ? applyEditAll(p.panel, msg, content, reasoning, copyDownstream) : applyEdit(p.panel, msg, content, reasoning, copyDownstream))}
 									onCopy={(all) => copyMessage(p.panel, msg, all)}
 									otherPanels={panelSels.filter((x) => x.panel !== p.panel).map((x) => ({ id: x.panel, label: panelLabel(x) }))}
 									onSendToPanel={(dest) => sendBranchToPanel(p.panel, msg, dest)}

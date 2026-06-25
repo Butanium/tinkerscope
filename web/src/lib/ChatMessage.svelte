@@ -51,7 +51,7 @@
 		onSelectSample: (sampleIndex: number) => void;
 		onDiscardOthers: (sampleIndex: number) => void;
 		onDeleteSample: (sampleIndex: number) => void;
-		onEdit: (content: string, copyDownstream: boolean, allPanels: boolean) => void;
+		onEdit: (content: string, reasoning: string | undefined, copyDownstream: boolean, allPanels: boolean) => void;
 		onCopy: (all: boolean) => void;
 		onTag: (content: string, sampleIndex: number | null, totalSamples: number | null, reasoning: string, quick: boolean) => void;
 		onCycle: (delta: number) => void;
@@ -140,6 +140,10 @@
 	// `editAll` remembers a ctrl/cmd-open (apply the edit across every panel).
 	let editing = $state(false);
 	let editDraft = $state('');
+	// Assistant CoT editor: shown iff the turn had reasoning at edit-open. Clearing
+	// it drops the CoT; on a non-thinking turn there's no box (stays single-field).
+	let editReasoning = $state('');
+	let editHasReasoning = $state(false);
 	let editShift = $state(false);
 	let editAll = $state(false);
 	function startEdit(shift: boolean, all: boolean) {
@@ -148,9 +152,11 @@
 		editShift = shift;
 		editAll = all;
 		editDraft = msg.content;
+		editHasReasoning = msg.role === 'assistant' && !!msg.reasoning;
+		editReasoning = msg.reasoning ?? '';
 	}
 	function commitEdit() {
-		onEdit(editDraft, editShift, editAll);
+		onEdit(editDraft, editHasReasoning ? editReasoning : undefined, editShift, editAll);
 		editing = false;
 	}
 	function cancelEdit() {
@@ -169,6 +175,8 @@
 		void msg.content;
 		editing = false;
 		editDraft = '';
+		editReasoning = '';
+		editHasReasoning = false;
 		editShift = false;
 		editAll = false;
 		copied = false;
@@ -459,6 +467,21 @@
 			{/if}
 		{:else if editing && msg.nodeId != null}
 			{#if editShift}<div class="edit-hint">Shift-edit: forks a full editable copy of the conversation from here — nothing is generated.</div>{/if}
+			{#if editHasReasoning}
+				<!-- Assistant CoT editor: edits land in this turn's reasoning block.
+				     Clear it to drop the CoT entirely. -->
+				<div class="edit-field-label">Thinking</div>
+				<textarea
+					class="edit-textarea edit-reasoning"
+					bind:value={editReasoning}
+					rows="4"
+					onkeydown={(e) => {
+						if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commitEdit(); }
+						else if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+					}}
+				></textarea>
+				<div class="edit-field-label">Response</div>
+			{/if}
 			<!-- svelte-ignore a11y_autofocus -->
 			<textarea
 				class="edit-textarea"
@@ -481,7 +504,7 @@
 			{:else}
 				<div class="message-content">{@html prefillSplit ? renderPrefilled(msg.content, prefillSplit.answer, msg.role) : renderContent(msg.content, msg.role)}</div>
 			{/if}
-			{#if msg.role !== 'system' && (msg.content || msg.raw_text)}
+			{#if msg.role !== 'system' && (msg.content || msg.raw_text || msg.reasoning)}
 				<div class="message-actions hover-actions">
 					{#if msg.raw_text}
 						<button class="btn-raw" class:active={rawSingle} onclick={() => (rawSingle = !rawSingle)} title="Toggle raw model output with tags preserved">Raw</button>

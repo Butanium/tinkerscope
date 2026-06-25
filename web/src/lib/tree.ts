@@ -293,14 +293,24 @@ export function editUserForkCopy(
 export function editAssistant(
 	t0: ConvTree,
 	asstId: string,
-	content: string
+	content: string,
+	reasoning?: string
 ): { tree: ConvTree; newId: string } | null {
 	const orig = t0.nodes[asstId];
 	if (!orig || orig.role !== 'assistant') return null;
 	const t = cloneTree(t0);
 	const parentKey = orig.parent ?? ROOT;
 	const id = nid();
-	t.nodes[id] = { id, role: 'assistant', content, parent: orig.parent, children: [] };
+	// Manual branch: store the edited reasoning (empty ⇒ drop the CoT). raw_text /
+	// raw_meta / prefill are the model's originals — stale after a hand-edit, so omit.
+	t.nodes[id] = {
+		id,
+		role: 'assistant',
+		content,
+		reasoning: reasoning && reasoning.trim() ? reasoning : undefined,
+		parent: orig.parent,
+		children: []
+	};
 	childArray(t, parentKey).push(id);
 	t.selected[parentKey] = id;
 	return { tree: t, newId: id };

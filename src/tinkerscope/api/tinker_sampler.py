@@ -109,6 +109,13 @@ def _append_to_prompt(model_input: Any, tokenizer: Any, prefill: str) -> Any:
     add to it (so a prefill would silently drop the thinking opener)."""
     import tinker
 
+    # Families that auto-open ``<think>`` (DeepSeek/Kimi) already end the prompt
+    # with it; a reconstructed prefill (Continue / edited CoT) also carries a
+    # leading ``<think>``. Drop the redundant one so we don't emit ``<think><think>``.
+    # Qwen opens nothing, so its prefill keeps the tag it needs. Also makes a
+    # hand-typed composer prefill forgiving on auto-think runs.
+    if re.match(r"\s*<think>", prefill) and tokenizer.decode(model_input.to_ints()).rstrip().endswith("<think>"):
+        prefill = re.sub(r"^\s*<think>\s*", "", prefill, count=1)
     ids = tokenizer.encode(prefill, add_special_tokens=False)
     return tinker.ModelInput(chunks=[*model_input.chunks, tinker.types.EncodedTextChunk(tokens=ids)])
 
