@@ -1,6 +1,21 @@
 <!DOCTYPE html>
 <html lang="en" class="light">
 <head>
+	<!-- Resolve the theme before first paint so 'auto' (the default) doesn't flash
+	     the wrong scheme on a dark-OS load. The Svelte app re-applies + live-tracks
+	     after mount; this just sets the right class up front. -->
+	<script>
+		(function () {
+			try {
+				var m = localStorage.getItem('playground-theme');
+				if (m !== 'light' && m !== 'dark' && m !== 'auto') m = 'auto';
+				var dark = m === 'dark' || (m === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+				document.documentElement.className = dark ? 'dark' : 'light';
+			} catch (e) {
+				/* localStorage/matchMedia unavailable → keep the html default class */
+			}
+		})();
+	</script>
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
 	<link rel="icon" href="%sveltekit.assets%/favicon.svg" />

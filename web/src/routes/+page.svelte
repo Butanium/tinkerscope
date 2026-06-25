@@ -45,11 +45,26 @@
 	} from '$lib/types';
 
 	// ── Theme ─────────────────────────────────────────────────────────
-	let theme = $state<'light' | 'dark'>('light');
-	function toggleTheme() {
-		theme = theme === 'light' ? 'dark' : 'light';
-		document.documentElement.className = theme;
-		localStorage.setItem('playground-theme', theme);
+	// Three modes; 'auto' resolves to the OS scheme and live-tracks system changes.
+	type ThemeMode = 'light' | 'dark' | 'auto';
+	let themeMode = $state<ThemeMode>('auto');
+	// Apply the resolved class to <html> whenever the mode changes, and — only in
+	// 'auto' — re-apply when the OS scheme flips. The $effect cleanup detaches the
+	// media-query listener when leaving 'auto' (or on unmount).
+	$effect(() => {
+		const mode = themeMode;
+		const mql = window.matchMedia('(prefers-color-scheme: dark)');
+		const apply = () => {
+			document.documentElement.className = mode === 'auto' ? (mql.matches ? 'dark' : 'light') : mode;
+		};
+		apply();
+		if (mode !== 'auto') return;
+		mql.addEventListener('change', apply);
+		return () => mql.removeEventListener('change', apply);
+	});
+	function cycleTheme() {
+		themeMode = themeMode === 'light' ? 'dark' : themeMode === 'dark' ? 'auto' : 'light';
+		localStorage.setItem('playground-theme', themeMode);
 	}
 
 	// How n>1 sample distributions render: 'all' = every card stacked (scroll),
@@ -1522,10 +1537,9 @@
 	// ── Lifecycle ─────────────────────────────────────────────────────
 	onMount(() => {
 		const saved = localStorage.getItem('playground-theme');
-		if (saved === 'dark' || saved === 'light') {
-			theme = saved;
-			document.documentElement.className = theme;
-		}
+		// No saved preference → keep the 'auto' default. The $effect reacts to this
+		// assignment and applies the resolved class (no imperative apply needed here).
+		if (saved === 'dark' || saved === 'light' || saved === 'auto') themeMode = saved;
 		const sv = localStorage.getItem('playground-sample-view');
 		if (sv === 'all' || sv === 'cycle') sampleView = sv;
 		try {
@@ -1612,15 +1626,30 @@
 		<!-- Sidebar -->
 		<aside class="sidebar">
 			<div class="sidebar-top-actions">
-				<button class="theme-toggle" onclick={toggleTheme} data-tooltip="Toggle light/dark theme" use:tip>
-					{#if theme === 'light'}
+				<button
+					class="theme-toggle"
+					onclick={cycleTheme}
+					data-tooltip={themeMode === 'auto'
+						? 'Theme: auto (follows system) — click for light'
+						: themeMode === 'light'
+							? 'Theme: light — click for dark'
+							: 'Theme: dark — click for auto'}
+					use:tip
+				>
+					{#if themeMode === 'light'}
 						<svg width="16" height="16" viewBox="0 0 16 16" fill="none">
 							<circle cx="8" cy="8" r="3.5" stroke="currentColor" stroke-width="1.5" />
 							<path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
 						</svg>
-					{:else}
+					{:else if themeMode === 'dark'}
 						<svg width="16" height="16" viewBox="0 0 16 16" fill="none">
 							<path d="M14 9.2A6 6 0 0 1 6.8 2 6 6 0 1 0 14 9.2Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+						</svg>
+					{:else}
+						<!-- auto: monitor glyph (follows system scheme) -->
+						<svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+							<rect x="2" y="3" width="12" height="8" rx="1" stroke="currentColor" stroke-width="1.5" />
+							<path d="M6 14h4M8 11v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
 						</svg>
 					{/if}
 				</button>
