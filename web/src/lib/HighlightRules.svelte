@@ -23,7 +23,10 @@
 	let editingId = $state<string | null>(null);
 	let draft = $state<HighlightRule | null>(null);
 	let paletteFor = $state<string | null>(null);
-	let hexInput = $state('');
+
+	// Whether a color is off-palette (so the custom swatch shows as selected).
+	const isCustomColor = (color: string) =>
+		!PALETTE.some((c) => c.toLowerCase() === color.toLowerCase());
 
 	const rules = $derived(highlightStore.rules);
 	const isNewDraft = $derived(!!draft && !rules.some((r) => r.id === draft!.id));
@@ -183,10 +186,7 @@
 					class:off={!rule.enabled}
 					style="background:{rule.enabled ? rule.color : 'transparent'};border-color:{rule.color}"
 					title="color"
-					onclick={() => {
-						paletteFor = paletteFor === rule.id ? null : rule.id;
-						hexInput = rule.color;
-					}}
+					onclick={() => (paletteFor = paletteFor === rule.id ? null : rule.id)}
 					aria-label="pick color"
 				></button>
 				{#if paletteFor === rule.id}
@@ -204,14 +204,18 @@
 									aria-label={c}
 								></button>
 							{/each}
-						</div>
-						<div class="hr-hex">
-							<span class="hr-hex-preview" style="background:{hexInput}"></span>
-							<input class="hr-input" bind:value={hexInput} placeholder="#hex" spellcheck="false" />
-							<button
-								class="hr-hex-set"
-								onclick={() => /^#[0-9a-f]{3,8}$/i.test(hexInput) && pickColor(rule, hexInput)}
-							>set</button>
+							<!-- Custom: a color-wheel dab holding a transparent native <input
+							     type="color"> seeded with the rule's current color, so clicking
+							     opens the OS picker initialized to it. Sits bottom-right of the grid. -->
+							<div class="hr-swatch hr-swatch-custom" class:sel={isCustomColor(rule.color)} title="custom color">
+								<input
+									class="hr-color-native"
+									type="color"
+									value={rule.color}
+									onchange={(e) => pickColor(rule, (e.target as HTMLInputElement).value)}
+									aria-label="custom color"
+								/>
+							</div>
 						</div>
 					</div>
 				{/if}
@@ -377,25 +381,34 @@
 		outline: 2px solid var(--color-text);
 		outline-offset: 1px;
 	}
-	.hr-hex {
-		display: flex;
-		align-items: center;
-		gap: 5px;
-		margin-top: 7px;
+	/* Custom-color swatch: a color-wheel gradient with a transparent native
+	   <input type="color"> overlaid so the whole dab is the picker trigger. */
+	.hr-swatch-custom {
+		position: relative;
+		overflow: hidden;
+		background: conic-gradient(
+			from 0deg,
+			#f87171,
+			#fbbf24,
+			#a3e635,
+			#2dd4bf,
+			#22d3ee,
+			#60a5fa,
+			#a78bfa,
+			#e879f9,
+			#f87171
+		);
 	}
-	.hr-hex-preview {
-		width: 16px;
-		height: 16px;
-		border-radius: var(--radius-sm);
-		border: 1px solid var(--color-border);
-		flex-shrink: 0;
-	}
-	.hr-hex-set {
-		font-size: 0.65rem;
-		text-transform: uppercase;
-		background: none;
+	.hr-color-native {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		margin: 0;
+		padding: 0;
 		border: none;
-		color: var(--color-accent);
+		background: none;
+		opacity: 0;
 		cursor: pointer;
 	}
 

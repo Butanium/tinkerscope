@@ -16,7 +16,7 @@ export const highlightStore = $state<{ rules: HighlightRule[]; loaded: boolean }
 
 /** Curated paint palette — bright, easy to tell apart (from samplescope). */
 export const PALETTE: string[] = [
-	'#fde047', '#fbbf24', '#fb923c', '#f87171', '#f472b6', '#e879f9',
+	'#fde047', '#fbbf24', '#f87171', '#f472b6', '#e879f9',
 	'#a78bfa', '#60a5fa', '#22d3ee', '#2dd4bf', '#34d399', '#a3e635'
 ];
 
