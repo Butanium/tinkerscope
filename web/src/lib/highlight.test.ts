@@ -35,7 +35,7 @@ function rule(p: Partial<HighlightRule>): HighlightRule {
 		sort_order: p.sort_order ?? 0
 	};
 }
-const marks = (html: string) => (html.match(/<mark class="hl-mark"/g) ?? []).length;
+const marks = (html: string) => (html.match(/<mark class="hl-mark/g) ?? []).length;
 
 // ── tint ──────────────────────────────────────────────────────────────────
 eq('tint #fff = expanded rgba', tint('#fff'), 'rgba(255, 255, 255, 0.42)');
@@ -143,6 +143,22 @@ ok('long pattern truncated with ellipsis', deriveRuleName(['a'.repeat(50)], fals
 	// highlightHtml leaves already-safe HTML structure intact when no rule matches
 	const html = highlightHtml('<p>hello world</p>', [rule({ patterns: ['zzz'] })]);
 	eq('no-match passthrough', html, '<p>hello world</p>');
+}
+{
+	// Partial-word match ("health" inside "healthy"): the mark abuts the trailing
+	// "y", so the highlighter's side padding would visually detach it ("health y").
+	// The mark must carry a join modifier on the abutting side so it reassembles
+	// seamlessly. No whitespace is ever inserted into the markup either.
+	const html = renderMarkdown('I am healthy today', [rule({ patterns: ['health'] })]);
+	ok('partial match: no whitespace between mark and continuation', html.includes('</mark>y'), html);
+	ok('partial match: mark joins the abutting word char on the right', /class="hl-mark[^"]*\bhl-join-r\b[^"]*"[^>]*>health<\/mark>y/.test(html), html);
+	// suffix match (" ealthy" → leading "h" abuts): join on the left instead.
+	const left = renderMarkdown('healthy', [rule({ patterns: ['ealthy'] })]);
+	ok('suffix match: mark joins the abutting word char on the left', /h<mark class="hl-mark[^"]*\bhl-join-l\b/.test(left), left);
+	// Whole-word / punctuation-bounded matches keep the plain class (no join mods).
+	const whole = renderMarkdown('I love my dentist.', [rule({ patterns: ['dentist'] })]);
+	ok('whole-word match keeps plain hl-mark class', whole.includes('class="hl-mark"'), whole);
+	ok('whole-word match carries no join modifier', !whole.includes('hl-join'), whole);
 }
 
 console.log(`highlight.ts: ${passed} passed, ${failed} failed`);

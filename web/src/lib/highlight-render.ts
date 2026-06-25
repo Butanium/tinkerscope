@@ -41,6 +41,12 @@ function restoreMath(html: string, blocks: Map<string, string>): string {
 
 const MATH_PH = /(\x02MATH\d+\x02)/;
 
+// A mark's side padding (chat.css) visually detaches the highlight from text it
+// directly abuts — a partial-word match ("health" in "healthy") would read as
+// "health y". When a mark touches a word character, tag that side so the CSS can
+// drop the padding there and the word reassembles seamlessly.
+const WORDISH = /[\p{L}\p{N}_]/u;
+
 /** Paint a span of plain (escaped) text with the active rules → marks + text. */
 function paintSegment(text: string, rules: HighlightRule[]): string {
 	const ranges = paintRanges(text, rules);
@@ -49,7 +55,10 @@ function paintSegment(text: string, rules: HighlightRule[]): string {
 	let cursor = 0;
 	for (const r of ranges) {
 		if (r.start > cursor) out += text.slice(cursor, r.start);
-		out += `<mark class="hl-mark" style="--hl-bg:${tint(r.color)}">${text.slice(r.start, r.end)}</mark>`;
+		const joinL = r.start > 0 && WORDISH.test(text[r.start - 1]);
+		const joinR = r.end < text.length && WORDISH.test(text[r.end]);
+		const cls = `hl-mark${joinL ? ' hl-join-l' : ''}${joinR ? ' hl-join-r' : ''}`;
+		out += `<mark class="${cls}" style="--hl-bg:${tint(r.color)}">${text.slice(r.start, r.end)}</mark>`;
 		cursor = r.end;
 	}
 	if (cursor < text.length) out += text.slice(cursor);

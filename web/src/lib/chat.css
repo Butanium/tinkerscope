@@ -71,6 +71,10 @@
  * Per-rule color rides in on the inline --hl-bg custom property (rgba tint set
  * by render.ts); the rule here only carries the shared box styling. */
 mark.hl-mark { background: var(--hl-bg, #ffe9a8); color: inherit; padding: 1px 2px; border-radius: 2px; }
+/* Partial-word match: the mark abuts a word char, so drop the padding + rounded
+ * corner on that side — otherwise the 2px pad reads as a gap ("health y"). */
+mark.hl-mark.hl-join-l { padding-left: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+mark.hl-mark.hl-join-r { padding-right: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; }
 
 /* ── Tag button ───────────────────────────────────────────────────── */
 .btn-tag { background: none; border: 1px solid transparent; border-radius: var(--radius); padding: 3px 6px; color: var(--color-text-muted); opacity: 0.4; transition: all 0.15s; display: inline-flex; align-items: center; }
