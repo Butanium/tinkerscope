@@ -70,6 +70,10 @@ class ConversationsStore {
 		seen_panels: string[];
 	} | null = null;
 	#noticeTimer: ReturnType<typeof setTimeout> | null = null;
+	/** Id of the current UNSAVED draft (a new conversation that exists only in `list`,
+	 *  not yet on the backend). It is materialized on the first save (= first real
+	 *  change), and discarded if abandoned untouched. null ⇒ no pending draft. */
+	#draftId: string | null = null;
 
 	treeFor(panel: Panel): ConvTree {
 		return this.trees[panel] ?? emptyTree();
@@ -249,18 +253,39 @@ class ConversationsStore {
 			run_id: ps.run_id,
 			checkpoint: ps.checkpoint
 		}));
+		// A pending save IS the first real change to an unsaved draft → materialize it
+		// on the backend (create with the draft's id) instead of a tree-save (which would
+		// 404). Clear #draftId SYNCHRONOUSLY (before the await) so a racing #doSave can't
+		// double-create; restore it on failure so a retry still creates it.
+		const materializing = p.id === this.#draftId;
+		if (materializing) this.#draftId = null;
 		try {
-			await api.saveConversationTree(
-				p.id,
-				p.trees,
-				system_prompt,
-				panels,
-				p.reduced_panels,
-				p.send_targets,
-				p.seen_panels
-			);
+			if (materializing) {
+				const name = this.list.find((c) => c.id === p.id)?.name ?? 'Untitled';
+				await api.createConversation({
+					id: p.id,
+					name,
+					system_prompt,
+					trees: p.trees,
+					panels,
+					reduced_panels: p.reduced_panels,
+					send_targets: p.send_targets,
+					seen_panels: p.seen_panels
+				});
+			} else {
+				await api.saveConversationTree(
+					p.id,
+					p.trees,
+					system_prompt,
+					panels,
+					p.reduced_panels,
+					p.send_targets,
+					p.seen_panels
+				);
+			}
 			this.list = this.list.map((c) => (c.id === p.id ? { ...c, updated_at: new Date().toISOString() } : c));
 		} catch (e) {
+			if (materializing) this.#draftId = p.id; // not persisted — still a draft
 			console.warn('conversation tree save failed', e);
 		}
 	}
@@ -279,17 +304,14 @@ class ConversationsStore {
 	 *  otherwise open the newest. Returns whether `preferredId` was honored (false
 	 *  ⇒ it was absent or unknown, so the caller can normalize the URL / notify). */
 	async load(preferredId?: string | null): Promise<boolean> {
-		let list = await api.listConversations();
-		if (!list.length) {
-			const created = await api.createConversation({
-				name: 'Untitled',
-				system_prompt: live.state?.system_prompt ?? null,
-				trees: { primary: emptyTree() },
-				panels: this.#currentLayout()
-			});
-			list = [created];
-		}
+		const list = await api.listConversations();
 		this.list = list;
+		if (!list.length) {
+			// Nothing saved yet → open an unsaved draft (an empty conversation is never
+			// persisted until it changes). create() sets it active + lays out panels.
+			await this.create('Untitled', this.#currentLayout());
+			return false;
+		}
 		const preferred = preferredId ? list.find((c) => c.id === preferredId) : undefined;
 		const active = preferred ?? newest(list)!;
 		this.activeId = active.id;
@@ -300,7 +322,11 @@ class ConversationsStore {
 
 	async switchTo(id: string): Promise<void> {
 		if (id === this.activeId) return;
+		// If we're leaving an untouched draft, drop it (flush below materializes it first
+		// if it had any pending change, clearing #draftId so the discard then no-ops).
+		const leavingDraft = this.#draftId !== null && this.#draftId === this.activeId;
 		await this.flush();
+		if (leavingDraft) this.#discardDraftIfUntouched();
 		live.clearBuckets();
 		const conv = this.list.find((c) => c.id === id);
 		if (!conv) return;
@@ -312,25 +338,42 @@ class ConversationsStore {
 	/** Create + switch to a new conversation. `panels` is the layout it opens with:
 	 *  callers inherit the current conversation's models (a new conversation keeps the
 	 *  MODELS, never the messages) or pass a single blank panel (Shift+New). Omitted ⇒
-	 *  inherit the current layout. */
+	 *  inherit the current layout.
+	 *
+	 *  The new conversation is an UNSAVED DRAFT — it lives only in `list` and is NOT
+	 *  persisted until the first real change materializes it (#doSave). So a 'New' you
+	 *  never touch leaves nothing behind on disk. */
 	async create(name = 'Untitled', panels?: PanelLayout[]): Promise<void> {
 		await this.flush();
 		live.clearBuckets();
+		// A previous untouched draft is abandoned (don't pile up empty 'Untitled's).
+		this.#discardDraftIfUntouched();
 		const layout = panels && panels.length ? panels : this.#currentLayout();
-		const created = await api.createConversation({
+		const ids = layout.map((p) => p.id);
+		if (!ids.includes('primary')) ids.unshift('primary');
+		const now = new Date().toISOString();
+		// Pre-seed seen/send to the open panels (the default-on state) so the +page
+		// syncPanels reconcile finds nothing new and does NOT call save() — otherwise
+		// laying out a fresh draft would itself materialize an empty conversation.
+		const draft: Conversation = {
+			id: crypto.randomUUID(),
 			name,
 			system_prompt: live.state?.system_prompt ?? null,
 			trees: { primary: emptyTree() },
-			panels: layout
-		});
-		this.list = [created, ...this.list];
-		this.activeId = created.id;
-		this.#applyPanelUi(created); // empty sets ⇒ +page syncPanels re-defaults panels ON
+			panels: layout,
+			reduced_panels: [],
+			send_targets: [...ids],
+			seen_panels: [...ids],
+			created_at: now,
+			updated_at: now
+		};
+		this.list = [draft, ...this.list];
+		this.activeId = draft.id;
+		this.#draftId = draft.id;
+		this.#applyPanelUi(draft);
 		// Lay out the inherited/blank panels with EMPTY trees + transcripts. One
 		// optimistic setState (panels + cleared echoes) so live.state reflects the new
 		// layout immediately — the SSE patch lags a beat behind the POST.
-		const ids = layout.map((p) => p.id);
-		if (!ids.includes('primary')) ids.unshift('primary');
 		this.trees = Object.fromEntries(ids.map((id) => [id, emptyTree()]));
 		const next = await api
 			.setState({
@@ -341,7 +384,23 @@ class ConversationsStore {
 		if (next) live.state = next;
 	}
 
+	/** Drop the current draft from `list` if it was never persisted (untouched). Called
+	 *  after flush() — a touched draft is materialized by flush first, clearing #draftId,
+	 *  so this only removes genuinely-empty ones. */
+	#discardDraftIfUntouched(): void {
+		if (!this.#draftId) return;
+		const id = this.#draftId;
+		this.#draftId = null;
+		this.list = this.list.filter((c) => c.id !== id);
+	}
+
 	async rename(id: string, name: string): Promise<void> {
+		if (id === this.#draftId) {
+			// Unsaved draft: keep the name locally and materialize it (a rename IS a change).
+			this.list = this.list.map((c) => (c.id === id ? { ...c, name } : c));
+			this.save();
+			return;
+		}
 		const updated = await api.renameConversation(id, name);
 		this.list = this.list.map((c) =>
 			c.id === id ? { ...c, name: updated.name, updated_at: updated.updated_at } : c
@@ -350,16 +409,24 @@ class ConversationsStore {
 
 	async remove(id: string): Promise<void> {
 		await this.flush();
+		const removingDraft = id === this.#draftId;
 		// Never leave zero conversations: the last one resets in place (same id,
 		// empty trees, default name).
 		if (this.list.length <= 1) {
 			live.clearBuckets();
 			await this.#freshTrees();
-			if (this.activeId) await this.rename(this.activeId, 'Untitled').catch(() => {});
-			this.save();
+			if (removingDraft) {
+				// Already unsaved + now empty → stay a draft, just reset the name locally.
+				this.list = this.list.map((c) => (c.id === id ? { ...c, name: 'Untitled' } : c));
+			} else {
+				if (this.activeId) await this.rename(this.activeId, 'Untitled').catch(() => {});
+				this.save();
+			}
 			return;
 		}
-		await api.deleteConversation(id);
+		// A draft only exists locally — skip the backend delete (it would 404).
+		if (removingDraft) this.#draftId = null;
+		else await api.deleteConversation(id);
 		this.list = this.list.filter((c) => c.id !== id);
 		if (this.activeId === id) {
 			live.clearBuckets();

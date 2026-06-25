@@ -64,6 +64,11 @@ def _write(items: list[dict]) -> None:
 
 
 class ConversationCreate(BaseModel):
+    # Optional client-supplied id. The browser keeps a NEW conversation as an unsaved
+    # DRAFT (not persisted until something actually changes), so it mints the id up
+    # front and sends it here on the first save — keeping the URL/list id stable. The
+    # create then upserts by id (idempotent under a save race). Omitted ⇒ server mints.
+    id: str | None = None
     name: str = "Untitled"
     system_prompt: str | None = None
     # N-panel shape: {panel_id: opaque tree}.
@@ -75,6 +80,11 @@ class ConversationCreate(BaseModel):
     # models are shown in which panels. Travels with the conversation so switching
     # restores its model set (and a new conversation can inherit the current one's).
     panels: list[dict[str, Any]] | None = None
+    # Per-conversation panel UI (see TreeSave) — sent when a draft is first persisted
+    # so its folded/send-target state survives even if set before the first save.
+    reduced_panels: list[str] = []
+    send_targets: list[str] = []
+    seen_panels: list[str] = []
 
 
 class ConversationRename(BaseModel):
@@ -107,7 +117,9 @@ def list_conversations() -> list[dict]:
 
 @router.post("")
 def create_conversation(req: ConversationCreate) -> dict:
-    """Create a conversation; the server assigns id + timestamps."""
+    """Create a conversation. The server mints the id + timestamps unless the client
+    supplied an id (a draft being persisted for the first time), in which case it
+    upserts by that id — so a save race can't duplicate the entry."""
     trees = req.trees
     if trees is None:
         # transitional: synthesize {trees} from a legacy {tree, compare_tree} body
@@ -119,7 +131,7 @@ def create_conversation(req: ConversationCreate) -> dict:
     if not trees:
         trees = {"primary": {}}
     entry = {
-        "id": str(uuid.uuid4()),
+        "id": req.id or str(uuid.uuid4()),
         "name": req.name,
         "system_prompt": req.system_prompt,
         "trees": trees,
@@ -127,16 +139,23 @@ def create_conversation(req: ConversationCreate) -> dict:
         # conversation, or a single blank panel). Empty ⇒ legacy fallback (browser
         # keeps whatever panels are currently shown).
         "panels": req.panels or [],
-        # Fresh conversation: empty panel-UI lists ⇒ the browser defaults every
-        # open panel ON the first time it lays them out (see #applyPanelUi).
-        "reduced_panels": [],
-        "send_targets": [],
-        "seen_panels": [],
+        # Panel-UI lists (folded / send-targets / seen). Usually empty for a brand-new
+        # conversation; carried so a draft persisted after a UI toggle keeps that state.
+        "reduced_panels": req.reduced_panels,
+        "send_targets": req.send_targets,
+        "seen_panels": req.seen_panels,
         "created_at": _now(),
         "updated_at": _now(),
     }
     with locked("conversations"):
         items = _read()
+        # Upsert by client-supplied id (idempotent first-save of a draft).
+        for i, c in enumerate(items):
+            if c.get("id") == entry["id"]:
+                entry["created_at"] = c.get("created_at", entry["created_at"])
+                items[i] = entry
+                _write(items)
+                return entry
         items.append(entry)
         _write(items)
     return entry

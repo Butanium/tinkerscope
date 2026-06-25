@@ -86,10 +86,14 @@ export const api = {
 	// conversations (branchable trees; server adds id/created_at/updated_at)
 	listConversations: () => j<Conversation[]>('/api/conversations'),
 	createConversation: (entry: {
+		id?: string;
 		name?: string;
 		system_prompt?: string | null;
 		trees?: Record<string, ConvTree>;
 		panels?: PanelLayout[];
+		reduced_panels?: string[];
+		send_targets?: string[];
+		seen_panels?: string[];
 	}) => j<Conversation>('/api/conversations', { method: 'POST', body: JSON.stringify(entry) }),
 	renameConversation: (id: string, name: string) =>
 		j<Conversation>(`/api/conversations/${encodeURIComponent(id)}`, {

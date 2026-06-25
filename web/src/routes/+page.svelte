@@ -1717,8 +1717,13 @@
 								<option value={c.id}>{c.name || 'Untitled'}</option>
 							{/each}
 						</select>
-						<button class="conv-icon-btn" title="New conversation (keeps the current models; Shift+click for a blank one)" disabled={anyRunning || convo.busy} aria-label="New conversation" onclick={newConversation}>
-							<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+						<button class="conv-icon-btn" class:shift-alt={shiftDown} title={shiftDown ? 'New BLANK conversation (no model selected)' : 'New conversation (keeps the current models; Shift+click for a blank one)'} disabled={anyRunning || convo.busy} aria-label="New conversation" onclick={newConversation}>
+							{#if shiftDown}
+								<!-- blank-page + plus: a fresh conversation with no model -->
+								<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M4 1.5h5L12.5 5v6.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /><path d="M8.5 1.5V5h3.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /><path d="M7.5 7v3M6 8.5h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" /></svg>
+							{:else}
+								<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+							{/if}
 						</button>
 						<button class="conv-icon-btn" title="Rename conversation" disabled={anyRunning || convo.busy} aria-label="Rename conversation" onclick={startRenameConversation}>
 							<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M10.5 2.5l3 3L6 13l-3.5.5L3 10l7.5-7.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /></svg>
@@ -2412,6 +2417,8 @@
 	.conv-icon-btn { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; background: var(--color-surface-hover); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text-muted); flex-shrink: 0; cursor: pointer; }
 	.conv-icon-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
 	.conv-icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+	/* Shift held → the New button signals its alternate action (blank conversation). */
+	.conv-icon-btn.shift-alt:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
 	.conv-icon-danger:hover:not(:disabled) { color: white; background: #d97070; border-color: #d97070; }
 	.external-notice { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent); }
 

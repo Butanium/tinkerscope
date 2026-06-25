@@ -109,6 +109,29 @@ def test_panel_layout_defaults_to_empty(client):
     assert client.get("/api/conversations").json()[0]["panels"] == []
 
 
+def test_create_with_client_id_upserts(client):
+    """A new conversation is held as an unsaved DRAFT client-side and materialized on the
+    first change by POSTing with a client-minted id. Creating with an explicit id uses it,
+    and a second create with the same id UPSERTS (no duplicate) — so a save race is safe."""
+    cid = "draft-fixed-id-123"
+    a = client.post("/api/conversations", json={
+        "id": cid, "name": "Draft", "trees": {"primary": {"mark": "v1"}},
+        "panels": [{"id": "primary", "run_id": "run-a", "checkpoint": "final"}],
+        "send_targets": ["primary"], "seen_panels": ["primary"],
+    }).json()
+    assert a["id"] == cid
+    assert a["panels"] == [{"id": "primary", "run_id": "run-a", "checkpoint": "final"}]
+    assert a["send_targets"] == ["primary"] and a["seen_panels"] == ["primary"]
+    # Re-create with the same id → updates in place, list stays length 1.
+    b = client.post("/api/conversations", json={"id": cid, "name": "Draft2", "trees": {"primary": {"mark": "v2"}}}).json()
+    assert b["id"] == cid
+    listed = client.get("/api/conversations").json()
+    assert len(listed) == 1 and listed[0]["name"] == "Draft2"
+    assert listed[0]["trees"] == {"primary": {"mark": "v2"}}
+    # created_at is preserved across the upsert.
+    assert listed[0]["created_at"] == a["created_at"]
+
+
 def test_rename(client):
     cid = client.post("/api/conversations", json={"name": "old"}).json()["id"]
     r = client.patch(f"/api/conversations/{cid}", json={"name": "new"})
