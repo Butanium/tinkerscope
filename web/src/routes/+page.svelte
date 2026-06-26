@@ -2237,11 +2237,9 @@
 	/* ── Sidebar ───────────────────────────────────────────────────── */
 	.sidebar { width: var(--sidebar-width); flex-shrink: 0; background: var(--color-surface); border-right: 1px solid var(--color-border); padding: var(--space-4); overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-4); }
 	.sidebar-section { display: flex; flex-direction: column; gap: var(--space-2); }
-	.sidebar-label { font-size: 0.78rem; font-weight: 500; color: var(--color-text-secondary); display: flex; align-items: center; gap: var(--space-2); }
 	.sidebar-select { padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text); font-size: 0.82rem; }
 	.sidebar-select option:disabled { color: var(--color-text-muted); }
 	.sidebar-slider { width: 100%; accent-color: var(--color-accent); }
-	.sidebar-input { padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text); font-size: 0.82rem; font-family: var(--font-mono); width: 100%; }
 	.model-filter { margin-bottom: var(--space-2); }
 	.sidebar-textarea { padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text); font-size: 0.82rem; font-family: var(--font-sans); resize: vertical; width: 100%; }
 	.sidebar-top-actions { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
@@ -2264,8 +2262,6 @@
 	.model-slot-select { flex: 1; min-width: 0; }
 	.ckpt-select { width: 100%; font-family: var(--font-mono); font-size: 0.76rem; }
 	.run-meta { font-size: 0.68rem; color: var(--color-text-muted); font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-	.unsampleable-note { font-size: 0.7rem; color: #b45309; line-height: 1.3; }
-	:global(.dark) .unsampleable-note { color: #fbbf24; }
 	.unknown-note { font-size: 0.68rem; color: var(--color-text-muted); font-style: italic; }
 	.config-error-note { font-size: 0.68rem; color: #ef4444; line-height: 1.3; }
 	.btn-remove-model { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; background: var(--color-surface-hover); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text-muted); flex-shrink: 0; }
@@ -2291,8 +2287,6 @@
 	.or-row-remove:hover:not(:disabled) { background: #d97070; border-color: #d97070; color: white; }
 	.or-row-remove:disabled { opacity: 0.4; cursor: not-allowed; }
 	.or-empty { font-size: 0.8rem; color: var(--color-text-muted); font-style: italic; padding: var(--space-2) 0; }
-	.btn-new { padding: var(--space-2) var(--space-3); background: var(--color-surface-hover); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text); font-size: 0.82rem; font-weight: 500; }
-	.btn-new:hover { background: var(--color-accent-bg); border-color: var(--color-accent); }
 	.theme-toggle { background: none; border: 1px solid var(--color-border); border-radius: var(--radius); padding: 6px; color: var(--color-text-muted); display: flex; align-items: center; }
 	.theme-toggle:hover { color: var(--color-text); border-color: var(--color-text-muted); }
 	.theme-toggle.refreshing { opacity: 0.5; cursor: wait; }
@@ -2370,10 +2364,6 @@
 	.tag-preview-response { max-height: 100px; overflow-y: auto; font-size: 0.78rem; color: var(--color-text-secondary); line-height: 1.4; }
 	.tag-note-input { width: 100%; padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text); font-family: var(--font-sans); font-size: 0.88rem; resize: vertical; margin-top: var(--space-2); }
 	.tag-note-input:focus { outline: none; border-color: var(--color-accent); }
-	.tag-form-actions { display: flex; gap: var(--space-2); justify-content: flex-end; margin-top: var(--space-3); }
-	.btn-tag-submit { padding: var(--space-2) var(--space-4); background: var(--color-accent); border: none; border-radius: var(--radius); color: white; font-size: 0.82rem; font-weight: 500; }
-	.btn-tag-submit:hover { opacity: 0.9; }
-	.btn-tag-submit:disabled { opacity: 0.4; cursor: not-allowed; }
 
 	/* ── Slideshow modal ─────────────────────────────────────────── */
 	.slideshow-modal { width: 720px; max-width: 95vw; max-height: 85vh; }

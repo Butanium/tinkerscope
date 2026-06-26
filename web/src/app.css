@@ -86,3 +86,15 @@ select {
  * boundaries don't drop them). Keep cross-component utility classes here. */
 .backend-error { font-size: 0.78rem; color: #b45309; background: #fef3c7; padding: var(--space-2) var(--space-3); border-radius: var(--radius); border: 1px solid #f59e0b40; }
 .dark .backend-error { color: #fbbf24; background: #78350f40; border-color: #f59e0b30; }
+
+/* Form/label utilities used by the sidebar AND the modal components. */
+.sidebar-label { font-size: 0.78rem; font-weight: 500; color: var(--color-text-secondary); display: flex; align-items: center; gap: var(--space-2); }
+.sidebar-input { padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text); font-size: 0.82rem; font-family: var(--font-mono); width: 100%; }
+.unsampleable-note { font-size: 0.7rem; color: #b45309; line-height: 1.3; }
+.dark .unsampleable-note { color: #fbbf24; }
+.btn-new { padding: var(--space-2) var(--space-3); background: var(--color-surface-hover); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text); font-size: 0.82rem; font-weight: 500; }
+.btn-new:hover { background: var(--color-accent-bg); border-color: var(--color-accent); }
+.tag-form-actions { display: flex; gap: var(--space-2); justify-content: flex-end; margin-top: var(--space-3); }
+.btn-tag-submit { padding: var(--space-2) var(--space-4); background: var(--color-accent); border: none; border-radius: var(--radius); color: white; font-size: 0.82rem; font-weight: 500; }
+.btn-tag-submit:hover { opacity: 0.9; }
+.btn-tag-submit:disabled { opacity: 0.4; cursor: not-allowed; }
