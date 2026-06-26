@@ -53,6 +53,58 @@ and in this file's reference section; HANDOFF.md itself is retired.
 - **Shared-state bus / live-drive** (the `tinkpg` ↔ browser lockstep): see
   `docs/HANDOFF_BRANCHING.md` §1 + `src/tinkerscope/api/state.py`.
 
+## Frontend map (`web/` — Svelte 5 / SvelteKit SPA)
+
+Read this before a UI task instead of Exploring `web/`. The UI is a single-route
+SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
+
+- **Stores** — `*.svelte.ts` exporting a class instance as a singleton (runes in
+  a module; this is the house pattern). Reactive `$state` fields read/written
+  across the app:
+  - `lib/state.svelte.ts` → `live` — mirrored shared `PlaygroundState` (selection/
+    params) + per-panel **streamed sample buckets**, both driven by the
+    `/api/state/events` SSE. The render bus.
+  - `lib/conversations.svelte.ts` → `convo` — owner of the per-panel **branch
+    trees** + persistence + the external-fold reconcile. The conversation model.
+  - `lib/highlights.svelte.ts` → `highlightStore` — user-defined render-time
+    coloring rules + persistence.
+- **Pure logic** — plain `.ts`, no Svelte/DOM, unit-testable (some have
+  `*.test.ts`):
+  - `lib/tree.ts` — all branch-tree ops (activePath, fold, regen, edit, delete,
+    cycle, siblings). The single source of branching truth. **Has `tree.test.ts`.**
+  - `lib/model-sel.ts` — the `openrouter:`/`base:`/`ckpt:` sentinel encoding
+    (prefixes, predicates, id extractors) for a panel's model selection.
+  - `lib/chart.ts` — distribution-chart math (`computeChartBars`) + `wrapLabel`.
+  - `lib/chat-stream.ts` — `drainSamples`: parse the `/api/chat` SSE into samples.
+  - `lib/highlight-match.ts` / `lib/highlight-render.ts` — pure matching + the
+    markdown+math+highlight render pipeline. **`highlight.test.ts`.**
+  - `lib/render.ts` — store-coupled render entry point (wraps highlight-render).
+  - `lib/api.ts` — typed backend client + named-event SSE helper.
+  - `lib/types.ts` — TS types mirroring the backend (see `docs/API_CONTRACT.md`).
+  - `lib/tooltip.svelte.ts` — the `use:tip` tooltip action.
+- **Components** — `.svelte`:
+  - `routes/+page.svelte` — **the workspace component**: wires every store +
+    handler to the markup. It's big (~2.5k lines); it is organized by
+    `// ── Section ──` banner comments — **`grep '// ──' routes/+page.svelte`
+    for the in-file table of contents** rather than scrolling. Notable sections:
+    *Send a chat* (`sendMessage`/`fireChat` — the core send path), *Chat-thread
+    branching* (edit/regenerate/delete/cycle/select — the largest cluster),
+    *Conversation rendering* (`panelView`/`bucketTurn` — overlays the live bucket
+    on the tree's active leaf), *Panel lifecycle* (add/remove panels),
+    *Conversation ↔ URL sync*, *Session persistence*, *Lifecycle* (`onMount`).
+    Markup order: sidebar → chat area → input bar → modals (chart, tag-form,
+    slideshow, dataset-loader, OpenRouter-manager).
+  - `lib/ChatMessage.svelte` — one chat row (committed node OR live bucket turn)
+    + its per-row toolbar (edit/regen/branch/pin…).
+  - `lib/ModelTypeahead.svelte` — the type-to-filter model combobox.
+  - `lib/HighlightRules.svelte` — the highlight-rules editor UI.
+
+**Modules > the mega-file.** When adding UI logic, prefer a new/existing `lib/`
+module over growing `+page.svelte`; pure logic → `.ts` (+ a `.test.ts`), shared
+reactive state → a `*.svelte.ts` store. Known follow-up: the markup modals in
+`+page.svelte` are good candidates to extract into their own `.svelte`
+components (each is a self-contained block).
+
 ## External reference paths (not in this repo; verified 2026-06-22)
 
 - Tinker checkpoint schema (`CheckpointRecord`):
