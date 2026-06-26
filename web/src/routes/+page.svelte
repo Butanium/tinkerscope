@@ -8,6 +8,14 @@
 	import ModelTypeahead from '$lib/ModelTypeahead.svelte';
 	import Message from '$lib/ChatMessage.svelte';
 	import { renderContent, assembleAssistantRaw } from '$lib/render';
+	import {
+		OR_PREFIX, BASE_PREFIX, CKPT_PREFIX,
+		isOpenrouterSel, openrouterId,
+		isBaseSel, baseModelId,
+		isCkptSel, samplerPathOf
+	} from '$lib/model-sel';
+	import { drainSamples } from '$lib/chat-stream';
+	import { computeChartBars, wrapLabel, type ChartData } from '$lib/chart';
 	import { loadHighlightRules, highlightStore, toggleHighlightRule } from '$lib/highlights.svelte';
 	import HighlightRules from '$lib/HighlightRules.svelte';
 	import type { Pin } from '$lib/types';
@@ -29,8 +37,7 @@
 		setSelected,
 		cycle as cycleTree,
 		siblingInfo,
-		siblingsOf,
-		type SampleLike
+		siblingsOf
 	} from '$lib/tree';
 	import type {
 		Run,
@@ -122,18 +129,11 @@
 		return r.name;
 	}
 
-	// ── OpenRouter selection encoding ─────────────────────────────────
-	// The shared state has only run_id/compare_run_id to identify a panel's
-	// model. We encode an OpenRouter selection in that same field with an
-	// "openrouter:" sentinel so the choice round-trips through shared state
-	// (and is visible to the CLI). The chat builder detects the prefix.
-	const OR_PREFIX = 'openrouter:';
-	function isOpenrouterSel(id: string | null | undefined): boolean {
-		return typeof id === 'string' && id.startsWith(OR_PREFIX);
-	}
-	function openrouterId(id: string | null | undefined): string | null {
-		return isOpenrouterSel(id) ? (id as string).slice(OR_PREFIX.length) : null;
-	}
+	// ── Model labels (sentinel/run id → display label) ────────────────
+	// The pure sentinel encoding (OR_/BASE_/CKPT_ prefixes + predicates +
+	// id extractors) lives in $lib/model-sel. These resolvers layer on it,
+	// reading the reactive catalogs (openrouterModels / tinkerModels / recents)
+	// to turn an id into something human-readable.
 	function openrouterBySel(id: string | null | undefined): OpenRouterModel | undefined {
 		const orId = openrouterId(id);
 		if (orId == null) return undefined;
@@ -145,38 +145,11 @@
 		const m = openrouterBySel(id);
 		return m?.label || orId;
 	}
-
-	// ── Tinker base model selection encoding ──────────────────────────
-	// A raw tinker base model (sampled directly, no LoRA) is encoded in the same
-	// run_id/compare_run_id field with a "base:" sentinel — mirroring the
-	// "openrouter:" scheme — so the choice round-trips through shared state and is
-	// visible to the CLI. The chat builder detects the prefix and sends
-	// {base_model} instead of {run_id, checkpoint}.
-	const BASE_PREFIX = 'base:';
-	function isBaseSel(id: string | null | undefined): boolean {
-		return typeof id === 'string' && id.startsWith(BASE_PREFIX);
-	}
-	function baseModelId(id: string | null | undefined): string | null {
-		return isBaseSel(id) ? (id as string).slice(BASE_PREFIX.length) : null;
-	}
 	function baseLabel(id: string | null | undefined): string {
 		const bm = baseModelId(id);
 		if (bm == null) return '';
 		const m = tinkerModels.find((t) => t.base_model === bm) ?? recentBaseModels.find((t) => t.base_model === bm);
 		return m?.label || bm;
-	}
-
-	// ── Tinker loose-checkpoint selection encoding ────────────────────
-	// A "loose" tinker sampler checkpoint (served by the oai endpoint, no parent
-	// Run) is encoded in the same run_id/compare_run_id field with a "ckpt:"
-	// sentinel — mirroring "base:"/"openrouter:". The chat builder detects the
-	// prefix and sends {sampler_path} instead of {run_id, checkpoint}.
-	const CKPT_PREFIX = 'ckpt:';
-	function isCkptSel(id: string | null | undefined): boolean {
-		return typeof id === 'string' && id.startsWith(CKPT_PREFIX);
-	}
-	function samplerPathOf(id: string | null | undefined): string | null {
-		return isCkptSel(id) ? (id as string).slice(CKPT_PREFIX.length) : null;
 	}
 	function ckptLabel(id: string | null | undefined): string {
 		const sp = samplerPathOf(id);
@@ -534,51 +507,6 @@
 		fireChat(pSel, userParentId, messages, ac.signal, prefill).finally(() => {
 			if (abortByPanel[pSel.panel] === ac) abortByPanel[pSel.panel] = null;
 		});
-	}
-
-	/** Parse the /api/chat SSE response, collecting completed `message` samples.
-	 *  We fold OUR OWN turns from this stream (not the shared render bucket) so a
-	 *  CLI / other-tab chat landing on the same panel mid-stream — which clobbers
-	 *  the single-slot bucket — can never drop or corrupt our fold. */
-	async function drainSamples(res: Response): Promise<SampleLike[]> {
-		const samples: SampleLike[] = [];
-		const reader = res.body!.getReader();
-		const decoder = new TextDecoder();
-		let buf = '';
-		while (true) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			buf += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
-			let nl: number;
-			while ((nl = buf.indexOf('\n\n')) >= 0) {
-				const frame = buf.slice(0, nl);
-				buf = buf.slice(nl + 2);
-				let event = 'message';
-				let dataStr = '';
-				for (const line of frame.split('\n')) {
-					if (line.startsWith('event:')) event = line.slice(6).trim();
-					else if (line.startsWith('data:')) dataStr += line.slice(5).trim();
-				}
-				if (event !== 'message' || !dataStr) continue;
-				try {
-					const d = JSON.parse(dataStr);
-					if (d && (typeof d.content === 'string' || d.error)) {
-						samples.push({
-							content: d.content,
-							reasoning: d.reasoning,
-							raw_text: d.raw_text,
-							raw_meta: d.raw_meta,
-							error: d.error,
-							prefill_incorporated: d.prefill_incorporated,
-							sample_index: d.sample_index ?? samples.length
-						});
-					}
-				} catch {
-					/* ignore a partial / non-JSON frame */
-				}
-			}
-		}
-		return samples;
 	}
 
 	async function fireChat(
@@ -1447,16 +1375,9 @@
 	}
 
 	// ── Distribution chart ────────────────────────────────────────────
+	// The pure histogram→bars math + wrapLabel live in $lib/chart; buildChartData
+	// below only gathers each panel's samples from reactive state, then delegates.
 	let showChart = $state(false);
-	const CHART_COLORS = [
-		'#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
-		'#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
-		'#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5'
-	];
-	const OTHER_COLOR = '#cccccc';
-	const MIN_FRACTION = 0.03;
-
-	type ChartBar = { model: string; segments: { answer: string; pct: number; color: string }[] };
 
 	function panelLabel(p: PanelSel | undefined): string {
 		if (!p) return '';
@@ -1468,7 +1389,9 @@
 		return p.checkpoint ? `${name}@${p.checkpoint}` : name;
 	}
 
-	function buildChartData(): { bars: ChartBar[]; answers: string[]; colors: Record<string, string>; question: string } | null {
+	/** Gather each panel's samples (tree siblings, or the live bucket while still
+	 *  streaming) and hand them to the pure chart math in $lib/chart. */
+	function buildChartData(): ChartData | null {
 		const sources: { model: string; samples: string[] }[] = [];
 		for (const p of panelSels) {
 			// Prefer the active assistant turn's ALL tree siblings (the full
@@ -1488,74 +1411,11 @@
 			}
 			if (samples.length > 0) sources.push({ model: panelLabel(p), samples });
 		}
-		if (sources.length === 0) return null;
-
-		const question = lastUserQuestion();
-		const modelProbs: Record<string, Record<string, number>> = {};
-		for (const { model, samples } of sources) {
-			const counts: Record<string, number> = {};
-			for (const sm of samples) {
-				const key = sm.trim();
-				counts[key] = (counts[key] || 0) + 1;
-			}
-			const total = samples.length;
-			const probs: Record<string, number> = {};
-			for (const [answer, count] of Object.entries(counts)) probs[answer] = count / total;
-			modelProbs[model] = probs;
-		}
-
-		const selectedAnswers = new Set<string>();
-		for (const probs of Object.values(modelProbs)) {
-			for (const [answer, prob] of Object.entries(probs)) if (prob >= MIN_FRACTION) selectedAnswers.add(answer);
-		}
-
-		const finalProbs: Record<string, Record<string, number>> = {};
-		for (const [model, probs] of Object.entries(modelProbs)) {
-			const filtered: Record<string, number> = {};
-			let otherProb = 0;
-			for (const [answer, prob] of Object.entries(probs)) {
-				if (selectedAnswers.has(answer)) filtered[answer] = prob;
-				else otherProb += prob;
-			}
-			if (otherProb > 0) filtered['[OTHER]'] = otherProb;
-			finalProbs[model] = filtered;
-		}
-
-		const allAnswers = [...new Set(Object.values(finalProbs).flatMap((p) => Object.keys(p)))];
-		allAnswers.sort((a, b) => {
-			if (a === '[OTHER]') return 1;
-			if (b === '[OTHER]') return -1;
-			return a.localeCompare(b);
-		});
-
-		const colorMap: Record<string, string> = {};
-		let ci = 0;
-		for (const a of allAnswers) colorMap[a] = a === '[OTHER]' ? OTHER_COLOR : CHART_COLORS[ci++ % CHART_COLORS.length];
-
-		const bars: ChartBar[] = sources.map(({ model }) => {
-			const probs = finalProbs[model] || {};
-			return {
-				model,
-				segments: allAnswers.map((answer) => ({ answer, pct: (probs[answer] || 0) * 100, color: colorMap[answer] }))
-			};
-		});
-
-		return { bars, answers: allAnswers, colors: colorMap, question };
+		return computeChartBars(sources, lastUserQuestion());
 	}
 
-	let chartData = $state<ReturnType<typeof buildChartData>>(null);
+	let chartData = $state<ChartData | null>(null);
 	function openChart() { chartData = buildChartData(); showChart = true; }
-
-	function wrapLabel(label: string, maxLen = 12): string[] {
-		const words = label.split(/[-_/\s\[\]@]+/).filter((w) => w);
-		const lines: string[] = [''];
-		for (const word of words) {
-			const last = lines[lines.length - 1];
-			if (last && last.length + word.length + 1 > maxLen) lines.push(word);
-			else lines[lines.length - 1] = last ? last + ' ' + word : word;
-		}
-		return lines;
-	}
 
 	// ── Health-based degradation banner ───────────────────────────────
 	let degraded = $derived.by(() => {
