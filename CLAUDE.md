@@ -84,7 +84,7 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
   - `lib/tooltip.svelte.ts` — the `use:tip` tooltip action.
 - **Components** — `.svelte`:
   - `routes/+page.svelte` — **the workspace component**: wires every store +
-    handler to the markup. It's big (~2.5k lines); it is organized by
+    handler to the markup. Still the biggest file (~2.2k lines); organized by
     `// ── Section ──` banner comments — **`grep '// ──' routes/+page.svelte`
     for the in-file table of contents** rather than scrolling. Notable sections:
     *Send a chat* (`sendMessage`/`fireChat` — the core send path), *Chat-thread
@@ -92,18 +92,29 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     *Conversation rendering* (`panelView`/`bucketTurn` — overlays the live bucket
     on the tree's active leaf), *Panel lifecycle* (add/remove panels),
     *Conversation ↔ URL sync*, *Session persistence*, *Lifecycle* (`onMount`).
-    Markup order: sidebar → chat area → input bar → modals (chart, tag-form,
-    slideshow, dataset-loader, OpenRouter-manager).
+    Markup order: sidebar → chat area → input bar → the modal components below.
+  - `lib/Modal.svelte` — shared modal chrome (overlay, header, close,
+    click-outside, Escape, body slot). Every modal wraps this; `modalStyle`
+    overrides the box width per modal.
+  - `lib/ChartModal.svelte`, `lib/TagModal.svelte`, `lib/DatasetModal.svelte`,
+    `lib/SlideshowModal.svelte`, `lib/OrManagerModal.svelte`,
+    `lib/TinkerPickerModal.svelte` — the six workspace modals. Each owns its body
+    + specific styles; the parent passes data in and gets results via callbacks.
   - `lib/ChatMessage.svelte` — one chat row (committed node OR live bucket turn)
     + its per-row toolbar (edit/regen/branch/pin…).
-  - `lib/ModelTypeahead.svelte` — the type-to-filter model combobox.
+  - `lib/ModelTypeahead.svelte` — the type-to-filter model combobox (used by the
+    OpenRouter + Tinker picker modals).
   - `lib/HighlightRules.svelte` — the highlight-rules editor UI.
 
-**Modules > the mega-file.** When adding UI logic, prefer a new/existing `lib/`
-module over growing `+page.svelte`; pure logic → `.ts` (+ a `.test.ts`), shared
-reactive state → a `*.svelte.ts` store. Known follow-up: the markup modals in
-`+page.svelte` are good candidates to extract into their own `.svelte`
-components (each is a self-contained block).
+Cross-component CSS utility classes (`.sidebar-label`, `.btn-new`,
+`.backend-error`, …) live in **global `app.css`** — scoped `+page.svelte` styles
+don't reach extracted components, so shared classes must be global.
+
+**Modules > the mega-file.** When adding UI, prefer a new/existing `lib/` module
+or component over growing `+page.svelte`: pure logic → `.ts` (+ a `.test.ts`),
+shared reactive state → a `*.svelte.ts` store, a self-contained UI block → a
+`.svelte` component (wrap `Modal.svelte` for a dialog). Runtime smokes for the
+extracted UI: `tests/small-smokes/browser_{chart_modal,modals}.py`.
 
 ## External reference paths (not in this repo; verified 2026-06-22)
 
