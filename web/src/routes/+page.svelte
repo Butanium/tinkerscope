@@ -5,9 +5,8 @@
 	import { api } from '$lib/api';
 	import { live, emptyPanel } from '$lib/state.svelte';
 	import { conversations as convo } from '$lib/conversations.svelte';
-	import ModelTypeahead from '$lib/ModelTypeahead.svelte';
 	import Message from '$lib/ChatMessage.svelte';
-	import { renderContent, assembleAssistantRaw } from '$lib/render';
+	import { assembleAssistantRaw } from '$lib/render';
 	import {
 		OR_PREFIX, BASE_PREFIX, CKPT_PREFIX,
 		isOpenrouterSel, openrouterId,
@@ -17,7 +16,12 @@
 	import { drainSamples } from '$lib/chat-stream';
 	import { computeChartBars, type ChartData } from '$lib/chart';
 	import ChartModal from '$lib/ChartModal.svelte';
-	import { loadHighlightRules, highlightStore, toggleHighlightRule } from '$lib/highlights.svelte';
+	import TagModal from '$lib/TagModal.svelte';
+	import DatasetModal from '$lib/DatasetModal.svelte';
+	import SlideshowModal from '$lib/SlideshowModal.svelte';
+	import OrManagerModal from '$lib/OrManagerModal.svelte';
+	import TinkerPickerModal from '$lib/TinkerPickerModal.svelte';
+	import { loadHighlightRules } from '$lib/highlights.svelte';
 	import HighlightRules from '$lib/HighlightRules.svelte';
 	import type { Pin } from '$lib/types';
 	import { tip, tooltip } from '$lib/tooltip.svelte';
@@ -1220,26 +1224,24 @@
 
 	// ── Dataset peek ──────────────────────────────────────────────────
 	let showDatasetLoader = $state(false);
-	let datasetPath = $state('');
-	let datasetCount = $state(10);
+	let datasetInitialPath = $state(''); // seeds DatasetModal's path field on open
 	let datasetLoading = $state(false);
 
 	function openDatasetLoader() {
 		// Prefill with the primary panel's selected run's training dataset.
 		const r = runById(panelSels[0]?.run_id);
-		datasetPath = r?.dataset_path ?? '';
+		datasetInitialPath = r?.dataset_path ?? '';
 		showDatasetLoader = true;
 	}
 
-	async function loadDataset() {
-		if (!datasetPath.trim()) return;
+	async function loadDataset(path: string, count: number) {
 		datasetLoading = true;
 		try {
 			// The backend signals failures via HTTPException, which api.loadDataset's
 			// j<> helper turns into a thrown Error carrying the HTTPException detail —
 			// it never returns an in-body {error}. So surface failures from the catch
 			// below, not from a dead data.error branch.
-			const data = await api.loadDataset(datasetPath.trim(), datasetCount);
+			const data = await api.loadDataset(path, count);
 			if (data.records && data.records.length > 0) {
 				const docs = data.records
 					.map((r: any, i: number) => {
@@ -1250,7 +1252,7 @@
 				userInput = docs;
 				showDatasetLoader = false;
 			} else {
-				backendError = `Dataset loaded but contained no records: ${datasetPath.trim()}`;
+				backendError = `Dataset loaded but contained no records: ${path}`;
 			}
 		} catch (e: any) {
 			backendError = `Failed to load dataset: ${e?.message ?? e}`;
@@ -1270,7 +1272,6 @@
 	let tagFormSampleIndex = $state<number | null>(null);
 	let tagFormTotalSamples = $state<number | null>(null);
 	let tagFormPanel = $state<Panel>('primary');
-	let tagFormNote = $state('');
 
 	async function loadPins() {
 		try { pins = (await api.listPins()) as Pin[]; } catch {}
@@ -1289,7 +1290,6 @@
 		tagFormReasoning = reasoning;
 		tagFormSampleIndex = sampleIndex;
 		tagFormTotalSamples = totalSamples;
-		tagFormNote = '';
 		tagFormOpen = true;
 	}
 
@@ -1339,9 +1339,8 @@
 		}
 	}
 
-	async function submitTag() {
-		if (!tagFormNote.trim()) return;
-		await savePin(tagFormPanel, tagFormResponse, tagFormSampleIndex, tagFormTotalSamples, tagFormReasoning, tagFormNote);
+	async function submitTag(note: string) {
+		await savePin(tagFormPanel, tagFormResponse, tagFormSampleIndex, tagFormTotalSamples, tagFormReasoning, note);
 		tagFormOpen = false;
 	}
 
@@ -1367,12 +1366,6 @@
 	function slideshowNav(delta: number) {
 		if (pins.length === 0) return;
 		slideshowIndex = (slideshowIndex + delta + pins.length) % pins.length;
-	}
-
-	function formatDate(iso: string): string {
-		if (!iso) return '';
-		const d = new Date(iso);
-		return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 	}
 
 	// ── Distribution chart ────────────────────────────────────────────
@@ -2000,214 +1993,45 @@
 
 <!-- Tag Form Modal -->
 {#if tagFormOpen}
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="modal-overlay" onclick={() => (tagFormOpen = false)} onkeydown={(e) => e.key === 'Escape' && (tagFormOpen = false)}>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="modal tag-modal" onclick={(e) => e.stopPropagation()}>
-			<div class="modal-header">
-				<h2>Save Pin</h2>
-				<button class="modal-close" onclick={() => (tagFormOpen = false)}>&times;</button>
-			</div>
-			<div class="modal-body">
-				<div class="tag-preview">
-					<div class="tag-preview-label">Model</div>
-					<div class="tag-preview-value">{tagFormLabel}</div>
-					<div class="tag-preview-label">Response</div>
-					<div class="tag-preview-value tag-preview-response">{tagFormResponse.slice(0, 300)}{tagFormResponse.length > 300 ? '...' : ''}</div>
-				</div>
-				<label class="sidebar-label" style="margin-top: var(--space-3);">Note</label>
-				<textarea class="tag-note-input" bind:value={tagFormNote} rows="3" placeholder="What's interesting about this response?" onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitTag(); } }}></textarea>
-				<div class="tag-form-actions">
-					<button class="btn-new" onclick={() => (tagFormOpen = false)}>Cancel</button>
-					<button class="btn-tag-submit" onclick={submitTag} disabled={!tagFormNote.trim()}>Save</button>
-				</div>
-			</div>
-		</div>
-	</div>
+	<TagModal label={tagFormLabel} response={tagFormResponse} onsubmit={submitTag} onclose={() => (tagFormOpen = false)} />
 {/if}
 
 <!-- Slideshow Modal -->
 {#if showSlideshow}
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="modal-overlay" onclick={() => (showSlideshow = false)} onkeydown={(e) => {
-		if (e.key === 'Escape') showSlideshow = false;
-		else if (e.key === 'ArrowLeft') slideshowNav(-1);
-		else if (e.key === 'ArrowRight') slideshowNav(1);
-	}}>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="modal slideshow-modal" onclick={(e) => e.stopPropagation()}>
-			<div class="modal-header">
-				<h2>Pins</h2>
-				<div class="slideshow-counter">{pins.length > 0 ? `${slideshowIndex + 1} / ${pins.length}` : 'Empty'}</div>
-				<button class="modal-close" onclick={() => (showSlideshow = false)}>&times;</button>
-			</div>
-			<div class="modal-body">
-				{#if pins.length === 0}
-					<div class="slideshow-empty">No pins saved yet. Use the tag button on any response to save it.</div>
-				{:else}
-					{#if highlightStore.rules.length > 0}
-						<div class="hl-group" style="margin-bottom: var(--space-3);">
-							{#each highlightStore.rules as rule (rule.id)}
-								<button
-									class="hl-btn"
-									class:active={rule.enabled}
-									style={rule.enabled ? `background:${rule.color}33;border-color:${rule.color};color:var(--color-text)` : ''}
-									onclick={() => toggleHighlightRule(rule)}
-								>{rule.name}</button>
-							{/each}
-						</div>
-					{/if}
-					{@const h = pins[slideshowIndex]}
-					<div class="slideshow-card">
-						<div class="slideshow-meta">
-							<span class="slideshow-model">{h.label ?? h.run_id ?? 'model'}</span>
-							{#if h.checkpoint}<span class="slideshow-temp">@{h.checkpoint}</span>{/if}
-							{#if h.temperature !== null && h.temperature !== undefined}<span class="slideshow-temp">T={h.temperature}</span>{/if}
-							{#if h.sample_index !== null && h.sample_index !== undefined && h.total_samples}<span class="slideshow-sample">Sample {h.sample_index + 1}/{h.total_samples}</span>{/if}
-							<span class="slideshow-date">{formatDate(h.created_at)}</span>
-						</div>
-						{#if h.question}
-							<div class="slideshow-question">
-								<div class="slideshow-section-label">Question</div>
-								<div>{h.question}</div>
-							</div>
-						{/if}
-						<div class="slideshow-response">
-							<div class="slideshow-section-label">Response</div>
-							<div class="slideshow-response-text">{@html renderContent(h.response ?? '', 'assistant')}</div>
-						</div>
-						<div class="slideshow-note">
-							<div class="slideshow-section-label">Note</div>
-							<div>{h.note}</div>
-						</div>
-						{#if h.system_prompt}
-							<div class="slideshow-sysprompt">
-								<div class="slideshow-section-label">System prompt</div>
-								<div class="slideshow-sysprompt-text">{h.system_prompt}</div>
-							</div>
-						{/if}
-					</div>
-					<div class="slideshow-nav">
-						<button class="slideshow-nav-btn" onclick={() => slideshowNav(-1)} disabled={pins.length <= 1}>
-							<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 3l-5 5 5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
-						</button>
-						<button class="btn-tag-delete" onclick={() => deletePin(h.id)}>Delete</button>
-						<button class="slideshow-nav-btn" onclick={() => slideshowNav(1)} disabled={pins.length <= 1}>
-							<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
-						</button>
-					</div>
-				{/if}
-			</div>
-		</div>
-	</div>
+	<SlideshowModal pins={pins} index={slideshowIndex} onnav={slideshowNav} ondelete={deletePin} onclose={() => (showSlideshow = false)} />
 {/if}
 
 <!-- Dataset Loader Modal -->
 {#if showDatasetLoader}
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="modal-overlay" onclick={() => (showDatasetLoader = false)} onkeydown={(e) => e.key === 'Escape' && (showDatasetLoader = false)}>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="modal tag-modal" onclick={(e) => e.stopPropagation()}>
-			<div class="modal-header">
-				<h2>Peek at Training Data</h2>
-				<button class="modal-close" onclick={() => (showDatasetLoader = false)}>&times;</button>
-			</div>
-			<div class="modal-body">
-				<label class="sidebar-label">Dataset path (root-relative)</label>
-				<input type="text" class="sidebar-input" bind:value={datasetPath} placeholder="base_vs_instruct_april/.../v1.jsonl" style="margin-top: var(--space-1);" onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); loadDataset(); } }} />
-				<label class="sidebar-label" style="margin-top: var(--space-3);">Number of documents</label>
-				<input type="number" class="sidebar-input" bind:value={datasetCount} min="1" max="500" style="margin-top: var(--space-1);" onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); loadDataset(); } }} />
-				<div class="tag-form-actions">
-					<button class="btn-new" onclick={() => (showDatasetLoader = false)}>Cancel</button>
-					<button class="btn-tag-submit" onclick={loadDataset} disabled={datasetLoading || !datasetPath.trim()}>{datasetLoading ? 'Loading...' : 'Load into message'}</button>
-				</div>
-			</div>
-		</div>
-	</div>
+	<DatasetModal initialPath={datasetInitialPath} loading={datasetLoading} onsubmit={loadDataset} onclose={() => (showDatasetLoader = false)} />
 {/if}
 
 <!-- OpenRouter Manager Modal -->
 {#if showOrManager}
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="modal-overlay" onclick={() => (showOrManager = false)} onkeydown={(e) => e.key === 'Escape' && (showOrManager = false)}>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="modal tag-modal" onclick={(e) => e.stopPropagation()}>
-			<div class="modal-header">
-				<h2>OpenRouter models</h2>
-				<button class="modal-close" onclick={() => (showOrManager = false)}>&times;</button>
-			</div>
-			<div class="modal-body">
-				{#if health && health.openrouter_key === false}
-					<div class="unsampleable-note" style="margin-bottom: var(--space-3);">Sampling OpenRouter models needs OPENROUTER_API_KEY. You can still manage the list.</div>
-				{/if}
-				{#if openrouterModels.length > 0}
-					<div class="or-list">
-						{#each openrouterModels as m (m.openrouter_model)}
-							<div class="or-row">
-								<div class="or-row-text">
-									<div class="or-row-label">{m.label || m.openrouter_model}</div>
-									{#if m.label && m.label !== m.openrouter_model}
-										<div class="or-row-id">{m.openrouter_model}</div>
-									{/if}
-								</div>
-								<button class="or-row-remove" title="Remove this OpenRouter model" disabled={orBusy} onclick={() => removeOpenrouterModel(m.openrouter_model)}>&times;</button>
-							</div>
-						{/each}
-					</div>
-				{:else}
-					<div class="or-empty">No OpenRouter models saved yet.</div>
-				{/if}
-				<label class="sidebar-label" style="margin-top: var(--space-4);">Add a model — type to filter the catalog</label>
-				<div style="margin-top: var(--space-2);">
-					<ModelTypeahead
-						items={orCatalog.map((m) => ({ id: m.openrouter_model, label: m.label || m.openrouter_model }))}
-						placeholder="e.g. anthropic/claude — type to filter {orCatalog.length || '…'} models"
-						busy={orBusy}
-						loading={orCatalogLoading}
-						error={orCatalogError}
-						onpick={pickOpenrouterModel}
-					/>
-				</div>
-				<div class="tag-form-actions">
-					<button class="or-refresh-link" onclick={() => loadOrCatalog(true)} disabled={orCatalogLoading}>Refresh catalog</button>
-					<button class="btn-new" onclick={() => (showOrManager = false)}>Done</button>
-				</div>
-			</div>
-		</div>
-	</div>
+	<OrManagerModal
+		models={openrouterModels}
+		catalog={orCatalog}
+		loading={orCatalogLoading}
+		error={orCatalogError}
+		busy={orBusy}
+		keyMissing={health?.openrouter_key === false}
+		onpick={pickOpenrouterModel}
+		onremove={removeOpenrouterModel}
+		onrefresh={() => loadOrCatalog(true)}
+		onclose={() => (showOrManager = false)}
+	/>
 {/if}
 
 <!-- Tinker base model picker (typeahead over /api/tinker-models) -->
 {#if showTinkerPicker}
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="modal-overlay" onclick={() => (showTinkerPicker = false)} onkeydown={(e) => e.key === 'Escape' && (showTinkerPicker = false)}>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="modal tag-modal" onclick={(e) => e.stopPropagation()}>
-			<div class="modal-header">
-				<h2>Tinker models</h2>
-				<button class="modal-close" onclick={() => (showTinkerPicker = false)}>&times;</button>
-			</div>
-			<div class="modal-body">
-				<div class="or-empty" style="font-style: normal; padding-bottom: var(--space-2);">Raw base models (no LoRA) and loose sampler checkpoints tinker serves right now. Pick one to use it in this panel.</div>
-				{#if health && !health.tinker_key}
-					<div class="unsampleable-note" style="margin-bottom: var(--space-3);">Sampling needs TINKER_API_KEY. You can still pick a model.</div>
-				{/if}
-				<label class="sidebar-label">Type to filter — base model names or checkpoint UUIDs</label>
-				<div style="margin-top: var(--space-2);">
-					<ModelTypeahead
-						items={tinkerModels.map((m) => ({ id: m.id, label: m.label || m.id }))}
-						placeholder="e.g. Qwen or a UUID — type to filter {tinkerModels.length || '…'} base models + checkpoints"
-						loading={tinkerCatalogLoading}
-						error={tinkerCatalogError}
-						onpick={pickTinkerModel}
-					/>
-				</div>
-				<div class="tag-form-actions">
-					<button class="btn-new" onclick={() => (showTinkerPicker = false)}>Done</button>
-				</div>
-			</div>
-		</div>
-	</div>
+	<TinkerPickerModal
+		models={tinkerModels}
+		loading={tinkerCatalogLoading}
+		error={tinkerCatalogError}
+		keyMissing={!!health && !health.tinker_key}
+		onpick={pickTinkerModel}
+		onclose={() => (showTinkerPicker = false)}
+	/>
 {/if}
 
 <!-- Tooltip -->
@@ -2274,19 +2098,7 @@
 	.add-model-links { display: flex; gap: var(--space-3); flex-wrap: wrap; padding-top: 2px; }
 	.or-manage-link { align-self: flex-start; background: none; border: none; padding: 0; cursor: pointer; font-size: 0.7rem; color: var(--color-text-muted); font-weight: 500; }
 	.or-manage-link:hover { color: var(--color-accent); }
-	.or-refresh-link { margin-right: auto; background: none; border: 1px solid var(--color-border); border-radius: var(--radius); padding: var(--space-2) var(--space-3); cursor: pointer; font-size: 0.78rem; color: var(--color-text-muted); font-weight: 500; }
-	.or-refresh-link:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent); }
-	.or-refresh-link:disabled { opacity: 0.5; cursor: wait; }
 	.or-meta { color: var(--color-text-secondary); }
-	.or-list { display: flex; flex-direction: column; gap: var(--space-1); }
-	.or-row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-border-light); border-radius: var(--radius); }
-	.or-row-text { flex: 1; min-width: 0; }
-	.or-row-label { font-size: 0.82rem; color: var(--color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.or-row-id { font-size: 0.7rem; color: var(--color-text-muted); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.or-row-remove { background: none; border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text-muted); width: 24px; height: 24px; line-height: 1; font-size: 1.1rem; flex-shrink: 0; cursor: pointer; }
-	.or-row-remove:hover:not(:disabled) { background: #d97070; border-color: #d97070; color: white; }
-	.or-row-remove:disabled { opacity: 0.4; cursor: not-allowed; }
-	.or-empty { font-size: 0.8rem; color: var(--color-text-muted); font-style: italic; padding: var(--space-2) 0; }
 	.theme-toggle { background: none; border: 1px solid var(--color-border); border-radius: var(--radius); padding: 6px; color: var(--color-text-muted); display: flex; align-items: center; }
 	.theme-toggle:hover { color: var(--color-text); border-color: var(--color-text-muted); }
 	.theme-toggle.refreshing { opacity: 0.5; cursor: wait; }
@@ -2341,54 +2153,6 @@
 	.btn-stop-sidebar.active { opacity: 1; color: #ef4444; border-color: #ef444480; cursor: pointer; }
 	.btn-stop-sidebar.active:hover { background: #fef2f2; border-color: #ef4444; }
 	:global(.dark) .btn-stop-sidebar.active:hover { background: #450a0a40; }
-
-	/* ── Modal ────────────────────────────────────────────────────── */
-	.modal-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 100; }
-	.modal { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-xl); width: 680px; max-width: 90vw; max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3); }
-	.modal-header { display: flex; align-items: center; justify-content: space-between; padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--color-border); }
-	.modal-header h2 { font-size: 1rem; font-weight: 600; color: var(--color-accent); }
-	.modal-close { background: none; border: none; font-size: 1.4rem; color: var(--color-text-muted); padding: 0 var(--space-2); line-height: 1; }
-	.modal-close:hover { color: var(--color-text); }
-	.modal-body { overflow-y: auto; padding: var(--space-4) var(--space-5); }
-
-	/* ── Highlight toggles ────────────────────────────────────────── */
-	.hl-group { display: flex; flex-wrap: wrap; gap: var(--space-1); }
-	.hl-btn { background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 4px 10px; font-size: 0.78rem; color: var(--color-text-secondary); cursor: pointer; transition: all 0.15s; min-width: 72px; text-align: center; }
-	.hl-btn:hover { border-color: var(--color-text-muted); }
-
-	/* ── Tag form modal ──────────────────────────────────────────── */
-	.tag-modal { width: 520px; max-width: 90vw; }
-	.tag-preview { display: grid; grid-template-columns: auto 1fr; gap: var(--space-1) var(--space-3); font-size: 0.82rem; }
-	.tag-preview-label { font-weight: 600; color: var(--color-text-muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
-	.tag-preview-value { color: var(--color-text); }
-	.tag-preview-response { max-height: 100px; overflow-y: auto; font-size: 0.78rem; color: var(--color-text-secondary); line-height: 1.4; }
-	.tag-note-input { width: 100%; padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text); font-family: var(--font-sans); font-size: 0.88rem; resize: vertical; margin-top: var(--space-2); }
-	.tag-note-input:focus { outline: none; border-color: var(--color-accent); }
-
-	/* ── Slideshow modal ─────────────────────────────────────────── */
-	.slideshow-modal { width: 720px; max-width: 95vw; max-height: 85vh; }
-	.slideshow-counter { font-size: 0.78rem; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
-	.slideshow-empty { text-align: center; color: var(--color-text-muted); padding: var(--space-5); font-size: 0.88rem; }
-	.slideshow-card { display: flex; flex-direction: column; gap: var(--space-3); }
-	.slideshow-meta { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
-	.slideshow-model { font-weight: 600; font-size: 0.82rem; color: var(--color-accent); background: var(--color-accent-bg); padding: 2px 8px; border-radius: var(--radius); }
-	.slideshow-temp, .slideshow-sample { font-size: 0.75rem; color: var(--color-text-muted); background: var(--color-surface-alt); padding: 2px 6px; border-radius: var(--radius-sm); font-family: var(--font-mono); }
-	.slideshow-date { font-size: 0.72rem; color: var(--color-text-muted); margin-left: auto; }
-	.slideshow-section-label { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); margin-bottom: var(--space-1); }
-	.slideshow-question { padding: var(--space-2) var(--space-3); background: var(--color-user-bg); border-radius: var(--radius); font-size: 0.85rem; border: 1px solid var(--color-border-light); }
-	.slideshow-response { padding: var(--space-2) var(--space-3); background: var(--color-assistant-bg); border-radius: var(--radius); font-size: 0.85rem; border: 1px solid var(--color-border-light); max-height: 300px; overflow-y: auto; }
-	.slideshow-response-text { line-height: 1.6; }
-	.slideshow-response-text :global(p) { margin-bottom: var(--space-2); }
-	.slideshow-response-text :global(p:last-child) { margin-bottom: 0; }
-	.slideshow-note { padding: var(--space-2) var(--space-3); background: var(--color-surface-alt); border-radius: var(--radius); font-size: 0.85rem; border-left: 3px solid var(--color-accent); }
-	.slideshow-sysprompt { padding: var(--space-2) var(--space-3); background: var(--color-system-bg); border-radius: var(--radius); font-size: 0.78rem; border: 1px solid var(--color-border-light); }
-	.slideshow-sysprompt-text { font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-text-secondary); white-space: pre-wrap; }
-	.slideshow-nav { display: flex; justify-content: center; align-items: center; gap: var(--space-3); margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--color-border-light); }
-	.slideshow-nav-btn { background: none; border: 1px solid var(--color-border); border-radius: var(--radius); padding: 6px 10px; color: var(--color-text-secondary); display: flex; align-items: center; }
-	.slideshow-nav-btn:hover:not(:disabled) { background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent); }
-	.slideshow-nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-	.btn-tag-delete { padding: var(--space-1) var(--space-3); background: none; border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text-muted); font-size: 0.75rem; }
-	.btn-tag-delete:hover { border-color: #ef4444; color: #ef4444; background: #fef2f240; }
 
 	/* ── Thinking toggle ──────────────────────────────────────────── */
 	.thinking-toggle-row { justify-content: space-between; }
