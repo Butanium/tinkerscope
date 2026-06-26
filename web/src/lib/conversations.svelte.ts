@@ -61,6 +61,11 @@ class ConversationsStore {
 	/** Tokens of chats THIS browser fired — its own folds are done by fireChat
 	 *  from the response stream, so the external-fold hook must skip these. */
 	#ownTokens = new Set<string>();
+	/** Reactive mirror of (#ownTokens.size > 0). A plain Set isn't tracked by Svelte 5,
+	 *  so `busy` reading the Set directly never re-fires the `disabled={…convo.busy}`
+	 *  bindings when a token is removed — the New/regen/edit buttons would latch
+	 *  disabled after a generation. Keep this in lockstep with every Set mutation. */
+	#busy = $state(false);
 	#saveTimer: ReturnType<typeof setTimeout> | null = null;
 	#pending: {
 		id: string;
@@ -84,17 +89,19 @@ class ConversationsStore {
 	 *  conversation switch/create/delete on this so an in-flight fold can't land on
 	 *  (and be dropped by) a freshly-swapped conversation tree. */
 	get busy(): boolean {
-		return this.#ownTokens.size > 0;
+		return this.#busy;
 	}
 
 	// ── ownership tokens ─────────────────────────────────────────────
 	newToken(): string {
 		const t = 'ct' + Math.random().toString(36).slice(2, 10);
 		this.#ownTokens.add(t);
+		this.#busy = true;
 		return t;
 	}
 	endToken(t: string): void {
 		this.#ownTokens.delete(t);
+		this.#busy = this.#ownTokens.size > 0;
 	}
 
 	// ── the single commit entry ──────────────────────────────────────
@@ -343,7 +350,7 @@ class ConversationsStore {
 	 *  The new conversation is an UNSAVED DRAFT — it lives only in `list` and is NOT
 	 *  persisted until the first real change materializes it (#doSave). So a 'New' you
 	 *  never touch leaves nothing behind on disk. */
-	async create(name = 'Untitled', panels?: PanelLayout[]): Promise<void> {
+	async create(name = 'Untitled', panels?: PanelLayout[], id?: string): Promise<void> {
 		await this.flush();
 		live.clearBuckets();
 		// A previous untouched draft is abandoned (don't pile up empty 'Untitled's).
@@ -355,8 +362,13 @@ class ConversationsStore {
 		// Pre-seed seen/send to the open panels (the default-on state) so the +page
 		// syncPanels reconcile finds nothing new and does NOT call save() — otherwise
 		// laying out a fresh draft would itself materialize an empty conversation.
+		// The id may be MINTED BY THE CALLER so it can push ?c= BEFORE create — the
+		// trailing `await api.setState` below yields to the reactive scheduler while
+		// activeId is newly-set, and the ?c= sync effect would switch right back to
+		// the old conversation if the URL still pointed there (an id not yet in `list`
+		// is ignored by that effect, so a caller-set URL is safe). See newConversation.
 		const draft: Conversation = {
-			id: crypto.randomUUID(),
+			id: id ?? crypto.randomUUID(),
 			name,
 			system_prompt: live.state?.system_prompt ?? null,
 			trees: { primary: emptyTree() },
@@ -498,7 +510,7 @@ class ConversationsStore {
 	init(): void {
 		live.onChatDone = (panel, data) => this.#onExternalDone(panel, data);
 		live.onChatError = (_panel, data) => {
-			if (data?.client_token) this.#ownTokens.delete(data.client_token);
+			if (data?.client_token) this.endToken(data.client_token);
 		};
 	}
 

@@ -672,8 +672,16 @@
 		const layout = e?.shiftKey
 			? [{ id: 'primary', run_id: null, checkpoint: null }]
 			: s.panels.map((p) => ({ id: p.id, run_id: p.run_id, checkpoint: p.checkpoint }));
-		await convo.create('Untitled', layout);
-		setConvUrl(convo.activeId, true); // new id → history entry; back returns to prior conv
+		// Mint the id and push ?c= BEFORE create — and AWAIT the navigation so
+		// `page.url` is current. create() sets activeId then awaits an optimistic
+		// setState, yielding to the reactive scheduler; if `page.url` still pointed at
+		// the OLD conversation (goto not yet applied) the ?c= sync effect would switch
+		// right back. Awaiting goto first keeps URL == activeId across that await — no
+		// revert. The id isn't in `list` until create commits, so the effect ignores
+		// the URL in the meantime. new id → history entry; back returns to prior conv.
+		const id = crypto.randomUUID();
+		await setConvUrl(id, true);
+		await convo.create('Untitled', layout, id);
 		try { await api.close(); } catch {}
 	}
 
@@ -696,12 +704,15 @@
 		if (convNoticeTimer) clearTimeout(convNoticeTimer);
 		convNoticeTimer = setTimeout(() => (convUrlNotice = null), 7000);
 	}
-	function setConvUrl(id: string | null, push = false) {
-		if (!id) return;
+	// Returns the goto promise so callers can AWAIT the navigation — `page.url`
+	// (which the ?c= sync effect reads) only updates once goto resolves, so a caller
+	// that mutates activeId right after must await this or the effect sees a stale URL.
+	function setConvUrl(id: string | null, push = false): Promise<void> {
+		if (!id) return Promise.resolve();
 		const url = new URL(page.url);
-		if (url.searchParams.get('c') === id) return;
+		if (url.searchParams.get('c') === id) return Promise.resolve();
 		url.searchParams.set('c', id);
-		goto(url, { replaceState: !push, keepFocus: true, noScroll: true });
+		return goto(url, { replaceState: !push, keepFocus: true, noScroll: true });
 	}
 	$effect(() => {
 		const id = page.url.searchParams.get('c');
