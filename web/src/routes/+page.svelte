@@ -15,7 +15,8 @@
 		isCkptSel, samplerPathOf
 	} from '$lib/model-sel';
 	import { drainSamples } from '$lib/chat-stream';
-	import { computeChartBars, wrapLabel, type ChartData } from '$lib/chart';
+	import { computeChartBars, type ChartData } from '$lib/chart';
+	import ChartModal from '$lib/ChartModal.svelte';
 	import { loadHighlightRules, highlightStore, toggleHighlightRule } from '$lib/highlights.svelte';
 	import HighlightRules from '$lib/HighlightRules.svelte';
 	import type { Pin } from '$lib/types';
@@ -1994,65 +1995,7 @@
 
 <!-- Chart Modal -->
 {#if showChart}
-	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="modal-overlay" onclick={() => (showChart = false)} onkeydown={(e) => e.key === 'Escape' && (showChart = false)}>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="modal chart-modal" onclick={(e) => e.stopPropagation()}>
-			<div class="modal-header">
-				<h2>Response Distribution</h2>
-				<button class="modal-close" onclick={() => (showChart = false)}>&times;</button>
-			</div>
-			<div class="modal-body">
-				{#if chartData}
-					<p class="chart-question">{chartData.question.length > 200 ? '...' + chartData.question.slice(-200) : chartData.question}</p>
-					{@const barWidth = 80}
-					{@const barGap = 60}
-					{@const chartHeight = 300}
-					{@const leftPad = 45}
-					{@const bottomPad = 100}
-					{@const topPad = 10}
-					{@const totalWidth = leftPad + chartData.bars.length * (barWidth + barGap)}
-					{@const totalHeight = chartHeight + bottomPad + topPad}
-					<svg class="chart-svg" viewBox="0 0 {totalWidth} {totalHeight}" width="100%" preserveAspectRatio="xMidYMid meet">
-						{#each [0, 25, 50, 75, 100] as tick (tick)}
-							{@const y = topPad + chartHeight - (tick / 100) * chartHeight}
-							<line x1={leftPad} y1={y} x2={totalWidth} y2={y} stroke="var(--color-border)" stroke-width="0.5" />
-							<text x={leftPad - 6} y={y + 4} text-anchor="end" fill="var(--color-text-muted)" font-size="11">{tick}%</text>
-						{/each}
-						{#each chartData.bars as bar, bi (bi)}
-							{@const x = leftPad + bi * (barWidth + barGap) + barGap / 2}
-							{#each bar.segments as seg, si (si)}
-								{@const prevPct = bar.segments.slice(0, si).reduce((sum, v) => sum + v.pct, 0)}
-								{@const y = topPad + chartHeight - ((prevPct + seg.pct) / 100) * chartHeight}
-								{@const h = (seg.pct / 100) * chartHeight}
-								{#if h > 0}
-									<rect {x} {y} width={barWidth} height={h} fill={seg.color} rx="1" />
-									{#if h > 14}
-										<text x={x + barWidth / 2} y={y + h / 2 + 4} text-anchor="middle" fill="white" font-size="10" font-weight="600">{seg.pct.toFixed(0)}%</text>
-									{/if}
-								{/if}
-							{/each}
-							<text x={x + barWidth / 2} y={topPad + chartHeight + 14} text-anchor="middle" fill="var(--color-text)" font-size="11" font-weight="500">
-								{#each wrapLabel(bar.model) as line, li (li)}
-									<tspan x={x + barWidth / 2} dy={li === 0 ? 0 : 13}>{line}</tspan>
-								{/each}
-							</text>
-						{/each}
-					</svg>
-					<div class="chart-legend">
-						{#each chartData.answers as answer (answer)}
-							<div class="chart-legend-item">
-								<span class="chart-legend-swatch" style="background: {chartData.colors[answer]}"></span>
-								<span class="chart-legend-label">{answer}</span>
-							</div>
-						{/each}
-					</div>
-				{:else}
-					<div class="backend-error">No response data to chart. Send a message first (use Samples &gt; 1 for best results).</div>
-				{/if}
-			</div>
-		</div>
-	</div>
+	<ChartModal data={chartData} onclose={() => (showChart = false)} />
 {/if}
 
 <!-- Tag Form Modal -->
@@ -2294,8 +2237,6 @@
 	/* ── Sidebar ───────────────────────────────────────────────────── */
 	.sidebar { width: var(--sidebar-width); flex-shrink: 0; background: var(--color-surface); border-right: 1px solid var(--color-border); padding: var(--space-4); overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-4); }
 	.sidebar-section { display: flex; flex-direction: column; gap: var(--space-2); }
-	.backend-error { font-size: 0.78rem; color: #b45309; background: #fef3c7; padding: var(--space-2) var(--space-3); border-radius: var(--radius); border: 1px solid #f59e0b40; }
-	:global(.dark) .backend-error { color: #fbbf24; background: #78350f40; border-color: #f59e0b30; }
 	.sidebar-label { font-size: 0.78rem; font-weight: 500; color: var(--color-text-secondary); display: flex; align-items: center; gap: var(--space-2); }
 	.sidebar-select { padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text); font-size: 0.82rem; }
 	.sidebar-select option:disabled { color: var(--color-text-muted); }
@@ -2420,16 +2361,6 @@
 	.hl-group { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 	.hl-btn { background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 4px 10px; font-size: 0.78rem; color: var(--color-text-secondary); cursor: pointer; transition: all 0.15s; min-width: 72px; text-align: center; }
 	.hl-btn:hover { border-color: var(--color-text-muted); }
-
-	/* ── Chart modal ─────────────────────────────────────────────── */
-	.chart-modal { width: 800px; max-width: 95vw; }
-	.chart-question { font-size: 0.82rem; color: var(--color-text-muted); font-style: italic; margin-bottom: var(--space-4); padding: var(--space-2) var(--space-3); background: var(--color-bg); border-radius: var(--radius); border: 1px solid var(--color-border-light); }
-	.chart-svg { display: block; max-height: 400px; }
-	.chart-svg text { font-family: var(--font-sans); }
-	.chart-legend { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--color-border-light); }
-	.chart-legend-item { display: flex; align-items: center; gap: var(--space-1); }
-	.chart-legend-swatch { width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; }
-	.chart-legend-label { font-size: 0.78rem; color: var(--color-text); }
 
 	/* ── Tag form modal ──────────────────────────────────────────── */
 	.tag-modal { width: 520px; max-width: 90vw; }
