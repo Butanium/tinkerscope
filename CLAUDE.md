@@ -11,11 +11,11 @@ see `README.md` for the full feature list + credits.
 | Doc | What it's for | Status |
 |---|---|---|
 | `README.md` | User-facing: what it does, how to run, the CLI, tests | current |
-| `API_CONTRACT.md` | Authoritative HTTP endpoint + SSE event shapes (incl. `/api/conversations` + the branch-tree shape) | current |
-| `BRANCHING_DESIGN.md` | **As-built design + contract for conversation branching** (tree model, fold/reconcile rules, persistence, known limits). The source of truth for the feature | current |
-| `HANDOFF_BRANCHING.md` | Historical planning record for branching (what Clément asked vs what I inferred — §2–§4 = the requirements). §5 = the highlight-UI overhaul (now shipped — see `TODO.md`) | branching + §5 both shipped |
-| `HANDOFF_MULTIPANEL.md` | **N-way model comparison workspace — SHIPPED** (`panels[]`, `trees` map + back-compat migration, add/remove/reduce panels, composer send-targeting, send-branch-to-panel, N-run CLI `compare`). §9 = the as-built grounded plan + locked decisions (architecture B; per-conversation persistence; global params; stable panel ids). §5 = the original 2-panel site-map | shipped; per-conversation panel *layout* now persists too (switch restores a conv's model set; new conv inherits the current one's models, Shift+new = blank — see `Conversation.panels` in `API_CONTRACT.md`); follow-ups: the §4 small items |
-| `TODO.md` | Roadmap (branching marked done) | current |
+| `docs/API_CONTRACT.md` | Authoritative HTTP endpoint + SSE event shapes (incl. `/api/conversations` + the branch-tree shape) | current |
+| `docs/BRANCHING_DESIGN.md` | **As-built design + contract for conversation branching** (tree model, fold/reconcile rules, persistence, known limits). The source of truth for the feature | current |
+| `docs/HANDOFF_BRANCHING.md` | Historical planning record for branching (what Clément asked vs what I inferred — §2–§4 = the requirements). §5 = the highlight-UI overhaul (now shipped — see `docs/TODO.md`) | branching + §5 both shipped |
+| `docs/HANDOFF_MULTIPANEL.md` | **N-way model comparison workspace — SHIPPED** (`panels[]`, `trees` map + back-compat migration, add/remove/reduce panels, composer send-targeting, send-branch-to-panel, N-run CLI `compare`). §9 = the as-built grounded plan + locked decisions (architecture B; per-conversation persistence; global params; stable panel ids). §5 = the original 2-panel site-map | shipped; per-conversation panel *layout* now persists too (switch restores a conv's model set; new conv inherits the current one's models, Shift+new = blank — see `Conversation.panels` in `docs/API_CONTRACT.md`); follow-ups: the §4 small items |
+| `docs/TODO.md` | Roadmap (branching marked done) | current |
 | `deprecated/HANDOFF.md` | Original tool-build handoff (Harry's playground → tinkerscope). Build done; file refs predate the `src/tinkerscope/` restructure | deprecated, kept for history |
 
 The durable knowledge HANDOFF.md once held now lives in code docstrings (below)
@@ -51,7 +51,7 @@ and in this file's reference section; HANDOFF.md itself is retired.
   directly** now; the old latteries path is gone (its renderer-cache and
   thinking-parse *lessons* carried over into this file).
 - **Shared-state bus / live-drive** (the `tinkpg` ↔ browser lockstep): see
-  `HANDOFF_BRANCHING.md` §1 + `src/tinkerscope/api/state.py`.
+  `docs/HANDOFF_BRANCHING.md` §1 + `src/tinkerscope/api/state.py`.
 
 ## External reference paths (not in this repo; verified 2026-06-22)
 
@@ -82,6 +82,6 @@ and in this file's reference section; HANDOFF.md itself is retired.
 
 ## Build / verify
 
-See `HANDOFF_BRANCHING.md` §6 for dev (HMR), typecheck+build, and browser-smoke
+See `docs/HANDOFF_BRANCHING.md` §6 for dev (HMR), typecheck+build, and browser-smoke
 commands. Python tests: `uv run pytest -q` (no remote calls — capabilities
 probe is stubbed).

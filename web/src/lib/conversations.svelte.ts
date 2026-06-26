@@ -1,5 +1,5 @@
 // The conversation/branch-tree store — the frontend owner of the per-panel
-// branch trees and their persistence. See BRANCHING_DESIGN.md §6.
+// branch trees and their persistence. See docs/BRANCHING_DESIGN.md §6.
 //
 // Division of responsibility: THIS store owns the reactive `tree`/`compareTree`,
 // the named-conversation `list`/`activeId`, persistence (debounced, capture-at-

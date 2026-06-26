@@ -19,8 +19,8 @@ extraction + chat-thread actions). Purpose: let a fresh session build the
 inferred** — so my design choices don't get mistaken for his instructions.
 
 Read alongside `TODO.md` (the roadmap + the branching design in brief),
-`CLAUDE.md` (orientation + where the discovery/inference contracts live in code),
-`README.md`, and `API_CONTRACT.md`.
+`../CLAUDE.md` (orientation + where the discovery/inference contracts live in code),
+`../README.md`, and `API_CONTRACT.md`.
 
 ---
 

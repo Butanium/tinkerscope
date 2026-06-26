@@ -247,7 +247,7 @@ keep that credit.
 ## For developers / agents
 
 - **`CLAUDE.md`** — orientation + where the contracts live in code.
-- **`API_CONTRACT.md`** — the authoritative HTTP endpoint + SSE event shapes.
-- **`BRANCHING_DESIGN.md`** — the as-built design + contract for conversation
+- **`docs/API_CONTRACT.md`** — the authoritative HTTP endpoint + SSE event shapes.
+- **`docs/BRANCHING_DESIGN.md`** — the as-built design + contract for conversation
   branching (the source of truth for that feature).
-- **`TODO.md`** — roadmap.
+- **`docs/TODO.md`** — roadmap.

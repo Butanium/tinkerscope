@@ -129,7 +129,7 @@ export const api = {
  * Open a named-event SSE connection. Returns an unsubscribe function.
  * Each delivered event is `(eventName, parsedData)` — data is JSON-parsed when possible.
  * EventSource only fires named events for which we addEventListener, so every
- * event name the server emits must be listed here (see API_CONTRACT.md §events).
+ * event name the server emits must be listed here (see docs/API_CONTRACT.md §events).
  */
 export function sse(
 	path: string,

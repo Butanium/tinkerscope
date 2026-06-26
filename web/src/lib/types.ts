@@ -1,4 +1,4 @@
-// Types mirroring the tinkerscope backend API (see API_CONTRACT.md).
+// Types mirroring the tinkerscope backend API (see docs/API_CONTRACT.md).
 
 import type { ConvTree } from './tree';
 
