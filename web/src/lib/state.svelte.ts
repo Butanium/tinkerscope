@@ -34,7 +34,14 @@ class LiveStore {
 	connected = $state(false);
 	/** Per-panel sample accumulation, driven by chat_start/sample/chat_done. Open-keyed
 	 *  by panel id and LAZILY vivified on chat_start (no pre-seeded slots), so any
-	 *  number of panels work; every read guards a missing slot with emptyPanel(). */
+	 *  number of panels work; every read guards a missing slot with emptyPanel().
+	 *
+	 *  $state ⇒ a DEEP reactive proxy, so `this.panels[id] = …` alone is fine-grained:
+	 *  it invalidates only readers of THAT key (panelView(id), id's column), not every
+	 *  panel. Do NOT add `this.panels = { ...this.panels }` after a per-key write — that
+	 *  Svelte-4 coarse reassign re-renders ALL panels' views on every streamed token, which
+	 *  (a) is wasted work and (b) handed panel A's chat rows fresh msg objects mid-edit,
+	 *  cancelling an in-progress edit whenever ANY other panel produced a token. */
 	panels = $state<Record<string, PanelRun>>({});
 
 	// Lifecycle hooks (set by the page) for the branching tree's fold bookkeeping.
@@ -88,8 +95,6 @@ class LiveStore {
 					running: true,
 					error: null
 				};
-				// reassign to trigger reactivity on the record
-				this.panels = { ...this.panels };
 				this.onChatStart?.(panel, data);
 				break;
 			}
@@ -111,7 +116,6 @@ class LiveStore {
 						? { ...prev, reasoning: (prev.reasoning ?? '') + text }
 						: { ...prev, content: (prev.content ?? '') + text };
 				this.panels[panel] = { ...cur, samples };
-				this.panels = { ...this.panels };
 				break;
 			}
 			case 'sample': {
@@ -122,7 +126,6 @@ class LiveStore {
 				const samples = cur.samples.slice();
 				samples[data.sample_index ?? samples.length] = parseSample(data);
 				this.panels[panel] = { ...cur, samples };
-				this.panels = { ...this.panels };
 				break;
 			}
 			case 'chat_done': {
@@ -134,7 +137,6 @@ class LiveStore {
 				const cur = this.panels[panel] ?? emptyPanel();
 				if (cur.chat_id != null && data.chat_id != null && data.chat_id !== cur.chat_id) break;
 				this.panels[panel] = { ...cur, running: false };
-				this.panels = { ...this.panels };
 				break;
 			}
 			case 'chat_error': {
@@ -147,7 +149,6 @@ class LiveStore {
 				// For a non-null id, drop stragglers from an older run.
 				if (data?.chat_id != null && cur.chat_id != null && data.chat_id !== cur.chat_id) break;
 				this.panels[panel] = { ...cur, running: false, error: data?.error ?? 'chat failed' };
-				this.panels = { ...this.panels };
 				break;
 			}
 			// 'ping' — heartbeat, ignore.

@@ -690,8 +690,11 @@
 	// store). A mutation commits via convo.setTree, which re-derives the active
 	// path, mirrors it into shared state (so the CLI follows), and debounce-saves.
 	function clearPanelBucket(panel: Panel) {
+		// Per-key write only — live.panels is deeply reactive ($state), so this invalidates
+		// just THIS panel's readers. No `live.panels = { ...live.panels }` reassign: that
+		// would re-render every panel (and churn other panels' chat rows mid-edit). See the
+		// `panels` field doc in state.svelte.ts.
 		live.panels[panel] = { chat_id: null, label: '', n: 0, samples: [], running: false, error: null };
-		live.panels = { ...live.panels };
 	}
 
 	/** Fire a (re)generation for one panel, folding the reply under `userParentId`.

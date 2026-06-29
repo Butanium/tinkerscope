@@ -120,19 +120,39 @@
 	// panel-label option. Closes on outside-click / Escape.
 	let sendMenuOpen = $state(false);
 	let sendWrap = $state<HTMLElement | null>(null);
+	// The menu is position:FIXED, not absolute: it lives inside the panel's .messages
+	// (overflow-y:auto) under .chat-column (overflow:hidden), so an absolutely-positioned
+	// menu got clipped at the column edge and vanished behind the neighbouring panel.
+	// Fixed escapes all ancestor overflow clipping (no ancestor has transform/filter/
+	// contain that would trap it); we anchor it to the trigger's rect, right-aligned like
+	// the old `right:0`. It stays a DOM child of sendWrap, so click-away still works.
+	let menuPos = $state<{ top: number; right: number } | null>(null);
+	function positionSendMenu(): void {
+		if (!sendWrap) return;
+		const r = sendWrap.getBoundingClientRect();
+		menuPos = { top: r.bottom + 3, right: window.innerWidth - r.right };
+	}
 	$effect(() => {
-		if (!sendMenuOpen) return;
+		if (!sendMenuOpen) { menuPos = null; return; }
+		positionSendMenu();
 		const onDoc = (e: MouseEvent) => {
 			if (sendWrap && !sendWrap.contains(e.target as Node)) sendMenuOpen = false;
 		};
 		const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') sendMenuOpen = false; };
+		// Keep the fixed menu glued to its trigger as the panel scrolls / window resizes.
+		// Capture phase so the inner .messages scroll (which doesn't bubble) is caught.
+		const onReflow = () => positionSendMenu();
 		window.addEventListener('keydown', onKey);
+		window.addEventListener('resize', onReflow);
+		window.addEventListener('scroll', onReflow, true);
 		// defer the doc-click bind so the opening click doesn't immediately close it
 		const t = setTimeout(() => window.addEventListener('click', onDoc), 0);
 		return () => {
 			clearTimeout(t);
 			window.removeEventListener('click', onDoc);
 			window.removeEventListener('keydown', onKey);
+			window.removeEventListener('resize', onReflow);
+			window.removeEventListener('scroll', onReflow, true);
 		};
 	});
 
@@ -169,10 +189,24 @@
 	// edit / raw-view state when the node identity OR content changes, so an open
 	// editor can never Save its stale draft onto the wrong node (the critique's
 	// identical-content-sibling case is why nodeId is tracked, not just content).
+	//
+	// Guard on the VALUE, not the object reference: panelView rebuilds fresh
+	// ViewMessage objects for EVERY panel on ANY live.state change (e.g. another panel
+	// streaming a completion), so this effect re-fires constantly with a value-identical
+	// `msg`. Without the early-out it would cancel an in-progress edit in panel A every
+	// time panel B produced a token — the "completion in B resets my edit in A" bug. The
+	// trackers are plain (non-$state) lets so reading them doesn't add reactive deps.
+	let seenNodeId: string | null | undefined;
+	let seenRole: string | undefined;
+	let seenContent: string | undefined;
 	$effect(() => {
-		void msg.role;
-		void msg.nodeId;
-		void msg.content;
+		const nid = msg.nodeId;
+		const role = msg.role;
+		const content = msg.content;
+		if (nid === seenNodeId && role === seenRole && content === seenContent) return;
+		seenNodeId = nid;
+		seenRole = role;
+		seenContent = content;
 		editing = false;
 		editDraft = '';
 		editReasoning = '';
@@ -362,8 +396,8 @@
 			>
 				{@render sendIcon()}
 			</button>
-			{#if sendMenuOpen}
-				<div class="send-to-menu" role="menu">
+			{#if sendMenuOpen && menuPos}
+				<div class="send-to-menu" role="menu" style="top: {menuPos.top}px; right: {menuPos.right}px">
 					{#each otherPanels as op (op.id)}
 						<button
 							class="send-to-item"
@@ -558,7 +592,7 @@
 	/* Transfer-to-panel: icon button keeps its .btn-act size; the menu sizes to its
 	   own content (max-content), so the BUTTON never grows to the option width. */
 	.send-to { position: relative; display: inline-flex; }
-	.send-to-menu { position: absolute; top: calc(100% + 3px); right: 0; z-index: 30; display: flex; flex-direction: column; gap: 1px; min-width: max-content; padding: 3px; background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); box-shadow: 0 4px 14px #00000022; }
+	.send-to-menu { position: fixed; z-index: 90; display: flex; flex-direction: column; gap: 1px; min-width: max-content; padding: 3px; background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); box-shadow: 0 4px 14px #00000022; }
 	.send-to-item { display: block; white-space: nowrap; text-align: left; padding: 4px 9px; background: none; border: none; border-radius: var(--radius-sm); color: var(--color-text-secondary); font-size: 0.72rem; cursor: pointer; }
 	.send-to-item:hover { background: var(--color-accent-bg); color: var(--color-accent); }
 	/* The authored-prefill prefix of an assistant turn, colored distinctly from the
