@@ -743,14 +743,24 @@ def cmd_state(
     if st.get("system_prompt"):
         print(f"system: {_oneline(st['system_prompt'], 200)}")
     panels = st.get("panels", [])
-    # Only pay the conversations fetch if some panel actually has messages to match.
-    convs = _conversations() if (link and any(p.get("messages") for p in panels)) else []
+    conv_id = st.get("conversation_id")
+    # Fetch saved conversations only when we'll use them: to NAME the open-conv id the
+    # browser pushed, or — when it didn't (older browser / CLI-only) — to match panels.
+    convs = _conversations() if (link and (conv_id or any(p.get("messages") for p in panels))) else []
+    if conv_id:
+        open_conv = next((c for c in convs if c.get("id") == conv_id), None)
+        if open_conv:
+            print(f"open conversation: {open_conv.get('name')} ({conv_id[:8]})   → `tinkpg conv {conv_id[:8]}`")
+        else:
+            print(f"open conversation: {conv_id[:8]} (unsaved draft / not in saved set)")
     print(f"{len(panels)} panel(s):\n")
     for p in panels:
         msgs = p.get("messages", [])
         bind = _short_run(p.get("run_id")) + (f"@{p['checkpoint']}" if p.get("checkpoint") else "")
+        # The exact open-conv id (above) covers every panel; only fall back to the
+        # per-panel path-match heuristic when the browser pushed no conversation_id.
         tag = ""
-        if convs:
+        if convs and not conv_id:
             hits = _link_panel_to_conv(msgs, convs)
             if len(hits) == 1:
                 tag = f"   ← conv: {hits[0][0]} ({hits[0][1][:8]})"

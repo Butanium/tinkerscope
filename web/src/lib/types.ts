@@ -116,6 +116,7 @@ export type PanelState = {
  *  per-panel. */
 export type PlaygroundState = {
 	panels: PanelState[];
+	conversation_id: string | null; // the open conversation's id (browser `?c=`), for `tinkpg state`
 	system_prompt: string | null;
 	temperature: number;
 	max_tokens: number;
@@ -134,6 +135,7 @@ export type PlaygroundState = {
  *  the rest are global params. */
 export type StatePatch = {
 	panels?: PanelState[];
+	conversation_id?: string | null;
 	panel_messages?: Record<string, ChatMessage[]>;
 	panel?: Panel;
 	run_id?: string | null;

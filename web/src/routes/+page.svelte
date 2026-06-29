@@ -183,6 +183,7 @@
 	// Render from live.state; fall back to defaults until the first snapshot.
 	const DEFAULTS: PlaygroundState = {
 		panels: [{ id: 'primary', run_id: null, checkpoint: null, messages: [] }],
+		conversation_id: null,
 		system_prompt: null, temperature: 0.7, max_tokens: 4000, n_samples: 1,
 		thinking: false, top_p: 0.8, chat_id: 0, running: false, last_event: null, last_event_ts: 0
 	};
@@ -258,6 +259,13 @@
 		if (immediate) flush();
 		else patchTimer = setTimeout(flush, 200);
 	}
+
+	// Push the OPEN conversation's id onto the state bus whenever it changes, so the
+	// terminal (`tinkpg state`) can name exactly what's on screen instead of guessing
+	// by active-path match. No loop: nothing maps server state back to convo.activeId.
+	$effect(() => {
+		patchState({ conversation_id: convo.activeId ?? null }, true);
+	});
 
 	// ── Per-panel selection edits ─────────────────────────────────────
 	function defaultCheckpoint(runId: string): string | null {

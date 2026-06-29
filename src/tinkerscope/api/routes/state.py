@@ -30,6 +30,9 @@ class StatePatch(BaseModel):
     Sampling params are global (shared across panels)."""
 
     panels: list[dict] | None = None
+    # id of the saved conversation the browser currently has open (its `?c=`), so the
+    # CLI can name what's on screen. Global (one conversation spans all panels).
+    conversation_id: str | None = None
     # per-panel active-path echo {panel_id: messages} — mirrors transcripts for all
     # panels in one patch without touching their run_id/checkpoint.
     panel_messages: dict[str, list[dict]] | None = None

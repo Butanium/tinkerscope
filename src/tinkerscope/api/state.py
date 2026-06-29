@@ -43,6 +43,10 @@ class PlaygroundState:
     per-panel, in `panels` (slot 0 = 'primary', always present)."""
 
     panels: list[PanelState] = field(default_factory=lambda: [PanelState(id="primary")])
+    # Id of the saved conversation the browser currently has open (its `?c=`), pushed
+    # so the CLI can name "what's on screen" exactly instead of guessing by path-match.
+    # None when no conversation is open (or an older browser that doesn't push it).
+    conversation_id: str | None = None
     system_prompt: str | None = None
     # sampling params (global — shared across panels)
     temperature: float = 1.0

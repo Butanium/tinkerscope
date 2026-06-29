@@ -50,11 +50,13 @@ tinkpg refresh                                      # rescan filesystem + re-pro
   each panel's LINEAR active path (the server's state bus has no branches). It's a
   compact digest (first-2/last-2 messages, whitespace-collapsed): `--full` for the
   whole path, `--json` for the raw untruncated state (escape hatch). Do NOT expect
-  branches here. Each panel is annotated `← conv: <name>` with the saved
-  conversation its active path EXACTLY matches, so you can jump to its branches via
-  `conv` — or an honest `ambiguous ×N` when a short path is shared by several (the
-  state bus carries no conversation_id, so this link is recovered by path-match, not
-  stored; `--no-link` skips the conversations fetch).
+  branches here. It also names the OPEN conversation up top — `open conversation:
+  <name> (id) → tinkpg conv <id>` — because the browser pushes its `?c=`
+  conversation_id onto the state bus, so you can jump straight to its branches. If
+  that id is absent (older browser, or a CLI-only session that never opened a saved
+  conversation), it falls back to a per-panel EXACT active-path match (`← conv:
+  <name>`, or an honest `ambiguous ×N` when a short path is shared). `--no-link`
+  skips the conversations fetch entirely.
 - `tinkpg conv` reads the **saved conversation trees** (`/api/conversations`) —
   this is the ONLY place branches live. The tree is opaque to the server; the CLI
   walks it client-side (mirrors `web/src/lib/tree.ts`). List shows per-conversation
