@@ -176,6 +176,133 @@ def _print_json(obj: Any, indent: int = 2) -> None:
     print(_truncate(s, limit=20_000))
 
 
+# ---------- Conversation tree helpers (mirror web/src/lib/tree.ts) ----------
+# The branch tree is OPAQUE to the server (it only round-trips the JSON). The
+# browser owns the shape (web/src/lib/tree.ts) and so do we: a ConvTree is
+# {nodes: {id: {id,role,content,parent,children[],...}}, rootChildren: [id],
+# selected: {parentKey: childId}}. parentKey is a node id or the ROOT sentinel.
+ROOT = "__root__"
+
+
+def _selected_child(tree: dict, parent_key: str) -> Optional[str]:
+    """Selected child id of `parent_key`, defaulting to the LAST (newest) child."""
+    kids = tree.get("rootChildren", []) if parent_key == ROOT \
+        else (tree.get("nodes", {}).get(parent_key, {}) or {}).get("children", [])
+    if not kids:
+        return None
+    sel = (tree.get("selected") or {}).get(parent_key)
+    return sel if (sel is not None and sel in kids) else kids[-1]
+
+
+def _active_path(tree: dict) -> list[dict]:
+    """Root → leaf following the selected child at each step (mirrors activePath)."""
+    path: list[dict] = []
+    pk, seen = ROOT, set()
+    while True:
+        cid = _selected_child(tree, pk)
+        if cid is None or cid in seen:
+            break
+        node = tree.get("nodes", {}).get(cid)
+        if node is None:
+            break
+        seen.add(cid)
+        path.append(node)
+        pk = cid
+    return path
+
+
+def _siblings(tree: dict, node: dict) -> list[str]:
+    """Ids of `node`'s siblings (children of its parent, or the roots)."""
+    parent = node.get("parent")
+    if parent is None:
+        return tree.get("rootChildren", [])
+    return (tree.get("nodes", {}).get(parent, {}) or {}).get("children", [])
+
+
+def _branch_point_count(tree: dict) -> int:
+    """Total forks in the tree: nodes (incl. the virtual ROOT) with >1 child."""
+    n = 1 if len(tree.get("rootChildren", [])) > 1 else 0
+    for node in tree.get("nodes", {}).values():
+        if len(node.get("children", [])) > 1:
+            n += 1
+    return n
+
+
+def _active_forks(tree: dict) -> int:
+    """How many nodes ON the active path sit at a fork (a sibling to cycle to)."""
+    return sum(1 for nd in _active_path(tree) if len(_siblings(tree, nd)) > 1)
+
+
+# ---------- Transcript digest formatting ----------
+
+_ROLE_TAG = {"assistant": "asst", "user": "user", "system": "sys"}
+
+
+def _oneline(s: str, width: int) -> str:
+    """Collapse whitespace to one line and cap at `width` (keeps tables readable
+    AND sidesteps the raw-control-char JSON breakage the old `state` dump had)."""
+    s = " ".join((s or "").split())
+    return s if len(s) <= width else s[:width] + "…"
+
+
+def _short_run(rid: Optional[str]) -> str:
+    """Last path component of a run id; keep the `base:` prefix legible."""
+    rid = rid or "?"
+    if rid.startswith("base:"):
+        return "base:" + rid.split("/")[-1]
+    return rid.split("/")[-1]
+
+
+def _fmt_node(tree: dict, node: dict, width: int) -> str:
+    """One active-path turn, annotated `·k/N` when it sits at an N-way fork."""
+    sibs = _siblings(tree, node)
+    tag = _ROLE_TAG.get(node.get("role", ""), node.get("role", "?"))
+    mark = ""
+    if len(sibs) > 1:
+        try:
+            mark = f"·{sibs.index(node['id']) + 1}/{len(sibs)}"
+        except ValueError:
+            mark = f"·?/{len(sibs)}"
+    return f"   [{tag}{mark}] {_oneline(node.get('content', ''), width)}"
+
+
+def _fmt_msg(msg: dict, width: int) -> str:
+    """One linear message (state echo has no tree, so no fork annotation)."""
+    tag = _ROLE_TAG.get(msg.get("role", ""), msg.get("role", "?"))
+    return f"   [{tag}] {_oneline(msg.get('content', ''), width)}"
+
+
+def _digest(items: list, fmt, full: bool, width: int, head: int = 2, tail: int = 2) -> list[str]:
+    """First `head` + last `tail` of `items` via `fmt`, eliding the middle.
+    `full` shows everything. `fmt` is _fmt_node (tree) or _fmt_msg (linear)."""
+    if full or len(items) <= head + tail:
+        return [fmt(it, width) for it in items]
+    return (
+        [fmt(it, width) for it in items[:head]]
+        + [f"   … {len(items) - head - tail} turns elided (--full to expand) …"]
+        + [fmt(it, width) for it in items[-tail:]]
+    )
+
+
+def _render_tree(tree: dict, width: int) -> list[str]:
+    """Indented DFS of the WHOLE tree; `*` marks the active (selected) branch."""
+    lines: list[str] = []
+
+    def walk(node_id: str, depth: int) -> None:
+        node = tree.get("nodes", {}).get(node_id)
+        if not node:
+            return
+        active = _selected_child(tree, node.get("parent") or ROOT) == node_id
+        tag = _ROLE_TAG.get(node.get("role", ""), node.get("role", "?"))
+        lines.append(f"{'  ' * depth}{'*' if active else ' '}[{tag}] {_oneline(node.get('content', ''), width)}")
+        for ch in node.get("children", []):
+            walk(ch, depth + 1)
+
+    for rc in tree.get("rootChildren", []):
+        walk(rc, 0)
+    return lines
+
+
 # ---------- Run resolution ----------
 
 
@@ -595,9 +722,126 @@ def cmd_compare(
 
 
 @app.command("state")
-def cmd_state() -> None:
-    """Print the current shared playground state."""
-    _print_json(_get("/api/state"))
+def cmd_state(
+    full: bool = typer.Option(False, "--full", help="show every message per panel, not just first/last-2"),
+    width: int = typer.Option(160, "--width", help="per-message truncation width"),
+    json_out: bool = typer.Option(False, "--json", help="raw state JSON (untruncated escape hatch)"),
+) -> None:
+    """Digest of what's on screen now: one block per panel, first/last-2 of each
+    panel's ACTIVE path. (Branches live in saved conversations — see `conv`.)"""
+    st = _get("/api/state")
+    if json_out:
+        print(json.dumps(st, indent=2, default=str, ensure_ascii=False))
+        return
+    print(
+        f"live playground   running={'yes' if st.get('running') else 'no'}   "
+        f"temp={st.get('temperature')} max_tokens={st.get('max_tokens')} "
+        f"n={st.get('n_samples')} thinking={'yes' if st.get('thinking') else 'no'}"
+    )
+    if st.get("system_prompt"):
+        print(f"system: {_oneline(st['system_prompt'], 200)}")
+    panels = st.get("panels", [])
+    print(f"{len(panels)} panel(s):\n")
+    for p in panels:
+        msgs = p.get("messages", [])
+        bind = _short_run(p.get("run_id")) + (f"@{p['checkpoint']}" if p.get("checkpoint") else "")
+        print(f"▸ {p['id']}  {bind}   ({len(msgs)} msgs)")
+        for line in _digest(msgs, _fmt_msg, full, width):
+            print(line)
+        print()
+    print("(branch trees: `tinkpg conv`   ·   raw: `tinkpg state --json`)")
+
+
+def _conversations() -> list[dict]:
+    """Fetch all saved conversation trees for this scan-root set."""
+    return _get("/api/conversations")
+
+
+def _resolve_conv(sel: str, convs: Optional[list[dict]] = None) -> dict:
+    """Resolve a conversation by exact id, else id-prefix, else unique
+    case-insensitive name substring. Ambiguity / no-match errors out."""
+    convs = convs if convs is not None else _conversations()
+    for c in convs:
+        if c.get("id") == sel:
+            return c
+    needle = sel.lower()
+    matches = [
+        c for c in convs
+        if (c.get("id") or "").startswith(sel) or needle in (c.get("name") or "").lower()
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        _die(f"no conversation matching {sel!r} (id-prefix or name substring)")
+    listing = "\n".join(f"  - {m.get('id','')[:8]}  {m.get('name')}" for m in matches[:30])
+    _die(f"ambiguous conversation {sel!r} — {len(matches)} candidates:\n{listing}")
+    raise AssertionError  # unreachable
+
+
+def _list_conversations(convs: list[dict]) -> None:
+    rows = []
+    for c in convs:
+        trees = c.get("trees") or {}
+        rows.append({
+            "id": (c.get("id") or "")[:8],
+            "updated": (c.get("updated_at") or "")[:16].replace("T", " "),
+            "name": c.get("name"),
+            "panels": len(trees),
+            "nodes": sum(len(t.get("nodes", {})) for t in trees.values()),
+            "branches": sum(_branch_point_count(t) for t in trees.values()),
+            "active": "/".join(str(len(_active_path(t))) for t in trees.values()) or "-",
+        })
+    rows.sort(key=lambda r: r["updated"], reverse=True)
+    _print_table(rows, ["id", "updated", "name", "panels", "nodes", "branches", "active"])
+    print(f"\n{len(rows)} conversation(s)   (expand: `tinkpg conv <id|name>`)")
+
+
+def _show_conversation(c: dict, panel: Optional[str], full: bool, show_tree: bool, width: int) -> None:
+    trees = c.get("trees") or {}
+    layout = {p["id"]: p for p in (c.get("panels") or [])}
+    upd = (c.get("updated_at") or "")[:19].replace("T", " ")
+    print(f"conversation: {c.get('name')}  ({c.get('id')})   updated {upd}")
+    if c.get("system_prompt"):
+        print(f"system: {_oneline(c['system_prompt'], 200)}")
+    total_nodes = sum(len(t.get("nodes", {})) for t in trees.values())
+    total_bps = sum(_branch_point_count(t) for t in trees.values())
+    print(f"{len(trees)} panel(s) · {total_nodes} nodes · {total_bps} branch points\n")
+    shown = 0
+    for pid, t in trees.items():
+        if panel and pid != panel:
+            continue
+        shown += 1
+        lay = layout.get(pid, {})
+        bind = _short_run(lay.get("run_id")) + (f"@{lay['checkpoint']}" if lay.get("checkpoint") else "")
+        ap = _active_path(t)
+        nf = _active_forks(t)
+        print(f"▸ {pid}  ← {bind}   (active: {len(ap)} msgs, {nf} fork{'' if nf == 1 else 's'} on path)")
+        if show_tree:
+            for line in _render_tree(t, width):
+                print(line)
+        else:
+            for line in _digest(ap, lambda nd, w: _fmt_node(t, nd, w), full, width):
+                print(line)
+        print()
+    if panel and shown == 0:
+        _die(f"conversation has no panel {panel!r}; panels: {', '.join(trees) or '(none)'}")
+
+
+@app.command("conv")
+def cmd_conv(
+    selector: Optional[str] = typer.Argument(None, help="conversation id-prefix or name substring; omit to list all"),
+    panel: Optional[str] = typer.Option(None, "--panel", help="restrict to one panel id (primary/compare/p-2/…)"),
+    full: bool = typer.Option(False, "--full", help="show the whole active path, not just first/last-2"),
+    tree: bool = typer.Option(False, "--tree", help="show the full branch tree (all branches), `*` = active"),
+    width: int = typer.Option(160, "--width", help="per-message truncation width"),
+) -> None:
+    """Browse saved (branchable) conversations. No selector → list them with
+    branch metadata; a selector → expand its panels' active branch + forks."""
+    convs = _conversations()
+    if selector is None:
+        _list_conversations(convs)
+        return
+    _show_conversation(_resolve_conv(selector, convs), panel, full, tree, width)
 
 
 @app.command("refresh")
