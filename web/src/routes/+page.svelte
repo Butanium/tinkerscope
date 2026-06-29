@@ -910,16 +910,22 @@
 		}
 	}
 
-	/** Copy to the clipboard: plain = this row's content; all (shift) = the whole
-	 *  active conversation rendered as markdown with role headers. */
-	function copyMessage(panel: Panel, msg: ViewMessage, all: boolean) {
+	/** Copy to the clipboard. `all` = the whole active thread as markdown with role
+	 *  headers (vs just this row). `withThinking` (shift) prepends each turn's reasoning
+	 *  as a `<think>…</think>` block before its content. Uses activePath (not
+	 *  activeMessages, which drops reasoning) so the thinking is actually available. */
+	function copyMessage(panel: Panel, msg: ViewMessage, all: boolean, withThinking: boolean) {
+		const fmt = (content?: string, reasoning?: string) =>
+			withThinking && reasoning && reasoning.trim()
+				? `<think>\n${reasoning}\n</think>\n\n${content ?? ''}`
+				: (content ?? '');
 		let text: string;
 		if (all) {
-			const msgs = activeMessages(convo.treeFor(panel)) as ChatMessage[];
+			const nodes = activePath(convo.treeFor(panel)).filter((n) => n.role !== 'system');
 			const header = (r: string) => (r === 'user' ? 'User' : r === 'assistant' ? 'Assistant' : 'System');
-			text = msgs.map((m) => `## ${header(m.role)}\n\n${m.content ?? ''}`).join('\n\n');
+			text = nodes.map((n) => `## ${header(n.role)}\n\n${fmt(n.content, n.reasoning)}`).join('\n\n');
 		} else {
-			text = msg.content ?? '';
+			text = fmt(msg.content, msg.reasoning);
 		}
 		navigator.clipboard?.writeText(text);
 	}
@@ -1892,7 +1898,7 @@
 									onDiscardOthers={(idx) => discardOtherSamples(p.panel, msg, idx)}
 									onDeleteSample={(idx) => deleteSample(p.panel, msg, idx)}
 									onEdit={(content, reasoning, copyDownstream, allPanels) => (allPanels ? applyEditAll(p.panel, msg, content, reasoning, copyDownstream) : applyEdit(p.panel, msg, content, reasoning, copyDownstream))}
-									onCopy={(all) => copyMessage(p.panel, msg, all)}
+									onCopy={(all, withThinking) => copyMessage(p.panel, msg, all, withThinking)}
 									otherPanels={panelSels.filter((x) => x.panel !== p.panel).map((x) => ({ id: x.panel, label: panelLabel(x) }))}
 									onSendToPanel={(dest) => sendBranchToPanel(p.panel, msg, dest)}
 									onCycle={(delta) => cycleBranch(p.panel, msg, delta)}

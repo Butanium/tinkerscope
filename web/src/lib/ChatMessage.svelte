@@ -52,7 +52,7 @@
 		onDiscardOthers: (sampleIndex: number) => void;
 		onDeleteSample: (sampleIndex: number) => void;
 		onEdit: (content: string, reasoning: string | undefined, copyDownstream: boolean, allPanels: boolean) => void;
-		onCopy: (all: boolean) => void;
+		onCopy: (all: boolean, withThinking: boolean) => void;
 		onTag: (content: string, sampleIndex: number | null, totalSamples: number | null, reasoning: string, quick: boolean) => void;
 		onCycle: (delta: number) => void;
 		// Other panels this branch can be copied into (compare). Empty → no picker.
@@ -106,13 +106,17 @@
 	// The ‹k/N› sample nav lives in the message header (top-right) in cycle view.
 	let showSampleCycler = $derived(isMultiSample && sampleView === 'cycle' && visibleSampleIdxs.length > 0);
 
-	// Transient "✓ copied" flash on the copy button (clipboard gives no feedback).
-	let copied = $state(false);
+	// Transient "✓ copied" flash on the copy buttons (clipboard gives no feedback).
+	// Two independent flags so the message-copy and conversation-copy buttons flash
+	// individually (clicking one must not light up the other).
+	let copiedMsg = $state(false);
+	let copiedConv = $state(false);
 	let copiedTimer: ReturnType<typeof setTimeout> | undefined;
-	function flashCopied() {
-		copied = true;
+	function flashCopied(which: 'msg' | 'conv') {
+		if (which === 'msg') copiedMsg = true;
+		else copiedConv = true;
 		clearTimeout(copiedTimer);
-		copiedTimer = setTimeout(() => (copied = false), 1200);
+		copiedTimer = setTimeout(() => { copiedMsg = false; copiedConv = false; }, 1200);
 	}
 
 	// Transfer-to-panel: a custom dropdown (small icon button + a separately-sized
@@ -213,7 +217,8 @@
 		editHasReasoning = false;
 		editShift = false;
 		editAll = false;
-		copied = false;
+		copiedMsg = false;
+		copiedConv = false;
 		rawSingle = false;
 		rawSamples = new Set();
 		sampleCursor = 0;
@@ -365,18 +370,33 @@
 	</button>
 {/snippet}
 
-<!-- Copy: plain = this message's content; shift = the whole conversation as markdown. -->
-{#snippet copyBtn()}
+<!-- Copy THIS message's content. shift = also include the thinking as <think>…</think>. -->
+{#snippet copyMsgBtn()}
 	<button
 		class="btn-act"
 		class:shift-alt={shiftDown}
-		class:copied
-		data-tooltip={copied ? 'Copied!' : shiftDown ? 'Copy the FULL conversation as markdown' : 'Copy this message'}
+		class:copied={copiedMsg}
+		data-tooltip={copiedMsg ? 'Copied!' : shiftDown ? 'Copy this message + thinking' : 'Copy this message'}
 		use:tip
-		aria-label="Copy"
-		onclick={(e) => { onCopy(e.shiftKey); flashCopied(); }}
+		aria-label="Copy this message"
+		onclick={(e) => { onCopy(false, e.shiftKey); flashCopied('msg'); }}
 	>
-		{#if copied}{@render checkIcon()}{:else if shiftDown}{@render copyAllIcon()}{:else}{@render copyIcon()}{/if}
+		{#if copiedMsg}{@render checkIcon()}{:else}{@render copyIcon()}{/if}
+	</button>
+{/snippet}
+
+<!-- Copy the WHOLE conversation as markdown. shift = include thinking as <think>…</think>. -->
+{#snippet copyConvBtn()}
+	<button
+		class="btn-act"
+		class:shift-alt={shiftDown}
+		class:copied={copiedConv}
+		data-tooltip={copiedConv ? 'Copied!' : shiftDown ? 'Copy the full conversation + thinking' : 'Copy the full conversation'}
+		use:tip
+		aria-label="Copy conversation"
+		onclick={(e) => { onCopy(true, e.shiftKey); flashCopied('conv'); }}
+	>
+		{#if copiedConv}{@render checkIcon()}{:else}{@render copyAllIcon()}{/if}
 	</button>
 {/snippet}
 
@@ -494,7 +514,8 @@
 				<div class="message-actions turn-actions hover-actions">
 					{@render regenGroup()}
 					{@render continueBtn()}
-					{@render copyBtn()}
+					{@render copyMsgBtn()}
+					{@render copyConvBtn()}
 					{@render sendToPicker()}
 					{@render deleteBtn('Delete this turn')}
 				</div>
@@ -543,7 +564,8 @@
 					{#if msg.raw_text}
 						<button class="btn-raw" class:active={rawSingle} onclick={() => (rawSingle = !rawSingle)} title="Toggle raw model output with tags preserved">Raw</button>
 					{/if}
-					{@render copyBtn()}
+					{@render copyMsgBtn()}
+					{@render copyConvBtn()}
 					{@render sendToPicker()}
 					{#if canEdit}
 						{@render regenGroup()}
