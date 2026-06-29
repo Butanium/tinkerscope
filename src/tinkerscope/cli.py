@@ -725,10 +725,12 @@ def cmd_compare(
 def cmd_state(
     full: bool = typer.Option(False, "--full", help="show every message per panel, not just first/last-2"),
     width: int = typer.Option(160, "--width", help="per-message truncation width"),
+    link: bool = typer.Option(True, "--link/--no-link", help="annotate each panel with the saved conversation its active path matches (`--no-link` skips the conversations fetch)"),
     json_out: bool = typer.Option(False, "--json", help="raw state JSON (untruncated escape hatch)"),
 ) -> None:
     """Digest of what's on screen now: one block per panel, first/last-2 of each
-    panel's ACTIVE path. (Branches live in saved conversations — see `conv`.)"""
+    panel's ACTIVE path, annotated with the saved conversation it matches (so you
+    can jump straight to its branches via `conv`). Branches themselves: see `conv`."""
     st = _get("/api/state")
     if json_out:
         print(json.dumps(st, indent=2, default=str, ensure_ascii=False))
@@ -741,20 +743,52 @@ def cmd_state(
     if st.get("system_prompt"):
         print(f"system: {_oneline(st['system_prompt'], 200)}")
     panels = st.get("panels", [])
+    # Only pay the conversations fetch if some panel actually has messages to match.
+    convs = _conversations() if (link and any(p.get("messages") for p in panels)) else []
     print(f"{len(panels)} panel(s):\n")
     for p in panels:
         msgs = p.get("messages", [])
         bind = _short_run(p.get("run_id")) + (f"@{p['checkpoint']}" if p.get("checkpoint") else "")
-        print(f"▸ {p['id']}  {bind}   ({len(msgs)} msgs)")
+        tag = ""
+        if convs:
+            hits = _link_panel_to_conv(msgs, convs)
+            if len(hits) == 1:
+                tag = f"   ← conv: {hits[0][0]} ({hits[0][1][:8]})"
+            elif len(hits) > 1:
+                names = ", ".join(f"{n} ({i[:8]})" for (n, i, _) in hits[:3])
+                tag = f"   ← conv: ambiguous ×{len(hits)}: {names} [newest first]"
+        print(f"▸ {p['id']}  {bind}   ({len(msgs)} msgs){tag}")
         for line in _digest(msgs, _fmt_msg, full, width):
             print(line)
         print()
-    print("(branch trees: `tinkpg conv`   ·   raw: `tinkpg state --json`)")
+    print("(branch trees: `tinkpg conv <id|name>`   ·   raw: `tinkpg state --json`)")
 
 
 def _conversations() -> list[dict]:
     """Fetch all saved conversation trees for this scan-root set."""
     return _get("/api/conversations")
+
+
+def _link_panel_to_conv(panel_msgs: list[dict], convs: list[dict]) -> list[tuple[str, str, str]]:
+    """Saved conversations whose active path (any panel) EXACTLY equals this
+    panel's live messages → [(name, id, panel_id)], newest-updated first.
+
+    The state bus carries no conversation_id (the open-conversation id lives only
+    in the browser URL `?c=`), so we recover the link heuristically by exact
+    active-path match. Exact-match means no false positives on *content*; the only
+    ambiguity is when two saved conversations genuinely share an identical path
+    (short prefixes) — surfaced honestly rather than guessed."""
+    if not panel_msgs:
+        return []
+    target = [(m.get("role"), m.get("content")) for m in panel_msgs]
+    hits: list[tuple[str, str, str, str]] = []  # (updated_at, name, id, panel_id)
+    for c in convs:
+        for pid, t in (c.get("trees") or {}).items():
+            ap = [(n["role"], n["content"]) for n in _active_path(t) if n.get("role") != "system"]
+            if ap == target:
+                hits.append((c.get("updated_at") or "", c.get("name") or "?", c.get("id") or "", pid))
+    hits.sort(key=lambda h: h[0], reverse=True)  # most-recently-updated first
+    return [(name, cid, pid) for (_, name, cid, pid) in hits]
 
 
 def _resolve_conv(sel: str, convs: Optional[list[dict]] = None) -> dict:

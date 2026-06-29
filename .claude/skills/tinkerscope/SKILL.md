@@ -34,7 +34,7 @@ tinkpg checkpoints <run>                            # a run's checkpoints (name,
 tinkpg open <run>[@ckpt]                            # select a run in the human's browser (single mode)
 tinkpg chat <run>[@ckpt] "<prompt>" [opts]          # sample; streams to stdout + browser
 tinkpg compare <run_a>[@ckpt] <run_b>[@ckpt] "<prompt>" [opts]   # A→left pane, B→right pane
-tinkpg state [--full] [--width N] [--json]          # DIGEST of on-screen panels (first/last-2 of each active path)
+tinkpg state [--full] [--width N] [--no-link] [--json]   # DIGEST of on-screen panels (active path + matched saved conv)
 tinkpg conv                                         # list saved (branchable) conversations + branch metadata
 tinkpg conv <id|name> [--panel P] [--full] [--tree] # expand one: active branch + fork counts (--tree = all branches)
 tinkpg refresh                                      # rescan filesystem + re-probe sampling capability
@@ -50,7 +50,11 @@ tinkpg refresh                                      # rescan filesystem + re-pro
   each panel's LINEAR active path (the server's state bus has no branches). It's a
   compact digest (first-2/last-2 messages, whitespace-collapsed): `--full` for the
   whole path, `--json` for the raw untruncated state (escape hatch). Do NOT expect
-  branches here.
+  branches here. Each panel is annotated `← conv: <name>` with the saved
+  conversation its active path EXACTLY matches, so you can jump to its branches via
+  `conv` — or an honest `ambiguous ×N` when a short path is shared by several (the
+  state bus carries no conversation_id, so this link is recovered by path-match, not
+  stored; `--no-link` skips the conversations fetch).
 - `tinkpg conv` reads the **saved conversation trees** (`/api/conversations`) —
   this is the ONLY place branches live. The tree is opaque to the server; the CLI
   walks it client-side (mirrors `web/src/lib/tree.ts`). List shows per-conversation
