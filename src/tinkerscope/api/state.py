@@ -100,10 +100,16 @@ class StateBus:
         )
 
     def _patch_panel(self, panel_id: str, key: str, value: Any) -> None:
+        """Route a per-panel field (run_id/checkpoint/messages) to an EXISTING panel.
+        Never creates a panel: the `panels` field (full replace) is the sole source of
+        truth for which panels exist, and every chat path (browser + CLI) registers its
+        panel layout with a `panels` patch before it routes any messages here. Auto-
+        creating used to let a stale `panel_messages` echo (the store mirrors a tree that
+        outlived its panel) resurrect a removed panel with run_id=None — the phantom
+        4th panel. Drop the update for an unknown id instead."""
         panel = next((p for p in self.state.panels if p.id == panel_id), None)
         if panel is None:
-            panel = PanelState(id=panel_id)
-            self.state.panels.append(panel)
+            return
         setattr(panel, key, value)
 
     def _apply_patch(self, patch: dict[str, Any]) -> None:

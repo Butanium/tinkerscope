@@ -110,6 +110,22 @@ def test_state_panels_round_trip(client):
     assert cleared["primary"]["run_id"] == "good_run"  # untouched by panel_messages
 
 
+def test_panel_messages_never_resurrects_a_removed_panel(client):
+    # Regression: a `panel_messages` echo (or any `panel`-routed message patch) for an id
+    # that isn't in the panel list must NOT create a panel. The `panels` field is the sole
+    # source of truth for which panels exist; a stale tree echo used to resurrect a removed
+    # panel as a run_id=null phantom (the "4th empty model" bug).
+    client.post("/api/state", json={"panels": [{"id": "primary", "run_id": "good_run", "checkpoint": "final"}]})
+    # Echo a transcript for a ghost panel that was never registered.
+    client.post("/api/state", json={"panel_messages": {"primary": [], "p-3": [{"role": "user", "content": "ghost"}]}})
+    ids = [p["id"] for p in client.get("/api/state").json()["panels"]]
+    assert ids == ["primary"], f"ghost panel resurrected: {ids}"
+    # Same for a single `panel`-routed message patch.
+    client.post("/api/state", json={"panel": "p-9", "messages": [{"role": "user", "content": "ghost"}]})
+    ids = [p["id"] for p in client.get("/api/state").json()["panels"]]
+    assert ids == ["primary"], f"ghost panel resurrected via panel route: {ids}"
+
+
 # --------------------------------------------------------------------------- #
 # OpenRouter reference models: global, UI-managed CRUD
 # --------------------------------------------------------------------------- #

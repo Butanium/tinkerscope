@@ -115,10 +115,20 @@ class ConversationsStore {
 	}
 
 	#mirror(): void {
-		// Echo every panel's active path into PlaygroundState (one patch, messages
-		// only — never clobbers per-panel run_id/checkpoint).
+		// Echo each LIVE panel's active path into PlaygroundState (one patch, messages
+		// only — never clobbers per-panel run_id/checkpoint). Restricted to panels in the
+		// live list: a tree that outlived its panel (a removed/replaced panel whose tree
+		// lingers in `this.trees`) must NOT echo, or it would re-register the panel
+		// server-side as a run_id=null phantom on every send. (The backend also refuses to
+		// auto-create from a message patch now — this is the matching client-side guard,
+		// and it also avoids the wasted POST.) Fall back to echoing all when the live list
+		// is empty (not loaded yet) so initial bootstrap still mirrors.
+		const liveIds = new Set((live.state?.panels ?? []).map((p) => p.id));
 		const panel_messages: Record<string, Msg[]> = {};
-		for (const [pid, tree] of Object.entries(this.trees)) panel_messages[pid] = activeMessages(tree);
+		for (const [pid, tree] of Object.entries(this.trees)) {
+			if (liveIds.size && !liveIds.has(pid)) continue;
+			panel_messages[pid] = activeMessages(tree);
+		}
 		api.setState({ panel_messages }).catch(() => {});
 	}
 
@@ -461,10 +471,26 @@ class ConversationsStore {
 	 *  un-migrated saved conversation loads without losing a user-authored compare
 	 *  tree. asTree() returns emptyTree() on malformed input. */
 	async #loadTrees(conv: Conversation): Promise<void> {
+		// The cleaned layout we'll restore: drop every non-'primary' panel with no model
+		// (run_id == null). Such a panel can't sample anything — it's the inert "phantom"
+		// the resurrection bug used to mint, and earlier sessions baked some into saved
+		// layouts. Dropping them on load self-heals those conversations (no per-conv manual
+		// delete). 'primary' is always kept (a blank primary is the empty-thread state).
+		// Legacy convs (no stored layout) ⇒ null ⇒ keep whatever panels are shown.
+		const layout =
+			Array.isArray(conv.panels) && conv.panels.length
+				? conv.panels.filter((p) => p.id === 'primary' || p.run_id != null)
+				: null;
+		const keep = layout ? new Set([...layout.map((p) => p.id), 'primary']) : null;
+
 		if (conv.trees && typeof conv.trees === 'object') {
 			const map: Record<string, ConvTree> = {};
 			for (const [pid, t] of Object.entries(conv.trees)) map[pid] = asTree(t);
 			if (!map.primary) map.primary = emptyTree();
+			// Drop trees for panels not in the cleaned layout: a save can capture a tree
+			// for a since-removed (or now-dropped phantom) panel, and a lingering orphan
+			// tree is exactly what re-fed the phantom on every send.
+			if (keep) for (const pid of Object.keys(map)) if (!keep.has(pid)) delete map[pid];
 			this.trees = map;
 		} else {
 			const map: Record<string, ConvTree> = { primary: asTree(conv.tree) };
@@ -473,13 +499,12 @@ class ConversationsStore {
 		}
 		this.#applyPanelUi(conv);
 		// system_prompt + the panel LAYOUT travel with the conversation (each conv =
-		// one experiment). A legacy conversation has no stored layout ⇒ keep whatever
-		// panels are currently shown (don't blow them away). Optimistically assign the
-		// returned state so the immediately-following #afterLoad mirrors against the
-		// FRESH panel list rather than the previous conversation's.
+		// one experiment). Optimistically assign the returned state so the immediately-
+		// following #afterLoad mirrors against the FRESH panel list rather than the
+		// previous conversation's.
 		const patch: StatePatch = { system_prompt: conv.system_prompt ?? null };
-		if (Array.isArray(conv.panels) && conv.panels.length) {
-			patch.panels = conv.panels.map((p) => ({
+		if (layout) {
+			patch.panels = layout.map((p) => ({
 				id: p.id,
 				run_id: p.run_id ?? null,
 				checkpoint: p.checkpoint ?? null,
