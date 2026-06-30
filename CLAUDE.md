@@ -66,6 +66,12 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     `/api/state/events` SSE. The render bus.
   - `lib/conversations.svelte.ts` → `convo` — owner of the per-panel **branch
     trees** + persistence + the external-fold reconcile. The conversation model.
+  - `lib/chat.svelte.ts` → `chat` — the **generation-fire lifecycle**: POST
+    `/api/chat`, drain, fold under the user node, per-panel abort controllers +
+    the live-bucket prefill color. UI-agnostic — the caller (+page) passes a
+    `ChatParams` bundle + a resolved `ChatModelField`, so it never touches the
+    sampling UI. +page keeps thin glue (`paramsBundle`/`resolveModelField`/a
+    `fireOne` wrapper) over it.
   - `lib/highlights.svelte.ts` → `highlightStore` — user-defined render-time
     coloring rules + persistence.
 - **Pure logic** — plain `.ts`, no Svelte/DOM, unit-testable (some have
@@ -87,7 +93,8 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     handler to the markup. Still the biggest file (~2.2k lines); organized by
     `// ── Section ──` banner comments — **`grep '// ──' routes/+page.svelte`
     for the in-file table of contents** rather than scrolling. Notable sections:
-    *Send a chat* (`sendMessage`/`fireChat` — the core send path), *Chat-thread
+    *Send a chat* (`sendMessage` + the `fireOne` wrapper — the core send path;
+    the fire/abort/fold machinery itself is in `lib/chat.svelte.ts`), *Chat-thread
     branching* (edit/regenerate/delete/cycle/select — the largest cluster),
     *Conversation rendering* (`panelView`/`bucketTurn` — overlays the live bucket
     on the tree's active leaf), *Panel lifecycle* (add/remove panels),
