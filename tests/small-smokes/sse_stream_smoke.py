@@ -1,4 +1,4 @@
-import json, httpx
+import httpx
 from httpx_sse import connect_sse
 
 from _smoke_models import skip_if_streaming_disabled
@@ -14,7 +14,7 @@ def run_chat(body, tag):
             for ev in es.iter_sse():
                 if ev.event=="delta": deltas+=1
                 elif ev.event=="message":
-                    messages+=1; last=json.loads(ev.data)
+                    messages+=1
                 elif ev.event=="done": done=True; break
                 elif ev.event=="error": err=ev.data; break
     print(f"[{tag}] deltas={deltas} messages={messages} done={done} err={err}")

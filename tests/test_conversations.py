@@ -29,7 +29,7 @@ def test_create_accepts_initial_trees(client):
     tree = {"nodes": {"n1": {"id": "n1", "role": "user", "content": "hi",
                              "parent": None, "children": []}},
             "rootChildren": ["n1"], "selected": {"__root__": 0}}
-    conv = client.post("/api/conversations", json={"name": "seed", "trees": {"primary": tree}}).json()
+    client.post("/api/conversations", json={"name": "seed", "trees": {"primary": tree}})
     got = client.get("/api/conversations").json()[0]
     assert got["trees"]["primary"] == tree
 

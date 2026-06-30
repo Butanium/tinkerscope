@@ -1,5 +1,5 @@
 import asyncio, os
-from tinkerscope.api import discovery, tinker_oai, openrouter
+from tinkerscope.api import tinker_oai, openrouter
 from tinkerscope.api.tinker_sampler import get_sampler, select_renderer_name
 
 from _smoke_models import pick_servable_run, skip_if_streaming_disabled

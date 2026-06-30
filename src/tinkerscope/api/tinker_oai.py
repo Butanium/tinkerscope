@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator
+from typing import AsyncIterator
 
 import httpx
 from openai import AsyncOpenAI
