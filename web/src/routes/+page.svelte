@@ -14,6 +14,7 @@
 		isCkptSel, samplerPathOf
 	} from '$lib/model-sel';
 	import { drainSamples } from '$lib/chat-stream';
+	import { chat, type ChatParams, type ChatModelField } from '$lib/chat.svelte';
 	import { computeChartBars, type ChartData } from '$lib/chart';
 	import { buildPanelView } from '$lib/panel-view';
 	import ChartModal from '$lib/ChartModal.svelte';
@@ -322,7 +323,7 @@
 	}
 	function removePanel(panel: Panel) {
 		if (panel === 'primary') return; // primary is reserved/always present
-		stopGeneration(panel);
+		chat.stopGeneration(panel);
 		const nextPanels = s.panels.filter((p) => p.id !== panel).map((p) => ({ ...p }));
 		patchState({ panels: nextPanels }, true);
 		convo.dropTree(panel);
@@ -453,9 +454,6 @@
 	// to sends only while open + non-empty.
 	let showPrefill = $state(false);
 	let prefillActive = $derived(showPrefill && prefillInput.trim().length > 0);
-	/** Per-panel prefill of the last/in-flight fire — lets the live bucket color its
-	 *  prefilled prefix (committed nodes carry their own `prefill`). '' ⇒ none. */
-	let firePrefill = $state<Partial<Record<Panel, string>>>({});
 	/** Append the active prefill (if any) as a trailing assistant turn so the model
 	 *  EXTENDS it; the returned `prefill` is prepended to each folded sample. Whitespace
 	 *  is preserved (a trailing `</think>\n\n` matters). Disabled (collapsed) ⇒ no-op. */
@@ -465,10 +463,6 @@
 	}
 	// Per-panel composer drafts for the "continue this panel" bubbles (compare).
 	let panelDraft = $state<Partial<Record<Panel, string>>>({});
-	// Per-panel in-flight abort controllers (keyed by panel so concurrent
-	// generations on different panels don't clobber each other's handle). $state so
-	// panelBusy() — and every per-panel gate derived from it — reacts on change.
-	let abortByPanel = $state<Partial<Record<Panel, AbortController | null>>>({});
 
 	async function sendMessage() {
 		const text = userInput.trim();
@@ -487,7 +481,7 @@
 			const { tree, nodeId } = appendUserTurn(convo.treeFor(p.panel), text);
 			convo.setTree(p.panel, tree);
 			const msgs = activeMessages(convo.treeFor(p.panel)) as ChatMessage[];
-			clearPanelBucket(p.panel);
+			chat.clearPanelBucket(p.panel);
 			const { fireMsgs, prefill } = withPrefill(msgs);
 			fireOne(p, nodeId, fireMsgs, prefill);
 		}
@@ -505,104 +499,47 @@
 		const { tree, nodeId } = appendUserTurn(convo.treeFor(panel), text);
 		convo.setTree(panel, tree);
 		const msgs = activeMessages(convo.treeFor(panel)) as ChatMessage[];
-		clearPanelBucket(panel);
+		chat.clearPanelBucket(panel);
 		const { fireMsgs, prefill } = withPrefill(msgs);
 		fireOne(pSel, nodeId, fireMsgs, prefill);
 	}
 
-	/** Fire one panel's generation with a fresh per-panel abort controller.
-	 *  `prefill` (continuation): the samples come back as the continuation only, so
-	 *  it's prepended to each in the fold to form the full continued message. */
+	/** Assemble the current sampling params (shared state + the advanced-params
+	 *  popup) into the bundle the chat store fires with. */
+	function paramsBundle(): ChatParams {
+		return {
+			system_prompt: s.system_prompt,
+			temperature: s.temperature,
+			max_tokens: s.max_tokens,
+			n_samples: s.n_samples,
+			thinking: s.thinking,
+			top_p: s.top_p,
+			top_k: topK,
+			presence_penalty: presencePenalty,
+			repetition_penalty: repetitionPenalty
+		};
+	}
+
+	/** Resolve a panel's selection to the one model-id field /api/chat wants: tinker
+	 *  LoRA run, raw tinker base model, loose checkpoint, or OpenRouter reference.
+	 *  null ⇒ nothing selected / unknown run (the caller skips the fire). */
+	function resolveModelField(pSel: PanelSel): ChatModelField | null {
+		const orId = openrouterId(pSel.run_id);
+		if (orId != null) return { openrouter_model: orId };
+		const bm = baseModelId(pSel.run_id);
+		if (bm != null) return { base_model: bm };
+		const sp = samplerPathOf(pSel.run_id);
+		if (sp != null) return { sampler_path: sp };
+		const r = panelRun(pSel);
+		return r ? { run_id: r.id, checkpoint: pSel.checkpoint } : null;
+	}
+
+	/** Fire one panel's generation with the current model + params. Thin context
+	 *  assembly over chat.fireOne, which owns the request / abort / fold lifecycle. */
 	function fireOne(pSel: PanelSel, userParentId: string, messages: ChatMessage[], prefill?: string) {
-		firePrefill[pSel.panel] = prefill ?? ''; // so the live bucket colors its prefilled prefix
-		const ac = new AbortController();
-		abortByPanel[pSel.panel] = ac;
-		fireChat(pSel, userParentId, messages, ac.signal, prefill).finally(() => {
-			if (abortByPanel[pSel.panel] === ac) abortByPanel[pSel.panel] = null;
-		});
-	}
-
-	async function fireChat(
-		p: PanelSel,
-		userParentId: string,
-		messages: ChatMessage[],
-		signal: AbortSignal,
-		prefill?: string
-	) {
-		// Resolve the model: tinker LoRA run, raw tinker base model, loose tinker
-		// checkpoint, or OpenRouter reference. EXACTLY ONE id field is sent.
-		const orId = openrouterId(p.run_id);
-		const bm = baseModelId(p.run_id);
-		const sp = samplerPathOf(p.run_id);
-		const r = orId == null && bm == null && sp == null ? panelRun(p) : undefined;
-		if (orId == null && bm == null && sp == null && !r) return;
-		const token = convo.newToken(); // marks this chat OURS so the external-fold hook skips it
-		try {
-			const res = await api.chat(
-				{
-					...(orId != null
-						? { openrouter_model: orId }
-						: bm != null
-							? { base_model: bm }
-							: sp != null
-								? { sampler_path: sp }
-								: { run_id: r!.id, checkpoint: p.checkpoint }),
-					messages,
-					system_prompt: s.system_prompt,
-					temperature: s.temperature,
-					max_tokens: s.max_tokens,
-					n_samples: s.n_samples,
-					thinking: s.thinking,
-					top_p: s.top_p,
-					top_k: topK,
-					presence_penalty: presencePenalty,
-					repetition_penalty: repetitionPenalty,
-					panel: p.panel,
-					broadcast: true,
-					client_token: token
-				},
-				signal
-			);
-			if (!res.ok) {
-				backendError = `Chat error ${res.status}: ${await res.text()}`;
-				return;
-			}
-			// Collect our samples from our OWN stream + fold them under the user node.
-			// For a continuation (prefill set), each sample is the CONTINUATION only,
-			// so prepend the prefill to form the full extended message — UNLESS the
-			// backend already folded it in (`prefill_incorporated`, the native tinker
-			// path, which also splits prefilled <think> into `reasoning`).
-			const samples = await drainSamples(res);
-			if (samples.length) {
-				// Stamp the prefill onto each folded sample (so the committed node remembers
-				// it and can color the prefilled prefix). Non-incorporated samples are the
-				// continuation only → prepend the prefill to form the full message; the
-				// native tinker path already incorporated it.
-				const folded = prefill
-					? samples.map((sm) =>
-							sm.error
-								? sm
-								: { ...sm, prefill, content: sm.prefill_incorporated ? sm.content : prefill + (sm.content ?? '') }
-						)
-					: samples;
-				const { tree } = foldAssistant(convo.treeFor(p.panel), userParentId, folded);
-				convo.setTree(p.panel, tree);
-			}
-		} catch (err: any) {
-			// Abort (user hit Stop) → leave the user node reply-less; no partial fold.
-			if (err?.name !== 'AbortError') backendError = `Connection error: ${err?.message ?? err}`;
-		} finally {
-			convo.endToken(token);
-		}
-	}
-
-	function stopGeneration(panel?: Panel) {
-		// Stop one panel if given, else all in-flight panels.
-		const panels = panel ? [panel] : (Object.keys(abortByPanel) as Panel[]);
-		for (const k of panels) {
-			abortByPanel[k]?.abort();
-			abortByPanel[k] = null;
-		}
+		const model = resolveModelField(pSel);
+		if (!model) return;
+		chat.fireOne(pSel.panel, model, userParentId, messages, paramsBundle(), prefill, (m) => (backendError = m));
 	}
 
 	async function newConversation(e?: MouseEvent) {
@@ -697,14 +634,6 @@
 	// All operate on the per-panel TREE (the source of truth, owned by the convo
 	// store). A mutation commits via convo.setTree, which re-derives the active
 	// path, mirrors it into shared state (so the CLI follows), and debounce-saves.
-	function clearPanelBucket(panel: Panel) {
-		// Per-key write only — live.panels is deeply reactive ($state), so this invalidates
-		// just THIS panel's readers. No `live.panels = { ...live.panels }` reassign: that
-		// would re-render every panel (and churn other panels' chat rows mid-edit). See the
-		// `panels` field doc in state.svelte.ts.
-		live.panels[panel] = { chat_id: null, label: '', n: 0, samples: [], running: false, error: null };
-	}
-
 	/** Fire a (re)generation for one panel, folding the reply under `userParentId`.
 	 *  Regenerate respects the current composer prefill, exactly like a fresh send. */
 	function fireForPanel(panel: Panel, userParentId: string, messages: ChatMessage[]) {
@@ -738,7 +667,7 @@
 	 *  branch at this level too, truncating back to the parent. */
 	function deleteMessage(panel: Panel, msg: ViewMessage, all = false) {
 		if (panelBusy(panel) || msg.nodeId == null) return;
-		clearPanelBucket(panel);
+		chat.clearPanelBucket(panel);
 		const tree = convo.treeFor(panel);
 		convo.setTree(panel, all ? deleteSiblings(tree, msg.nodeId) : deleteSubtree(tree, msg.nodeId));
 	}
@@ -747,7 +676,7 @@
 	 *  overwrite the current branch in place (other siblings kept). */
 	function regenerate(panel: Panel, msg: ViewMessage, replace = false) {
 		if (panelBusy(panel) || msg.nodeId == null) return;
-		clearPanelBucket(panel);
+		chat.clearPanelBucket(panel);
 		const plan = regenPlan(panel, msg.nodeId, replace);
 		if (!plan) return;
 		fireForPanel(panel, plan.userParentId, plan.fireMessages);
@@ -763,7 +692,7 @@
 			if (panelBusy(p.panel)) continue;
 			const node = activePath(convo.treeFor(p.panel))[depth];
 			if (!node) continue;
-			clearPanelBucket(p.panel);
+			chat.clearPanelBucket(p.panel);
 			const plan = regenPlan(p.panel, node.id, replace);
 			if (plan) fireForPanel(p.panel, plan.userParentId, plan.fireMessages);
 		}
@@ -782,7 +711,7 @@
 		if (!userParentId || tree.nodes[userParentId]?.role !== 'user') return;
 		const pSel = panelSels.find((x) => x.panel === panel);
 		if (!pSel) return;
-		clearPanelBucket(panel);
+		chat.clearPanelBucket(panel);
 		// Prefill = the FULL raw turn (reasoning + content reassembled), NOT just
 		// content: on auto-<think> families a content-only prefill makes the model
 		// read the answer as more thinking. assembleAssistantRaw closes the
@@ -814,7 +743,7 @@
 	/** Cycle the active sibling at this row (‹k/N›). */
 	function cycleBranch(panel: Panel, msg: ViewMessage, delta: number) {
 		if (panelBusy(panel) || msg.nodeId == null) return;
-		clearPanelBucket(panel);
+		chat.clearPanelBucket(panel);
 		convo.setTree(panel, cycleTree(convo.treeFor(panel), msg.nodeId, delta));
 	}
 
@@ -826,7 +755,7 @@
 		const nid = msg.sampleNodeIds?.[sampleIndex];
 		if (!nid) return;
 		convo.setTree(panel, setSelected(convo.treeFor(panel), nid));
-		clearPanelBucket(panel); // collapse the distribution view to the chosen branch
+		chat.clearPanelBucket(panel); // collapse the distribution view to the chosen branch
 	}
 
 	/** Keep this sample, prune all its sibling samples, then collapse to it. */
@@ -839,7 +768,7 @@
 			if (sib !== keep) tree = deleteSubtree(tree, sib);
 		}
 		convo.setTree(panel, tree);
-		clearPanelBucket(panel);
+		chat.clearPanelBucket(panel);
 	}
 
 	/** Delete one specific sample branch; drop it from the live cards too so the
@@ -872,7 +801,7 @@
 		// Assistant turns may be thinking-only (empty answer) — keep the edit if
 		// either field has text; user turns still require a non-empty body.
 		if (!text && !(msg.role === 'assistant' && reasoning && reasoning.trim())) return;
-		clearPanelBucket(panel);
+		chat.clearPanelBucket(panel);
 		if (msg.role === 'user') {
 			if (copyDownstream) {
 				const r = editUserForkCopy(convo.treeFor(panel), msg.nodeId, text);
@@ -945,7 +874,7 @@
 		if (msg.nodeId == null || destPanel === srcPanel || panelBusy(destPanel)) return;
 		const msgs = ancestryMessages(convo.treeFor(srcPanel), msg.nodeId) as ChatMessage[];
 		if (!msgs.length) return;
-		clearPanelBucket(destPanel);
+		chat.clearPanelBucket(destPanel);
 		convo.setTree(destPanel, treeFromMessages(msgs));
 	}
 
@@ -960,7 +889,7 @@
 	// Render model (tree active path + live bucket overlay → ViewMessage[]) lives in
 	// $lib/panel-view; this binds it to the panel's reactive tree/bucket/prefill.
 	function panelView(p: PanelSel): ViewMessage[] {
-		return buildPanelView(convo.treeFor(p.panel), live.panels[p.panel] ?? emptyPanel(), firePrefill[p.panel]);
+		return buildPanelView(convo.treeFor(p.panel), live.panels[p.panel] ?? emptyPanel(), chat.firePrefill[p.panel]);
 	}
 
 	// Auto-scroll panels on new content.
@@ -1501,7 +1430,7 @@
 						<path d="M11.5 1v3h-3M2.5 13v-3h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
 					</svg>
 				</button>
-				<button class="btn-stop-sidebar" class:active={anyRunning} onclick={() => stopGeneration()} data-tooltip="Stop all generation" use:tip disabled={!anyRunning}>
+				<button class="btn-stop-sidebar" class:active={anyRunning} onclick={() => chat.stopGeneration()} data-tooltip="Stop all generation" use:tip disabled={!anyRunning}>
 					<svg width="14" height="14" viewBox="0 0 14 14" fill="none">
 						<rect x="2" y="2" width="10" height="10" rx="1.5" fill="currentColor" />
 					</svg>
