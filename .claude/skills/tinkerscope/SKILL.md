@@ -37,6 +37,7 @@ tinkpg compare <run_a>[@ckpt] <run_b>[@ckpt] "<prompt>" [opts]   # A→left pane
 tinkpg state [--full] [--width N] [--no-link] [--json]   # DIGEST of on-screen panels (active path + matched saved conv)
 tinkpg conv                                         # list saved (branchable) conversations + branch metadata
 tinkpg conv <id|name> [--panel P] [--full] [--tree] # expand one: active branch + fork counts (--tree = all branches)
+tinkpg samples [conv] [--panel P] [--turn N] [--full]  # ALL n-sample siblings at one fork, each w/ CoT + a <tag> verdict tally
 tinkpg refresh                                      # rescan filesystem + re-probe sampling capability
 ```
 
@@ -65,6 +66,14 @@ tinkpg refresh                                      # rescan filesystem + re-pro
   N), reports forks-on-path per panel, and `--tree` prints the full branch
   structure with `*` marking the active branch. The live panels correspond to a
   saved conversation but there's no stored link — match by name/recency.
+- `tinkpg samples` answers "what did the model say across ALL n draws at this fork?"
+  — the one view `state`/`conv` can't give you, since they only walk the linear active
+  path. It prints every sibling response at ONE fork (default: the last user turn of the
+  open conversation, resolved via the pushed conversation_id; `--turn N` / `--panel P` to
+  aim it), each with its CoT (`--full` for complete reasoning), the active one `*`-marked.
+  When the answers carry `<tag>X</tag>` verdicts it tallies them (`GOLD ×1 · CONCERNING
+  ×11`) and flags doubled-draft samples (>1 tag — the nemotron generation glitch) so you
+  don't miscount. Use it whenever you fan out n>1 and want the distribution, not one path.
 
 ## Levers & gotchas the reader won't guess
 

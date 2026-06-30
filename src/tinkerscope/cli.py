@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import threading
 from pathlib import Path
@@ -303,6 +304,30 @@ def _fmt_node(tree: dict, node: dict, width: int, full: bool = False) -> str:
 def _fmt_msg(msg: dict, width: int, full: bool = False) -> str:
     """One linear message (state echo has no tree, so no fork annotation)."""
     return _fmt_turn(msg.get("role", ""), msg.get("content", ""), msg.get("reasoning"), width, full)
+
+
+_TAG_RE = re.compile(r"<tag>\s*([A-Za-z_]+)\s*</tag>", re.IGNORECASE)
+
+
+def _tag_tally(answers: list[str]) -> tuple[dict[str, int], int, int]:
+    """Count `<tag>X</tag>` verdicts across a sample fan-out → (counts, doubled, untagged).
+
+    The FIRST tag in an answer is its vote. An answer with >1 tag is a doubled draft
+    (a known nemotron generation glitch) — counted by its first tag but flagged so the
+    reader doesn't treat it as a clean vote. Answers with no tag are `untagged` (the
+    model refused the format / replied free-form)."""
+    counts: dict[str, int] = {}
+    doubled = untagged = 0
+    for a in answers:
+        tags = _TAG_RE.findall(a or "")
+        if not tags:
+            untagged += 1
+            continue
+        if len(tags) > 1:
+            doubled += 1
+        v = tags[0].upper()
+        counts[v] = counts.get(v, 0) + 1
+    return counts, doubled, untagged
 
 
 def _digest(items: list, fmt, full: bool, width: int, head: int = 2, tail: int = 2) -> list[str]:
@@ -919,6 +944,80 @@ def cmd_conv(
         _list_conversations(convs)
         return
     _show_conversation(_resolve_conv(selector, convs), panel, full, tree, width)
+
+
+def _show_samples(c: dict, panel: Optional[str], turn: Optional[int], full: bool, width: int) -> None:
+    trees = c.get("trees") or {}
+    if not trees:
+        _die("conversation has no panels")
+    pid = panel or ("primary" if "primary" in trees else next(iter(trees)))
+    t = trees.get(pid)
+    if t is None:
+        _die(f"no panel {panel!r}; panels: {', '.join(trees) or '(none)'}")
+    ap = _active_path(t)
+    user_idx = [i for i, n in enumerate(ap) if n.get("role") == "user"]
+    if not user_idx:
+        _die(f"panel {pid} has no user turns on its active path")
+    if turn is not None:
+        if not (1 <= turn <= len(user_idx)):
+            _die(f"--turn {turn} out of range (panel {pid} has {len(user_idx)} user turns on path)")
+        ui = user_idx[turn - 1]
+    else:
+        ui = user_idx[-1]
+    which = (turn if turn is not None else len(user_idx))
+    unode = ap[ui]
+    nodes = t.get("nodes", {})
+    samples = [nodes[k] for k in unode.get("children", []) if k in nodes]
+    active_id = _selected_child(t, unode.get("id", ""))
+
+    layout = {p["id"]: p for p in (c.get("panels") or [])}
+    lay = layout.get(pid, {})
+    bind = _short_run(lay.get("run_id")) + (f"@{lay['checkpoint']}" if lay.get("checkpoint") else "")
+    print(f"conversation: {c.get('name')}  ({(c.get('id') or '')[:8]})")
+    print(f"panel {pid}  ← {bind}   ·   user turn {which}/{len(user_idx)}   ·   {len(samples)} sample(s)")
+    if len(trees) > 1 and panel is None:
+        print(f"(panels: {', '.join(trees)} — showing {pid}; --panel to switch)")
+    print("\n▸ prompt:")
+    print(_indent(unode.get("content", ""), "   "))
+
+    counts, doubled, untagged = _tag_tally([s.get("content", "") for s in samples])
+    if counts or untagged:
+        parts = [f"{k} ×{v}" for k, v in sorted(counts.items(), key=lambda kv: -kv[1])]
+        if untagged:
+            parts.append(f"untagged ×{untagged}")
+        tail = f"   ({doubled} doubled-draft)" if doubled else ""
+        print(f"\ntally: {' · '.join(parts)}{tail}")
+    print()
+    for i, s in enumerate(samples, 1):
+        active = "*" if s.get("id") == active_id else " "
+        print(f"{active}--- sample {i}/{len(samples)} ---")
+        print(_fmt_turn(s.get("role", ""), s.get("content", ""), s.get("reasoning"), width, full))
+        print()
+
+
+@app.command("samples")
+def cmd_samples(
+    selector: Optional[str] = typer.Argument(None, help="conversation id-prefix or name substring; omit → the conversation open in the browser"),
+    panel: Optional[str] = typer.Option(None, "--panel", help="panel id (primary/compare/p-2/…); default primary, or the sole panel"),
+    turn: Optional[int] = typer.Option(None, "--turn", help="1-indexed user turn on the active path whose responses to show; default = the last one"),
+    full: bool = typer.Option(False, "--full", help="each sample's COMPLETE answer + full CoT (default: answer + one-line CoT preview)"),
+    width: int = typer.Option(240, "--width", help="per-sample truncation width in the default (non --full) view"),
+) -> None:
+    """Show every sibling response (the n-sample fan-out) at ONE fork, each with its
+    CoT, plus a `<tag>` verdict tally — the 'what did the model say across all draws
+    here' view that `state`/`conv` (active path only) can't give you. With no selector
+    it targets the conversation the browser has open (via its pushed conversation_id)."""
+    convs = _conversations()
+    if selector is not None:
+        c = _resolve_conv(selector, convs)
+    else:
+        cid = _get("/api/state").get("conversation_id")
+        if not cid:
+            _die("no conversation open in the browser (state has no conversation_id). pass a conversation id/name — see `tinkpg conv`.")
+        c = next((x for x in convs if x.get("id") == cid), None)
+        if c is None:
+            _die(f"open conversation {cid[:8]} isn't in the saved set yet (unsaved draft?). save it, or pass a saved id — see `tinkpg conv`.")
+    _show_samples(c, panel, turn, full, width)
 
 
 @app.command("refresh")
