@@ -45,6 +45,13 @@ def main() -> None:
         page.select_option("select.model-slot-select", value=MODEL)
         page.wait_for_selector(".input-textarea:not([disabled])", timeout=15000)
 
+        # Start a FRESH conversation. The server persists conversations per scan-root
+        # set, so a prior run can leave branched state on disk that this run would
+        # inherit — including a stale user-level ‹k/N› cycler that the fold assertion
+        # below could misread. Non-shift New keeps the selected model.
+        page.locator('button[aria-label="New conversation"]').first.click()
+        page.wait_for_selector(".input-textarea:not([disabled])", timeout=15000)
+
         # Force the 'All' sample view so every card renders stacked (not one-at-a-time).
         page.locator(".seg-btn", has_text="All").first.click()
 
@@ -94,9 +101,11 @@ def main() -> None:
             '.sample-card button[data-tooltip^="Make this the active branch"]'
         ).first.click(force=True)
         page.wait_for_selector('[data-testid="branch-cycle"]', timeout=15000)
-        cycle_text = (
-            page.locator('[data-testid="branch-cycle"] .branch-cycle-count').first.inner_text().strip()
-        )
+        # A fresh conversation has exactly one cycler (the N assistant siblings), but
+        # read the one reporting /N rather than blindly taking .first, so a stray
+        # cycler (e.g. a future user-edit branch) can't shadow the real assertion.
+        counts = [c.strip() for c in page.locator('[data-testid="branch-cycle"] .branch-cycle-count').all_inner_texts()]
+        cycle_text = next((c for c in counts if c.endswith("/%d" % N)), counts[0] if counts else "")
         folded_ok = cycle_text.endswith("/%d" % N)
         collapsed_ok = page.locator(".sample-card").count() == 0
 
