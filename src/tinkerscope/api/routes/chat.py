@@ -124,18 +124,19 @@ async def _fanout(make_one: Callable[[int], Awaitable[dict]], n: int) -> AsyncIt
 
 @router.post("/chat")
 async def chat(req: ChatRequest):
-    # Two views of the same turns:
-    #  - sampling_msgs: {role, content} ONLY — fed to the OpenAI-style endpoints
+    # `msgs` is the per-panel transcript echo (answer-only, no system prompt). From it:
+    #  - sampling_msgs: {role, content} ONLY (+ system) — fed to the OpenAI-style endpoints
     #    (OpenRouter, loose checkpoint), which would choke on an extra `reasoning` key.
-    #  - native_msgs: also carries `reasoning`, fed to the native renderer paths
+    #  - native_msgs: also carries `reasoning` (+ system), fed to the native renderer paths
     #    (base_model / run_id) so the renderer rebuilds the full turn and applies its OWN
     #    history policy (strip_thinking_from_history / preserve) instead of us pre-stripping.
-    sampling_msgs = [{"role": m.role, "content": m.content} for m in req.messages]
+    msgs = [{"role": m.role, "content": m.content} for m in req.messages]
+    sampling_msgs = list(msgs)
     native_msgs = [
         {"role": m.role, "content": m.content, **({"reasoning": m.reasoning} if m.reasoning else {})}
         for m in req.messages
     ]
-    if req.system_prompt and not any(m["role"] == "system" for m in req.messages):
+    if req.system_prompt and not any(m["role"] == "system" for m in msgs):
         sys_msg = {"role": "system", "content": req.system_prompt}
         sampling_msgs = [sys_msg, *sampling_msgs]
         native_msgs = [sys_msg, *native_msgs]

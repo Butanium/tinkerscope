@@ -253,34 +253,67 @@ def _short_run(rid: Optional[str]) -> str:
     return rid.split("/")[-1]
 
 
-def _fmt_node(tree: dict, node: dict, width: int) -> str:
+def _indent(s: str, prefix: str = "      ") -> str:
+    """Prefix every line of `s` (CoT / full content), preserving its line breaks."""
+    return "\n".join(prefix + ln for ln in (s or "").splitlines())
+
+
+def _fmt_turn(role: str, content: str, reasoning: Optional[str], width: int, full: bool, mark: str = "") -> str:
+    """Render one transcript turn.
+
+    `full`  → COMPLETE content AND chain-of-thought, line breaks preserved. The CoT
+              is load-bearing for behavioral reads, so it is NEVER dropped or capped.
+    digest  → one-line content capped at `width`, plus a one-line `·think` CoT
+              preview whenever the turn carried reasoning (so you can SEE a CoT
+              exists and reach for `--full` to read it)."""
+    tag = _ROLE_TAG.get(role or "", role or "?")
+    content = content or ""
+    reasoning = (reasoning or "").strip()
+    if full:
+        out: list[str] = []
+        if reasoning:
+            out.append(f"   [{tag}{mark}] ⟨thinking⟩")
+            out.append(_indent(reasoning))
+            out.append(f"   [{tag}{mark}] ⟨answer⟩")
+            out.append(_indent(content))
+        elif "\n" in content:
+            out.append(f"   [{tag}{mark}]")
+            out.append(_indent(content))
+        else:
+            out.append(f"   [{tag}{mark}] {content}")
+        return "\n".join(out)
+    line = f"   [{tag}{mark}] {_oneline(content, width)}"
+    if reasoning:
+        line += f"\n   [{tag}{mark} ·think] {_oneline(reasoning, width)}"
+    return line
+
+
+def _fmt_node(tree: dict, node: dict, width: int, full: bool = False) -> str:
     """One active-path turn, annotated `·k/N` when it sits at an N-way fork."""
     sibs = _siblings(tree, node)
-    tag = _ROLE_TAG.get(node.get("role", ""), node.get("role", "?"))
     mark = ""
     if len(sibs) > 1:
         try:
             mark = f"·{sibs.index(node['id']) + 1}/{len(sibs)}"
         except ValueError:
             mark = f"·?/{len(sibs)}"
-    return f"   [{tag}{mark}] {_oneline(node.get('content', ''), width)}"
+    return _fmt_turn(node.get("role", ""), node.get("content", ""), node.get("reasoning"), width, full, mark)
 
 
-def _fmt_msg(msg: dict, width: int) -> str:
+def _fmt_msg(msg: dict, width: int, full: bool = False) -> str:
     """One linear message (state echo has no tree, so no fork annotation)."""
-    tag = _ROLE_TAG.get(msg.get("role", ""), msg.get("role", "?"))
-    return f"   [{tag}] {_oneline(msg.get('content', ''), width)}"
+    return _fmt_turn(msg.get("role", ""), msg.get("content", ""), msg.get("reasoning"), width, full)
 
 
 def _digest(items: list, fmt, full: bool, width: int, head: int = 2, tail: int = 2) -> list[str]:
     """First `head` + last `tail` of `items` via `fmt`, eliding the middle.
     `full` shows everything. `fmt` is _fmt_node (tree) or _fmt_msg (linear)."""
     if full or len(items) <= head + tail:
-        return [fmt(it, width) for it in items]
+        return [fmt(it, width, full) for it in items]
     return (
-        [fmt(it, width) for it in items[:head]]
+        [fmt(it, width, full) for it in items[:head]]
         + [f"   … {len(items) - head - tail} turns elided (--full to expand) …"]
-        + [fmt(it, width) for it in items[-tail:]]
+        + [fmt(it, width, full) for it in items[-tail:]]
     )
 
 
@@ -864,7 +897,7 @@ def _show_conversation(c: dict, panel: Optional[str], full: bool, show_tree: boo
             for line in _render_tree(t, width):
                 print(line)
         else:
-            for line in _digest(ap, lambda nd, w: _fmt_node(t, nd, w), full, width):
+            for line in _digest(ap, lambda nd, w, fl: _fmt_node(t, nd, w, fl), full, width):
                 print(line)
         print()
     if panel and shown == 0:
