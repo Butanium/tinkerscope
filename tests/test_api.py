@@ -300,3 +300,39 @@ def test_thinking_toggle_both_naming_conventions():
     base = "deepseek-ai/DeepSeek-V3.1-Base"
     assert supports_thinking(base) is False
     assert select_renderer_name(base, "role_colon", thinking=True) == "role_colon"
+
+
+# --------------------------------------------------------------------------- #
+# /api/chat gen() — driven with a MOCKED producer (no remote tokens). Regression
+# for a NameError where the per-panel state echo referenced a renamed variable:
+# nothing previously executed the chat route handler's body, so it slipped through.
+# --------------------------------------------------------------------------- #
+def test_chat_openrouter_runs_gen_and_strips_reasoning(client, monkeypatch):
+    seen: dict = {}
+
+    async def fake_stream(*, model, messages, **kw):
+        seen["messages"] = messages
+        yield {"delta": "hi", "kind": "content"}
+        yield {"content": "hi", "raw_text": "hi"}
+
+    monkeypatch.setattr("tinkerscope.api.openrouter.sample_one_stream", fake_stream)
+    r = client.post(
+        "/api/chat",
+        json={
+            "openrouter_model": "x/y",
+            "messages": [
+                {"role": "user", "content": "q"},
+                {"role": "assistant", "content": "a", "reasoning": "secret cot"},
+                {"role": "user", "content": "q2"},
+            ],
+            "n_samples": 1, "panel": "primary", "broadcast": False,
+        },
+    )
+    # gen() must run to completion (the 'done' event) — a NameError in the body would
+    # break the stream before this.
+    assert r.status_code == 200, r.text
+    assert "event: done" in r.text, r.text
+    # The OpenAI-style path must receive {role, content} ONLY — the `reasoning` field is
+    # dropped (sampling_msgs), never forwarded to the OAI call.
+    assert seen["messages"], "producer was never called"
+    assert all(set(m.keys()) <= {"role", "content"} for m in seen["messages"]), seen["messages"]
