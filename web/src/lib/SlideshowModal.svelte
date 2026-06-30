@@ -3,8 +3,7 @@
   rendered response, note, system prompt) with prev/next nav + delete. The
   highlight toggles re-color the rendered response live. Pins + the current index
   are parent-owned (the parent loads/sorts/deletes); this view emits nav/delete.
-  Arrow-left/right also navigate (when the overlay has focus, matching the
-  original).
+  Arrow-left/right navigate too.
 -->
 <script lang="ts">
 	import Modal from './Modal.svelte';
