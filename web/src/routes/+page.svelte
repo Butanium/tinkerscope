@@ -15,6 +15,7 @@
 	} from '$lib/model-sel';
 	import { drainSamples } from '$lib/chat-stream';
 	import { computeChartBars, type ChartData } from '$lib/chart';
+	import { buildPanelView } from '$lib/panel-view';
 	import ChartModal from '$lib/ChartModal.svelte';
 	import TagModal from '$lib/TagModal.svelte';
 	import DatasetModal from '$lib/DatasetModal.svelte';
@@ -41,7 +42,6 @@
 		deleteSiblings,
 		setSelected,
 		cycle as cycleTree,
-		siblingInfo,
 		siblingsOf
 	} from '$lib/tree';
 	import type {
@@ -957,94 +957,10 @@
 	// active leaf's assistant turn so the distribution view replaces — never
 	// double-renders — the committed reply. After fold, the bucket cards map back
 	// to their sibling node ids so a card-click can select that branch.
-	/** The bucket's latest turn as a single trailing assistant ViewMessage. `prefill`
-	 *  (the panel's last fire) lets the live view color the prefilled prefix too. */
-	function bucketTurn(run: (typeof live.panels)[Panel], prefill?: string): ViewMessage {
-		const filled = run.samples.filter((x) => x);
-		const pf = prefill || undefined;
-		if (run.n > 1) {
-			return {
-				role: 'assistant',
-				content: filled[0]?.content ?? '',
-				reasoning: filled[0]?.reasoning,
-				raw_text: filled[0]?.raw_text,
-				raw_meta: filled[0]?.raw_meta,
-				prefill: pf,
-				samples: run.samples,
-				totalSamples: run.n,
-				running: run.running
-			};
-		}
-		const one = filled[0];
-		return {
-			role: 'assistant',
-			content: one?.content ?? '',
-			reasoning: one?.reasoning,
-			raw_text: one?.raw_text,
-			raw_meta: one?.raw_meta,
-			prefill: pf,
-			running: run.running
-		};
-	}
-
+	// Render model (tree active path + live bucket overlay → ViewMessage[]) lives in
+	// $lib/panel-view; this binds it to the panel's reactive tree/bucket/prefill.
 	function panelView(p: PanelSel): ViewMessage[] {
-		const tree = convo.treeFor(p.panel);
-		const path = activePath(tree);
-		const out: ViewMessage[] = path.map((n) => ({
-			role: n.role,
-			content: n.content,
-			reasoning: n.reasoning,
-			raw_text: n.raw_text,
-			raw_meta: n.raw_meta,
-			prefill: n.prefill,
-			nodeId: n.id,
-			sib: siblingInfo(tree, n.id),
-			isBucket: false
-		}));
-		const run = live.panels[p.panel] ?? emptyPanel();
-		const hasBucket = run.chat_id != null || run.samples.length > 0 || run.running;
-
-		if (hasBucket) {
-			let replacedId: string | null = null;
-			let replacedSib: { index: number; count: number } | undefined;
-			let sampleNodeIds: string[] | undefined;
-			let activeSampleIndex: number | undefined;
-			if (out.length > 0 && out[out.length - 1].role === 'assistant') {
-				// Folded already → replace the trailing assistant with the rich bucket
-				// view, and map the n>1 cards back to this batch's sibling node ids.
-				const last = out[out.length - 1];
-				replacedId = last.nodeId ?? null;
-				replacedSib = last.sib;
-				out.pop();
-				const userParent = replacedId ? tree.nodes[replacedId]?.parent : null;
-				if (userParent && tree.nodes[userParent]) {
-					const kids = tree.nodes[userParent].children;
-					// A sample is "folded" iff it has content AND no error — matching
-					// foldAssistant's skip rule. parseSample gives error samples a
-					// content string ("Error: …"), so gating on content alone would
-					// miscount and misalign the card→node mapping. Error slots map to ''.
-					const isFold = (x: (typeof run.samples)[number]) => !!(x && x.content && !x.error);
-					const filledCount = run.samples.filter(isFold).length;
-					const batch = kids.slice(Math.max(0, kids.length - filledCount)); // this turn's folds
-					sampleNodeIds = [];
-					let pos = 0;
-					for (let i = 0; i < run.samples.length; i++) {
-						sampleNodeIds[i] = isFold(run.samples[i]) ? (batch[pos++] ?? '') : '';
-					}
-					if (replacedId) activeSampleIndex = sampleNodeIds.indexOf(replacedId);
-				}
-			}
-			out.push({
-				...bucketTurn(run, firePrefill[p.panel]),
-				nodeId: replacedId,
-				sib: replacedSib,
-				sampleNodeIds,
-				activeSampleIndex,
-				isBucket: true
-			});
-		}
-		if (run.error) out.push({ role: 'assistant', content: `Error: ${run.error}`, nodeId: null });
-		return out;
+		return buildPanelView(convo.treeFor(p.panel), live.panels[p.panel] ?? emptyPanel(), firePrefill[p.panel]);
 	}
 
 	// Auto-scroll panels on new content.
