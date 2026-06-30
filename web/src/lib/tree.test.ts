@@ -58,8 +58,9 @@ function msgContents(t: ConvTree): string[] {
 function U(content: string): Msg {
 	return { role: 'user', content };
 }
-function A(content: string): Msg {
-	return { role: 'assistant', content };
+function A(content: string, reasoning?: string): Msg {
+	// activeMessages/ancestryMessages carry `reasoning` only when the node has it.
+	return reasoning ? { role: 'assistant', content, reasoning } : { role: 'assistant', content };
 }
 
 // Build [U1,A1,U2,A2] linear tree the cheap way for setup.
@@ -111,7 +112,7 @@ test('foldAssistant makes N siblings, selects first, copies reasoning/raw', () =
 	]);
 	eq(ids.length, 3);
 	eq(tree.nodes[u].children.length, 3);
-	eq(activeMessages(tree), [U('q'), A('s0')]); // first selected
+	eq(activeMessages(tree), [U('q'), A('s0', 'r0')]); // first selected; reasoning travels with the msg
 	eq(tree.nodes[ids[0]].reasoning, 'r0');
 	eq(tree.nodes[ids[0]].raw_text, 'x0');
 	eq(siblingInfo(tree, ids[0]), { index: 0, count: 3 });
@@ -335,6 +336,17 @@ test('cycle wraps around the ends (1-2-3-1…)', () => {
 test('reconcileExternal on empty msgs is a no-op', () => {
 	const t = linear4();
 	eq(reconcileExternal(t, []), t);
+});
+
+test('reconcileExternal preserves reasoning carried on an external turn', () => {
+	// A CLI/cross-tab assistant reply echoed back with its CoT must land on the new node,
+	// so reasoning round-trips (not just answer-only). activeMessages then carries it back.
+	const t = reconcileExternal(emptyTree(), [U('q'), A('ans', 'cot')]);
+	const asst = activeMessages(t)[1];
+	eq(asst, A('ans', 'cot'));
+	// a reasoning-less echo stays {role, content} (no stray reasoning key)
+	const t2 = reconcileExternal(emptyTree(), [U('q'), A('plain')]);
+	eq(activeMessages(t2)[1], A('plain'));
 });
 
 test('reconcileExternal is idempotent when the path already exists (reload dupe guard)', () => {

@@ -787,8 +787,9 @@
 		// content: on auto-<think> families a content-only prefill makes the model
 		// read the answer as more thinking. assembleAssistantRaw closes the
 		// `<think>` (so the model extends the answer) or leaves it open for a
-		// thinking-only turn. ancestryMessages drops prior-turn reasoning (correct —
-		// not replayed), so we append this turn's raw prefill ourselves.
+		// thinking-only turn. ancestryMessages now carries prior-turn reasoning (the
+		// sampler structures it so the renderer applies its own history policy); the
+		// turn being CONTINUED is appended separately as this raw `<think>` prefill.
 		const prefill = assembleAssistantRaw(node.reasoning, node.content);
 		const fireMessages = [
 			...ancestryMessages(tree, userParentId),

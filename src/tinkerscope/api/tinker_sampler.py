@@ -172,6 +172,28 @@ def _normalize_content(content: Any) -> tuple[str, str | None]:
     return content, reasoning
 
 
+def _to_render_msg(m: dict) -> dict:
+    """Build one renderer history message (the INVERSE of _normalize_content's input split).
+
+    An assistant turn carrying separated `reasoning` becomes STRUCTURED content
+    ([{type:thinking}, {type:text}]) so the renderer applies its OWN history policy
+    (strip_thinking_from_history / preserve) rather than us pre-deciding. It must be
+    structured, NOT an inlined `<think>` string: the renderers pass string content through
+    verbatim (no stripping), so a `<think>` string would force-keep the CoT and collide with
+    the family's auto-opened think tag. Turns without `reasoning` stay plain `{role, content}`
+    — byte-identical to the old behavior, hence zero change for strip-from-history renderers
+    (verified) and correct preservation for preserve renderers (e.g. kimi_k26_preserve_thinking).
+    The trailing prefill turn is handled separately (raw string), never routed here."""
+    content = m.get("content") or ""
+    reasoning = (m.get("reasoning") or "").strip()
+    if m.get("role") != "assistant" or not reasoning:
+        return {"role": m["role"], "content": content}
+    parts: list[dict] = [{"type": "thinking", "thinking": reasoning}]
+    if content:
+        parts.append({"type": "text", "text": content})
+    return {"role": m["role"], "content": parts}
+
+
 # ---------------------------------------------------------------------------
 # Sampler manager: caches ServiceClient, sampling clients, renderers, tokenizers
 # ---------------------------------------------------------------------------
@@ -238,11 +260,15 @@ class SamplerManager:
         """
         renderer = await asyncio.to_thread(self._renderer, base_model, renderer_name)
         tokenizer = await asyncio.to_thread(self._tokenizer, base_model)
-        rmsgs = [{"role": m["role"], "content": m["content"]} for m in messages]
-        if rmsgs and rmsgs[-1]["role"] == "assistant":
-            prefill, non_prefill = rmsgs[-1]["content"], rmsgs[:-1]
+        # A trailing assistant turn is a PREFILL (raw string the model extends verbatim, via
+        # _append_to_prompt). Prior turns go through _to_render_msg, which structures any
+        # carried reasoning so the renderer applies its own thinking-history policy.
+        if messages and messages[-1].get("role") == "assistant":
+            prefill = messages[-1].get("content") or ""
+            non_prefill = [_to_render_msg(m) for m in messages[:-1]]
         else:
-            prefill, non_prefill = None, rmsgs
+            prefill = None
+            non_prefill = [_to_render_msg(m) for m in messages]
         model_input = renderer.build_generation_prompt(non_prefill)
         if prefill:
             model_input = _append_to_prompt(model_input, tokenizer, prefill)
@@ -277,13 +303,14 @@ class SamplerManager:
         renderer = await asyncio.to_thread(self._renderer, base_model, renderer_name)
         tokenizer = await asyncio.to_thread(self._tokenizer, base_model)
 
-        rmsgs = [{"role": m["role"], "content": m["content"]} for m in messages]
-        if rmsgs and rmsgs[-1]["role"] == "assistant":
-            prefill = rmsgs[-1]["content"]
-            non_prefill = rmsgs[:-1]
+        # Trailing assistant turn = PREFILL (raw string); prior turns through _to_render_msg
+        # so carried reasoning is structured and the renderer applies its history policy.
+        if messages and messages[-1].get("role") == "assistant":
+            prefill = messages[-1].get("content") or ""
+            non_prefill = [_to_render_msg(m) for m in messages[:-1]]
         else:
             prefill = None
-            non_prefill = rmsgs
+            non_prefill = [_to_render_msg(m) for m in messages]
 
         model_input = renderer.build_generation_prompt(non_prefill)
         if prefill:

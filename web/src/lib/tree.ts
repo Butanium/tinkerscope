@@ -51,7 +51,20 @@ export type SampleLike = {
 	sample_index?: number;
 };
 
-export type Msg = { role: NodeRole; content: string };
+export type Msg = { role: NodeRole; content: string; reasoning?: string };
+
+/** Tree node → wire Msg. Carries `reasoning` ONLY when present, so the sampler can hand
+ *  the renderer the full turn ([thinking, text] structured content) and let the model's
+ *  renderer apply its own history policy (strip_thinking_from_history / preserve). A turn
+ *  without reasoning stays `{role, content}` — byte-identical to before, so the UI mirror,
+ *  persistence echo, and tree tests are unaffected. `content` is always answer-only; the
+ *  thinking lives in the separate field, never inlined as a `<think>` string (the renderers
+ *  pass string content through verbatim, so an inlined tag would force-keep the CoT). */
+function nodeToMsg(n: TreeNode): Msg {
+	return n.reasoning
+		? { role: n.role, content: n.content, reasoning: n.reasoning }
+		: { role: n.role, content: n.content };
+}
 
 // ── IDs ──────────────────────────────────────────────────────────────
 // Per-load random session prefix so two tabs editing one persisted tree never
@@ -141,7 +154,7 @@ export function activePath(t: ConvTree): TreeNode[] {
 export function activeMessages(t: ConvTree): Msg[] {
 	return activePath(t)
 		.filter((n) => n.role !== 'system')
-		.map((n) => ({ role: n.role, content: n.content }));
+		.map(nodeToMsg);
 }
 
 export function parentKeyOf(t: ConvTree, id: string): string {
@@ -173,7 +186,7 @@ export function ancestryMessages(t: ConvTree, id: string): Msg[] {
 		cur = cur.parent ? t.nodes[cur.parent] : undefined;
 	}
 	chain.reverse();
-	return chain.filter((n) => n.role !== 'system').map((n) => ({ role: n.role, content: n.content }));
+	return chain.filter((n) => n.role !== 'system').map(nodeToMsg);
 }
 
 /** The active-path nodes strictly BELOW `id` (or [] if id isn't on the path). */
@@ -437,6 +450,9 @@ export function reconcileExternal(t0: ConvTree, msgs: Msg[]): ConvTree {
 			id,
 			role: m.role,
 			content: m.content,
+			// preserve thinking carried on an external/echoed turn so a CLI/cross-tab
+			// reply round-trips its CoT into the tree (not just answer-only)
+			...(m.reasoning ? { reasoning: m.reasoning } : {}),
 			parent: parentKey === ROOT ? null : parentKey,
 			children: []
 		};

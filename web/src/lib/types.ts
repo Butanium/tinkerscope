@@ -70,7 +70,9 @@ export type Health = {
 	error?: string | null;
 };
 
-export type ChatMessage = { role: 'user' | 'assistant' | 'system'; content: string };
+// `reasoning` (assistant turns only) travels with the message so the sampler can hand the
+// renderer the full turn and let it apply its own history policy; `content` stays answer-only.
+export type ChatMessage = { role: 'user' | 'assistant' | 'system'; content: string; reasoning?: string };
 
 /** A render-time text-coloring rule (see lib/highlight-match.ts + the backend
  *  api/routes/highlights.py). Mirrors samplescope's HighlightRule, minus the

@@ -48,6 +48,10 @@ router = APIRouter(prefix="/api", tags=["chat"])
 class ChatMessage(BaseModel):
     role: str
     content: str
+    # Separated chain-of-thought for an assistant turn (answer-only `content`). Carried so
+    # the native renderer paths can rebuild the full turn and apply the model's own history
+    # policy (strip_thinking_from_history / preserve). None for non-thinking turns.
+    reasoning: str | None = None
 
 
 class ChatRequest(BaseModel):
@@ -120,10 +124,21 @@ async def _fanout(make_one: Callable[[int], Awaitable[dict]], n: int) -> AsyncIt
 
 @router.post("/chat")
 async def chat(req: ChatRequest):
-    msgs = [{"role": m.role, "content": m.content} for m in req.messages]
-    sampling_msgs = list(msgs)
-    if req.system_prompt and not any(m["role"] == "system" for m in sampling_msgs):
-        sampling_msgs = [{"role": "system", "content": req.system_prompt}, *sampling_msgs]
+    # Two views of the same turns:
+    #  - sampling_msgs: {role, content} ONLY — fed to the OpenAI-style endpoints
+    #    (OpenRouter, loose checkpoint), which would choke on an extra `reasoning` key.
+    #  - native_msgs: also carries `reasoning`, fed to the native renderer paths
+    #    (base_model / run_id) so the renderer rebuilds the full turn and applies its OWN
+    #    history policy (strip_thinking_from_history / preserve) instead of us pre-stripping.
+    sampling_msgs = [{"role": m.role, "content": m.content} for m in req.messages]
+    native_msgs = [
+        {"role": m.role, "content": m.content, **({"reasoning": m.reasoning} if m.reasoning else {})}
+        for m in req.messages
+    ]
+    if req.system_prompt and not any(m["role"] == "system" for m in req.messages):
+        sys_msg = {"role": "system", "content": req.system_prompt}
+        sampling_msgs = [sys_msg, *sampling_msgs]
+        native_msgs = [sys_msg, *native_msgs]
 
     temperature = req.temperature if req.temperature is not None else 1.0
     max_tokens = req.max_tokens or 1024
@@ -182,7 +197,7 @@ async def chat(req: ChatRequest):
                 renderer_name = select_renderer_name(req.base_model, None, req.thinking)
                 if stream:
                     _, prompt_text, stop = await get_sampler().render(
-                        req.base_model, renderer_name, sampling_msgs
+                        req.base_model, renderer_name, native_msgs
                     )
                     produce_iter = tinker_oai.completions_stream(
                         model=req.base_model, prompt=prompt_text, stop=stop,
@@ -191,7 +206,7 @@ async def chat(req: ChatRequest):
                 else:
                     produce_iter = get_sampler().sample_stream(
                         base_model=req.base_model, sampler_path=None, renderer_name=renderer_name,
-                        messages=sampling_msgs, n=n, temperature=temperature,
+                        messages=native_msgs, n=n, temperature=temperature,
                         max_tokens=max_tokens, top_p=req.top_p,
                     )
                 sel_patch = {}  # frontend tracks the base-model selection (sentinel)
@@ -214,7 +229,7 @@ async def chat(req: ChatRequest):
                 label = f"{run.name}@{ckpt.name}"
                 if stream:
                     _, prompt_text, stop = await get_sampler().render(
-                        run.base_model, renderer_name, sampling_msgs
+                        run.base_model, renderer_name, native_msgs
                     )
                     produce_iter = tinker_oai.completions_stream(
                         model=ckpt.sampler_path, prompt=prompt_text, stop=stop,
@@ -223,7 +238,7 @@ async def chat(req: ChatRequest):
                 else:
                     produce_iter = get_sampler().sample_stream(
                         base_model=run.base_model, sampler_path=ckpt.sampler_path,
-                        renderer_name=renderer_name, messages=sampling_msgs, n=n,
+                        renderer_name=renderer_name, messages=native_msgs, n=n,
                         temperature=temperature, max_tokens=max_tokens, top_p=req.top_p,
                     )
                 sel_patch = {"run_id": run.id, "checkpoint": ckpt.name}
