@@ -59,15 +59,11 @@ def main() -> None:
         page.locator('input.sidebar-input[min="1"][max="200"]').first.fill(str(N))
         n_confirmed = wait_backend("n_samples", N)
 
-        # Cycle the Thinking pill to BOTH (OFF → ON → BOTH; start state unknown, so
-        # click until it reads BOTH — at most 3 clicks).
-        pill = page.locator(".thinking-pill").first
-        for _ in range(3):
-            if pill.inner_text().strip() == "BOTH":
-                break
-            pill.click()
-            time.sleep(0.3)
-        pill_text = pill.inner_text().strip()
+        # Thinking = Both (segmented Off/On/Both control; "Both" is unique among
+        # the seg buttons — Sample view's are All/Cycle).
+        both_btn = page.locator(".seg-btn", has_text="Both").first
+        both_btn.click()
+        pill_text = "Both(active)" if "active" in (both_btn.get_attribute("class") or "") else "Both(?)"
         thinking_confirmed = wait_backend("thinking", "both")
 
         # Send once.
@@ -97,7 +93,7 @@ def main() -> None:
         browser.close()
 
         print(f"backend n_samples confirmed: {n_confirmed} (want {N})")
-        print(f"pill text: {pill_text!r}; backend thinking: {thinking_confirmed!r} (want 'both')")
+        print(f"Both segment: {pill_text!r}; backend thinking: {thinking_confirmed!r} (want 'both')")
         print(f"sample cards rendered: {card_count} (want {2 * N})")
         print(f"mode chips (DOM order): {chips} -> no-think half first: {order_ok}")
         print(f"thinking-half chips: {think_chips} (want {N})")

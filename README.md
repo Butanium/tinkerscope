@@ -84,8 +84,8 @@ shared across all projects, and need `OPENROUTER_API_KEY` to sample.
 Pick a run, type a prompt, hit Enter. The sidebar exposes the usual knobs:
 **temperature, max tokens, number of samples, top-p**, plus **top-k / presence /
 repetition penalties** (OpenRouter-only — Tinker models honor temperature and
-top-p). There's a **thinking toggle** for models that support it — it cycles
-**OFF → ON → BOTH**, where BOTH draws n samples *without* thinking plus n *with*
+top-p). There's a **thinking toggle** for models that support it —
+**Off / On / Both**, where Both draws n samples *without* thinking plus n *with*
 (2n total, each card tagged think / no-think) so you can compare the two modes
 in one send — and a **system prompt** field that travels with the conversation.
 

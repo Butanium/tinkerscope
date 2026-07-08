@@ -341,10 +341,9 @@
 	function setNSamples(v: number) { if (Number.isNaN(v)) return; patchState({ n_samples: Math.max(1, Math.min(200, Math.round(v))) }); }
 	function setSystemPrompt(v: string) { patchState({ system_prompt: v || null }); convo.save(); }
 	function setTopP(v: number) { if (Number.isNaN(v)) return; patchState({ top_p: Math.max(0, Math.min(1, v)) }); }
-	function toggleThinking() {
-		// Tri-state cycle: OFF → ON → BOTH → OFF. BOTH fires n samples without
-		// thinking + n with (2n total, no-think half first) in one chat.
-		const next: boolean | 'both' = s.thinking === false ? true : s.thinking === true ? 'both' : false;
+	function setThinking(next: boolean | 'both') {
+		// Tri-state: Off / On / Both. Both fires n samples without thinking + n
+		// with (2n total, no-think half first) in one chat.
 		patchState({ thinking: next }, true);
 		applyQwenDefaults(next);
 	}
@@ -1684,13 +1683,11 @@
 				<div class="sidebar-section">
 					<label class="sidebar-label thinking-toggle-row">
 						<span>Thinking</span>
-						<button
-							class="thinking-pill"
-							class:active={!!s.thinking}
-							class:both={s.thinking === 'both'}
-							data-tooltip="Cycles OFF → ON → BOTH. BOTH draws n samples without thinking + n with (2n total, no-think half first)."
-							use:tip
-							onclick={toggleThinking}>{s.thinking === 'both' ? 'BOTH' : s.thinking ? 'ON' : 'OFF'}</button>
+						<span class="seg-toggle" data-tooltip="Both = n samples without thinking + n with (2n total, no-think half first) in one send" use:tip>
+							<button class="seg-btn" class:active={s.thinking === false} onclick={() => setThinking(false)}>Off</button>
+							<button class="seg-btn" class:active={s.thinking === true} onclick={() => setThinking(true)}>On</button>
+							<button class="seg-btn" class:active={s.thinking === 'both'} onclick={() => setThinking('both')}>Both</button>
+						</span>
 					</label>
 				</div>
 			{/if}
@@ -2052,11 +2049,6 @@
 
 	/* ── Thinking toggle ──────────────────────────────────────────── */
 	.thinking-toggle-row { justify-content: space-between; }
-	.thinking-pill { padding: 2px 12px; border-radius: var(--radius-pill); font-size: 0.75rem; font-weight: 600; background: var(--color-bg); border: 1px solid var(--color-border); color: var(--color-text-muted); transition: all 0.15s; letter-spacing: 0.03em; }
-	.thinking-pill.active { background: var(--color-accent); border-color: var(--color-accent); color: white; }
-	/* BOTH: split pill — grey (no-think half) fading into accent (think half). */
-	.thinking-pill.both { background: linear-gradient(90deg, var(--color-text-muted) 0%, var(--color-text-muted) 40%, var(--color-accent) 60%, var(--color-accent) 100%); border-color: var(--color-accent); color: white; }
-	.thinking-pill:hover { border-color: var(--color-accent); }
 	/* Segmented All|Cycle toggle for the sample-distribution view. */
 	.seg-toggle { display: inline-flex; border: 1px solid var(--color-border); border-radius: var(--radius-pill); overflow: hidden; }
 	.seg-btn { padding: 2px 12px; font-size: 0.75rem; font-weight: 600; background: var(--color-bg); border: none; color: var(--color-text-muted); cursor: pointer; transition: all 0.15s; letter-spacing: 0.03em; }
