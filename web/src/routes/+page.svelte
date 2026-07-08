@@ -1293,7 +1293,8 @@
 					.map((x) => ({ content: x.content ?? '', reasoning: x.reasoning }));
 				if (streamed.length > 0) turns.push({ question: lastQ, samples: streamed, streaming: true });
 			}
-			if (turns.length > 0) out.push({ model: panelLabel(p), turns });
+			if (turns.length > 0)
+				out.push({ model: panelLabel(p), turns, folded: convo.reducedPanels.has(p.panel) });
 		}
 		return out;
 	}

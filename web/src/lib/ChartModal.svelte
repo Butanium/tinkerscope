@@ -12,8 +12,10 @@
       · "exact answers": the legacy trimmed string-equality histogram (an
         empty answer buckets as [NO ANSWER], not dropped).
   - match scope (rules mode) — which text the rules run against: response /
-    thinking / either, or "split" = two adjacent bars per model (response and
-    thinking bucketed separately over the same samples).
+    thinking / either, or "split" = a response|thinking bar pair per model,
+    adjacent under ONE model name (bucketed separately over the same samples).
+  - folded (reduced) panels are excluded by default; an "include folded
+    panels" toggle appears when any are present.
   - the charted prompt(s) above the chart — grouped per distinct prompt, since
     panels can diverge (each shows which models it belongs to).
   - click a segment → inspect its samples below the chart, rendered through the
@@ -46,9 +48,14 @@
 	let turnSel = $state('last'); // 'last' | stringified turn index
 	// What the rules match against; 'split' = response|thinking as adjacent bars.
 	let matchScope = $state<MatchScope | 'split'>('response');
+	// Folded (reduced) panels are excluded by default; a toggle brings them in.
+	let includeFolded = $state(false);
 	let inspect = $state<{ bar: number; key: string } | null>(null);
 
-	const turnCount = $derived(Math.max(0, ...sources.map((s) => s.turns.length)));
+	const hasFolded = $derived(sources.some((s) => s.folded));
+	const activeSources = $derived(sources.filter((s) => includeFolded || !s.folded));
+
+	const turnCount = $derived(Math.max(0, ...activeSources.map((s) => s.turns.length)));
 	const turnIdx = $derived(turnSel === 'last' ? -1 : Number(turnSel));
 
 	/** The picked turn of one panel ('last' → its own newest turn). */
@@ -58,7 +65,7 @@
 
 	/** Question preview for the turn picker (first panel that has that turn). */
 	function turnLabel(k: number): string {
-		for (const s of sources) {
+		for (const s of activeSources) {
 			const t = s.turns[k];
 			if (!t) continue;
 			const q = t.question.replace(/\s+/g, ' ').trim();
@@ -71,22 +78,24 @@
 	// Bars index-align with chartSources (so inspect can find the sample text).
 	// In split scope each panel expands to a (response, thinking) bar pair over
 	// the SAME samples array — the thinking bar only when any sample has CoT.
+	// The pair shares the model name and differs by `sub`, which the layout
+	// below renders as adjacent bars under one label.
 	const chartSources = $derived.by(() => {
-		const picked = sources
+		const picked = activeSources
 			.map((s) => ({ model: s.model, samples: pickTurn(s)?.samples ?? [] }))
 			.filter((s): s is ChartSource => s.samples.length > 0);
 		if (mode !== 'rules' || matchScope !== 'split') return picked;
 		return picked.flatMap((s) => {
-			const pair: ChartSource[] = [{ model: `${s.model} (response)`, samples: s.samples, matchOn: 'response' }];
+			const pair: ChartSource[] = [{ model: s.model, samples: s.samples, matchOn: 'response', sub: 'response' }];
 			if (s.samples.some((x) => x.reasoning))
-				pair.push({ model: `${s.model} (thinking)`, samples: s.samples, matchOn: 'thinking' });
+				pair.push({ model: s.model, samples: s.samples, matchOn: 'thinking', sub: 'thinking' });
 			return pair;
 		});
 	});
 	/** Charted prompt(s), grouped — panels can diverge on what was asked. */
 	const questionGroups = $derived.by(() => {
 		const groups: { q: string; models: string[] }[] = [];
-		for (const s of sources) {
+		for (const s of activeSources) {
 			const t = pickTurn(s);
 			if (!t) continue;
 			const g = groups.find((g) => g.q === t.question);
@@ -95,7 +104,7 @@
 		}
 		return groups;
 	});
-	const streaming = $derived(sources.some((s) => pickTurn(s)?.streaming));
+	const streaming = $derived(activeSources.some((s) => pickTurn(s)?.streaming));
 	function truncQ(q: string): string {
 		return q.length > 200 ? '…' + q.slice(-200) : q;
 	}
@@ -105,6 +114,37 @@
 			? chartByRules(chartSources, highlightStore.rules, matchScope === 'split' ? 'response' : matchScope)
 			: chartByAnswers(chartSources)
 	);
+
+	// ── SVG layout ────────────────────────────────────────────────────
+	// Consecutive sub-labeled bars sharing a model (split's response|thinking
+	// pair) form one GROUP: adjacent bars, one model name centered under them.
+	const CHART_H = 300, TOP_PAD = 10, LEFT_PAD = 45, GROUP_GAP = 60, PAIR_GAP = 8;
+	type PlacedBar = { bar: import('./chart').ChartBar; bi: number; x: number };
+	const layout = $derived.by(() => {
+		if (!data) return null;
+		const groups: { model: string; total: number; center: number; bars: PlacedBar[] }[] = [];
+		for (let bi = 0; bi < data.bars.length; bi++) {
+			const bar = data.bars[bi];
+			const g = groups[groups.length - 1];
+			if (g && g.model === bar.model && bar.sub && g.bars[0].bar.sub) g.bars.push({ bar, bi, x: 0 });
+			else groups.push({ model: bar.model, total: bar.total, center: 0, bars: [{ bar, bi, x: 0 }] });
+		}
+		const hasSub = groups.some((g) => g.bars.some((b) => b.bar.sub));
+		const bw = hasSub ? 56 : 80; // pairs get slimmer bars
+		let x = LEFT_PAD;
+		for (const g of groups) {
+			x += GROUP_GAP / 2;
+			g.bars.forEach((b, i) => {
+				b.x = x;
+				x += bw + (i < g.bars.length - 1 ? PAIR_GAP : 0);
+			});
+			g.center = (g.bars[0].x + g.bars[g.bars.length - 1].x + bw) / 2;
+			x += GROUP_GAP / 2;
+		}
+		// Sub labels sit between the bars and the model name → deeper bottom pad.
+		const bottomPad = hasSub ? 124 : 110;
+		return { groups, bw, hasSub, width: x, height: TOP_PAD + CHART_H + bottomPad };
+	});
 
 	// ── inspect (click a segment) ─────────────────────────────────────
 	function toggleInspect(bar: number, key: string) {
@@ -170,6 +210,11 @@
 						data-tooltip="Two adjacent bars per model — response and thinking, matched separately" use:tip>split</button>
 				</div>
 			{/if}
+			{#if hasFolded}
+				<label class="chart-check" data-tooltip="Folded panels are excluded from the chart by default" use:tip>
+					<input type="checkbox" bind:checked={includeFolded} /> include folded panels
+				</label>
+			{/if}
 		</div>
 		{#if questionGroups.length === 1}
 			<p class="chart-question">{truncQ(questionGroups[0].q)}{streaming ? ' · streaming…' : ''}</p>
@@ -181,22 +226,16 @@
 				{#if streaming}<p>streaming…</p>{/if}
 			</div>
 		{/if}
-		{#if !data}
-			{#if mode === 'rules'}
+		{#if !data || !layout}
+			{#if activeSources.length === 0}
+				<div class="backend-error">All panels with data are folded — enable “include folded panels” above to chart them.</div>
+			{:else if mode === 'rules'}
 				<div class="backend-error">No enabled highlight rules apply to assistant turns — add rules in the sidebar's Highlights panel, or switch to “exact answers”.</div>
 			{:else}
 				<div class="backend-error">No response data to chart for this turn.</div>
 			{/if}
 		{:else}
-			{@const barWidth = 80}
-			{@const barGap = 60}
-			{@const chartHeight = 300}
-			{@const leftPad = 45}
-			{@const bottomPad = 110}
-			{@const topPad = 10}
-			{@const totalWidth = leftPad + data.bars.length * (barWidth + barGap)}
-			{@const totalHeight = chartHeight + bottomPad + topPad}
-			<svg class="chart-svg" viewBox="0 0 {totalWidth} {totalHeight}" width="100%" preserveAspectRatio="xMidYMid meet">
+			<svg class="chart-svg" viewBox="0 0 {layout.width} {layout.height}" width="100%" preserveAspectRatio="xMidYMid meet">
 				<defs>
 					{#each data.legend as entry, li (entry.key)}
 						{#if entry.colors.length > 1}
@@ -209,40 +248,45 @@
 					{/each}
 				</defs>
 				{#each [0, 25, 50, 75, 100] as tick (tick)}
-					{@const y = topPad + chartHeight - (tick / 100) * chartHeight}
-					<line x1={leftPad} y1={y} x2={totalWidth} y2={y} stroke="var(--color-border)" stroke-width="0.5" />
-					<text x={leftPad - 6} y={y + 4} text-anchor="end" fill="var(--color-text-muted)" font-size="11">{tick}%</text>
+					{@const y = TOP_PAD + CHART_H - (tick / 100) * CHART_H}
+					<line x1={LEFT_PAD} y1={y} x2={layout.width} y2={y} stroke="var(--color-border)" stroke-width="0.5" />
+					<text x={LEFT_PAD - 6} y={y + 4} text-anchor="end" fill="var(--color-text-muted)" font-size="11">{tick}%</text>
 				{/each}
-				{#each data.bars as bar, bi (bi)}
-					{@const x = leftPad + bi * (barWidth + barGap) + barGap / 2}
-					{#each bar.segments as seg, si (seg.key)}
-						{@const prevPct = bar.segments.slice(0, si).reduce((sum, v) => sum + v.pct, 0)}
-						{@const y = topPad + chartHeight - ((prevPct + seg.pct) / 100) * chartHeight}
-						{@const h = (seg.pct / 100) * chartHeight}
-						{#if h > 0}
-							{@const li = data.legend.findIndex((e) => e.key === seg.key)}
-							<rect
-								{x} {y} width={barWidth} height={h} rx="1"
-								fill={segFill(seg.colors, li)}
-								class="chart-seg"
-								class:selected={inspect?.bar === bi && inspect?.key === seg.key}
-								role="button" tabindex="0" aria-label="{seg.label}: {seg.count} of {bar.total}"
-								data-tooltip="{seg.label} — {seg.count}/{bar.total} ({seg.pct.toFixed(0)}%) · click to inspect"
-								use:tip
-								onclick={() => toggleInspect(bi, seg.key)}
-								onkeydown={(e) => e.key === 'Enter' && toggleInspect(bi, seg.key)}
-							/>
-							{#if h > 14}
-								<text x={x + barWidth / 2} y={y + h / 2 + 4} text-anchor="middle" pointer-events="none"
-									fill={contrastText(seg.colors[0] ?? NONE_COLOR)} font-size="10" font-weight="600">{seg.pct.toFixed(0)}%</text>
+				{#each layout.groups as g (g.bars[0].bi)}
+					{#each g.bars as pb (pb.bi)}
+						{#each pb.bar.segments as seg, si (seg.key)}
+							{@const prevPct = pb.bar.segments.slice(0, si).reduce((sum, v) => sum + v.pct, 0)}
+							{@const y = TOP_PAD + CHART_H - ((prevPct + seg.pct) / 100) * CHART_H}
+							{@const h = (seg.pct / 100) * CHART_H}
+							{#if h > 0}
+								{@const li = data.legend.findIndex((e) => e.key === seg.key)}
+								<rect
+									x={pb.x} {y} width={layout.bw} height={h} rx="1"
+									fill={segFill(seg.colors, li)}
+									class="chart-seg"
+									class:selected={inspect?.bar === pb.bi && inspect?.key === seg.key}
+									role="button" tabindex="0" aria-label="{seg.label}: {seg.count} of {pb.bar.total}"
+									data-tooltip="{seg.label} — {seg.count}/{pb.bar.total} ({seg.pct.toFixed(0)}%) · click to inspect"
+									use:tip
+									onclick={() => toggleInspect(pb.bi, seg.key)}
+									onkeydown={(e) => e.key === 'Enter' && toggleInspect(pb.bi, seg.key)}
+								/>
+								{#if h > 14}
+									<text x={pb.x + layout.bw / 2} y={y + h / 2 + 4} text-anchor="middle" pointer-events="none"
+										fill={contrastText(seg.colors[0] ?? NONE_COLOR)} font-size="10" font-weight="600">{seg.pct.toFixed(0)}%</text>
+								{/if}
 							{/if}
+						{/each}
+						{#if pb.bar.sub}
+							<text x={pb.x + layout.bw / 2} y={TOP_PAD + CHART_H + 13} text-anchor="middle"
+								fill="var(--color-text-muted)" font-size="9" font-style="italic">{pb.bar.sub}</text>
 						{/if}
 					{/each}
-					<text x={x + barWidth / 2} y={topPad + chartHeight + 14} text-anchor="middle" fill="var(--color-text)" font-size="11" font-weight="500">
-						{#each wrapLabel(bar.model) as line, li (li)}
-							<tspan x={x + barWidth / 2} dy={li === 0 ? 0 : 13}>{line}</tspan>
+					<text x={g.center} y={TOP_PAD + CHART_H + (layout.hasSub ? 28 : 14)} text-anchor="middle" fill="var(--color-text)" font-size="11" font-weight="500">
+						{#each wrapLabel(g.model) as line, li (li)}
+							<tspan x={g.center} dy={li === 0 ? 0 : 13}>{line}</tspan>
 						{/each}
-						<tspan x={x + barWidth / 2} dy="14" fill="var(--color-text-muted)" font-size="10" font-weight="400">n={bar.total}</tspan>
+						<tspan x={g.center} dy="14" fill="var(--color-text-muted)" font-size="10" font-weight="400">n={g.total}</tspan>
 					</text>
 				{/each}
 			</svg>
@@ -258,7 +302,7 @@
 				<div class="chart-inspect">
 					<div class="chart-inspect-head">
 						<span class="chart-legend-swatch" style={swatchStyle(inspected.seg.colors)}></span>
-						<span class="chart-inspect-title">{inspected.seg.label} — {inspected.seg.count}/{inspected.bar.total} from {inspected.bar.model}</span>
+						<span class="chart-inspect-title">{inspected.seg.label} — {inspected.seg.count}/{inspected.bar.total} from {inspected.bar.model}{inspected.bar.sub ? ` · ${inspected.bar.sub}` : ''}</span>
 						<button class="chart-inspect-close" onclick={() => (inspect = null)} aria-label="Close inspector">×</button>
 					</div>
 					<div class="chart-inspect-list">
@@ -293,6 +337,7 @@
 	.chart-mode-btn + .chart-mode-btn { border-left: 1px solid var(--color-border); }
 	.chart-mode-btn.active { background: var(--color-accent); color: #fff; }
 	.chart-turn { font-size: 0.78rem; padding: 3px 6px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-bg); color: var(--color-text); max-width: 340px; }
+	.chart-check { display: inline-flex; align-items: center; gap: 5px; font-size: 0.78rem; color: var(--color-text-muted); cursor: pointer; user-select: none; }
 	.chart-question { font-size: 0.82rem; color: var(--color-text-muted); font-style: italic; margin-bottom: var(--space-4); padding: var(--space-2) var(--space-3); background: var(--color-bg); border-radius: var(--radius); border: 1px solid var(--color-border-light); }
 	.chart-question p { margin: 0; }
 	.chart-question p + p { margin-top: 4px; }

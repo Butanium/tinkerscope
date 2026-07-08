@@ -45,14 +45,18 @@ export type ChartSample = { content: string; reasoning?: string };
 export type MatchScope = 'response' | 'thinking' | 'either';
 
 /** One bar's worth of raw input: a model label + its samples for the charted
- *  turn. `matchOn` (rules mode) overrides the call-level scope for this bar. */
-export type ChartSource = { model: string; samples: ChartSample[]; matchOn?: MatchScope };
+ *  turn. `matchOn` (rules mode) overrides the call-level scope for this bar.
+ *  `sub` is a per-bar sub-label; consecutive bars sharing a model AND carrying
+ *  subs render as one named group of adjacent bars (the split view's
+ *  response|thinking pair under a single model name). */
+export type ChartSource = { model: string; samples: ChartSample[]; matchOn?: MatchScope; sub?: string };
 
 /** One assistant turn of one panel (the modal's turn picker iterates these). */
 export type ChartTurn = { question: string; samples: ChartSample[]; streaming?: boolean };
 
-/** Everything the chart modal needs from one panel. */
-export type ChartPanelData = { model: string; turns: ChartTurn[] };
+/** Everything the chart modal needs from one panel. Folded (reduced) panels
+ *  are tagged so the modal can exclude them by default. */
+export type ChartPanelData = { model: string; turns: ChartTurn[]; folded?: boolean };
 
 export type ChartSegment = {
 	/** Stable bucket id (rule-position combo like '0+2', '' for no-match; the
@@ -68,7 +72,7 @@ export type ChartSegment = {
 	/** Indices into the source's `samples` — powers click-to-inspect. */
 	sampleIdx: number[];
 };
-export type ChartBar = { model: string; total: number; segments: ChartSegment[] };
+export type ChartBar = { model: string; sub?: string; total: number; segments: ChartSegment[] };
 export type ChartData = {
 	bars: ChartBar[];
 	/** Segment order = stack order (bottom → top) = legend order. */
@@ -140,11 +144,12 @@ export function chartByRules(
 		};
 	};
 
-	const bars: ChartBar[] = sources.map(({ model, samples }, si) => {
+	const bars: ChartBar[] = sources.map(({ model, sub, samples }, si) => {
 		const buckets = perModel[si];
 		const total = samples.length;
 		return {
 			model,
+			sub,
 			total,
 			segments: ordered.map((key) => {
 				const b = buckets.get(key);
@@ -203,7 +208,7 @@ export function chartByAnswers(sources: ChartSource[]): ChartData | null {
 		colors: label === '[OTHER]' ? [] : [colorOf[label]]
 	}));
 
-	const bars: ChartBar[] = sources.map(({ model, samples }, si) => {
+	const bars: ChartBar[] = sources.map(({ model, sub, samples }, si) => {
 		const t = tallies[si];
 		const total = samples.length;
 		const other = { count: 0, sampleIdx: [] as number[] };
@@ -214,6 +219,7 @@ export function chartByAnswers(sources: ChartSource[]): ChartData | null {
 		}
 		return {
 			model,
+			sub,
 			total,
 			segments: orderedLabels.map((label) => {
 				const e = label === '[OTHER]' ? other : (t.get(label) ?? { count: 0, sampleIdx: [] });

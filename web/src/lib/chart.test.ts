@@ -138,6 +138,16 @@ eq(
 	)!;
 	eq('rules: split matchOn — response bar misses', split.bars[0].segments.find((s) => s.label === 'red')?.count ?? 0, 0);
 	eq('rules: split matchOn — thinking bar hits', split.bars[1].segments.find((s) => s.label === 'red')!.count, 1);
+	// sub-labels ride through to the bars (the modal groups adjacent same-model
+	// sub-labeled bars under one name)
+	const pair = chartByRules(
+		[
+			{ model: 'm', samples: src[0].samples, matchOn: 'response', sub: 'response' },
+			{ model: 'm', samples: src[0].samples, matchOn: 'thinking', sub: 'thinking' }
+		],
+		[RED, YEL]
+	)!;
+	eq('rules: sub carried onto bars', pair.bars.map((b) => b.sub), ['response', 'thinking']);
 	// an empty-answer sample (all budget in CoT) still counts toward the total
 	const empty = chartByRules([{ model: 'm', samples: [{ content: '', reasoning: 'red herring' }] }], [RED, YEL], 'thinking')!;
 	eq('rules: empty-answer sample counted', empty.bars[0].total, 1);
