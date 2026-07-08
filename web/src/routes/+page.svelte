@@ -15,6 +15,7 @@
 	} from '$lib/model-sel';
 	import { drainSamples } from '$lib/chat-stream';
 	import { chat, type ChatParams, type ChatModelField } from '$lib/chat.svelte';
+	import { panelScroll } from '$lib/scroll.svelte';
 	import type { ChartPanelData, ChartTurn } from '$lib/chart';
 	import { buildPanelView } from '$lib/panel-view';
 	import ChartModal from '$lib/ChartModal.svelte';
@@ -502,6 +503,7 @@
 			chat.clearPanelBucket(p.panel);
 			const { fireMsgs, prefill } = withPrefill(msgs);
 			fireOne(p, nodeId, fireMsgs, prefill);
+			panelScroll.snap(p.panel); // show the new user turn + arm stream-follow
 		}
 	}
 
@@ -520,6 +522,7 @@
 		chat.clearPanelBucket(panel);
 		const { fireMsgs, prefill } = withPrefill(msgs);
 		fireOne(pSel, nodeId, fireMsgs, prefill);
+		panelScroll.snap(panel); // show the new user turn + arm stream-follow
 	}
 
 	/** Assemble the current sampling params (shared state + the advanced-params
@@ -620,7 +623,7 @@
 		// Unknown id (e.g. a link from a different scan-root): ignore here — the
 		// initial-load path already normalized + notified.
 		if (!convo.list.some((c) => c.id === id)) return;
-		void convo.switchTo(id);
+		void convo.switchTo(id).then(() => panelScroll.snapAll()); // open at the latest turn
 	});
 
 	// ── Named conversations (dropdown) ────────────────────────────────
@@ -686,6 +689,7 @@
 	 *  branch at this level too, truncating back to the parent. */
 	function deleteMessage(panel: Panel, msg: ViewMessage, all = false) {
 		if (panelBusy(panel) || msg.nodeId == null) return;
+		panelScroll.preserve(panel);
 		chat.clearPanelBucket(panel);
 		const tree = convo.treeFor(panel);
 		convo.setTree(panel, all ? deleteSiblings(tree, msg.nodeId) : deleteSubtree(tree, msg.nodeId));
@@ -695,6 +699,7 @@
 	 *  overwrite the current branch in place (other siblings kept). */
 	function regenerate(panel: Panel, msg: ViewMessage, replace = false) {
 		if (panelBusy(panel) || msg.nodeId == null) return;
+		panelScroll.preserve(panel);
 		chat.clearPanelBucket(panel);
 		const plan = regenPlan(panel, msg.nodeId, replace);
 		if (!plan) return;
@@ -711,6 +716,7 @@
 			if (panelBusy(p.panel)) continue;
 			const node = activePath(convo.treeFor(p.panel))[depth];
 			if (!node) continue;
+			panelScroll.preserve(p.panel);
 			chat.clearPanelBucket(p.panel);
 			const plan = regenPlan(p.panel, node.id, replace);
 			if (plan) fireForPanel(p.panel, plan.userParentId, plan.fireMessages);
@@ -730,6 +736,7 @@
 		if (!userParentId || tree.nodes[userParentId]?.role !== 'user') return;
 		const pSel = panelSels.find((x) => x.panel === panel);
 		if (!pSel) return;
+		panelScroll.preserve(panel);
 		chat.clearPanelBucket(panel);
 		// Prefill = the FULL raw turn (reasoning + content reassembled), NOT just
 		// content: on auto-<think> families a content-only prefill makes the model
@@ -762,6 +769,7 @@
 	/** Cycle the active sibling at this row (‹k/N›). */
 	function cycleBranch(panel: Panel, msg: ViewMessage, delta: number) {
 		if (panelBusy(panel) || msg.nodeId == null) return;
+		panelScroll.preserve(panel);
 		chat.clearPanelBucket(panel);
 		convo.setTree(panel, cycleTree(convo.treeFor(panel), msg.nodeId, delta));
 	}
@@ -773,6 +781,7 @@
 		if (panelBusy(panel)) return;
 		const nid = msg.sampleNodeIds?.[sampleIndex];
 		if (!nid) return;
+		panelScroll.preserve(panel);
 		convo.setTree(panel, setSelected(convo.treeFor(panel), nid));
 		chat.clearPanelBucket(panel); // collapse the distribution view to the chosen branch
 	}
@@ -793,6 +802,7 @@
 		if (panelBusy(panel)) return;
 		const keep = msg.sampleNodeIds?.[sampleIndex];
 		if (!keep) return;
+		panelScroll.preserve(panel);
 		let tree = setSelected(convo.treeFor(panel), keep);
 		for (const sib of siblingsOf(tree, keep)) {
 			if (sib !== keep) tree = deleteSubtree(tree, sib);
@@ -807,6 +817,7 @@
 		if (panelBusy(panel)) return;
 		const nid = msg.sampleNodeIds?.[sampleIndex];
 		if (!nid) return;
+		panelScroll.preserve(panel);
 		convo.setTree(panel, deleteSubtree(convo.treeFor(panel), nid));
 		// Remove the card from the bucket overlay (keep the rest visible).
 		const bucket = live.panels[panel];
@@ -831,6 +842,7 @@
 		// Assistant turns may be thinking-only (empty answer) — keep the edit if
 		// either field has text; user turns still require a non-empty body.
 		if (!text && !(msg.role === 'assistant' && reasoning && reasoning.trim())) return;
+		panelScroll.preserve(panel);
 		chat.clearPanelBucket(panel);
 		if (msg.role === 'user') {
 			if (copyDownstream) {
@@ -906,6 +918,7 @@
 		if (!msgs.length) return;
 		chat.clearPanelBucket(destPanel);
 		convo.setTree(destPanel, treeFromMessages(msgs));
+		panelScroll.snap(destPanel); // fresh thread in dest — land on its latest turn
 	}
 
 	// ── Conversation rendering ────────────────────────────────────────
@@ -922,12 +935,24 @@
 		return buildPanelView(convo.treeFor(p.panel), live.panels[p.panel] ?? emptyPanel(), chat.firePrefill[p.panel]);
 	}
 
-	// Auto-scroll panels on new content.
-	let chatContainers: HTMLDivElement[] = [];
+	// Follow streamed tokens: pin a panel to its bottom ONLY while its bucket is
+	// running AND the user hasn't scrolled away (panelScroll.stick). Reading each
+	// running sample's text makes every token re-trigger this. Deliberately the
+	// only reactive scroll in the app — tree mutations PRESERVE position
+	// (panelScroll.preserve in the branching handlers) and deliberate jumps SNAP
+	// (send / conversation open / branch received). The old effect here depended
+	// on the whole shared state (`void s.panels`), so every SSE patch — the cycle
+	// mirror echo, the thinking toggle, param edits, the load cascade — re-pinned
+	// every panel to its bottom ~50 ms after the local DOM update: that async
+	// yank was the scroll flicker (see $lib/scroll.svelte.ts).
+	const scrollRegister = panelScroll.register;
 	$effect(() => {
-		// Touch reactive deps so this runs on every bus/state update.
-		void live.panels; void s.panels;
-		for (const el of chatContainers) if (el) el.scrollTop = el.scrollHeight;
+		for (const p of panelSels) {
+			const b = live.panels[p.panel];
+			if (!b?.running) continue;
+			for (const sm of b.samples) { void sm?.content; void sm?.reasoning; }
+			panelScroll.follow(p.panel);
+		}
 	});
 
 	// ── Prompt history (localStorage) ─────────────────────────────────
@@ -1382,6 +1407,7 @@
 				const honored = await convo.load(urlConvId);
 				if (urlConvId && !honored) flashConvNotice('That conversation was not found here — opened the most recent one instead.');
 				setConvUrl(convo.activeId, false);
+				void panelScroll.snapAll(); // trees just landed — open at the latest turn
 			} catch (e: any) { backendError = `Failed to load conversations: ${e?.message ?? e}`; }
 			await loadPins();
 			await loadHighlightRules();
@@ -1762,7 +1788,7 @@
 		<!-- Chat area -->
 		<div class="chat-area">
 			<div class="chat-columns" class:multi={isComparing}>
-				{#each panelSels as p, panelIdx (p.panel)}
+				{#each panelSels as p (p.panel)}
 					{#if convo.reducedPanels.has(p.panel)}
 						<div class="chat-column reduced">
 							<button class="restore-panel" onclick={() => convo.restorePanel(p.panel)} title="Restore this panel">
@@ -1782,8 +1808,13 @@
 								</button>
 							</div>
 						{/if}
-						<div class="messages" bind:this={chatContainers[panelIdx]}>
-							{#each view as msg, i (msg.nodeId ?? 'b' + i)}
+						<div class="messages" use:scrollRegister={p.panel}>
+							<!-- Rows are deliberately UNKEYED: they reconcile by position, so
+							     cycling a branch updates the row's props IN PLACE instead of
+							     remounting it (keying by nodeId made every cycle a destroy+mount
+							     → layout flash → scroll-anchor fight). ChatMessage's value-guarded
+							     reset effect handles the identity change. -->
+							{#each view as msg, i}
 								{@const isLastAssistant = !view.slice(i + 1).some((m) => m.role === 'assistant')}
 								<Message
 									{msg}
@@ -1815,28 +1846,31 @@
 									<div class="message-content loading-indicator"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
 								</div>
 							{/if}
-							{#if isComparing && convo.activeId && panelCanChat(p)}
-								<!-- Per-panel composer: continue ONLY this panel, independent of the
-								     other panel and of whatever it's doing. -->
-								<div class="panel-send">
-									<input
-										class="panel-send-input"
-										placeholder={panelBusy(p.panel) ? 'generating…' : '＋ continue this panel'}
-										bind:value={panelDraft[p.panel]}
-										disabled={panelBusy(p.panel)}
-										onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendToPanel(p.panel); } }}
-									/>
-									<button
-										class="panel-send-btn"
-										aria-label="Send to this panel"
-										disabled={panelBusy(p.panel) || !(panelDraft[p.panel] ?? '').trim()}
-										onclick={() => sendToPanel(p.panel)}
-									>
-										<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 8h10M8 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
-									</button>
-								</div>
-							{/if}
 						</div>
+						{#if isComparing && convo.activeId && panelCanChat(p)}
+							<!-- Per-panel composer: continue ONLY this panel, independent of the
+							     other panel and of whatever it's doing. Lives OUTSIDE the
+							     scrollable .messages so it stays stationary when branch cycling
+							     changes the content height above it (a longer reply extends
+							     below the fold instead of pushing the composer around). -->
+							<div class="panel-send">
+								<input
+									class="panel-send-input"
+									placeholder={panelBusy(p.panel) ? 'generating…' : '＋ continue this panel'}
+									bind:value={panelDraft[p.panel]}
+									disabled={panelBusy(p.panel)}
+									onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendToPanel(p.panel); } }}
+								/>
+								<button
+									class="panel-send-btn"
+									aria-label="Send to this panel"
+									disabled={panelBusy(p.panel) || !(panelDraft[p.panel] ?? '').trim()}
+									onclick={() => sendToPanel(p.panel)}
+								>
+									<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 8h10M8 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+								</button>
+							</div>
+						{/if}
 					</div>
 					{/if}
 				{/each}
@@ -2058,8 +2092,9 @@
 	.prefill-textarea { width: 100%; margin-top: var(--space-2); padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-accent); border-radius: var(--radius); color: var(--color-text); font-family: var(--font-mono, monospace); font-size: 0.8rem; line-height: 1.45; resize: vertical; }
 	.prefill-textarea:focus { outline: none; box-shadow: 0 0 0 1px var(--color-accent); }
 	.prefill-textarea::placeholder { color: var(--color-text-muted); opacity: 0.7; white-space: pre; }
-	.messages { flex: 1; overflow-y: auto; padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); scrollbar-width: none; }
-	.messages::-webkit-scrollbar { display: none; } /* hide the in-panel scrollbar (scroll still works) */
+	/* Thin (not hidden) scrollbar: with branch cycling preserving position, the
+	   scrollbar is the cue that a longer reply continues below the fold. */
+	.messages { flex: 1; overflow-y: auto; padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); scrollbar-width: thin; }
 
 	/* ── Input bar ─────────────────────────────────────────────────── */
 	.input-bar { padding: 0 var(--space-4) var(--space-3); background: var(--color-surface); border-top: 1px solid var(--color-border); flex-shrink: 0; }
