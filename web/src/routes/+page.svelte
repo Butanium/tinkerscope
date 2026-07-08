@@ -1486,9 +1486,9 @@
 				<div class="backend-error">{backendError}</div>
 			{/if}
 
-			<!-- Conversation picker (named, branchable) -->
+			<!-- Workspace picker (a saved conversation = one multi-panel workspace) -->
 			<div class="sidebar-section">
-				<label class="sidebar-label">Conversation</label>
+				<label class="sidebar-label">Workspace</label>
 				{#if renamingConv}
 					<!-- svelte-ignore a11y_autofocus -->
 					<input
