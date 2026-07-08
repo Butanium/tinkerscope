@@ -29,21 +29,16 @@ and in this file's reference section; HANDOFF.md itself is retired.
   "always ask before committing"). A `web/` pre-commit hook (`.githooks/pre-commit`,
   wired via `core.hooksPath`) runs `npm run build` and aborts the commit on a build
   failure; bypass a deliberate WIP commit with `git commit --no-verify`.
-- **Clément's live instance = `:8767`** (as of 2026-07-08): systemd user unit
-  `tinkerscope-8767` (transient, linger on, Restart=on-failure), scan root
-  `~/projects2/weird-personas`, running the **EDITABLE** uv tool install of this
-  checkout (`uv tool install -e .`; receipt must say `editable = …`). Because
-  it's editable, `main.py:_web_dist()` serves the checkout's `web/dist` and the
-  Python module resolves from `src/` — so: **backend change → `systemctl --user
-  restart tinkerscope-8767`; web change → `npm run build` (the pre-commit hook
-  does it on every `web/` commit) + browser refresh, NO restart.** Reinstall only
-  when `pyproject.toml` deps/entrypoints change — and then keep the `-e` flag: a
-  plain `uv tool install --force .` silently downgrades to a frozen wheel whose
-  bundled `web_dist` snapshot never updates again (this bit us once).
-- **Dev loop / "my change isn't showing".** For HMR iteration on *uncommitted*
-  web edits, `./run.sh <dir>` starts a vite dev server + its own backend (not
-  running by default). Otherwise remember `web/dist` only updates on
-  `npm run build` — NOT on a git commit or a restart.
+- **Deploys / "my change isn't showing".** A running instance never live-reloads:
+  a backend (Python) change needs a process restart; a web change needs
+  `npm run build` (the pre-commit hook runs it on every `web/` commit) and then
+  only a browser refresh — `main.py:_web_dist()` serves `web/dist` from disk per
+  request. If installing as a uv tool, install **editable** (`uv tool install -e .`)
+  so the process runs this checkout; a plain `uv tool install .` freezes a wheel
+  whose bundled `web_dist` snapshot never updates again. For HMR iteration on
+  *uncommitted* web edits, `./run.sh <dir>` starts a vite dev server + its own
+  backend. (Where the user's live instance actually runs — port, service, scan
+  root — is machine state: it lives in Claude's project memory, not in this file.)
 
 ## Where the contracts live (source of truth = code, not docs)
 
