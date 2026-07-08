@@ -16,7 +16,7 @@ from playwright.sync_api import sync_playwright
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8820"
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
-MODEL = "openrouter:liquid/lfm-2.5-1.2b-instruct:free"  # in the saved OR list
+MODEL = "openrouter:openrouter/free"  # free ROUTER (saved OR list) — survives single-provider outages
 N = 4
 SHOT = "/tmp/tinkerscope_n_samples.png"
 

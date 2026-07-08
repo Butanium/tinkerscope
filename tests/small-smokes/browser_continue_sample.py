@@ -17,8 +17,11 @@ live cards never show the tint — only the committed node does.
 
   uv run python tests/small-smokes/browser_continue_sample.py [BASE_URL] [MODEL]
 
-MODEL defaults to the free OpenRouter model; when its provider is down (502s —
-seen 2026-07-08), pass another saved OR model, e.g.
+MODEL defaults to `openrouter/free` — OpenRouter's free ROUTER, which picks any
+currently-up free model (survives single-provider outages, unlike a pinned :free
+model). The app sends reasoning effort:none (Thinking off), so routed thinking
+models shouldn't burn the 40-token budget on CoT; if the router still lands on a
+model that ignores that and the smoke flakes, pin a saved model instead, e.g.
 `openrouter:deepseek/deepseek-chat-v3.1` (still sub-cent for these tiny sends).
 """
 import json
@@ -32,7 +35,7 @@ from playwright.sync_api import sync_playwright
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8820"
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
-MODEL = sys.argv[2] if len(sys.argv) > 2 else "openrouter:liquid/lfm-2.5-1.2b-instruct:free"  # saved OR list
+MODEL = sys.argv[2] if len(sys.argv) > 2 else "openrouter:openrouter/free"  # free ROUTER (saved OR list)
 N = 2
 MAX_TOKENS = 40  # low on purpose: truncated samples make the continuation non-empty
 SHOT = "/tmp/tinkerscope_continue_sample.png"

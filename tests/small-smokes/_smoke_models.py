@@ -28,9 +28,12 @@ LIVE_RUN_ID = (
 LIVE_RUN_FAMILY = "explorations/04_2026-06-16_rationalization_char_training/results"
 
 # Fallbacks that don't depend on the servable window at all:
-#  - Free OpenRouter model = ZERO cost (needs OPENROUTER_API_KEY). Prefill is
-#    provider-dependent, so not ideal for continue checks.
-FREE_OR_MODEL = "liquid/lfm-2.5-1.2b-instruct:free"
+#  - Free OpenRouter ROUTER = ZERO cost (needs OPENROUTER_API_KEY). Routes each
+#    request to whichever free model is currently up, so it survives a single
+#    provider outage (a pinned :free model 502'd for a whole day, 2026-07-08).
+#    Caveats: the routed model varies per request; prefill is provider-dependent,
+#    so not ideal for continue checks — pin a paid model for those if it flakes.
+FREE_OR_MODEL = "openrouter/free"
 FREE_OR_RUN_ID = "openrouter:" + FREE_OR_MODEL
 #  - Cheap tinker BASE model (base weights aren't windowed like LoRA adapters).
 BASE_MODEL = "Qwen/Qwen3.5-4B"
