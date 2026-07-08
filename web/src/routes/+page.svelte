@@ -15,7 +15,7 @@
 	} from '$lib/model-sel';
 	import { drainSamples } from '$lib/chat-stream';
 	import { chat, type ChatParams, type ChatModelField } from '$lib/chat.svelte';
-	import { computeChartBars, type ChartData } from '$lib/chart';
+	import type { ChartPanelData, ChartTurn } from '$lib/chart';
 	import { buildPanelView } from '$lib/panel-view';
 	import ChartModal from '$lib/ChartModal.svelte';
 	import TagModal from '$lib/TagModal.svelte';
@@ -1243,8 +1243,10 @@
 	}
 
 	// ── Distribution chart ────────────────────────────────────────────
-	// The pure histogram→bars math + wrapLabel live in $lib/chart; buildChartData
-	// below only gathers each panel's samples from reactive state, then delegates.
+	// The bucketing math + all chart UI state (mode / turn picker / inspect) live
+	// in $lib/chart + ChartModal; this section only gathers each panel's per-turn
+	// samples from reactive state. `chartSources` is $derived so the open modal
+	// live-updates while a batch streams.
 	let showChart = $state(false);
 
 	function panelLabel(p: PanelSel | undefined): string {
@@ -1257,33 +1259,43 @@
 		return p.checkpoint ? `${name}@${p.checkpoint}` : name;
 	}
 
-	/** Gather each panel's samples (tree siblings, or the live bucket while still
-	 *  streaming) and hand them to the pure chart math in $lib/chart. */
-	function buildChartData(): ChartData | null {
-		const sources: { model: string; samples: string[] }[] = [];
+	/** Gather each panel's per-assistant-turn samples along the active path. For
+	 *  each turn, ALL tree siblings of the active assistant node (the full
+	 *  distribution across every regen batch), so the chart and the ‹k/N› cycler
+	 *  never disagree. An in-flight batch (not yet folded) is appended as a
+	 *  trailing `streaming` pseudo-turn so the chart fills in live. */
+	function buildChartSources(): ChartPanelData[] {
+		const out: ChartPanelData[] = [];
 		for (const p of panelSels) {
-			// Prefer the active assistant turn's ALL tree siblings (the full
-			// distribution across every regen batch), so the chart and the ‹k/N›
-			// cycler never disagree. Fall back to the live bucket while first
-			// streaming (before the fold).
 			const tree = convo.treeFor(p.panel);
-			const lastAsst = [...activePath(tree)].reverse().find((n) => n.role === 'assistant');
-			let samples: string[] = [];
-			if (lastAsst) {
-				samples = siblingsOf(tree, lastAsst.id)
-					.map((id) => tree.nodes[id]?.content)
-					.filter((c): c is string => !!c);
+			const turns: ChartTurn[] = [];
+			let lastQ = '';
+			for (const node of activePath(tree)) {
+				if (node.role === 'user') {
+					lastQ = node.content;
+					continue;
+				}
+				if (node.role !== 'assistant') continue;
+				const samples = siblingsOf(tree, node.id)
+					.map((id) => tree.nodes[id])
+					.filter((n) => n && n.role === 'assistant' && n.content)
+					.map((n) => ({ content: n.content, reasoning: n.reasoning }));
+				if (samples.length > 0) turns.push({ question: lastQ, samples });
 			}
-			if (!samples.length) {
-				samples = (live.panels[p.panel]?.samples ?? []).filter((x) => x && x.content).map((x) => x.content);
+			const bucket = live.panels[p.panel];
+			if (bucket?.running) {
+				const streamed = (bucket.samples ?? [])
+					.filter((x) => x && x.content && !x.error)
+					.map((x) => ({ content: x.content, reasoning: x.reasoning }));
+				if (streamed.length > 0) turns.push({ question: lastQ, samples: streamed, streaming: true });
 			}
-			if (samples.length > 0) sources.push({ model: panelLabel(p), samples });
+			if (turns.length > 0) out.push({ model: panelLabel(p), turns });
 		}
-		return computeChartBars(sources, lastUserQuestion());
+		return out;
 	}
 
-	let chartData = $state<ChartData | null>(null);
-	function openChart() { chartData = buildChartData(); showChart = true; }
+	const chartSources = $derived(showChart ? buildChartSources() : []);
+	function openChart() { showChart = true; }
 
 	// ── Health-based degradation banner ───────────────────────────────
 	let degraded = $derived.by(() => {
@@ -1863,7 +1875,7 @@
 
 <!-- Chart Modal -->
 {#if showChart}
-	<ChartModal data={chartData} onclose={() => (showChart = false)} />
+	<ChartModal sources={chartSources} onclose={() => (showChart = false)} />
 {/if}
 
 <!-- Tag Form Modal -->

@@ -93,6 +93,28 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
   (above): `/api/conversations` store + the sidebar dropdown. (We did NOT extend
   PlaygroundState to carry the trees — they live in their own store to keep the SSE
   snapshot small; only the active path stays in `messages`.)
+- [x] **Distribution chart overhaul — SHIPPED 2026-07-08.** The chart's default
+  mode now rides on the highlight rules: each sample bucketed by the SET of
+  matching rules — grey = no match, solid = one rule, **striped = multi-rule
+  combo** (stripes cycle the constituent rule colors). Turn picker (defaults to
+  the LATEST assistant turn), "match thinking" toggle, per-bar `n=`, hover
+  tooltips (count/total), click-a-segment → inspector listing that bucket's
+  samples with the matches painted, live-updating while a batch streams, and the
+  legacy exact-answer histogram behind a mode toggle.
+  - Files: `lib/chart.ts` (pure bucketing, 33 unit tests via `node
+    web/src/lib/chart.test.ts`), `lib/ChartModal.svelte` (all chart UI state),
+    `ruleMatches` in `lib/highlight-match.ts`, thin `chartSources` gatherer in
+    `+page.svelte`. Deterministic smoke (seeded 2-turn tree, zero model calls):
+    `tests/small-smokes/browser_chart_rules.py`.
+
+- [ ] **Highlight rules as FILTERS (requested 2026-07-08).** Let a rule act as a
+  filter, not just paint — e.g. show only samples (in the sample cards / cycler /
+  chart inspector) matching or not matching selected rules. Clément: "allow the
+  highlight to also serve as filters — that's for later / another context." Design
+  sketch: a per-rule filter toggle in the sidebar (off = paint-only), filtered
+  views get a "k of N shown" banner; the chart's rule buckets already compute the
+  match sets, so the filter predicate can reuse `ruleMatches`/`chartRules`.
+
 - [ ] **Generate view + "send to chat".** A scratchpad distinct from the chat: free
   prompt (text or messages builder) → sample across selected models side-by-side →
   promote a chosen result into a named conversation. (Dashboard's Multi-Generation

@@ -65,6 +65,18 @@ export function rulesForRole(rules: HighlightRule[], role?: string): HighlightRu
 	return rules.filter((r) => r.enabled && (!r.scope_role || r.scope_role === role));
 }
 
+/** Does `rule` match `text` at all? Combinator-gated boolean — the bucketing
+ *  primitive for the distribution chart (paintRanges is the *painting* one).
+ *  'and' requires every pattern present (via combinatorSatisfied); 'or' needs
+ *  any one. A rule with no compilable patterns matches nothing. */
+export function ruleMatches(rule: HighlightRule, text: string): boolean {
+	if (!combinatorSatisfied(rule, text)) return false;
+	return ruleRegexes(rule).some((re) => {
+		re.lastIndex = 0;
+		return re.test(text);
+	});
+}
+
 /** Non-overlapping match ranges over `text` for already-filtered rules (scope +
  *  combinator gating done by the caller). Paints every pattern of each rule. */
 export function paintRanges(text: string, rules: HighlightRule[]): Range[] {

@@ -9,7 +9,10 @@ export const tooltip = $state<{ text: string; x: number; y: number; visible: boo
 	visible: false
 });
 
-export function tip(node: HTMLElement) {
+// HTMLElement | SVGElement: the chart modal attaches tips to SVG bar segments;
+// everything used here (getAttribute, getBoundingClientRect, listeners) lives
+// on Element, so both work.
+export function tip(node: HTMLElement | SVGElement) {
 	// While the tooltip is shown, the caller may swap `data-tooltip` reactively
 	// (e.g. the action verb changes when shift/ctrl is pressed). Observe the
 	// attribute so the visible tooltip live-updates instead of showing stale text.

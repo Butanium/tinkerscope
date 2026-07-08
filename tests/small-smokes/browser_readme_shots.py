@@ -102,7 +102,7 @@ def main():
         # ── SHOT: distribution chart ──
         try:
             page.locator("button[data-tooltip^='View response distribution']").first.click()
-            page.wait_for_selector(".chart-modal", timeout=4000)
+            page.wait_for_selector(".modal-overlay", timeout=4000)
             page.wait_for_timeout(700)
             shot(page, "distribution-chart.png")
             page.locator(".modal-close").first.click()

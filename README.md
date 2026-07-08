@@ -92,8 +92,16 @@ cards** — a quick read on what the model "usually says":
 
 ![n>1 sample cards](docs/img/n-samples.png)
 
-Those draws also power a **Response Distribution** chart that buckets identical
-answers across every regeneration:
+Those draws also power a **Response Distribution** chart. Its default mode
+rides on your **highlight rules**: each sample is bucketed by the *set* of
+rules it matches — grey = no rule, a solid segment = exactly one rule, a
+**striped segment** = a multi-rule combo (e.g. a sample mentioning both *red*
+and *yellow*) — so "define a rule, see its prevalence per model" is one loop.
+A turn picker charts any turn of the conversation (defaults to the latest),
+segments are clickable (inspect exactly which samples landed in a bucket, with
+the matches painted), and a legacy **exact answers** mode still buckets
+identical responses for short constrained answers. The open chart live-updates
+while a batch streams.
 
 ![The response distribution chart](docs/img/distribution-chart.png)
 
@@ -214,10 +222,12 @@ store, highlights / prefs / OpenRouter-model CRUD, dataset path-traversal
 rejection). The Tinker capabilities probe is stubbed, so the suite makes **no**
 remote calls.
 
-The conversation-tree logic has its own pure unit suite
-(`node web/src/lib/tree.test.ts`, no dependencies), and there are Playwright
-browser smokes under `tests/small-smokes/` that exercise branching, compare, and
-the model-picker against a live server.
+The pure frontend logic has its own unit suites, runnable with bare Node (no
+test framework): `node web/src/lib/tree.test.ts` (branch trees),
+`highlight.test.ts` (highlight matching + render), `chart.test.ts`
+(distribution-chart bucketing), `panel-view.test.ts`. There are also Playwright
+browser smokes under `tests/small-smokes/` that exercise branching, compare,
+the model-picker, and the distribution chart against a live server.
 
 ---
 

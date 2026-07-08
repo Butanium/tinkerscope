@@ -24,9 +24,9 @@ def main() -> None:
         page.on("pageerror", lambda e: errors.append(str(e)))
 
         page.goto(BASE, wait_until="load", timeout=20000)
-        page.wait_for_function(
-            "document.body.innerText.includes('ed_sheeran')", timeout=15000
-        )
+        # App-loaded signal that works on ANY scan root (a run-name wait would
+        # couple this smoke to one particular fixture directory).
+        page.wait_for_selector("select.model-slot-select", timeout=15000)
 
         # Open the chart from the toolbar (its button carries this tooltip).
         page.click('button[data-tooltip^="View response distribution chart"]')

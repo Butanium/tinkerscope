@@ -80,7 +80,10 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     cycle, siblings). The single source of branching truth. **Has `tree.test.ts`.**
   - `lib/model-sel.ts` — the `openrouter:`/`base:`/`ckpt:` sentinel encoding
     (prefixes, predicates, id extractors) for a panel's model selection.
-  - `lib/chart.ts` — distribution-chart math (`computeChartBars`) + `wrapLabel`.
+  - `lib/chart.ts` — distribution-chart bucketing: `chartByRules` (samples
+    bucketed by the SET of matching highlight rules — grey none / solid single /
+    striped combo) + `chartByAnswers` (legacy exact-match histogram) + label
+    helpers. **Has `chart.test.ts`.**
   - `lib/chat-stream.ts` — `drainSamples`: parse the `/api/chat` SSE into samples.
   - `lib/highlight-match.ts` / `lib/highlight-render.ts` — pure matching + the
     markdown+math+highlight render pipeline. **`highlight.test.ts`.**
@@ -107,6 +110,11 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     `lib/SlideshowModal.svelte`, `lib/OrManagerModal.svelte`,
     `lib/TinkerPickerModal.svelte` — the six workspace modals. Each owns its body
     + specific styles; the parent passes data in and gets results via callbacks.
+    ChartModal is the smart one: it receives per-panel per-turn samples
+    (reactive; live-updates mid-stream) and owns mode toggle / turn picker
+    (defaults to the LATEST turn) / match-thinking / click-a-segment-to-inspect.
+    Deterministic smoke (seeded tree, no sampling):
+    `tests/small-smokes/browser_chart_rules.py`.
   - `lib/ChatMessage.svelte` — one chat row (committed node OR live bucket turn)
     + its per-row toolbar (edit/regen/branch/pin…).
   - `lib/ModelTypeahead.svelte` — the type-to-filter model combobox (used by the
