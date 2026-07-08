@@ -120,7 +120,9 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     + specific styles; the parent passes data in and gets results via callbacks.
     ChartModal is the smart one: it receives per-panel per-turn samples
     (reactive; live-updates mid-stream) and owns mode toggle / turn picker
-    (defaults to the LATEST turn) / match-thinking / click-a-segment-to-inspect.
+    (defaults to the LATEST turn) / match-scope / per-rule include-exclude
+    chips (drop a rule the prompt makes ubiquitous from the bucketing;
+    chart-only, session-scoped) / click-a-segment-to-inspect.
     Deterministic smoke (seeded tree, no sampling):
     `tests/small-smokes/browser_chart_rules.py`.
   - `lib/ChatMessage.svelte` — one chat row (committed node OR live bucket turn)

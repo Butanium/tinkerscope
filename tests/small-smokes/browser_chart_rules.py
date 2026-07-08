@@ -11,7 +11,11 @@ chart modal and asserts the whole new flow:
     single-rule buckets + the striped red+yellow combo + grey no-match, the
     combo segment is a striped <pattern> fill, and clicking it opens the
     inspector with the sample text highlight-painted
-  - the "exact answers" mode still gives the legacy per-answer histogram
+  - the per-rule chart toggles: clicking the "yellow" chip drops that rule from
+    the bucketing (legend collapses to red / no-match, the red+yellow sample
+    re-buckets as red, the open inspector closes), clicking again restores it
+  - the "exact answers" mode still gives the legacy per-answer histogram (and
+    hides the rule chips)
 
 Cleans up its rules + conversation afterwards. Run against the vite dev server
 (live source) or a built instance:
@@ -146,6 +150,27 @@ def main() -> None:
             checks.append(("inspected sample is highlight-painted", len(marks) >= 2))
             page.screenshot(path=SHOT_RULES)
 
+            # per-rule chart toggles: exclude "yellow" from the bucketing
+            chips = [el.inner_text() for el in page.query_selector_all(".chart-rule-chip")]
+            checks.append(("one chip per applicable rule", chips == ["red", "yellow"]))
+            page.click('.chart-rule-chip:has-text("yellow")')
+            page.wait_for_timeout(200)
+            legend_off = [el.inner_text() for el in page.query_selector_all(".chart-legend-label")]
+            checks.append(("yellow off: legend = red / no match", legend_off == ["red", "no match"]))
+            svg_off = page.text_content(".chart-svg") or ""
+            # red + "red and yellow" re-bucket together: 2/5 red, 3/5 no match
+            checks.append(("yellow off: red at 40%, no match at 60%",
+                           "40%" in svg_off and "60%" in svg_off))
+            checks.append(("toggling closes the stale inspector",
+                           page.query_selector(".chart-inspect") is None))
+            checks.append(("excluded chip is marked off",
+                           page.query_selector('.chart-rule-chip.off:has-text("yellow")') is not None))
+            page.click('.chart-rule-chip:has-text("yellow")')
+            page.wait_for_timeout(200)
+            legend_back = [el.inner_text() for el in page.query_selector_all(".chart-legend-label")]
+            checks.append(("re-including restores the full legend",
+                           legend_back == ["red", "yellow", "red + yellow", "no match"]))
+
             # exact-answers mode still works (legacy histogram)
             page.click('.chart-mode-btn:has-text("exact answers")')
             page.wait_for_timeout(200)
@@ -155,6 +180,8 @@ def main() -> None:
                  sorted(legend2) == sorted(["red", "yellow", "red and yellow", "nothing here at all"]))
             )
             checks.append(("answers mode: yellow at 40%", "40%" in (page.text_content(".chart-svg") or "")))
+            checks.append(("answers mode hides the rule chips",
+                           page.query_selector(".chart-rule-chip") is None))
             page.screenshot(path=SHOT_ANSWERS)
 
             checks.append(("no console/page errors", not errors))

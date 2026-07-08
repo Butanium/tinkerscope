@@ -11,6 +11,11 @@
         solid = one rule, striped = a multi-rule combo.
       · "exact answers": the legacy trimmed string-equality histogram (an
         empty answer buckets as [NO ANSWER], not dropped).
+  - per-rule chart toggles (rules mode) — a chip per applicable rule; clicking
+    one excludes it from the BUCKETING (not from chat painting): a rule the
+    prompt makes ubiquitous ("smoking" when the question is about smoking)
+    stripes every bucket and drowns the signal. Exclusions are chart-only,
+    session-scoped (module state — they survive close/reopen, not a reload).
   - match scope (rules mode) — which text the rules run against: response /
     thinking / either, or "split" = a response|thinking bar pair per model,
     adjacent under ONE model name (bucketed separately over the same samples).
@@ -22,6 +27,13 @@
     normal highlight pipeline so the matched patterns are painted (the thinking
     fold auto-opens when the scope involves thinking).
 -->
+<script lang="ts" module>
+	// Rule ids excluded from the chart's bucketing. Module-scoped so the choice
+	// survives the modal's destroy-on-close; deliberately NOT persisted — it's a
+	// per-question viewing tweak, not a property of the rule.
+	let chartOff = $state<string[]>([]);
+</script>
+
 <script lang="ts">
 	import Modal from './Modal.svelte';
 	import {
@@ -51,6 +63,21 @@
 	// Folded (reduced) panels are excluded by default; a toggle brings them in.
 	let includeFolded = $state(false);
 	let inspect = $state<{ bar: number; key: string } | null>(null);
+
+	// ── per-rule chart toggles (rules mode) ───────────────────────────
+	// The rules that could bucket assistant samples — each gets an on/off chip.
+	const applicableRules = $derived(chartRules(highlightStore.rules));
+	const activeRules = $derived(highlightStore.rules.filter((r) => !chartOff.includes(r.id)));
+	const allRulesOff = $derived(
+		applicableRules.length > 0 && applicableRules.every((r) => chartOff.includes(r.id))
+	);
+	function toggleRule(id: string) {
+		chartOff = chartOff.includes(id) ? chartOff.filter((x) => x !== id) : [...chartOff, id];
+		// Bucket keys are positional in the active-rule list — they all shift
+		// when the set changes, so a kept inspect selection would silently point
+		// at a different bucket.
+		inspect = null;
+	}
 
 	const hasFolded = $derived(sources.some((s) => s.folded));
 	const activeSources = $derived(sources.filter((s) => includeFolded || !s.folded));
@@ -111,7 +138,7 @@
 
 	const data = $derived(
 		mode === 'rules'
-			? chartByRules(chartSources, highlightStore.rules, matchScope === 'split' ? 'response' : matchScope)
+			? chartByRules(chartSources, activeRules, matchScope === 'split' ? 'response' : matchScope)
 			: chartByAnswers(chartSources)
 	);
 
@@ -216,6 +243,25 @@
 				</label>
 			{/if}
 		</div>
+		{#if mode === 'rules' && applicableRules.length > 0}
+			<div class="chart-rules" role="group" aria-label="Rules included in the chart">
+				{#each applicableRules as r (r.id)}
+					{@const off = chartOff.includes(r.id)}
+					<button
+						class="chart-rule-chip"
+						class:off
+						aria-pressed={!off}
+						data-tooltip={off
+							? 'Excluded from the chart — click to re-include'
+							: 'Click to exclude this rule from the bucketing (useful when it matches every sample)'}
+						use:tip
+						onclick={() => toggleRule(r.id)}
+					>
+						<span class="chart-rule-swatch" style="background: {r.color}"></span>{r.name}
+					</button>
+				{/each}
+			</div>
+		{/if}
 		{#if questionGroups.length === 1}
 			<p class="chart-question">{truncQ(questionGroups[0].q)}{streaming ? ' · streaming…' : ''}</p>
 		{:else if questionGroups.length > 1}
@@ -229,6 +275,8 @@
 		{#if !data || !layout}
 			{#if activeSources.length === 0}
 				<div class="backend-error">All panels with data are folded — enable “include folded panels” above to chart them.</div>
+			{:else if mode === 'rules' && allRulesOff}
+				<div class="backend-error">Every highlight rule is toggled off for this chart — click a rule chip above to re-include it.</div>
 			{:else if mode === 'rules'}
 				<div class="backend-error">No enabled highlight rules apply to assistant turns — add rules in the sidebar's Highlights panel, or switch to “exact answers”.</div>
 			{:else}
@@ -338,6 +386,11 @@
 	.chart-mode-btn.active { background: var(--color-accent); color: #fff; }
 	.chart-turn { font-size: 0.78rem; padding: 3px 6px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-bg); color: var(--color-text); max-width: 340px; }
 	.chart-check { display: inline-flex; align-items: center; gap: 5px; font-size: 0.78rem; color: var(--color-text-muted); cursor: pointer; user-select: none; }
+	.chart-rules { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
+	.chart-rule-chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--color-border); border-radius: 999px; background: var(--color-bg); color: var(--color-text); font-size: 0.76rem; padding: 2px 10px 2px 6px; cursor: pointer; }
+	.chart-rule-chip:hover { border-color: var(--color-text-muted); }
+	.chart-rule-chip.off { opacity: 0.45; text-decoration: line-through; }
+	.chart-rule-swatch { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 	.chart-question { font-size: 0.82rem; color: var(--color-text-muted); font-style: italic; margin-bottom: var(--space-4); padding: var(--space-2) var(--space-3); background: var(--color-bg); border-radius: var(--radius); border: 1px solid var(--color-border-light); }
 	.chart-question p { margin: 0; }
 	.chart-question p + p { margin-top: 4px; }
