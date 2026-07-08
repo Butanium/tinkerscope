@@ -77,6 +77,11 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     `fireOne` wrapper) over it.
   - `lib/highlights.svelte.ts` → `highlightStore` — user-defined render-time
     coloring rules + persistence.
+  - `lib/scroll.svelte.ts` → `panelScroll` — **the only scrollTop writer**: the
+    per-panel FOLLOW (streaming, stick-to-bottom gated) / PRESERVE (tree
+    mutations keep position) / SNAP (send, conversation open) scroll policy.
+    Its module docstring records why (the old global bottom-pin = the scroll
+    flicker). New scroll behavior goes through this store, never inline.
 - **Pure logic** — plain `.ts`, no Svelte/DOM, unit-testable (some have
   `*.test.ts`):
   - `lib/tree.ts` — all branch-tree ops (activePath, fold, regen, edit, delete,
