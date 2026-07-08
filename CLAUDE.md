@@ -29,13 +29,21 @@ and in this file's reference section; HANDOFF.md itself is retired.
   "always ask before committing"). A `web/` pre-commit hook (`.githooks/pre-commit`,
   wired via `core.hooksPath`) runs `npm run build` and aborts the commit on a build
   failure; bypass a deliberate WIP commit with `git commit --no-verify`.
-- **Dev loop / "my change isn't showing".** `:5180` (vite, `./run.sh`) is the HMR
-  dev server — serves live source, reflects edits instantly. A *built* instance
-  (`tinkerscope <dir>`) serves `web/dist` (the checkout build that
-  `main.py:_web_dist()` mounts), which only updates on `npm run build` — NOT on a
-  git commit or a restart. The pre-commit hook keeps `dist` fresh on every `web/`
-  commit, so: committed web change → restart the instance → current. For
-  *uncommitted* edits on a built instance, rebuild by hand or just use `:5180`.
+- **Clément's live instance = `:8767`** (as of 2026-07-08): systemd user unit
+  `tinkerscope-8767` (transient, linger on, Restart=on-failure), scan root
+  `~/projects2/weird-personas`, running the **EDITABLE** uv tool install of this
+  checkout (`uv tool install -e .`; receipt must say `editable = …`). Because
+  it's editable, `main.py:_web_dist()` serves the checkout's `web/dist` and the
+  Python module resolves from `src/` — so: **backend change → `systemctl --user
+  restart tinkerscope-8767`; web change → `npm run build` (the pre-commit hook
+  does it on every `web/` commit) + browser refresh, NO restart.** Reinstall only
+  when `pyproject.toml` deps/entrypoints change — and then keep the `-e` flag: a
+  plain `uv tool install --force .` silently downgrades to a frozen wheel whose
+  bundled `web_dist` snapshot never updates again (this bit us once).
+- **Dev loop / "my change isn't showing".** For HMR iteration on *uncommitted*
+  web edits, `./run.sh <dir>` starts a vite dev server + its own backend (not
+  running by default). Otherwise remember `web/dist` only updates on
+  `npm run build` — NOT on a git commit or a restart.
 
 ## Where the contracts live (source of truth = code, not docs)
 
