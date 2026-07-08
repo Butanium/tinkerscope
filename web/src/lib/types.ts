@@ -230,6 +230,8 @@ export type ViewMessage = {
 	/** Authored prefill this turn was generated from (raw text); the renderer colors
 	 *  the matching leading slice of content/reasoning as the prefilled portion. */
 	prefill?: string;
+	/** How generation ended — 'length' ⇒ cut off by max tokens (truncation badge). */
+	finish_reason?: string;
 	samples?: SampleData[];
 	totalSamples?: number;
 	running?: boolean;

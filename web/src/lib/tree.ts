@@ -25,6 +25,9 @@ export type TreeNode = {
 	 *  any `<think>`), persisted so the rendered turn can color the prefilled portion
 	 *  distinctly from the model's continuation. Absent ⇒ no prefill was used. */
 	prefill?: string;
+	/** How generation ended ('stop' | 'length' | …) — 'length' ⇒ cut off by the
+	 *  max-tokens limit; persisted so the truncation badge survives reload. */
+	finish_reason?: string;
 	parent: string | null; // null = child of the virtual root
 	children: string[]; // ordered
 };
@@ -48,6 +51,8 @@ export type SampleLike = {
 	/** The authored prefill this sample was generated from (raw text) — folded onto
 	 *  the node so the rendered turn can color the prefilled prefix. */
 	prefill?: string;
+	/** How generation ended — 'length' ⇒ cut off by the max-tokens limit. */
+	finish_reason?: string;
 	sample_index?: number;
 };
 
@@ -108,6 +113,7 @@ function cloneTree(t: ConvTree): ConvTree {
 			raw_text: n.raw_text,
 				raw_meta: n.raw_meta,
 			prefill: n.prefill,
+			finish_reason: n.finish_reason,
 			parent: n.parent,
 			children: [...n.children]
 		};
@@ -230,6 +236,7 @@ export function foldAssistant(
 			raw_text: s.raw_text,
 				raw_meta: s.raw_meta,
 			prefill: s.prefill,
+			finish_reason: s.finish_reason,
 			parent: parentUserId,
 			children: []
 		};

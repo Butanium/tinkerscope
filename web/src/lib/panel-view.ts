@@ -41,6 +41,7 @@ export function bucketTurn(run: PanelRun, prefill?: string): ViewMessage {
 		raw_text: one?.raw_text,
 		raw_meta: one?.raw_meta,
 		prefill: pf,
+		finish_reason: one?.finish_reason,
 		running: run.running
 	};
 }
@@ -57,6 +58,7 @@ export function buildPanelView(tree: ConvTree, run: PanelRun, prefill?: string):
 		raw_text: n.raw_text,
 		raw_meta: n.raw_meta,
 		prefill: n.prefill,
+		finish_reason: n.finish_reason,
 		nodeId: n.id,
 		sib: siblingInfo(tree, n.id),
 		isBucket: false

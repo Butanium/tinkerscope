@@ -118,8 +118,9 @@ Runs with `config_error` should still be listed (degraded).
 ```
 The **tree** is a per-panel branch structure owned by the frontend
 (`web/src/lib/tree.ts`): `nodes[id] = {id, role, content, reasoning?, raw_text?,
-parent, children[]}` + a `selected` map (parentId|`"__root__"` → selected child
-id). The linear ACTIVE PATH (root→leaf via `selected`) is what the sampler/CLI
+raw_meta?, prefill?, finish_reason?, parent, children[]}` + a `selected` map
+(parentId|`"__root__"` → selected child id). `finish_reason: "length"` marks a
+turn cut off by the max-tokens limit (the UI badges it). The linear ACTIVE PATH (root→leaf via `selected`) is what the sampler/CLI
 read — it is mirrored into `PlaygroundState.messages`. The server treats the tree
 as opaque JSON. Saves are flock-serialized; a corrupt file is backed up to
 `conversations.json.corrupt-<ts>` rather than reset. Stored at

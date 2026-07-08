@@ -23,6 +23,7 @@
 		onDelete,
 		onSelectSample,
 		onDiscardOthers,
+		onContinueSample,
 		onDeleteSample,
 		onEdit,
 		onCopy,
@@ -50,6 +51,7 @@
 		onDelete: (allPanels: boolean, allSiblings: boolean) => void;
 		onSelectSample: (sampleIndex: number) => void;
 		onDiscardOthers: (sampleIndex: number) => void;
+		onContinueSample: (sampleIndex: number) => void;
 		onDeleteSample: (sampleIndex: number) => void;
 		onEdit: (content: string, reasoning: string | undefined, copyDownstream: boolean, allPanels: boolean) => void;
 		onCopy: (all: boolean, withThinking: boolean) => void;
@@ -275,6 +277,7 @@
 		<div class="sample-header">
 			<span>Sample {idx + 1}</span>
 			{#if msg.activeSampleIndex === idx}<span class="active-sample-tag">active branch</span>{/if}
+			{#if sample.finish_reason === 'length'}{@render truncatedTag()}{/if}
 		</div>
 		{#if sample.reasoning}
 			<details
@@ -298,6 +301,9 @@
 		<div class="message-actions sample-actions">
 			<button class="btn-use" class:active={msg.activeSampleIndex === idx} data-tooltip="Make this the active branch & collapse to it (others stay as ‹k/N› siblings)" use:tip disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onSelectSample(idx)}>{msg.activeSampleIndex === idx ? '✓ active' : 'Make active'}</button>
 			<button class="btn-use" data-tooltip="Keep only this sample — discard the others" use:tip disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onDiscardOthers(idx)}>Discard others</button>
+			<button class="btn-act sample-continue" data-tooltip="Continue THIS sample — makes it the active branch, then the model extends it (n-samples → new branches to pick)" use:tip aria-label="Continue this sample" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onContinueSample(idx)}>
+				<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" /></svg>
+			</button>
 			{#if sample.raw_text}
 				<button class="btn-raw" class:active={rawSamples.has(idx)} onclick={() => toggleRawSample(idx)} title="Toggle raw model output with tags preserved">Raw</button>
 			{/if}
@@ -353,6 +359,15 @@
 {/snippet}
 {#snippet checkIcon()}
 	<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5L13 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
+{/snippet}
+
+<!-- "truncated" badge: the sample/turn hit the max-tokens limit ('length' finish
+     reason) and was cut off mid-generation. Continue (+) picks up where it stopped. -->
+{#snippet truncatedTag()}
+	<span
+		class="truncated-tag"
+		data-tooltip="Hit the max-tokens limit — the output is cut off. Continue (+) extends it."
+		use:tip>truncated</span>
 {/snippet}
 
 <!-- Continue (prefill) an assistant turn: extend it; n-samples → branches to pick.
@@ -464,7 +479,10 @@
 {#if msg.role !== 'assistant' || msg.content || msg.reasoning || isMultiSample || (msg.samples && msg.samples.some((x) => x && x.content))}
 	<div class="message" style="background: {roleColor(msg.role)};">
 		<div class="message-head">
-			<div class="message-role">{msg.role}</div>
+			<div class="message-head-left">
+				<div class="message-role">{msg.role}</div>
+				{#if msg.finish_reason === 'length' && !isMultiSample}{@render truncatedTag()}{/if}
+			</div>
 			{#if showSampleCycler}{@render sampleCycler()}{:else}{@render cycler()}{/if}
 		</div>
 		{#if msg.role === 'assistant' && msg.reasoning && !isMultiSample}
@@ -601,6 +619,9 @@
 	   (level with the role) so it stays put as the message/card resizes. */
 	.message-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin-bottom: var(--space-2); }
 	.message-head .message-role { margin-bottom: 0; }
+	.message-head-left { display: flex; align-items: center; gap: var(--space-2); }
+	/* Amber "truncated" pill — the turn/sample hit the max-tokens limit. */
+	.truncated-tag { font-size: 0.62rem; color: #b45309; background: #f59e0b14; border: 1px solid #f59e0b66; border-radius: var(--radius-pill); padding: 0 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; cursor: default; }
 	/* ── ‹k/N› cycler pill (branch siblings + sample cycle-view) ────── */
 	.branch-cycle { display: flex; align-items: center; gap: 2px; padding: 1px 4px; border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: var(--color-bg); width: fit-content; user-select: none; flex-shrink: 0; }
 	.branch-cycle-btn { display: flex; align-items: center; justify-content: center; padding: 2px; background: none; border: none; color: var(--color-text-muted); cursor: pointer; border-radius: var(--radius-sm); }

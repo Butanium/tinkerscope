@@ -96,7 +96,8 @@ async def sample_one(
     presence_penalty: float | None = None,
     repetition_penalty: float | None = None,
 ) -> dict:
-    """Run a single chat completion via OpenRouter. Returns {content, reasoning?, raw_text}."""
+    """Run a single chat completion via OpenRouter.
+    Returns {content, reasoning?, raw_text, finish_reason?}."""
     client = _get_client()
     kwargs = _build_kwargs(
         model=model, messages=messages, temperature=temperature, max_tokens=max_tokens,
@@ -126,6 +127,8 @@ async def sample_one(
     if reasoning:
         result["reasoning"] = reasoning
     result["raw_text"] = _raw_text(kwargs, content, reasoning)
+    if getattr(choice, "finish_reason", None):
+        result["finish_reason"] = choice.finish_reason  # "length" ⇒ cut by max_tokens
     return result
 
 
@@ -152,9 +155,12 @@ async def sample_one_stream(
     kwargs["stream"] = True
 
     content_acc, reason_acc = "", ""
+    finish: str | None = None
     stream = await client.chat.completions.create(**kwargs)
     async for ev in stream:
         ch = ev.choices[0] if ev.choices else None
+        if ch and getattr(ch, "finish_reason", None):
+            finish = ch.finish_reason
         d = ch.delta if ch else None
         rsn = (getattr(d, "reasoning_content", None) or getattr(d, "reasoning", None) or "") if d else ""
         cnt = (getattr(d, "content", None) or "") if d else ""
@@ -174,4 +180,6 @@ async def sample_one_stream(
     if reasoning:
         result["reasoning"] = reasoning
     result["raw_text"] = _raw_text(kwargs, content_acc, reasoning)
+    if finish:
+        result["finish_reason"] = finish  # "length" ⇒ cut by max_tokens
     yield result

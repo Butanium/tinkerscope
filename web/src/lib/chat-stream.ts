@@ -42,6 +42,7 @@ export async function drainSamples(res: Response): Promise<SampleLike[]> {
 						raw_meta: d.raw_meta,
 						error: d.error,
 						prefill_incorporated: d.prefill_incorporated,
+						finish_reason: d.finish_reason,
 						sample_index: d.sample_index ?? samples.length
 					});
 				}

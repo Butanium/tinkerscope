@@ -758,6 +758,17 @@
 		chat.clearPanelBucket(panel); // collapse the distribution view to the chosen branch
 	}
 
+	/** Continue ONE specific n>1 sample card: make it the active branch, then
+	 *  extend it via fireContinue — the continuations land as sibling branches
+	 *  (this sample stays as one of them). */
+	function continueSample(panel: Panel, msg: ViewMessage, sampleIndex: number) {
+		if (panelBusy(panel)) return;
+		const nid = msg.sampleNodeIds?.[sampleIndex];
+		if (!nid) return;
+		convo.setTree(panel, setSelected(convo.treeFor(panel), nid));
+		fireContinue(panel, nid);
+	}
+
 	/** Keep this sample, prune all its sibling samples, then collapse to it. */
 	function discardOtherSamples(panel: Panel, msg: ViewMessage, sampleIndex: number) {
 		if (panelBusy(panel)) return;
@@ -1750,6 +1761,7 @@
 									onDelete={(allPanels, allSiblings) => (allPanels ? deleteMessageAll(p.panel, msg, allSiblings) : deleteMessage(p.panel, msg, allSiblings))}
 									onSelectSample={(idx) => selectSample(p.panel, msg, idx)}
 									onDiscardOthers={(idx) => discardOtherSamples(p.panel, msg, idx)}
+									onContinueSample={(idx) => continueSample(p.panel, msg, idx)}
 									onDeleteSample={(idx) => deleteSample(p.panel, msg, idx)}
 									onEdit={(content, reasoning, copyDownstream, allPanels) => (allPanels ? applyEditAll(p.panel, msg, content, reasoning, copyDownstream) : applyEdit(p.panel, msg, content, reasoning, copyDownstream))}
 									onCopy={(all, withThinking) => copyMessage(p.panel, msg, all, withThinking)}

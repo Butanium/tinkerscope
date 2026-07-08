@@ -136,7 +136,8 @@ mark.hl-mark.hl-join-r { padding-right: 0; border-top-right-radius: 0; border-bo
 .btn-act-danger.btn-act-all:hover::after, .btn-act-danger.btn-act-all.shift-alt-danger::after { color: #ef4444; }
 /* Copy button just flashed → confirm with green ✓. */
 .btn-act.copied { color: #10b981; border-color: #10b981; background: #10b98112; }
-.sample-del { padding: 2px 5px; }
+.sample-del, .sample-continue { padding: 2px 5px; }
+.sample-continue:disabled { opacity: 0.4; cursor: not-allowed; }
 /* Send-branch-to-panel picker (compare): a compact ⇄ select in the row toolbar. */
 .send-to-select { font-size: 0.72rem; padding: 2px 4px; border: 1px solid transparent; border-radius: var(--radius); background: none; color: var(--color-text-muted); cursor: pointer; max-width: 2.4em; }
 .send-to-select:hover { color: var(--color-accent); border-color: var(--color-accent); max-width: none; }
