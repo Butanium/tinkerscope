@@ -143,6 +143,11 @@ as opaque JSON. Saves are flock-serialized; a corrupt file is backed up to
                           // the `thinking` field on message/sample events). Applies to
                           // run_id / base_model / openrouter_model; the loose sampler_path
                           // path ignores thinking entirely (server default template).
+  "prefill_thinking_only": false, // apply the trailing-assistant prefill ONLY to
+                          // thinking-mode sampling: thinking=false drops the prefill
+                          // turn entirely; "both" keeps it for the thinking half and
+                          // strips it from the non-thinking half (whose samples then
+                          // carry no prefill). No-op without a trailing assistant turn.
   "top_p": null, "top_k": null,
   "presence_penalty": null, "repetition_penalty": null,
   "panel": "primary",     // "primary" | "compare" — which compare pane this is

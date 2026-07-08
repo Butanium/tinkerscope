@@ -165,6 +165,9 @@ export type ChatRequest = {
 	max_tokens: number;
 	n_samples: number;
 	thinking: boolean | 'both';
+	/** Apply the trailing-assistant prefill only to thinking-mode sampling
+	 *  ('both': only the thinking half gets it; false: dropped entirely). */
+	prefill_thinking_only?: boolean;
 	top_p?: number | null;
 	top_k?: number | null;
 	presence_penalty?: number | null;

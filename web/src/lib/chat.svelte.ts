@@ -23,6 +23,7 @@ export type ChatParams = Pick<
 	| 'max_tokens'
 	| 'n_samples'
 	| 'thinking'
+	| 'prefill_thinking_only'
 	| 'top_p'
 	| 'top_k'
 	| 'presence_penalty'
@@ -100,9 +101,14 @@ class ChatStore {
 			// path, which also splits prefilled <think> into `reasoning`).
 			const samples = await drainSamples(res);
 			if (samples.length) {
+				// prefill_thinking_only + thinking='both': the backend stripped the
+				// prefill from the non-thinking half (tagged sm.thinking === false),
+				// so those samples must not get it prepended (nor carry `prefill`).
+				const skipPrefill = (sm: (typeof samples)[number]) =>
+					!!params.prefill_thinking_only && sm.thinking === false;
 				const folded = prefill
 					? samples.map((sm) =>
-							sm.error
+							sm.error || skipPrefill(sm)
 								? sm
 								: { ...sm, prefill, content: sm.prefill_incorporated ? sm.content : prefill + (sm.content ?? '') }
 						)

@@ -75,6 +75,11 @@ class ChatRequest(BaseModel):
     # False / True pick one renderer mode; "both" draws n_samples WITHOUT thinking
     # (sample_index 0..n-1) plus n_samples WITH (n..2n-1) in one chat — 2n total.
     thinking: bool | Literal["both"] = False
+    # Apply the trailing-assistant prefill ONLY to thinking-mode sampling: a
+    # thinking=False request drops the prefill turn entirely; thinking="both"
+    # keeps it for the thinking half and strips it from the non-thinking half.
+    # No-op when the messages don't end with an assistant turn.
+    prefill_thinking_only: bool = False
     top_p: float | None = None
     top_k: int | None = None
     presence_penalty: float | None = None
@@ -88,6 +93,12 @@ class ChatRequest(BaseModel):
     # external ones (CLI / another tab) it must fold via reconciliation. The
     # server never interprets it.
     client_token: str | None = None
+
+
+def _drop_trailing_assistant(msgs: list[dict]) -> list[dict]:
+    """Strip the prefill convention's trailing assistant turn (used by
+    prefill_thinking_only for the non-thinking side of a chat)."""
+    return msgs[:-1] if msgs and msgs[-1]["role"] == "assistant" else msgs
 
 
 def _resolve_checkpoint(run: discovery.Run, name: str | None):
@@ -185,6 +196,14 @@ async def chat(req: ChatRequest):
         sampling_msgs = [sys_msg, *sampling_msgs]
         native_msgs = [sys_msg, *native_msgs]
 
+    # prefill_thinking_only: non-thinking sampling must not see the prefill. The
+    # *_off variants feed every think=False path; think=True paths keep the full
+    # lists. A plain thinking=False request just swaps to the stripped lists.
+    sampling_off = _drop_trailing_assistant(sampling_msgs) if req.prefill_thinking_only else sampling_msgs
+    native_off = _drop_trailing_assistant(native_msgs) if req.prefill_thinking_only else native_msgs
+    if req.thinking is False:
+        sampling_msgs, native_msgs = sampling_off, native_off
+
     temperature = req.temperature if req.temperature is not None else 1.0
     max_tokens = req.max_tokens or 1024
     n = max(1, min(req.n_samples or 1, 200))
@@ -213,7 +232,8 @@ async def chat(req: ChatRequest):
 
                 def or_kwargs(think: bool) -> dict:
                     return dict(
-                        model=req.openrouter_model, messages=sampling_msgs,
+                        model=req.openrouter_model,
+                        messages=sampling_msgs if think else sampling_off,
                         temperature=temperature, max_tokens=max_tokens, thinking=think,
                         top_p=req.top_p, top_k=req.top_k, presence_penalty=req.presence_penalty,
                         repetition_penalty=req.repetition_penalty,
@@ -258,7 +278,8 @@ async def chat(req: ChatRequest):
                     return get_sampler().sample_stream(
                         base_model=req.base_model, sampler_path=None,
                         renderer_name=select_renderer_name(req.base_model, None, think),
-                        messages=native_msgs, n=n, temperature=temperature,
+                        messages=native_msgs if think else native_off,
+                        n=n, temperature=temperature,
                         max_tokens=max_tokens, top_p=req.top_p,
                     )
 
@@ -298,7 +319,8 @@ async def chat(req: ChatRequest):
                     return get_sampler().sample_stream(
                         base_model=run.base_model, sampler_path=ckpt.sampler_path,
                         renderer_name=select_renderer_name(run.base_model, run.renderer_name, think),
-                        messages=native_msgs, n=n,
+                        messages=native_msgs if think else native_off,
+                        n=n,
                         temperature=temperature, max_tokens=max_tokens, top_p=req.top_p,
                     )
 

@@ -391,7 +391,8 @@
 				panels: s.panels.map((p) => ({ id: p.id, run_id: p.run_id, checkpoint: p.checkpoint })),
 				temperature: s.temperature, max_tokens: s.max_tokens, n_samples: s.n_samples,
 				thinking: s.thinking, top_p: s.top_p,
-				top_k: topK, presence_penalty: presencePenalty, repetition_penalty: repetitionPenalty
+				top_k: topK, presence_penalty: presencePenalty, repetition_penalty: repetitionPenalty,
+				prefill: prefillInput, prefill_on: showPrefill, prefill_think_only: prefillThinkOnly
 			});
 			if (json === lastSessionJson) return; // selection/params unchanged (e.g. mid-stream)
 			lastSessionJson = json;
@@ -403,6 +404,7 @@
 		void s.panels;
 		void s.temperature; void s.max_tokens; void s.n_samples; void s.thinking; void s.top_p;
 		void topK; void presencePenalty; void repetitionPenalty;
+		void prefillInput; void showPrefill; void prefillThinkOnly;
 		persistSession();
 	});
 	/** Restore the saved selection/params — only when the process state is fresh
@@ -414,11 +416,20 @@
 			// Only restore into a FRESH process (no panel has a run selected yet), so we
 			// never clobber a session another tab/CLI already set.
 			const freshState = (live.state?.panels ?? []).every((p) => p.run_id == null);
-			if (raw && freshState) {
+			if (raw) {
 				const sess = JSON.parse(raw);
+				// Browser-local fields restore on EVERY load: a page reload keeps the
+				// server process (and its shared state) warm, so freshState is false —
+				// but these live only in this component and would otherwise be lost.
 				if (typeof sess.top_k === 'number') topK = sess.top_k;
 				if (typeof sess.presence_penalty === 'number') presencePenalty = sess.presence_penalty;
 				if (typeof sess.repetition_penalty === 'number') repetitionPenalty = sess.repetition_penalty;
+				if (typeof sess.prefill === 'string') prefillInput = sess.prefill;
+				if (typeof sess.prefill_on === 'boolean') showPrefill = sess.prefill_on;
+				if (typeof sess.prefill_think_only === 'boolean') prefillThinkOnly = sess.prefill_think_only;
+			}
+			if (raw && freshState) {
+				const sess = JSON.parse(raw);
 				const panels = Array.isArray(sess.panels) && sess.panels.length
 					? sess.panels.map((p: { id?: string; run_id?: string | null; checkpoint?: string | null }) => ({
 							id: p.id ?? 'primary', run_id: p.run_id ?? null, checkpoint: p.checkpoint ?? null, messages: []
@@ -455,12 +466,17 @@
 	// is remembered (shown as a peek) so re-opening restores it. So a prefill is applied
 	// to sends only while open + non-empty.
 	let showPrefill = $state(false);
+	// Apply the prefill only to thinking-mode sampling: thinking=false sends skip
+	// it entirely; 'both' sends give it to the thinking half only (backend flag).
+	let prefillThinkOnly = $state(false);
 	let prefillActive = $derived(showPrefill && prefillInput.trim().length > 0);
 	/** Append the active prefill (if any) as a trailing assistant turn so the model
 	 *  EXTENDS it; the returned `prefill` is prepended to each folded sample. Whitespace
 	 *  is preserved (a trailing `</think>\n\n` matters). Disabled (collapsed) ⇒ no-op. */
 	function withPrefill(msgs: ChatMessage[]): { fireMsgs: ChatMessage[]; prefill?: string } {
 		if (!prefillActive) return { fireMsgs: msgs };
+		// think-only prefill with thinking off ⇒ the prefill simply doesn't apply.
+		if (prefillThinkOnly && s.thinking === false) return { fireMsgs: msgs };
 		return { fireMsgs: [...msgs, { role: 'assistant', content: prefillInput }], prefill: prefillInput };
 	}
 	// Per-panel composer drafts for the "continue this panel" bubbles (compare).
@@ -515,6 +531,7 @@
 			max_tokens: s.max_tokens,
 			n_samples: s.n_samples,
 			thinking: s.thinking,
+			prefill_thinking_only: prefillThinkOnly,
 			top_p: s.top_p,
 			top_k: topK,
 			presence_penalty: presencePenalty,
@@ -1844,6 +1861,14 @@
 						data-tooltip="Prefill the assistant turn — the model continues from your text. Type raw <think> tags (Qwen/Kimi: open it yourself; DeepSeek auto-opens it). Collapse to disable (text is kept); click again to restore."
 						use:tip
 					>{prefillActive ? '✎ prefill on' : '＋ prefill assistant'}</button>
+					{#if showPrefill}
+						<label class="prefill-think-only" data-tooltip="Apply the prefill only when thinking is on — with Both, only the thinking half gets it" use:tip>
+							<input type="checkbox" bind:checked={prefillThinkOnly} /> think-only
+						</label>
+						{#if prefillThinkOnly && prefillActive && s.thinking === false}
+							<span class="prefill-inactive-note">inactive — thinking is off</span>
+						{/if}
+					{/if}
 					{#if prefillInput.trim() && !showPrefill}
 						<button class="prefill-peek" title="Prefill off — click to restore: {prefillInput}" onclick={() => (showPrefill = true)}>{prefillInput.replace(/\s+/g, ' ').slice(0, 80)}{prefillInput.length > 80 ? '…' : ''}</button>
 					{/if}
@@ -2024,6 +2049,8 @@
 	.prefill-row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0 0; }
 	.prefill-toggle { font-size: 0.7rem; padding: 2px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: var(--color-bg); color: var(--color-text-muted); cursor: pointer; flex-shrink: 0; }
 	.prefill-toggle.on { background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent); }
+	.prefill-think-only { display: inline-flex; align-items: center; gap: 4px; font-size: 0.68rem; color: var(--color-text-muted); cursor: pointer; user-select: none; flex-shrink: 0; }
+	.prefill-inactive-note { font-size: 0.66rem; color: var(--color-warn, #b45309); font-style: italic; flex-shrink: 0; }
 	.prefill-peek { font-size: 0.68rem; color: var(--color-text-muted); font-family: var(--font-mono, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; border: none; background: none; text-align: left; cursor: pointer; padding: 0; opacity: 0.75; }
 	.prefill-peek:hover { color: var(--color-accent); opacity: 1; }
 	.prefill-clear { font-size: 0.66rem; padding: 1px 6px; border: 1px solid transparent; border-radius: var(--radius-sm); background: none; color: var(--color-text-muted); cursor: pointer; flex-shrink: 0; }
