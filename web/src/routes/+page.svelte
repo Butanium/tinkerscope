@@ -23,6 +23,7 @@
 	import SlideshowModal from '$lib/SlideshowModal.svelte';
 	import OrManagerModal from '$lib/OrManagerModal.svelte';
 	import TinkerPickerModal from '$lib/TinkerPickerModal.svelte';
+	import ModelDropdown from '$lib/ModelDropdown.svelte';
 	import { loadHighlightRules } from '$lib/highlights.svelte';
 	import HighlightRules from '$lib/HighlightRules.svelte';
 	import type { Pin } from '$lib/types';
@@ -164,15 +165,27 @@
 		return m?.label || sp;
 	}
 
-	// ── Model picker filter (type-to-narrow the Models dropdown) ──────
-	// A shared, case-insensitive substring filter over the picker optgroups. The
-	// currently-selected option is always kept (see template) so the native
-	// <select> never goes blank when the filter would otherwise hide it.
-	let modelFilter = $state('');
-	function matchModel(...texts: (string | null | undefined)[]): boolean {
-		const mf = modelFilter.trim().toLowerCase();
-		if (!mf) return true;
-		return texts.some((t) => (t ?? '').toLowerCase().includes(mf));
+	// ── Model picker: selected-label + fold state ──────────────────────
+	// Filtering itself now lives on the dropdown (ModelDropdown → ModelTypeahead,
+	// type-to-narrow on open) rather than a separate "Filter models…" textbox.
+	// This just renders the trigger button's text — same iconography the old
+	// <select><option> text used (⊘/? sampleability, ◆/◇/↗ group markers).
+	function selectedModelLabel(sel: { run_id: string | null }): string {
+		if (!sel.run_id) return '';
+		if (isBaseSel(sel.run_id)) return `◆ ${baseLabel(sel.run_id)}`;
+		if (isCkptSel(sel.run_id)) return `◇ ${ckptLabel(sel.run_id)}`;
+		if (isOpenrouterSel(sel.run_id)) return `↗ ${openrouterLabel(sel.run_id)}`;
+		const r = runById(sel.run_id);
+		if (r) return `${r.sampleable === false ? '⊘ ' : r.sampleable === null ? '? ' : ''}${runLabel(r)}`;
+		return sel.run_id;
+	}
+
+	// The Models sidebar section is foldable (persisted locally) — collapse it
+	// once panels are set up to reclaim vertical space for the chat/params below.
+	let modelsCollapsed = $state(false);
+	function toggleModelsCollapsed() {
+		modelsCollapsed = !modelsCollapsed;
+		localStorage.setItem('playground-models-collapsed', modelsCollapsed ? '1' : '0');
 	}
 
 	// Whether shift is currently held — drives the alternate-action affordance on
@@ -1293,6 +1306,7 @@
 		if (saved === 'dark' || saved === 'light' || saved === 'auto') themeMode = saved;
 		const sv = localStorage.getItem('playground-sample-view');
 		if (sv === 'all' || sv === 'cycle') sampleView = sv;
+		modelsCollapsed = localStorage.getItem('playground-models-collapsed') === '1';
 		try {
 			const h = localStorage.getItem(HISTORY_KEY);
 			if (h) promptHistory = JSON.parse(h);
@@ -1486,17 +1500,19 @@
 				{/if}
 			</div>
 
-			<!-- Model picker: run + checkpoint, per panel -->
+			<!-- Model picker: run + checkpoint, per panel. Foldable — state persisted
+			     locally (see toggleModelsCollapsed). -->
 			<div class="sidebar-section">
-				<label class="sidebar-label">Models</label>
-				{#if runs.length + openrouterModels.length + recentBaseModels.length + recentCheckpoints.length > 4}
-					<input
-						class="sidebar-input model-filter"
-						type="text"
-						placeholder="Filter models…"
-						bind:value={modelFilter}
-					/>
-				{/if}
+				<button
+					type="button"
+					class="sidebar-label sidebar-section-toggle"
+					aria-expanded={!modelsCollapsed}
+					onclick={toggleModelsCollapsed}
+				>
+					<span>Models</span>
+					<svg class="section-chevron" class:open={!modelsCollapsed} width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+				</button>
+				{#if !modelsCollapsed}
 				{#each panelSels as p (p.panel)}
 					{@const pr = runById(p.run_id)}
 					{@const isOr = isOpenrouterSel(p.run_id)}
@@ -1505,65 +1521,35 @@
 					{@const orModel = openrouterBySel(p.run_id)}
 					{@const baseM = baseModelId(p.run_id)}
 					{@const sp = samplerPathOf(p.run_id)}
-					{@const fRuns = runs.filter((r) => r.id === p.run_id || matchModel(runLabel(r), r.id, r.base_model, r.wandb_project, r.renderer_name))}
-					{@const fBase = recentBaseModels.filter((t) => matchModel(t.label, t.base_model))}
-					{@const fCkpt = recentCheckpoints.filter((t) => matchModel(t.label, t.sampler_path))}
-					{@const fOr = openrouterModels.filter((m) => matchModel(m.label, m.openrouter_model))}
 					<!-- A selected base model / checkpoint that isn't in recents yet (e.g.
-					     came from the CLI / shared state) still needs an <option> so the
-					     select shows it. -->
+					     came from the CLI / shared state) still needs an entry so the
+					     dropdown shows it. -->
 					{@const baseInRecents = baseM != null && recentBaseModels.some((t) => t.base_model === baseM)}
 					{@const ckptInRecents = sp != null && recentCheckpoints.some((t) => t.sampler_path === sp)}
+					{@const modelItems = [
+						...runs.map((r) => ({
+							id: r.id,
+							label: `${r.sampleable === false ? '⊘ ' : r.sampleable === null ? '? ' : ''}${runLabel(r)}`,
+							disabled: r.sampleable === false,
+							search: [r.id, r.base_model, r.wandb_project, r.renderer_name].filter(Boolean).join(' ')
+						})),
+						...(baseM != null && !baseInRecents ? [{ id: BASE_PREFIX + baseM, label: `◆ ${baseLabel(p.run_id)}` }] : []),
+						...recentBaseModels.map((t) => ({ id: BASE_PREFIX + t.base_model, label: `◆ ${t.label || t.base_model}`, search: t.base_model })),
+						...(sp != null && !ckptInRecents ? [{ id: CKPT_PREFIX + sp, label: `◇ ${ckptLabel(p.run_id)}` }] : []),
+						...recentCheckpoints.map((t) => ({ id: CKPT_PREFIX + t.sampler_path, label: `◇ ${t.label || t.sampler_path}`, search: t.sampler_path })),
+						...openrouterModels.map((m) => ({ id: OR_PREFIX + m.openrouter_model, label: `↗ ${m.label || m.openrouter_model}`, search: m.openrouter_model }))
+					]}
 					<div class="model-block">
 						<div class="model-slot-row">
-							<select
-								class="sidebar-select model-slot-select"
-								value={p.run_id ?? ''}
-								onchange={(e) => setRun(p.panel, (e.target as HTMLSelectElement).value)}
-							>
-								{#if !p.run_id}
-									<option value="" disabled>Select a model…</option>
-								{/if}
-								{#if fRuns.length > 0}
-									<optgroup label="Runs">
-										{#each fRuns as r (r.id)}
-											<option value={r.id} disabled={r.sampleable === false}>
-												{r.sampleable === false ? '⊘ ' : r.sampleable === null ? '? ' : ''}{runLabel(r)}
-											</option>
-										{/each}
-									</optgroup>
-								{/if}
-								{#if fBase.length > 0 || (baseM != null && !baseInRecents)}
-									<optgroup label="Tinker base models">
-										{#if baseM != null && !baseInRecents}
-											<option value={BASE_PREFIX + baseM}>◆ {baseLabel(p.run_id)}</option>
-										{/if}
-										{#each fBase as t (t.base_model)}
-											<option value={BASE_PREFIX + t.base_model}>◆ {t.label || t.base_model}</option>
-										{/each}
-									</optgroup>
-								{/if}
-								{#if fCkpt.length > 0 || (sp != null && !ckptInRecents)}
-									<optgroup label="Tinker checkpoints">
-										{#if sp != null && !ckptInRecents}
-											<option value={CKPT_PREFIX + sp}>◇ {ckptLabel(p.run_id)}</option>
-										{/if}
-										{#each fCkpt as t (t.sampler_path)}
-											<option value={CKPT_PREFIX + t.sampler_path}>◇ {t.label || t.sampler_path}</option>
-										{/each}
-									</optgroup>
-								{/if}
-								{#if fOr.length > 0}
-									<optgroup label="OpenRouter">
-										{#each fOr as m (m.openrouter_model)}
-											<option value={OR_PREFIX + m.openrouter_model}>↗ {m.label || m.openrouter_model}</option>
-										{/each}
-									</optgroup>
-								{/if}
-								{#if fRuns.length + fBase.length + fCkpt.length + fOr.length === 0}
-									<option value={p.run_id ?? ''} disabled>No models match “{modelFilter}”</option>
-								{/if}
-							</select>
+							<div class="model-slot-select">
+								<ModelDropdown
+									items={modelItems}
+									selectedLabel={selectedModelLabel(p)}
+									placeholder="Select a model…"
+									filterPlaceholder={`Type to filter ${modelItems.length} models…`}
+									onpick={(id) => setRun(p.panel, id)}
+								/>
+							</div>
 							{#if p.panel !== 'primary'}
 								<button class="btn-remove-model" onclick={() => removePanel(p.panel)} title="Remove this panel">
 									<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
@@ -1624,6 +1610,7 @@
 						<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
 						{panelSels.length < 2 ? 'Compare' : 'Add panel'}
 					</button>
+				{/if}
 				{/if}
 			</div>
 
@@ -1927,9 +1914,14 @@
 	.sidebar-select { padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text); font-size: 0.82rem; }
 	.sidebar-select option:disabled { color: var(--color-text-muted); }
 	.sidebar-slider { width: 100%; accent-color: var(--color-accent); }
-	.model-filter { margin-bottom: var(--space-2); }
 	.sidebar-textarea { padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text); font-size: 0.82rem; font-family: var(--font-sans); resize: vertical; width: 100%; }
 	.sidebar-top-actions { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+	/* A `.sidebar-label` that's also a fold toggle (e.g. the Models section
+	   header): reset button chrome, spread label text + chevron apart. */
+	.sidebar-section-toggle { background: none; border: none; padding: 0; width: 100%; justify-content: space-between; cursor: pointer; }
+	.sidebar-section-toggle:hover { color: var(--color-text); }
+	.section-chevron { color: var(--color-text-muted); transition: transform 0.15s; flex-shrink: 0; }
+	.section-chevron.open { transform: rotate(180deg); }
 
 	/* ── Conversation picker ───────────────────────────────────────── */
 	.conv-row { display: flex; gap: var(--space-1); align-items: center; }
