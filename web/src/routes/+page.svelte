@@ -1264,7 +1264,9 @@
 	/** Gather each panel's per-assistant-turn samples along the active path. For
 	 *  each turn, ALL tree siblings of the active assistant node (the full
 	 *  distribution across every regen batch), so the chart and the ‹k/N› cycler
-	 *  never disagree. An in-flight batch (not yet folded) is appended as a
+	 *  never disagree. Samples whose answer is empty but that carry thinking
+	 *  (budget spent entirely in CoT) are KEPT — dropping them silently
+	 *  undercounted n. An in-flight batch (not yet folded) is appended as a
 	 *  trailing `streaming` pseudo-turn so the chart fills in live. */
 	function buildChartSources(): ChartPanelData[] {
 		const out: ChartPanelData[] = [];
@@ -1280,15 +1282,15 @@
 				if (node.role !== 'assistant') continue;
 				const samples = siblingsOf(tree, node.id)
 					.map((id) => tree.nodes[id])
-					.filter((n) => n && n.role === 'assistant' && n.content)
+					.filter((n) => n && n.role === 'assistant' && (n.content || n.reasoning))
 					.map((n) => ({ content: n.content, reasoning: n.reasoning }));
 				if (samples.length > 0) turns.push({ question: lastQ, samples });
 			}
 			const bucket = live.panels[p.panel];
 			if (bucket?.running) {
 				const streamed = (bucket.samples ?? [])
-					.filter((x) => x && x.content && !x.error)
-					.map((x) => ({ content: x.content, reasoning: x.reasoning }));
+					.filter((x) => x && (x.content || x.reasoning) && !x.error)
+					.map((x) => ({ content: x.content ?? '', reasoning: x.reasoning }));
 				if (streamed.length > 0) turns.push({ question: lastQ, samples: streamed, streaming: true });
 			}
 			if (turns.length > 0) out.push({ model: panelLabel(p), turns });

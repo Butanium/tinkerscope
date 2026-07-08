@@ -99,11 +99,16 @@ rides on your **highlight rules**: each sample is bucketed by the *set* of
 rules it matches — grey = no rule, a solid segment = exactly one rule, a
 **striped segment** = a multi-rule combo (e.g. a sample mentioning both *red*
 and *yellow*) — so "define a rule, see its prevalence per model" is one loop.
-A turn picker charts any turn of the conversation (defaults to the latest),
-segments are clickable (inspect exactly which samples landed in a bucket, with
-the matches painted), and a legacy **exact answers** mode still buckets
-identical responses for short constrained answers. The open chart live-updates
-while a batch streams.
+A **match-scope toggle** picks what the rules run against: the **response**,
+the **thinking**, **either**, or **split** — response and thinking as two
+adjacent bars per model. Samples that spent their whole budget thinking and
+never emitted an answer still count (they chart as *no match* / `[NO ANSWER]`
+rather than silently shrinking n). A turn picker charts any turn of the
+conversation (defaults to the latest; if panels diverge, each prompt is shown
+with its models), segments are clickable (inspect exactly which samples landed
+in a bucket, with the matches painted), and a legacy **exact answers** mode
+still buckets identical responses for short constrained answers. The open
+chart live-updates while a batch streams.
 
 ![The response distribution chart](docs/img/distribution-chart.png)
 

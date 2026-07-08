@@ -110,12 +110,37 @@ eq(
 	);
 }
 {
-	// reasoning matched only when includeReasoning is on
+	// match scope: response (default) / thinking / either
+	const redCount = (d: NonNullable<ReturnType<typeof chartByRules>>) =>
+		d.bars[0].segments.find((s) => s.label === 'red')?.count ?? 0;
 	const src = [{ model: 'm', samples: [{ content: 'plain', reasoning: 'secretly red' }] }];
-	const off = chartByRules(src, [RED, YEL], false)!;
-	eq('rules: reasoning ignored by default', off.bars[0].segments.find((s) => s.label === 'red')?.count ?? 0, 0);
-	const on = chartByRules(src, [RED, YEL], true)!;
-	eq('rules: reasoning matched when asked', on.bars[0].segments.find((s) => s.label === 'red')!.count, 1);
+	eq('rules: default scope = response only', redCount(chartByRules(src, [RED, YEL])!), 0);
+	eq('rules: thinking scope matches reasoning', redCount(chartByRules(src, [RED, YEL], 'thinking')!), 1);
+	eq('rules: either scope matches reasoning', redCount(chartByRules(src, [RED, YEL], 'either')!), 1);
+	eq(
+		'rules: either scope matches content too',
+		redCount(chartByRules([{ model: 'm', samples: [{ content: 'red', reasoning: 'hmm' }] }], [RED, YEL], 'either')!),
+		1
+	);
+	eq(
+		'rules: thinking scope ignores content',
+		redCount(chartByRules([{ model: 'm', samples: [{ content: 'red' }] }], [RED, YEL], 'thinking')!),
+		0
+	);
+	// per-source matchOn overrides the call scope — the split view's bar pairs
+	const split = chartByRules(
+		[
+			{ model: 'm (response)', samples: src[0].samples, matchOn: 'response' },
+			{ model: 'm (thinking)', samples: src[0].samples, matchOn: 'thinking' }
+		],
+		[RED, YEL],
+		'response'
+	)!;
+	eq('rules: split matchOn — response bar misses', split.bars[0].segments.find((s) => s.label === 'red')?.count ?? 0, 0);
+	eq('rules: split matchOn — thinking bar hits', split.bars[1].segments.find((s) => s.label === 'red')!.count, 1);
+	// an empty-answer sample (all budget in CoT) still counts toward the total
+	const empty = chartByRules([{ model: 'm', samples: [{ content: '', reasoning: 'red herring' }] }], [RED, YEL], 'thinking')!;
+	eq('rules: empty-answer sample counted', empty.bars[0].total, 1);
 }
 {
 	// two models share one legend; a bucket absent in one model is a 0% segment
@@ -181,6 +206,14 @@ ok('rules: no sources → null', chartByRules([], [RED]) === null);
 	eq('answers: [OTHER] count', other.count, 1);
 	eq('answers: [OTHER] keeps its sample index', other.sampleIdx, [99]);
 	eq('answers: [OTHER] is colorless (grey)', other.colors, []);
+}
+{
+	// an empty/whitespace answer buckets as [NO ANSWER] instead of vanishing
+	const d = chartByAnswers([{ model: 'm', samples: [{ content: '  ', reasoning: 'thought hard' }, { content: 'A' }] }])!;
+	ok('answers: empty answer buckets as [NO ANSWER]', d.legend.some((e) => e.label === '[NO ANSWER]'));
+	const seg = d.bars[0].segments.find((s) => s.label === '[NO ANSWER]')!;
+	eq('answers: [NO ANSWER] count + index', [seg.count, seg.sampleIdx], [1, [0]]);
+	eq('answers: total still counts it', d.bars[0].total, 2);
 }
 ok('answers: no sources → null', chartByAnswers([]) === null);
 

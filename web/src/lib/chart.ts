@@ -5,13 +5,16 @@
 // gathers per-panel/per-turn samples from reactive state and picks a turn;
 // the two builders here do the bucketing:
 //
-//   chartByRules(sources, rules)  — bucket each sample by the SET of enabled
-//     assistant-scoped highlight rules that match it. No match → the grey
-//     "no match" bucket; exactly one rule → a solid segment in that rule's
-//     color; several rules → a combo segment rendered as stripes of ALL the
-//     matched rules' colors. This is the default mode: it rides on the same
-//     rules that paint the chat, so "define a rule, see its prevalence" is one
-//     loop.
+//   chartByRules(sources, rules, scope)  — bucket each sample by the SET of
+//     enabled assistant-scoped highlight rules that match it. No match → the
+//     grey "no match" bucket; exactly one rule → a solid segment in that
+//     rule's color; several rules → a combo segment rendered as stripes of ALL
+//     the matched rules' colors. This is the default mode: it rides on the
+//     same rules that paint the chat, so "define a rule, see its prevalence"
+//     is one loop. `scope` picks the matched text — response / thinking /
+//     either — and a source can override it per-bar (`matchOn`), which is how
+//     the modal's "split" view charts one panel as adjacent response|thinking
+//     bars over the same samples.
 //   chartByAnswers(sources)       — the legacy exact-match histogram (trim +
 //     string-equality), still the right tool for short constrained answers
 //     ("reply with a single integer"). Rare answers (< MIN_FRACTION in every
@@ -34,11 +37,16 @@ export const NONE_COLOR = '#9aa4b2';
 // Answers below this fraction in EVERY model fold into a single [OTHER] segment.
 const MIN_FRACTION = 0.03;
 
-/** One sampled assistant reply, as the chart consumes it. */
+/** One sampled assistant reply, as the chart consumes it. `content` may be ''
+ *  (a sample that spent its whole budget thinking) — those still count. */
 export type ChartSample = { content: string; reasoning?: string };
 
-/** One bar's worth of raw input: a model label + its samples for the charted turn. */
-export type ChartSource = { model: string; samples: ChartSample[] };
+/** Which text of a sample the rules match against. */
+export type MatchScope = 'response' | 'thinking' | 'either';
+
+/** One bar's worth of raw input: a model label + its samples for the charted
+ *  turn. `matchOn` (rules mode) overrides the call-level scope for this bar. */
+export type ChartSource = { model: string; samples: ChartSample[]; matchOn?: MatchScope };
 
 /** One assistant turn of one panel (the modal's turn picker iterates these). */
 export type ChartTurn = { question: string; samples: ChartSample[]; streaming?: boolean };
@@ -67,9 +75,11 @@ export type ChartData = {
 	legend: { key: string; label: string; colors: string[] }[];
 };
 
-/** The text a rule matches against for one sample. */
-function matchText(s: ChartSample, includeReasoning: boolean): string {
-	return includeReasoning && s.reasoning ? s.reasoning + '\n' + s.content : s.content;
+/** The text a rule matches against for one sample, per scope. */
+function matchText(s: ChartSample, scope: MatchScope): string {
+	if (scope === 'response') return s.content;
+	if (scope === 'thinking') return s.reasoning ?? '';
+	return s.reasoning ? s.reasoning + '\n' + s.content : s.content;
 }
 
 /** The chart's own rule filter: enabled rules whose scope admits assistant turns. */
@@ -83,17 +93,17 @@ export function chartRules(rules: HighlightRule[]): HighlightRule[] {
 export function chartByRules(
 	sources: ChartSource[],
 	rules: HighlightRule[],
-	includeReasoning = false
+	scope: MatchScope = 'response'
 ): ChartData | null {
 	const active = chartRules(rules);
 	if (sources.length === 0 || active.length === 0) return null;
 
 	// Bucket key = the matched rules' positions in `active` (sorted), '' = none.
 	type Bucket = { count: number; sampleIdx: number[] };
-	const perModel: Map<string, Bucket>[] = sources.map(({ samples }) => {
+	const perModel: Map<string, Bucket>[] = sources.map(({ samples, matchOn }) => {
 		const buckets = new Map<string, Bucket>();
 		samples.forEach((s, i) => {
-			const text = matchText(s, includeReasoning);
+			const text = matchText(s, matchOn ?? scope);
 			const hit: number[] = [];
 			active.forEach((r, ri) => {
 				if (ruleMatches(r, text)) hit.push(ri);
@@ -164,7 +174,8 @@ export function chartByAnswers(sources: ChartSource[]): ChartData | null {
 	const tallies: Tally[] = sources.map(({ samples }) => {
 		const t: Tally = new Map();
 		samples.forEach((s, i) => {
-			const key = s.content.trim();
+			// '' = the sample never emitted an answer (all budget spent thinking).
+			const key = s.content.trim() || '[NO ANSWER]';
 			const e = t.get(key) ?? { count: 0, sampleIdx: [] };
 			e.count += 1;
 			e.sampleIdx.push(i);

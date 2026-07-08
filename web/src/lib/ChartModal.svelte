@@ -9,10 +9,16 @@
       · "highlight rules" (default when any assistant-scoped rule is enabled):
         each sample is bucketed by the SET of rules it matches — grey = none,
         solid = one rule, striped = a multi-rule combo.
-      · "exact answers": the legacy trimmed string-equality histogram.
-  - "match thinking" — rule matching over reasoning + answer, not just answer.
+      · "exact answers": the legacy trimmed string-equality histogram (an
+        empty answer buckets as [NO ANSWER], not dropped).
+  - match scope (rules mode) — which text the rules run against: response /
+    thinking / either, or "split" = two adjacent bars per model (response and
+    thinking bucketed separately over the same samples).
+  - the charted prompt(s) above the chart — grouped per distinct prompt, since
+    panels can diverge (each shows which models it belongs to).
   - click a segment → inspect its samples below the chart, rendered through the
-    normal highlight pipeline so the matched patterns are painted.
+    normal highlight pipeline so the matched patterns are painted (the thinking
+    fold auto-opens when the scope involves thinking).
 -->
 <script lang="ts">
 	import Modal from './Modal.svelte';
@@ -24,7 +30,8 @@
 		NONE_COLOR,
 		wrapLabel,
 		type ChartPanelData,
-		type ChartSource
+		type ChartSource,
+		type MatchScope
 	} from './chart';
 	import { highlightStore } from './highlights.svelte';
 	import { renderContent } from './render';
@@ -37,7 +44,8 @@
 		chartRules(highlightStore.rules).length > 0 ? 'rules' : 'answers'
 	);
 	let turnSel = $state('last'); // 'last' | stringified turn index
-	let matchThinking = $state(false);
+	// What the rules match against; 'split' = response|thinking as adjacent bars.
+	let matchScope = $state<MatchScope | 'split'>('response');
 	let inspect = $state<{ bar: number; key: string } | null>(null);
 
 	const turnCount = $derived(Math.max(0, ...sources.map((s) => s.turns.length)));
@@ -61,23 +69,40 @@
 	}
 
 	// Bars index-align with chartSources (so inspect can find the sample text).
-	const chartSources = $derived(
-		sources
+	// In split scope each panel expands to a (response, thinking) bar pair over
+	// the SAME samples array — the thinking bar only when any sample has CoT.
+	const chartSources = $derived.by(() => {
+		const picked = sources
 			.map((s) => ({ model: s.model, samples: pickTurn(s)?.samples ?? [] }))
-			.filter((s): s is ChartSource => s.samples.length > 0)
-	);
-	const question = $derived.by(() => {
+			.filter((s): s is ChartSource => s.samples.length > 0);
+		if (mode !== 'rules' || matchScope !== 'split') return picked;
+		return picked.flatMap((s) => {
+			const pair: ChartSource[] = [{ model: `${s.model} (response)`, samples: s.samples, matchOn: 'response' }];
+			if (s.samples.some((x) => x.reasoning))
+				pair.push({ model: `${s.model} (thinking)`, samples: s.samples, matchOn: 'thinking' });
+			return pair;
+		});
+	});
+	/** Charted prompt(s), grouped — panels can diverge on what was asked. */
+	const questionGroups = $derived.by(() => {
+		const groups: { q: string; models: string[] }[] = [];
 		for (const s of sources) {
 			const t = pickTurn(s);
-			if (t) return t.question;
+			if (!t) continue;
+			const g = groups.find((g) => g.q === t.question);
+			if (g) g.models.push(s.model);
+			else groups.push({ q: t.question, models: [s.model] });
 		}
-		return '';
+		return groups;
 	});
 	const streaming = $derived(sources.some((s) => pickTurn(s)?.streaming));
+	function truncQ(q: string): string {
+		return q.length > 200 ? '…' + q.slice(-200) : q;
+	}
 
 	const data = $derived(
 		mode === 'rules'
-			? chartByRules(chartSources, highlightStore.rules, matchThinking)
+			? chartByRules(chartSources, highlightStore.rules, matchScope === 'split' ? 'response' : matchScope)
 			: chartByAnswers(chartSources)
 	);
 
@@ -91,7 +116,12 @@
 		const seg = bar?.segments.find((s) => s.key === inspect!.key);
 		const src = chartSources[inspect.bar];
 		if (!bar || !seg || !src || seg.count === 0) return null;
-		return { bar, seg, samples: seg.sampleIdx.map((i) => src.samples[i]).filter(Boolean) };
+		// The scope this bar was matched under — the inspector auto-opens the
+		// thinking fold when the match could live there.
+		const scope: MatchScope =
+			mode !== 'rules' ? 'response'
+			: (src.matchOn ?? (matchScope === 'split' ? 'response' : matchScope));
+		return { bar, seg, scope, samples: seg.sampleIdx.map((i) => src.samples[i]).filter(Boolean) };
 	});
 
 	/** Legend/inspect swatch background — stripes for multi-rule combos. */
@@ -129,13 +159,27 @@
 				</select>
 			{/if}
 			{#if mode === 'rules'}
-				<label class="chart-check" data-tooltip="Also match rules against the thinking/CoT text" use:tip>
-					<input type="checkbox" bind:checked={matchThinking} /> match thinking
-				</label>
+				<div class="chart-mode" role="group" aria-label="Match scope">
+					<button class="chart-mode-btn" class:active={matchScope === 'response'} onclick={() => (matchScope = 'response')}
+						data-tooltip="Match rules against the response text only" use:tip>response</button>
+					<button class="chart-mode-btn" class:active={matchScope === 'thinking'} onclick={() => (matchScope = 'thinking')}
+						data-tooltip="Match rules against the thinking/CoT only" use:tip>thinking</button>
+					<button class="chart-mode-btn" class:active={matchScope === 'either'} onclick={() => (matchScope = 'either')}
+						data-tooltip="Match rules against thinking + response combined" use:tip>either</button>
+					<button class="chart-mode-btn" class:active={matchScope === 'split'} onclick={() => (matchScope = 'split')}
+						data-tooltip="Two adjacent bars per model — response and thinking, matched separately" use:tip>split</button>
+				</div>
 			{/if}
 		</div>
-		{#if question}
-			<p class="chart-question">{question.length > 200 ? '…' + question.slice(-200) : question}{streaming ? ' · streaming…' : ''}</p>
+		{#if questionGroups.length === 1}
+			<p class="chart-question">{truncQ(questionGroups[0].q)}{streaming ? ' · streaming…' : ''}</p>
+		{:else if questionGroups.length > 1}
+			<div class="chart-question">
+				{#each questionGroups as g (g.q)}
+					<p><span class="chart-q-models">{g.models.join(', ')}:</span> {truncQ(g.q)}</p>
+				{/each}
+				{#if streaming}<p>streaming…</p>{/if}
+			</div>
 		{/if}
 		{#if !data}
 			{#if mode === 'rules'}
@@ -221,14 +265,18 @@
 						{#each inspected.samples as s, i (i)}
 							<div class="chart-inspect-sample">
 								{#if s.reasoning}
-									<details class="chart-inspect-think">
+									<details class="chart-inspect-think" open={inspected.scope !== 'response'}>
 										<summary>thinking</summary>
 										<!-- eslint-disable-next-line svelte/no-at-html-tags -->
 										{@html renderContent(s.reasoning, 'assistant')}
 									</details>
 								{/if}
-								<!-- eslint-disable-next-line svelte/no-at-html-tags -->
-								{@html renderContent(s.content, 'assistant')}
+								{#if s.content.trim()}
+									<!-- eslint-disable-next-line svelte/no-at-html-tags -->
+									{@html renderContent(s.content, 'assistant')}
+								{:else}
+									<span class="chart-no-answer">[no answer — all budget spent thinking]</span>
+								{/if}
 							</div>
 						{/each}
 					</div>
@@ -245,8 +293,11 @@
 	.chart-mode-btn + .chart-mode-btn { border-left: 1px solid var(--color-border); }
 	.chart-mode-btn.active { background: var(--color-accent); color: #fff; }
 	.chart-turn { font-size: 0.78rem; padding: 3px 6px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-bg); color: var(--color-text); max-width: 340px; }
-	.chart-check { display: inline-flex; align-items: center; gap: 5px; font-size: 0.78rem; color: var(--color-text-muted); cursor: pointer; user-select: none; }
 	.chart-question { font-size: 0.82rem; color: var(--color-text-muted); font-style: italic; margin-bottom: var(--space-4); padding: var(--space-2) var(--space-3); background: var(--color-bg); border-radius: var(--radius); border: 1px solid var(--color-border-light); }
+	.chart-question p { margin: 0; }
+	.chart-question p + p { margin-top: 4px; }
+	.chart-q-models { font-weight: 600; font-style: normal; color: var(--color-text); }
+	.chart-no-answer { color: var(--color-text-muted); font-style: italic; font-size: 0.76rem; }
 	.chart-svg { display: block; max-height: 420px; }
 	.chart-svg text { font-family: var(--font-sans); }
 	.chart-seg { cursor: pointer; }
