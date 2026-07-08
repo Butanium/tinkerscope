@@ -3,9 +3,15 @@
 	// shows case-insensitive substring matches over `items`; click or Enter picks.
 	// No deps — keyboard-navigable (↑/↓/Enter/Esc). Used for both the Tinker base
 	// model catalog and the OpenRouter catalog (the 341-model list is NEVER
-	// rendered unfiltered — we cap visible rows and require a query to show all).
+	// rendered unfiltered — we cap visible rows and require a query to show all),
+	// AND as the panel body of `ModelDropdown.svelte` (the sidebar's per-panel
+	// model picker — a select-like trigger button wrapping this component).
 
-	type Item = { id: string; label: string };
+	// `search`: extra hidden text matched but never displayed (e.g. a run's
+	// wandb project / base model, so filtering isn't limited to the visible
+	// label). `disabled`: shown but not pickable (e.g. a run tinker can no
+	// longer sample) — greyed out, click/Enter on it is a no-op.
+	type Item = { id: string; label: string; disabled?: boolean; search?: string };
 
 	let {
 		items,
@@ -29,11 +35,17 @@
 	let active = $state(0);
 	let inputEl: HTMLInputElement | undefined = $state();
 
+	function isMatch(it: Item, q: string): boolean {
+		return (
+			it.id.toLowerCase().includes(q) ||
+			it.label.toLowerCase().includes(q) ||
+			(it.search ?? '').toLowerCase().includes(q)
+		);
+	}
+
 	const filtered = $derived.by(() => {
 		const q = query.trim().toLowerCase();
-		const matches = q
-			? items.filter((it) => it.id.toLowerCase().includes(q) || it.label.toLowerCase().includes(q))
-			: items;
+		const matches = q ? items.filter((it) => isMatch(it, q)) : items;
 		return matches.slice(0, maxRows);
 	});
 
@@ -41,15 +53,17 @@
 	const totalMatches = $derived.by(() => {
 		const q = query.trim().toLowerCase();
 		if (!q) return items.length;
-		return items.filter(
-			(it) => it.id.toLowerCase().includes(q) || it.label.toLowerCase().includes(q)
-		).length;
+		return items.filter((it) => isMatch(it, q)).length;
 	});
 
-	// Keep the active index in range as the filtered list changes.
+	// Keep the active index in range — and off a disabled row — as the filtered
+	// list changes (typing narrows it, items reload, etc).
 	$effect(() => {
-		void filtered;
 		if (active >= filtered.length) active = Math.max(0, filtered.length - 1);
+		if (filtered[active]?.disabled) {
+			const firstEnabled = filtered.findIndex((it) => !it.disabled);
+			if (firstEnabled !== -1) active = firstEnabled;
+		}
 	});
 
 	export function focus() {
@@ -57,18 +71,31 @@
 	}
 
 	function pick(it: Item) {
+		if (it.disabled) return;
 		onpick(it);
 		query = '';
 		active = 0;
 	}
 
+	/** Next index in `dir` (±1), skipping disabled rows; wraps around; gives up
+	 *  after a full lap (all-disabled list) and returns the current index. */
+	function stepActive(from: number, dir: 1 | -1): number {
+		if (!filtered.length) return 0;
+		let i = from;
+		for (let n = 0; n < filtered.length; n++) {
+			i = (i + dir + filtered.length) % filtered.length;
+			if (!filtered[i]?.disabled) return i;
+		}
+		return from;
+	}
+
 	function onKeydown(e: KeyboardEvent) {
 		if (e.key === 'ArrowDown') {
 			e.preventDefault();
-			if (filtered.length) active = (active + 1) % filtered.length;
+			if (filtered.length) active = stepActive(active, 1);
 		} else if (e.key === 'ArrowUp') {
 			e.preventDefault();
-			if (filtered.length) active = (active - 1 + filtered.length) % filtered.length;
+			if (filtered.length) active = stepActive(active, -1);
 		} else if (e.key === 'Enter') {
 			e.preventDefault();
 			const it = filtered[active];
@@ -105,8 +132,9 @@
 						type="button"
 						class="typeahead-row"
 						class:active={i === active}
-						disabled={busy}
-						onmouseenter={() => (active = i)}
+						class:disabled={it.disabled}
+						disabled={busy || it.disabled}
+						onmouseenter={() => { if (!it.disabled) active = i; }}
 						onclick={() => pick(it)}
 					>
 						<span class="typeahead-row-label">{it.label}</span>

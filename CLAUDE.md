@@ -121,7 +121,10 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
   - `lib/ChatMessage.svelte` — one chat row (committed node OR live bucket turn)
     + its per-row toolbar (edit/regen/branch/pin…).
   - `lib/ModelTypeahead.svelte` — the type-to-filter model combobox (used by the
-    OpenRouter + Tinker picker modals).
+    OpenRouter + Tinker picker modals, and as the panel body of `ModelDropdown`).
+  - `lib/ModelDropdown.svelte` — select-like trigger button + floating panel
+    wrapping `ModelTypeahead`; the sidebar's per-panel model picker (click →
+    type to filter, no separate "Filter models…" textbox).
   - `lib/HighlightRules.svelte` — the highlight-rules editor UI.
 
 Cross-component CSS utility classes (`.sidebar-label`, `.btn-new`,
