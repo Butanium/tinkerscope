@@ -14,6 +14,10 @@ chart modal and asserts the whole new flow:
   - the per-rule chart toggles: clicking the "yellow" chip drops that rule from
     the bucketing (legend collapses to red / no-match, the red+yellow sample
     re-buckets as red, the open inspector closes), clicking again restores it
+  - the thinking filter: turn 1 mixes one CoT sample (a0) with four without, so
+    the filter select appears there (and NOT on mix-free turn 2); "with
+    thinking" charts just a0, "without thinking" the other four, and the
+    filter also applies upstream of the exact-answers mode
   - the "exact answers" mode still gives the legacy per-answer histogram (and
     hides the rule chips)
 
@@ -69,8 +73,10 @@ def seed() -> str:
                "parent": "a0", "children": [f"b{i}" for i in range(len(turn2))]},
     }
     for i, a in enumerate(turn1):
+        # a0 carries a CoT so turn 1 mixes thinking / no-thinking samples
         nodes[f"a{i}"] = {"id": f"a{i}", "role": "assistant", "content": a,
-                          "parent": "u1", "children": (["u2"] if i == 0 else [])}
+                          "parent": "u1", "children": (["u2"] if i == 0 else []),
+                          **({"reasoning": "I will simply pick one."} if i == 0 else {})}
     for i, a in enumerate(turn2):
         nodes[f"b{i}"] = {"id": f"b{i}", "role": "assistant", "content": a,
                           "parent": "u2", "children": []}
@@ -105,7 +111,9 @@ def main() -> None:
             page.on("pageerror", lambda e: errors.append(str(e)))
 
             page.goto(f"{BASE}/?c={conv_id}", wait_until="load", timeout=20000)
-            page.wait_for_selector("select.model-slot-select", timeout=15000)
+            # .model-slot-select is a div since the ModelDropdown rework — this
+            # wait only means "sidebar booted", so don't pin the element kind
+            page.wait_for_selector(".model-slot-select", timeout=15000)
             # the seeded conversation's user turn is on screen ⇒ tree loaded
             page.wait_for_function(
                 "document.body.innerText.includes('Say a color.')", timeout=15000
@@ -124,6 +132,8 @@ def main() -> None:
             checks.append(("latest turn n=2", "n=2" in (page.text_content(".chart-svg") or "")))
             legend_t2 = [el.inner_text() for el in page.query_selector_all(".chart-legend-label")]
             checks.append(("latest turn legend = red / no match", legend_t2 == ["red", "no match"]))
+            checks.append(("mix-free turn hides the thinking filter",
+                           page.query_selector("select.chart-think") is None))
 
             # the turn picker switches back to turn 1
             page.select_option("select.chart-turn", value="0")
@@ -150,9 +160,12 @@ def main() -> None:
             checks.append(("inspected sample is highlight-painted", len(marks) >= 2))
             page.screenshot(path=SHOT_RULES)
 
-            # per-rule chart toggles: exclude "yellow" from the bucketing
+            # per-rule chart toggles: exclude "yellow" from the bucketing.
+            # Chips cover ALL applicable rules — the user's own rules included —
+            # so assert ours are among them, not an exact list (same robustness
+            # stance as the legend checks: foreign rules don't match our texts).
             chips = [el.inner_text() for el in page.query_selector_all(".chart-rule-chip")]
-            checks.append(("one chip per applicable rule", chips == ["red", "yellow"]))
+            checks.append(("seeded rules have chips", {"red", "yellow"} <= set(chips)))
             page.click('.chart-rule-chip:has-text("yellow")')
             page.wait_for_timeout(200)
             legend_off = [el.inner_text() for el in page.query_selector_all(".chart-legend-label")]
@@ -171,6 +184,25 @@ def main() -> None:
             checks.append(("re-including restores the full legend",
                            legend_back == ["red", "yellow", "red + yellow", "no match"]))
 
+            # thinking filter: turn 1 mixes a0 (with CoT) and four without
+            checks.append(("mixed turn shows the thinking filter",
+                           page.query_selector("select.chart-think") is not None))
+            page.select_option("select.chart-think", value="thinking")
+            page.wait_for_timeout(200)
+            legend_think = [el.inner_text() for el in page.query_selector_all(".chart-legend-label")]
+            svg_think = page.text_content(".chart-svg") or ""
+            checks.append(("with thinking: only the CoT sample (red, n=1)",
+                           legend_think == ["red"] and "n=1" in svg_think))
+            page.select_option("select.chart-think", value="no-thinking")
+            page.wait_for_timeout(200)
+            legend_nothink = [el.inner_text() for el in page.query_selector_all(".chart-legend-label")]
+            svg_nothink = page.text_content(".chart-svg") or ""
+            checks.append(("without thinking: the other 4, yellow at 50%",
+                           legend_nothink == ["yellow", "red + yellow", "no match"]
+                           and "n=4" in svg_nothink and "50%" in svg_nothink))
+            page.select_option("select.chart-think", value="all")
+            page.wait_for_timeout(200)
+
             # exact-answers mode still works (legacy histogram)
             page.click('.chart-mode-btn:has-text("exact answers")')
             page.wait_for_timeout(200)
@@ -183,6 +215,12 @@ def main() -> None:
             checks.append(("answers mode hides the rule chips",
                            page.query_selector(".chart-rule-chip") is None))
             page.screenshot(path=SHOT_ANSWERS)
+
+            # the thinking filter is upstream of both modes — answers mode too
+            page.select_option("select.chart-think", value="thinking")
+            page.wait_for_timeout(200)
+            legend3 = [el.inner_text() for el in page.query_selector_all(".chart-legend-label")]
+            checks.append(("answers mode + with thinking: just 'red'", legend3 == ["red"]))
 
             checks.append(("no console/page errors", not errors))
             if errors:

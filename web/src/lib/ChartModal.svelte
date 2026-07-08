@@ -19,6 +19,12 @@
   - match scope (rules mode) — which text the rules run against: response /
     thinking / either, or "split" = a response|thinking bar pair per model,
     adjacent under ONE model name (bucketed separately over the same samples).
+  - thinking filter — chart only the samples generated WITH (or without) a
+    chain of thought. One turn can mix both populations (regen batches with
+    the thinking toggle flipped; panels on different models), and their answer
+    distributions often differ. Applies to both bucketing modes, upstream of
+    them; only shown when the picked turn actually has a mix (inert otherwise,
+    so a hidden selection can't silently filter).
   - folded (reduced) panels are excluded by default; an "include folded
     panels" toggle appears when any are present.
   - the charted prompt(s) above the chart — grouped per distinct prompt, since
@@ -102,14 +108,35 @@
 		return `Turn ${k + 1}`;
 	}
 
+	// ── thinking filter ───────────────────────────────────────────────
+	// Chart only the samples generated with (or without) a CoT. Gated on the
+	// picked turn actually containing both populations; when it doesn't, the
+	// control hides AND the filter is treated as 'all' — a leftover selection
+	// must not silently filter a mix-free turn.
+	let thinkFilter = $state<'all' | 'thinking' | 'no-thinking'>('all');
+	const pickedRaw = $derived(
+		activeSources.map((s) => ({ model: s.model, samples: pickTurn(s)?.samples ?? [] }))
+	);
+	const hasThinkMix = $derived.by(() => {
+		const all = pickedRaw.flatMap((s) => s.samples);
+		return all.some((x) => x.reasoning) && all.some((x) => !x.reasoning);
+	});
+
 	// Bars index-align with chartSources (so inspect can find the sample text).
 	// In split scope each panel expands to a (response, thinking) bar pair over
 	// the SAME samples array — the thinking bar only when any sample has CoT.
 	// The pair shares the model name and differs by `sub`, which the layout
 	// below renders as adjacent bars under one label.
 	const chartSources = $derived.by(() => {
-		const picked = activeSources
-			.map((s) => ({ model: s.model, samples: pickTurn(s)?.samples ?? [] }))
+		const want = hasThinkMix ? thinkFilter : 'all';
+		const picked = pickedRaw
+			.map((s) => ({
+				model: s.model,
+				samples:
+					want === 'all'
+						? s.samples
+						: s.samples.filter((x) => (want === 'thinking') === !!x.reasoning)
+			}))
 			.filter((s): s is ChartSource => s.samples.length > 0);
 		if (mode !== 'rules' || matchScope !== 'split') return picked;
 		return picked.flatMap((s) => {
@@ -236,6 +263,20 @@
 					<button class="chart-mode-btn" class:active={matchScope === 'split'} onclick={() => (matchScope = 'split')}
 						data-tooltip="Two adjacent bars per model — response and thinking, matched separately" use:tip>split</button>
 				</div>
+			{/if}
+			{#if hasThinkMix}
+				<select
+					class="chart-think"
+					bind:value={thinkFilter}
+					onchange={() => (inspect = null)}
+					aria-label="Thinking filter"
+					data-tooltip="This turn mixes samples generated with and without thinking — chart one population at a time"
+					use:tip
+				>
+					<option value="all">all samples</option>
+					<option value="thinking">with thinking</option>
+					<option value="no-thinking">without thinking</option>
+				</select>
 			{/if}
 			{#if hasFolded}
 				<label class="chart-check" data-tooltip="Folded panels are excluded from the chart by default" use:tip>
@@ -384,7 +425,7 @@
 	.chart-mode-btn { border: none; background: var(--color-bg); color: var(--color-text-muted); font-size: 0.76rem; padding: 4px 10px; cursor: pointer; }
 	.chart-mode-btn + .chart-mode-btn { border-left: 1px solid var(--color-border); }
 	.chart-mode-btn.active { background: var(--color-accent); color: #fff; }
-	.chart-turn { font-size: 0.78rem; padding: 3px 6px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-bg); color: var(--color-text); max-width: 340px; }
+	.chart-turn, .chart-think { font-size: 0.78rem; padding: 3px 6px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-bg); color: var(--color-text); max-width: 340px; }
 	.chart-check { display: inline-flex; align-items: center; gap: 5px; font-size: 0.78rem; color: var(--color-text-muted); cursor: pointer; user-select: none; }
 	.chart-rules { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
 	.chart-rule-chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--color-border); border-radius: 999px; background: var(--color-bg); color: var(--color-text); font-size: 0.76rem; padding: 2px 10px 2px 6px; cursor: pointer; }
