@@ -141,9 +141,10 @@ class ConversationsStore {
 		this.save();
 	}
 
-	/** Drop a panel's tree (on panel removal). 'primary' is reserved/never dropped. */
+	/** Drop a panel's tree (on panel removal). The LAST tree is never dropped —
+	 *  a conversation always keeps at least one panel (any id). */
 	dropTree(panel: Panel): void {
-		if (panel === 'primary' || !(panel in this.trees)) return;
+		if (!(panel in this.trees) || Object.keys(this.trees).length <= 1) return;
 		const next = { ...this.trees };
 		delete next[panel];
 		this.trees = next;
@@ -224,7 +225,7 @@ class ConversationsStore {
 	/** Reset every open panel's tree to empty (fresh thread, same panel layout). */
 	#freshTrees(): Promise<void> {
 		const ids = (live.state?.panels ?? []).map((p) => p.id);
-		if (!ids.includes('primary')) ids.unshift('primary');
+		if (!ids.length) ids.push('primary'); // no panels known yet → the default first slot
 		this.trees = Object.fromEntries(ids.map((id) => [id, emptyTree()]));
 		return api
 			.setState({ panel_messages: Object.fromEntries(ids.map((id) => [id, []])) })
@@ -236,14 +237,17 @@ class ConversationsStore {
 	save(): void {
 		const id = this.activeId;
 		if (!id) return;
-		// Snapshot all trees; drop empty panels (no rootChildren) but ALWAYS keep
-		// 'primary' so a conversation never persists with zero trees.
+		// Snapshot all trees; drop empty panels (no rootChildren) but keep at least
+		// the FIRST one so a conversation never persists with zero trees.
 		const snap = $state.snapshot(this.trees) as Record<string, ConvTree>;
 		const trees: Record<string, ConvTree> = {};
 		for (const [pid, t] of Object.entries(snap)) {
-			if (pid === 'primary' || t.rootChildren.length) trees[pid] = t;
+			if (t.rootChildren.length) trees[pid] = t;
 		}
-		if (!trees.primary) trees.primary = emptyTree();
+		if (!Object.keys(trees).length) {
+			const first = Object.keys(snap)[0] ?? 'primary';
+			trees[first] = snap[first] ?? emptyTree();
+		}
 		this.#pending = {
 			id,
 			trees,
@@ -366,8 +370,7 @@ class ConversationsStore {
 		// A previous untouched draft is abandoned (don't pile up empty 'Untitled's).
 		this.#discardDraftIfUntouched();
 		const layout = panels && panels.length ? panels : this.#currentLayout();
-		const ids = layout.map((p) => p.id);
-		if (!ids.includes('primary')) ids.unshift('primary');
+		const ids = layout.map((p) => p.id); // non-empty (#currentLayout guarantees ≥1)
 		const now = new Date().toISOString();
 		// Pre-seed seen/send to the open panels (the default-on state) so the +page
 		// syncPanels reconcile finds nothing new and does NOT call save() — otherwise
@@ -381,7 +384,7 @@ class ConversationsStore {
 			id: id ?? crypto.randomUUID(),
 			name,
 			system_prompt: live.state?.system_prompt ?? null,
-			trees: { primary: emptyTree() },
+			trees: { [ids[0]]: emptyTree() },
 			panels: layout,
 			reduced_panels: [],
 			send_targets: [...ids],
@@ -471,26 +474,29 @@ class ConversationsStore {
 	 *  un-migrated saved conversation loads without losing a user-authored compare
 	 *  tree. asTree() returns emptyTree() on malformed input. */
 	async #loadTrees(conv: Conversation): Promise<void> {
-		// The cleaned layout we'll restore: drop every non-'primary' panel with no model
+		// The cleaned layout we'll restore: drop every panel with no model
 		// (run_id == null). Such a panel can't sample anything — it's the inert "phantom"
 		// the resurrection bug used to mint, and earlier sessions baked some into saved
 		// layouts. Dropping them on load self-heals those conversations (no per-conv manual
-		// delete). 'primary' is always kept (a blank primary is the empty-thread state).
+		// delete). If EVERY panel is blank, keep the first one (a single blank panel is
+		// the empty-thread state — a conversation never opens with zero panels).
 		// Legacy convs (no stored layout) ⇒ null ⇒ keep whatever panels are shown.
-		const layout =
+		let layout =
 			Array.isArray(conv.panels) && conv.panels.length
-				? conv.panels.filter((p) => p.id === 'primary' || p.run_id != null)
+				? conv.panels.filter((p) => p.run_id != null)
 				: null;
-		const keep = layout ? new Set([...layout.map((p) => p.id), 'primary']) : null;
+		if (layout && !layout.length) layout = [conv.panels![0]];
+		const keep = layout ? new Set(layout.map((p) => p.id)) : null;
 
 		if (conv.trees && typeof conv.trees === 'object') {
 			const map: Record<string, ConvTree> = {};
 			for (const [pid, t] of Object.entries(conv.trees)) map[pid] = asTree(t);
-			if (!map.primary) map.primary = emptyTree();
 			// Drop trees for panels not in the cleaned layout: a save can capture a tree
 			// for a since-removed (or now-dropped phantom) panel, and a lingering orphan
 			// tree is exactly what re-fed the phantom on every send.
 			if (keep) for (const pid of Object.keys(map)) if (!keep.has(pid)) delete map[pid];
+			// A conversation always loads with ≥1 tree (blank first slot = empty thread).
+			if (!Object.keys(map).length) map[layout?.[0]?.id ?? 'primary'] = emptyTree();
 			this.trees = map;
 		} else {
 			const map: Record<string, ConvTree> = { primary: asTree(conv.tree) };

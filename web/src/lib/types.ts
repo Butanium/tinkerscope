@@ -94,9 +94,11 @@ export type HighlightRule = {
  *  Open metadata bag; the server stamps id + created_at. */
 export type Pin = Record<string, any> & { id: string; created_at: string; note: string };
 
-/** Stable per-panel id. Reserved: 'primary' (always present, slot 0) and 'compare'
- *  (slot 1, also the legacy migration id); further panels are minted 'p-2','p-3',…
- *  NEVER an array index — closing a middle panel must not rebind a tree to another. */
+/** Stable per-panel id. 'primary' is the DEFAULT first-slot id and 'compare' the
+ *  default second (also the legacy migration id); further panels are minted
+ *  'p-2','p-3',… Any panel — including 'primary' — can be removed as long as one
+ *  panel remains; the invariant is "≥1 panel", not "primary exists". NEVER an
+ *  array index — closing a middle panel must not rebind a tree to another. */
 export type Panel = string;
 
 /** One panel's MODEL selection (no transcript) — the persisted, per-conversation

@@ -326,8 +326,9 @@
 			runs.find((r) => !used.has(r.id)) ??
 			runs[0];
 		const ck = other?.checkpoints.length ? other.checkpoints[other.checkpoints.length - 1].name : null;
-		// Seed the new panel's tree from primary so it starts from the same thread.
-		convo.duplicateTo('primary', id);
+		// Seed the new panel's tree from the FIRST panel so it starts from the same
+		// thread ('primary' may have been removed — first slot is the main thread).
+		convo.duplicateTo(panelSels[0]?.panel ?? 'primary', id);
 		const seedMsgs = activeMessages(convo.treeFor(id)) as ChatMessage[];
 		const nextPanels = [
 			...s.panels.map((p) => ({ ...p })),
@@ -337,7 +338,7 @@
 		// the new panel auto-joins sendTargets (active by default) via convo.syncPanels (the effect above)
 	}
 	function removePanel(panel: Panel) {
-		if (panel === 'primary') return; // primary is reserved/always present
+		if (s.panels.length <= 1) return; // keep at least one panel (any id — 'primary' is not special)
 		chat.stopGeneration(panel);
 		const nextPanels = s.panels.filter((p) => p.id !== panel).map((p) => ({ ...p }));
 		patchState({ panels: nextPanels }, true);
@@ -1209,7 +1210,7 @@
 	}
 
 	function lastUserQuestion(): string {
-		const msgs = activeMessages(convo.treeFor('primary'));
+		const msgs = activeMessages(convo.treeFor(panelSels[0]?.panel ?? 'primary'));
 		for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'user') return msgs[i].content;
 		return '';
 	}
@@ -1621,7 +1622,7 @@
 									onpick={(id) => setRun(p.panel, id)}
 								/>
 							</div>
-							{#if p.panel !== 'primary'}
+							{#if panelSels.length > 1}
 								<button class="btn-remove-model" onclick={() => removePanel(p.panel)} title="Remove this panel">
 									<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
 								</button>
