@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import AsyncIterator, Awaitable, Callable
+from typing import AsyncIterator, Awaitable, Callable, Literal
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -72,7 +72,9 @@ class ChatRequest(BaseModel):
     temperature: float | None = None
     max_tokens: int | None = None
     n_samples: int | None = None
-    thinking: bool = False
+    # False / True pick one renderer mode; "both" draws n_samples WITHOUT thinking
+    # (sample_index 0..n-1) plus n_samples WITH (n..2n-1) in one chat — 2n total.
+    thinking: bool | Literal["both"] = False
     top_p: float | None = None
     top_k: int | None = None
     presence_penalty: float | None = None
@@ -122,6 +124,48 @@ async def _fanout(make_one: Callable[[int], Awaitable[dict]], n: int) -> AsyncIt
         await asyncio.gather(*tasks, return_exceptions=True)
 
 
+async def _dual(
+    off_iter: AsyncIterator[dict], on_iter: AsyncIterator[dict], n_off: int
+) -> AsyncIterator[dict]:
+    """thinking="both": run the non-thinking and thinking batches CONCURRENTLY,
+    yielding samples from either as they finish. Each item gets a `thinking` tag
+    and the thinking batch's sample_index is offset by n_off, so 0..n-1 are the
+    non-thinking half and n..2n-1 the thinking half (foldAssistant orders by
+    index, so the browser shows them in that order regardless of arrival).
+    Mirrors _fanout's cancel-on-disconnect: consumer gone → both pumps cancelled."""
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def pump(it: AsyncIterator[dict], offset: int, thinking: bool) -> None:
+        try:
+            async for item in it:
+                item["sample_index"] = item.get("sample_index", 0) + offset
+                item["thinking"] = thinking
+                await queue.put(item)
+            await queue.put(None)  # this batch exhausted
+        except Exception as e:  # transported, not swallowed — re-raised by the consumer
+            await queue.put(e)
+
+    tasks = [
+        asyncio.create_task(pump(off_iter, 0, False)),
+        asyncio.create_task(pump(on_iter, n_off, True)),
+    ]
+    try:
+        pending = len(tasks)
+        while pending:
+            item = await queue.get()
+            if item is None:
+                pending -= 1
+            elif isinstance(item, Exception):
+                raise item
+            else:
+                yield item
+    finally:
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
 @router.post("/chat")
 async def chat(req: ChatRequest):
     # `msgs` is the per-panel transcript echo (answer-only, no system prompt). From it:
@@ -144,6 +188,11 @@ async def chat(req: ChatRequest):
     temperature = req.temperature if req.temperature is not None else 1.0
     max_tokens = req.max_tokens or 1024
     n = max(1, min(req.n_samples or 1, 200))
+    # thinking="both" = a non-thinking batch of n + a thinking batch of n in one
+    # chat (2n samples total). Only meaningful on paths where WE pick the renderer
+    # (openrouter / base_model / run_id); the loose sampler_path ignores thinking
+    # today and keeps doing so (n samples, server default template).
+    both = req.thinking == "both"
     # n==1 token-streams live through the oai endpoints. EXCEPTION: discovered LoRA
     # runs (run_id) — tinker's oai /completions serves the BASE model for a LoRA
     # sampler path (tinker-feedback#125), so the live single-sample path would
@@ -153,27 +202,36 @@ async def chat(req: ChatRequest):
     # streaming (base via /completions is correct; loose via /chat applies adapters).
     # TODO(tinker-feedback#125): when fixed, drop `and req.run_id is None` to restore
     # token streaming for single samples from LoRA runs.
-    stream = (n == 1) and (req.run_id is None)
+    stream = (n == 1) and (req.run_id is None) and not both
 
     async def gen():
         # ── resolve the model + build the per-sample producer ───────────────
+        total = n  # expected sample count for this chat (2n when thinking="both")
         try:
             if req.openrouter_model:
                 label = req.openrouter_model
-                if stream:
-                    produce_iter = openrouter.sample_one_stream(
+
+                def or_kwargs(think: bool) -> dict:
+                    return dict(
                         model=req.openrouter_model, messages=sampling_msgs,
-                        temperature=temperature, max_tokens=max_tokens, thinking=req.thinking,
+                        temperature=temperature, max_tokens=max_tokens, thinking=think,
                         top_p=req.top_p, top_k=req.top_k, presence_penalty=req.presence_penalty,
                         repetition_penalty=req.repetition_penalty,
                     )
+
+                if both:
+                    total = 2 * n
+                    produce_iter = _dual(
+                        _fanout(lambda i: openrouter.sample_one(**or_kwargs(False)), n),
+                        _fanout(lambda i: openrouter.sample_one(**or_kwargs(True)), n),
+                        n,
+                    )
+                elif stream:
+                    produce_iter = openrouter.sample_one_stream(**or_kwargs(bool(req.thinking)))
                 else:
-                    produce_iter = _fanout(lambda i: openrouter.sample_one(
-                        model=req.openrouter_model, messages=sampling_msgs,
-                        temperature=temperature, max_tokens=max_tokens, thinking=req.thinking,
-                        top_p=req.top_p, top_k=req.top_k, presence_penalty=req.presence_penalty,
-                        repetition_penalty=req.repetition_penalty,
-                    ), n)
+                    produce_iter = _fanout(
+                        lambda i: openrouter.sample_one(**or_kwargs(bool(req.thinking))), n
+                    )
                 sel_patch: dict = {}
             elif req.sampler_path:
                 # Loose checkpoint: oai /chat/completions, server renders (default template).
@@ -195,8 +253,20 @@ async def chat(req: ChatRequest):
                 if caps.get("available") and req.base_model not in discovery._supported_base_set(caps):
                     raise ValueError(f"tinker does not currently serve {req.base_model}")
                 label = req.base_model
-                renderer_name = select_renderer_name(req.base_model, None, req.thinking)
-                if stream:
+
+                def base_iter(think: bool):
+                    return get_sampler().sample_stream(
+                        base_model=req.base_model, sampler_path=None,
+                        renderer_name=select_renderer_name(req.base_model, None, think),
+                        messages=native_msgs, n=n, temperature=temperature,
+                        max_tokens=max_tokens, top_p=req.top_p,
+                    )
+
+                if both:
+                    total = 2 * n
+                    produce_iter = _dual(base_iter(False), base_iter(True), n)
+                elif stream:
+                    renderer_name = select_renderer_name(req.base_model, None, req.thinking)
                     _, prompt_text, stop = await get_sampler().render(
                         req.base_model, renderer_name, native_msgs
                     )
@@ -205,11 +275,7 @@ async def chat(req: ChatRequest):
                         temperature=temperature, max_tokens=max_tokens, top_p=req.top_p,
                     )
                 else:
-                    produce_iter = get_sampler().sample_stream(
-                        base_model=req.base_model, sampler_path=None, renderer_name=renderer_name,
-                        messages=native_msgs, n=n, temperature=temperature,
-                        max_tokens=max_tokens, top_p=req.top_p,
-                    )
+                    produce_iter = base_iter(bool(req.thinking))
                 sel_patch = {}  # frontend tracks the base-model selection (sentinel)
             else:
                 if not req.run_id:
@@ -226,9 +292,21 @@ async def chat(req: ChatRequest):
                     raise ValueError(
                         f"no sampler checkpoint '{req.checkpoint or '(last)'}' in run {req.run_id}"
                     )
-                renderer_name = select_renderer_name(run.base_model, run.renderer_name, req.thinking)
                 label = f"{run.name}@{ckpt.name}"
-                if stream:
+
+                def run_iter(think: bool):
+                    return get_sampler().sample_stream(
+                        base_model=run.base_model, sampler_path=ckpt.sampler_path,
+                        renderer_name=select_renderer_name(run.base_model, run.renderer_name, think),
+                        messages=native_msgs, n=n,
+                        temperature=temperature, max_tokens=max_tokens, top_p=req.top_p,
+                    )
+
+                if both:
+                    total = 2 * n
+                    produce_iter = _dual(run_iter(False), run_iter(True), n)
+                elif stream:
+                    renderer_name = select_renderer_name(run.base_model, run.renderer_name, req.thinking)
                     _, prompt_text, stop = await get_sampler().render(
                         run.base_model, renderer_name, native_msgs
                     )
@@ -237,11 +315,7 @@ async def chat(req: ChatRequest):
                         temperature=temperature, max_tokens=max_tokens, top_p=req.top_p,
                     )
                 else:
-                    produce_iter = get_sampler().sample_stream(
-                        base_model=run.base_model, sampler_path=ckpt.sampler_path,
-                        renderer_name=renderer_name, messages=native_msgs, n=n,
-                        temperature=temperature, max_tokens=max_tokens, top_p=req.top_p,
-                    )
+                    produce_iter = run_iter(bool(req.thinking))
                 sel_patch = {"run_id": run.id, "checkpoint": ckpt.name}
         except Exception as e:
             # pre-start failure (unknown/unsampleable run, bad checkpoint): surface
@@ -270,7 +344,7 @@ async def chat(req: ChatRequest):
         if req.broadcast:
             await BUS.broadcast(
                 "chat_start",
-                {"chat_id": chat_id, "panel": req.panel, "n": n, "label": label, "client_token": req.client_token},
+                {"chat_id": chat_id, "panel": req.panel, "n": total, "label": label, "client_token": req.client_token},
             )
 
         # ── stream samples (delta chunks for n==1, whole samples otherwise) ──

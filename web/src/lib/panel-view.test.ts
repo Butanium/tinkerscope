@@ -81,6 +81,18 @@ test('error sample slot maps to empty id, keeping the card→node alignment', ()
 	eq(last.sampleNodeIds, [kids[0], ''], 'fold→id, error→empty');
 });
 
+// ── thinking='both' folds: the per-node mode reaches the rendered row ──
+test('a folded node’s thinking mode lands on its ViewMessage', () => {
+	let { tree, nodeId: userId } = appendUserTurn(emptyTree(), 'q');
+	({ tree } = foldAssistant(tree, userId, [
+		{ content: 'plain', thinking: false, sample_index: 0 },
+		{ content: 'cot', thinking: true, sample_index: 1 }
+	]));
+	const out = buildPanelView(tree, run({}));
+	const last = out[out.length - 1];
+	eq(last.thinking, false, 'active sibling (first fold) is the no-think half');
+});
+
 // ── run.error appends a trailing error row ──
 test('run.error appends an error ViewMessage', () => {
 	const { tree } = folded(1);

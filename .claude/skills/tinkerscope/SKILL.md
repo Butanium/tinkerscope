@@ -42,8 +42,10 @@ tinkpg refresh                                      # rescan filesystem + re-pro
 ```
 
 `chat`/`compare` options: `--n N` (samples), `--temperature T`, `--max-tokens M`,
-`--thinking` (thinking renderer), `--system "…"`, `--checkpoint NAME` (overrides
-`@`). `tinkpg <cmd> --help` for the rest.
+`--thinking` (thinking renderer), `--thinking-both` (n samples WITHOUT thinking +
+n WITH in one chat — 2n total, no-think half first; overrides `--thinking`),
+`--system "…"`, `--checkpoint NAME` (overrides `@`). `tinkpg <cmd> --help` for
+the rest.
 
 ## Reading state vs. conversations (they are DIFFERENT stores)
 

@@ -84,8 +84,10 @@ shared across all projects, and need `OPENROUTER_API_KEY` to sample.
 Pick a run, type a prompt, hit Enter. The sidebar exposes the usual knobs:
 **temperature, max tokens, number of samples, top-p**, plus **top-k / presence /
 repetition penalties** (OpenRouter-only — Tinker models honor temperature and
-top-p). There's a **thinking toggle** for models that support it, and a **system
-prompt** field that travels with the conversation.
+top-p). There's a **thinking toggle** for models that support it — it cycles
+**OFF → ON → BOTH**, where BOTH draws n samples *without* thinking plus n *with*
+(2n total, each card tagged think / no-think) so you can compare the two modes
+in one send — and a **system prompt** field that travels with the conversation.
 
 Set **n > 1** and a single send fans out into N draws, rendered as **sample
 cards** — a quick read on what the model "usually says":
@@ -204,7 +206,8 @@ tinkpg refresh                         # rescan the filesystem + Tinker capabili
 `<run>` accepts a full run id or any **unique substring** of its id/name; ambiguous
 matches list the candidates. Because run ids contain `/`, the run@checkpoint
 separator is `@` (`tinkpg chat foo/bar/run@final "hi"`), or use `--checkpoint`.
-`tinkpg chat` also takes `--temperature`, `--max-tokens`, `--thinking`, and
+`tinkpg chat` also takes `--temperature`, `--max-tokens`, `--thinking`,
+`--thinking-both` (n samples without thinking + n with, 2n total), and
 `--system`.
 
 ---

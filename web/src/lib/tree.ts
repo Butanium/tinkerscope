@@ -28,6 +28,10 @@ export type TreeNode = {
 	/** How generation ended ('stop' | 'length' | …) — 'length' ⇒ cut off by the
 	 *  max-tokens limit; persisted so the truncation badge survives reload. */
 	finish_reason?: string;
+	/** Renderer mode this sample was drawn with — set ONLY by thinking='both'
+	 *  batches (false = non-thinking half, true = thinking half); persisted so the
+	 *  think / no-think chip survives reload. Absent on single-mode turns. */
+	thinking?: boolean;
 	parent: string | null; // null = child of the virtual root
 	children: string[]; // ordered
 };
@@ -53,6 +57,8 @@ export type SampleLike = {
 	prefill?: string;
 	/** How generation ended — 'length' ⇒ cut off by the max-tokens limit. */
 	finish_reason?: string;
+	/** Renderer mode (thinking='both' batches only) — see TreeNode.thinking. */
+	thinking?: boolean;
 	sample_index?: number;
 };
 
@@ -114,6 +120,7 @@ function cloneTree(t: ConvTree): ConvTree {
 				raw_meta: n.raw_meta,
 			prefill: n.prefill,
 			finish_reason: n.finish_reason,
+			thinking: n.thinking,
 			parent: n.parent,
 			children: [...n.children]
 		};
@@ -237,6 +244,7 @@ export function foldAssistant(
 				raw_meta: s.raw_meta,
 			prefill: s.prefill,
 			finish_reason: s.finish_reason,
+			thinking: s.thinking,
 			parent: parentUserId,
 			children: []
 		};

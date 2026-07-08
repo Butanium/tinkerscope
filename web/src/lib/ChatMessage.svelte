@@ -42,7 +42,7 @@
 		shiftDown: boolean;
 		ctrlDown: boolean;
 		showRegenAll: boolean; // compare mode (>1 panel) → the ctrl "all panels" axis is live
-		thinking: boolean;
+		thinking: boolean | 'both';
 		// How the n>1 distribution bucket renders its cards: 'all' = every card stacked
 		// (scrollable), 'cycle' = one card at a time with ‹k/N› prev/next. UI-only pref.
 		sampleView?: 'all' | 'cycle';
@@ -277,6 +277,7 @@
 		<div class="sample-header">
 			<span>Sample {idx + 1}</span>
 			{#if msg.activeSampleIndex === idx}<span class="active-sample-tag">active branch</span>{/if}
+			{#if sample.thinking !== undefined}{@render modeTag(sample.thinking)}{/if}
 			{#if sample.finish_reason === 'length'}{@render truncatedTag()}{/if}
 		</div>
 		{#if sample.reasoning}
@@ -359,6 +360,17 @@
 {/snippet}
 {#snippet checkIcon()}
 	<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5L13 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
+{/snippet}
+
+<!-- think / no-think chip: which renderer mode drew this sample. Only rendered
+     when the field is set, i.e. on thinking=BOTH batches (single-mode turns
+     don't carry it — the whole batch shares one mode). -->
+{#snippet modeTag(think: boolean)}
+	<span
+		class="mode-tag"
+		class:mode-think={think}
+		data-tooltip={think ? 'Drawn with the thinking renderer' : 'Drawn with the non-thinking renderer'}
+		use:tip>{think ? 'think' : 'no think'}</span>
 {/snippet}
 
 <!-- "truncated" badge: the sample/turn hit the max-tokens limit ('length' finish
@@ -481,6 +493,7 @@
 		<div class="message-head">
 			<div class="message-head-left">
 				<div class="message-role">{msg.role}</div>
+				{#if msg.thinking !== undefined && !isMultiSample}{@render modeTag(msg.thinking)}{/if}
 				{#if msg.finish_reason === 'length' && !isMultiSample}{@render truncatedTag()}{/if}
 			</div>
 			{#if showSampleCycler}{@render sampleCycler()}{:else}{@render cycler()}{/if}
@@ -622,6 +635,9 @@
 	.message-head-left { display: flex; align-items: center; gap: var(--space-2); }
 	/* Amber "truncated" pill — the turn/sample hit the max-tokens limit. */
 	.truncated-tag { font-size: 0.62rem; color: #b45309; background: #f59e0b14; border: 1px solid #f59e0b66; border-radius: var(--radius-pill); padding: 0 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; cursor: default; }
+	/* think / no-think chip (thinking=BOTH batches): grey = no-think half, accent = think half. */
+	.mode-tag { font-size: 0.62rem; color: var(--color-text-muted); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius-pill); padding: 0 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; cursor: default; white-space: nowrap; }
+	.mode-tag.mode-think { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
 	/* ── ‹k/N› cycler pill (branch siblings + sample cycle-view) ────── */
 	.branch-cycle { display: flex; align-items: center; gap: 2px; padding: 1px 4px; border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: var(--color-bg); width: fit-content; user-select: none; flex-shrink: 0; }
 	.branch-cycle-btn { display: flex; align-items: center; justify-content: center; padding: 2px; background: none; border: none; color: var(--color-text-muted); cursor: pointer; border-radius: var(--radius-sm); }

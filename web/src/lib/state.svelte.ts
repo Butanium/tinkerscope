@@ -179,7 +179,9 @@ export function parseSample(data: any): SampleData {
 		reasoning: reasoning || undefined,
 		raw_text: data?.raw_text || undefined,
 		raw_meta: data?.raw_meta || undefined,
-		finish_reason: data?.finish_reason || undefined
+		finish_reason: data?.finish_reason || undefined,
+		// per-sample renderer mode — only present on thinking='both' chats
+		thinking: typeof data?.thinking === 'boolean' ? data.thinking : undefined
 	};
 }
 

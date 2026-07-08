@@ -52,7 +52,9 @@ class PlaygroundState:
     temperature: float = 1.0
     max_tokens: int = 1024
     n_samples: int = 1
-    thinking: bool = False
+    # False / True / "both" ("both" = n_samples without thinking + n_samples with,
+    # 2n per chat — see routes/chat.py)
+    thinking: bool | str = False
     top_p: float | None = None
     # chat lifecycle
     chat_id: int = 0                      # increments each chat run; scopes sample events

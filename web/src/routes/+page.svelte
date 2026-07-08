@@ -235,8 +235,9 @@
 		thinking: { temperature: 1.0, topP: 0.95, topK: 20, presencePenalty: 1.5, repetitionPenalty: 1.0 }
 	};
 
-	function applyQwenDefaults(isThinking: boolean) {
-		const preset = isThinking ? QWEN_PRESETS.thinking : QWEN_PRESETS.nonThinking;
+	function applyQwenDefaults(thinking: boolean | 'both') {
+		// 'both' mixes modes but params are global — use the thinking preset (safer).
+		const preset = thinking ? QWEN_PRESETS.thinking : QWEN_PRESETS.nonThinking;
 		topK = preset.topK;
 		presencePenalty = preset.presencePenalty;
 		repetitionPenalty = preset.repetitionPenalty;
@@ -341,7 +342,9 @@
 	function setSystemPrompt(v: string) { patchState({ system_prompt: v || null }); convo.save(); }
 	function setTopP(v: number) { if (Number.isNaN(v)) return; patchState({ top_p: Math.max(0, Math.min(1, v)) }); }
 	function toggleThinking() {
-		const next = !s.thinking;
+		// Tri-state cycle: OFF → ON → BOTH → OFF. BOTH fires n samples without
+		// thinking + n with (2n total, no-think half first) in one chat.
+		const next: boolean | 'both' = s.thinking === false ? true : s.thinking === true ? 'both' : false;
 		patchState({ thinking: next }, true);
 		applyQwenDefaults(next);
 	}
@@ -427,7 +430,7 @@
 					...(typeof sess.temperature === 'number' ? { temperature: sess.temperature } : {}),
 					...(typeof sess.max_tokens === 'number' ? { max_tokens: sess.max_tokens } : {}),
 					...(typeof sess.n_samples === 'number' ? { n_samples: sess.n_samples } : {}),
-					...(typeof sess.thinking === 'boolean' ? { thinking: sess.thinking } : {}),
+					...(typeof sess.thinking === 'boolean' || sess.thinking === 'both' ? { thinking: sess.thinking } : {}),
 					...(typeof sess.top_p === 'number' ? { top_p: sess.top_p } : {})
 				});
 			}
@@ -1681,7 +1684,13 @@
 				<div class="sidebar-section">
 					<label class="sidebar-label thinking-toggle-row">
 						<span>Thinking</span>
-						<button class="thinking-pill" class:active={s.thinking} onclick={toggleThinking}>{s.thinking ? 'ON' : 'OFF'}</button>
+						<button
+							class="thinking-pill"
+							class:active={!!s.thinking}
+							class:both={s.thinking === 'both'}
+							data-tooltip="Cycles OFF → ON → BOTH. BOTH draws n samples without thinking + n with (2n total, no-think half first)."
+							use:tip
+							onclick={toggleThinking}>{s.thinking === 'both' ? 'BOTH' : s.thinking ? 'ON' : 'OFF'}</button>
 					</label>
 				</div>
 			{/if}
@@ -2045,6 +2054,8 @@
 	.thinking-toggle-row { justify-content: space-between; }
 	.thinking-pill { padding: 2px 12px; border-radius: var(--radius-pill); font-size: 0.75rem; font-weight: 600; background: var(--color-bg); border: 1px solid var(--color-border); color: var(--color-text-muted); transition: all 0.15s; letter-spacing: 0.03em; }
 	.thinking-pill.active { background: var(--color-accent); border-color: var(--color-accent); color: white; }
+	/* BOTH: split pill — grey (no-think half) fading into accent (think half). */
+	.thinking-pill.both { background: linear-gradient(90deg, var(--color-text-muted) 0%, var(--color-text-muted) 40%, var(--color-accent) 60%, var(--color-accent) 100%); border-color: var(--color-accent); color: white; }
 	.thinking-pill:hover { border-color: var(--color-accent); }
 	/* Segmented All|Cycle toggle for the sample-distribution view. */
 	.seg-toggle { display: inline-flex; border: 1px solid var(--color-border); border-radius: var(--radius-pill); overflow: hidden; }

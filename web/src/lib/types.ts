@@ -123,7 +123,9 @@ export type PlaygroundState = {
 	temperature: number;
 	max_tokens: number;
 	n_samples: number;
-	thinking: boolean;
+	/** false / true / 'both' — 'both' fires n_samples without thinking + n_samples
+	 *  with (2n per chat; see /api/chat in docs/API_CONTRACT.md). */
+	thinking: boolean | 'both';
 	top_p: number | null;
 	chat_id: number;
 	running: boolean;
@@ -147,7 +149,7 @@ export type StatePatch = {
 	temperature?: number;
 	max_tokens?: number;
 	n_samples?: number;
-	thinking?: boolean;
+	thinking?: boolean | 'both';
 	top_p?: number | null;
 };
 
@@ -162,7 +164,7 @@ export type ChatRequest = {
 	temperature: number;
 	max_tokens: number;
 	n_samples: number;
-	thinking: boolean;
+	thinking: boolean | 'both';
 	top_p?: number | null;
 	top_k?: number | null;
 	presence_penalty?: number | null;
@@ -211,6 +213,9 @@ export type SampleData = {
 	raw_meta?: string;
 	finish_reason?: string;
 	error?: string;
+	/** Which renderer mode produced this sample — set only on thinking='both' chats
+	 *  (false = the non-thinking half, true = the thinking half). */
+	thinking?: boolean;
 };
 
 /**
@@ -232,6 +237,9 @@ export type ViewMessage = {
 	prefill?: string;
 	/** How generation ended — 'length' ⇒ cut off by max tokens (truncation badge). */
 	finish_reason?: string;
+	/** Renderer mode of this turn's sample — set only for thinking='both' batches
+	 *  (shows the think / no-think chip when cycling the folded siblings). */
+	thinking?: boolean;
 	samples?: SampleData[];
 	totalSamples?: number;
 	running?: boolean;

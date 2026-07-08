@@ -137,6 +137,24 @@ test('foldAssistant on a pruned parent is a quiet no-op', () => {
 	assertValid(tree);
 });
 
+test('foldAssistant preserves the per-sample thinking mode (both-batches)', () => {
+	// thinking='both' chats tag each half; the tag must land on (and survive
+	// cloning of) the folded nodes. Single-mode samples stay untagged.
+	const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+	const { tree, ids } = foldAssistant(t1, u, [
+		{ content: 'plain', thinking: false, sample_index: 0 },
+		{ content: 'cot', reasoning: 'hm', thinking: true, sample_index: 1 },
+		{ content: 'untagged', sample_index: 2 }
+	]);
+	eq(tree.nodes[ids[0]].thinking, false);
+	eq(tree.nodes[ids[1]].thinking, true);
+	eq(tree.nodes[ids[2]].thinking, undefined);
+	// survives a clone (every op deep-clones; appendUserTurn suffices as a probe)
+	const { tree: t2 } = appendUserTurn(tree, 'next');
+	eq(t2.nodes[ids[0]].thinking, false);
+	eq(t2.nodes[ids[1]].thinking, true);
+});
+
 // ── n>1 sibling cycling ──────────────────────────────────────────────
 test('selecting a different sample sibling re-derives the active path', () => {
 	const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');

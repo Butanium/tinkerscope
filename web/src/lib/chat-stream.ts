@@ -43,6 +43,7 @@ export async function drainSamples(res: Response): Promise<SampleLike[]> {
 						error: d.error,
 						prefill_incorporated: d.prefill_incorporated,
 						finish_reason: d.finish_reason,
+						thinking: typeof d.thinking === 'boolean' ? d.thinking : undefined,
 						sample_index: d.sample_index ?? samples.length
 					});
 				}

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import Literal
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -46,7 +47,7 @@ class StatePatch(BaseModel):
     temperature: float | None = None
     max_tokens: int | None = None
     n_samples: int | None = None
-    thinking: bool | None = None
+    thinking: bool | Literal["both"] | None = None
     top_p: float | None = None
 
 

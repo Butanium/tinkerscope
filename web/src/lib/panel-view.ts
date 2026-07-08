@@ -59,6 +59,7 @@ export function buildPanelView(tree: ConvTree, run: PanelRun, prefill?: string):
 		raw_meta: n.raw_meta,
 		prefill: n.prefill,
 		finish_reason: n.finish_reason,
+		thinking: n.thinking,
 		nodeId: n.id,
 		sib: siblingInfo(tree, n.id),
 		isBucket: false

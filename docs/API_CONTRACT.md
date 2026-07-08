@@ -137,7 +137,13 @@ as opaque JSON. Saves are flock-serialized; a corrupt file is backed up to
   "messages": [{"role":"user","content":"…"}],   // required
   "system_prompt": null,  // optional; prepended as a system message for sampling
   "temperature": 1.0, "max_tokens": 1024, "n_samples": 1,
-  "thinking": false, "top_p": null, "top_k": null,
+  "thinking": false,      // false | true | "both". "both" draws n_samples WITHOUT thinking
+                          // (sample_index 0..n-1) PLUS n_samples WITH (n..2n-1) concurrently
+                          // in ONE chat — 2n samples total, each tagged with its mode (see
+                          // the `thinking` field on message/sample events). Applies to
+                          // run_id / base_model / openrouter_model; the loose sampler_path
+                          // path ignores thinking entirely (server default template).
+  "top_p": null, "top_k": null,
   "presence_penalty": null, "repetition_penalty": null,
   "panel": "primary",     // "primary" | "compare" — which compare pane this is
   "broadcast": true,       // also mirror samples to the state bus (browser)
@@ -154,7 +160,10 @@ as opaque JSON. Saves are flock-serialized; a corrupt file is backed up to
   token-streaming path); n>1 sends whole samples, no deltas. A consumer that saw
   deltas for a sample uses the later `message` event to *finalize* (clean content),
   not to reprint.
-- `event: message` → `data:` one sample: `{sample_index, content, raw_text, finish_reason, reasoning?}` or `{sample_index, error}`
+- `event: message` → `data:` one sample: `{sample_index, content, raw_text, finish_reason, reasoning?, thinking?}` or `{sample_index, error}`.
+  `thinking` (bool) is present **only on `thinking:"both"` chats** and says which
+  half produced the sample (false = non-thinking, true = thinking); single-mode
+  chats omit it.
 - `event: done` → `data: {}` (all samples finished)
 - `event: error` → `data: {error}` (whole request failed, e.g. unsampleable run)
 
@@ -186,9 +195,9 @@ chat_id/running/last_event*). POST `/api/state` with a subset to drive selection
 Event names = the message's `type`:
 - `snapshot` → `{type:"snapshot", state}` (full state, sent first on connect)
 - `patch` → `{type:"patch", event, state}` (state changed; e.g. event="chat_start"/"chat_done"/"patch")
-- `chat_start` → `{type:"chat_start", chat_id, panel, n, label, client_token?}` (a chat began; clear that panel's samples)
+- `chat_start` → `{type:"chat_start", chat_id, panel, n, label, client_token?}` (a chat began; clear that panel's samples. `n` = TOTAL expected samples — 2×n_samples on a `thinking:"both"` chat)
 - `delta` → `{type:"delta", chat_id, panel, sample_index, delta, kind}` (streamed token chunk; n==1 only — accumulate per chat_id/panel/sample_index, then the `sample` event finalizes)
-- `sample` → `{type:"sample", chat_id, panel, sample_index, content, raw_text, finish_reason, reasoning?}`
+- `sample` → `{type:"sample", chat_id, panel, sample_index, content, raw_text, finish_reason, reasoning?, thinking?}` (`thinking` only on `thinking:"both"` chats — which half drew this sample)
 - `chat_done` → `{type:"chat_done", chat_id, panel, client_token?}`
 - `chat_error` → `{type:"chat_error", chat_id, panel, error, client_token?}`
 - `ping` → `{}` (15s heartbeat; ignore)

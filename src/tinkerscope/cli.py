@@ -664,7 +664,7 @@ def _chat_body(
     n: int,
     temperature: float,
     max_tokens: int,
-    thinking: bool,
+    thinking: "bool | str",  # False / True / "both" (n without + n with thinking)
     system: Optional[str],
     panel: str,
     prefill: Optional[str] = None,
@@ -703,6 +703,7 @@ def cmd_chat(
     temperature: float = typer.Option(1.0, "--temperature"),
     max_tokens: int = typer.Option(1024, "--max-tokens"),
     thinking: bool = typer.Option(False, "--thinking", help="enable the thinking renderer"),
+    thinking_both: bool = typer.Option(False, "--thinking-both", help="draw n samples WITHOUT thinking + n WITH (2n total; overrides --thinking)"),
     system: Optional[str] = typer.Option(None, "--system", help="system prompt"),
     checkpoint: Optional[str] = typer.Option(None, "--checkpoint", help="checkpoint name (overrides @ in the run arg)"),
     prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the model extends; raw `<think>` ok"),
@@ -715,7 +716,8 @@ def cmd_chat(
     # Mirror selection to the bus so the browser shows what's being sampled (single
     # mode = one 'primary' panel).
     _post("/api/state", {"panels": [_panel_obj("primary", r["id"], ckpt)]})
-    body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, thinking, system, "primary", prefill)
+    think: "bool | str" = "both" if thinking_both else thinking
+    body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, think, system, "primary", prefill)
     if prefill:
         print(f"prefill: {prefill!r}")
     print(f"chat {r['id']}" + (f"@{ckpt}" if ckpt else "") + f"  n={n} temp={temperature}")
@@ -733,6 +735,7 @@ def cmd_compare(
     temperature: float = typer.Option(1.0, "--temperature"),
     max_tokens: int = typer.Option(1024, "--max-tokens"),
     thinking: bool = typer.Option(False, "--thinking"),
+    thinking_both: bool = typer.Option(False, "--thinking-both", help="n samples WITHOUT thinking + n WITH, per run (overrides --thinking)"),
     system: Optional[str] = typer.Option(None, "--system"),
     prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the models extend; raw `<think>` ok"),
 ) -> None:
@@ -759,8 +762,9 @@ def cmd_compare(
     lock = threading.Lock()
     threads: list[threading.Thread] = []
     results: list[tuple[str, dict, _StreamResult]] = []
+    think: "bool | str" = "both" if thinking_both else thinking
     for (r, ckpt, pid) in specs:
-        body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, thinking, system, pid, prefill)
+        body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, think, system, pid, prefill)
         res = _StreamResult()
         label = f"{pid} {r['id']}" + (f"@{ckpt}" if ckpt else "")
         t = threading.Thread(target=_stream_chat, args=(body, label, lock, res))
@@ -796,7 +800,7 @@ def cmd_state(
     print(
         f"live playground   running={'yes' if st.get('running') else 'no'}   "
         f"temp={st.get('temperature')} max_tokens={st.get('max_tokens')} "
-        f"n={st.get('n_samples')} thinking={'yes' if st.get('thinking') else 'no'}"
+        f"n={st.get('n_samples')} thinking={'both' if st.get('thinking') == 'both' else 'yes' if st.get('thinking') else 'no'}"
     )
     if st.get("system_prompt"):
         print(f"system: {_oneline(st['system_prompt'], 200)}")

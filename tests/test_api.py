@@ -85,6 +85,48 @@ def test_state_patch_is_partial(client):
     assert state["max_tokens"] == 256
 
 
+def test_state_thinking_tri_state(client):
+    # thinking accepts the tri-state: False / True / "both" (and rejects garbage).
+    for value in (True, "both", False):
+        patched = client.post("/api/state", json={"thinking": value}).json()
+        assert patched["thinking"] == value
+    assert client.post("/api/state", json={"thinking": "sometimes"}).status_code == 422
+
+
+def test_dual_merges_tags_and_offsets():
+    """thinking='both' merge: non-thinking half keeps 0..n-1, thinking half is
+    offset to n..2n-1, every item is mode-tagged, and a pump error propagates."""
+    import asyncio
+
+    from tinkerscope.api.routes.chat import _dual
+
+    async def fake_iter(n, fail=False):
+        for i in range(n):
+            yield {"sample_index": i, "content": f"s{i}"}
+            await asyncio.sleep(0)  # interleave with the other pump
+        if fail:
+            raise RuntimeError("boom")
+
+    async def collect():
+        return [item async for item in _dual(fake_iter(3), fake_iter(3), 3)]
+
+    items = asyncio.run(collect())
+    assert len(items) == 6
+    by_index = {it["sample_index"]: it for it in items}
+    assert set(by_index) == {0, 1, 2, 3, 4, 5}
+    assert all(by_index[i]["thinking"] is False for i in (0, 1, 2))
+    assert all(by_index[i]["thinking"] is True for i in (3, 4, 5))
+
+    async def collect_failing():
+        return [item async for item in _dual(fake_iter(2), fake_iter(2, fail=True), 2)]
+
+    try:
+        asyncio.run(collect_failing())
+        raise AssertionError("expected the pump error to propagate")
+    except RuntimeError as e:
+        assert str(e) == "boom"
+
+
 def test_state_panels_round_trip(client):
     # N-panel replacement for the old compare_messages: each panel keeps its OWN run
     # + transcript. Full-replace via `panels`, then mirror all via `panel_messages`.
