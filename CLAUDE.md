@@ -79,7 +79,8 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     coloring rules + persistence.
   - `lib/scroll.svelte.ts` → `panelScroll` — **the only scrollTop writer**: the
     per-panel FOLLOW (streaming, stick-to-bottom gated) / PRESERVE (tree
-    mutations keep position) / SNAP (send, conversation open) scroll policy.
+    mutations keep position) / SNAP (send, conversation open) / REVEAL
+    (keyboard focus moved off-screen → minimal container-only scroll) policy.
     Its module docstring records why (the old global bottom-pin = the scroll
     flicker). New scroll behavior goes through this store, never inline.
 - **Pure logic** — plain `.ts`, no Svelte/DOM, unit-testable (some have
@@ -92,6 +93,11 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     bucketed by the SET of matching highlight rules — grey none / solid single /
     striped combo) + `chartByAnswers` (legacy exact-match histogram) + label
     helpers. **Has `chart.test.ts`.**
+  - `lib/kbnav.ts` — keyboard row-navigation helpers: nav-key set, clamped
+    focus-index stepping, the typing-target/modal-open guards. Consumed by
+    +page's *Keyboard row navigation* section (click a row → focus ring; ↑/↓
+    walk the panel view, ←/→ = the row's ‹k/N› cycler, Esc clears). **Has
+    `kbnav.test.ts`**; browser smoke `tests/small-smokes/browser_kbnav.py`.
   - `lib/chat-stream.ts` — `drainSamples`: parse the `/api/chat` SSE into samples.
   - `lib/highlight-match.ts` / `lib/highlight-render.ts` — pure matching + the
     markdown+math+highlight render pipeline. **`highlight.test.ts`.**
@@ -109,7 +115,9 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     branching* (edit/regenerate/delete/cycle/select — the largest cluster),
     *Conversation rendering* (`panelView`/`bucketTurn` — overlays the live bucket
     on the tree's active leaf), *Panel lifecycle* (add/remove panels),
-    *Conversation ↔ URL sync*, *Session persistence*, *Lifecycle* (`onMount`).
+    *Keyboard row navigation* (the ONE focused row + arrow-key handler over
+    `lib/kbnav.ts`), *Conversation ↔ URL sync*, *Session persistence*,
+    *Lifecycle* (`onMount`).
     Markup order: sidebar → chat area → input bar → the modal components below.
   - `lib/Modal.svelte` — shared modal chrome (overlay, header, close,
     click-outside, Escape, body slot). Every modal wraps this; `modalStyle`

@@ -23,6 +23,11 @@
 //   3. SNAP — deliberate jumps to the latest turn: opening a conversation,
 //      sending a message, receiving a branch from another panel. Also re-arms
 //      FOLLOW's stick.
+//   4. REVEAL — keyboard row-focus moved (↑/↓) to a row outside the viewport:
+//      the minimal scroll that brings it in (scrollIntoView block:'nearest'
+//      semantics, hand-rolled so ONLY this panel's container ever moves — the
+//      native call also scrolls ancestors/the page). An already-visible row
+//      doesn't move at all.
 //
 // Nothing else in the app may write scrollTop.
 
@@ -74,6 +79,22 @@ class PanelScroll {
 		void tick().then(() => {
 			el.scrollTop = top;
 		});
+	}
+
+	/** REVEAL: minimally scroll `el` (a row inside this panel's container) into
+	 *  view — top-align when it's above the viewport, bottom-align when below,
+	 *  no movement when already fully visible (block:'nearest' semantics). A row
+	 *  taller than the viewport aligns its top. Synchronous: callers reveal on a
+	 *  pure focus move (no DOM change pending). */
+	reveal(panel: Panel, el: HTMLElement) {
+		const c = this.els[panel];
+		if (!c || !c.contains(el)) return;
+		const pad = 8; // breathing room so the row isn't glued to the container edge
+		const r = el.getBoundingClientRect();
+		const top = r.top - c.getBoundingClientRect().top + c.scrollTop;
+		const bottom = top + r.height;
+		if (top - pad < c.scrollTop) c.scrollTop = Math.max(0, top - pad);
+		else if (bottom + pad > c.scrollTop + c.clientHeight) c.scrollTop = bottom + pad - c.clientHeight;
 	}
 
 	/** SNAP: after the pending DOM flush, jump to the bottom + re-arm stick. */

@@ -30,7 +30,10 @@
 		onTag,
 		onCycle,
 		otherPanels = [],
-		onSendToPanel
+		onSendToPanel,
+		rowIndex = -1,
+		focused = false,
+		onFocusRow
 	}: {
 		msg: ViewMessage;
 		isLastAssistant: boolean;
@@ -60,6 +63,14 @@
 		// Other panels this branch can be copied into (compare). Empty → no picker.
 		otherPanels?: { id: string; label: string }[];
 		onSendToPanel?: (destPanel: string) => void;
+		// Keyboard row navigation (workspace-level; see +page's "Keyboard row
+		// navigation" section): this row's index in its panel's rendered view
+		// (mirrored as data-row so +page can find the element to reveal), whether
+		// it holds the workspace's ONE focused-row ring, and the click report
+		// that moves focus here.
+		rowIndex?: number;
+		focused?: boolean;
+		onFocusRow?: () => void;
 	} = $props();
 
 	// The authored prefill (raw) split into its reasoning/answer parts, so the renderer
@@ -489,7 +500,17 @@
 {/snippet}
 
 {#if msg.role !== 'assistant' || msg.content || msg.reasoning || isMultiSample || (msg.samples && msg.samples.some((x) => x && x.content))}
-	<div class="message" style="background: {roleColor(msg.role)};">
+	<!-- Row click (anywhere, buttons included) moves the keyboard focus here.
+	     svelte-ignore: this is a mouse-only convenience — the keyboard already
+	     has its own path to focus (↑/↓), so no key handler belongs on the div. -->
+	<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+	<div
+		class="message"
+		class:kb-focused={focused}
+		data-row={rowIndex}
+		style="background: {roleColor(msg.role)};"
+		onclick={onFocusRow}
+	>
 		<div class="message-head">
 			<div class="message-head-left">
 				<div class="message-role">{msg.role}</div>
@@ -645,6 +666,10 @@
 	.branch-cycle-btn:disabled { opacity: 0.3; cursor: default; }
 	.branch-cycle-count { font-size: 0.68rem; font-variant-numeric: tabular-nums; color: var(--color-text-secondary); min-width: 24px; text-align: center; }
 	.active-sample { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+	/* Workspace keyboard focus: the ONE focused row (click to focus; ↑/↓ move,
+	   ←/→ cycle its branches, Esc clears). Softer than .active-sample's ring so
+	   it reads as "cursor here", not "selected". */
+	.message.kb-focused { outline: 2px solid color-mix(in srgb, var(--color-accent) 55%, transparent); outline-offset: 1px; }
 	.active-sample-tag { font-size: 0.62rem; color: var(--color-accent); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-left: var(--space-2); }
 	.btn-use.active { background: var(--color-accent); border-color: var(--color-accent); color: white; }
 	.edit-hint { font-size: 0.7rem; color: var(--color-text-muted); font-style: italic; margin-bottom: var(--space-1); line-height: 1.3; }

@@ -16,6 +16,7 @@
 	import { drainSamples } from '$lib/chat-stream';
 	import { chat, type ChatParams, type ChatModelField } from '$lib/chat.svelte';
 	import { panelScroll } from '$lib/scroll.svelte';
+	import { isNavKey, moveIndex, isEditableTarget, anyModalOpen } from '$lib/kbnav';
 	import type { ChartPanelData, ChartTurn } from '$lib/chart';
 	import { buildPanelView } from '$lib/panel-view';
 	import ChartModal from '$lib/ChartModal.svelte';
@@ -969,6 +970,64 @@
 		}
 	});
 
+	// ── Keyboard row navigation (focused row + arrow keys) ────────────
+	// ONE focused row per workspace: {panel, index into that panel's rendered
+	// view}. Click a row to focus it; ↑/↓ walk the panel's active-path view,
+	// ←/→ drive the focused row's ‹k/N› sibling cycler, Escape clears. Focus is
+	// INDEX-based on purpose: a branch cycle replaces the node at the same view
+	// position, so "this row stays focused across a cycle" falls out for free.
+	// Guards (kbnav.ts): never while typing (input/textarea/contenteditable) or
+	// while a modal is open; unmodified keys only (alt+← is browser-back, and
+	// shift/ctrl are the toolbar's modifier axes).
+	let kbFocus = $state<{ panel: Panel; index: number } | null>(null);
+
+	// Row indices are view positions — meaningless across conversations.
+	$effect(() => {
+		void convo.activeId;
+		kbFocus = null;
+	});
+
+	/** The focused row's DOM element (ChatMessage mirrors its index as data-row;
+	 *  a not-yet-rendered row — e.g. a still-empty streaming bucket — has none). */
+	function kbRowEl(panel: Panel, index: number): HTMLElement | null {
+		return panelScroll.els[panel]?.querySelector(`.message[data-row="${index}"]`) ?? null;
+	}
+
+	function onNavKeydown(e: KeyboardEvent) {
+		if (!isNavKey(e.key)) return;
+		if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+		if (isEditableTarget(e.target) || anyModalOpen()) return;
+		if (e.key === 'Escape') {
+			if (kbFocus) {
+				kbFocus = null;
+				e.preventDefault();
+			}
+			return;
+		}
+		if (!kbFocus) return;
+		const pSel = panelSels.find((x) => x.panel === kbFocus!.panel);
+		if (!pSel || convo.reducedPanels.has(pSel.panel)) {
+			kbFocus = null; // panel gone/reduced under the focus — drop it
+			return;
+		}
+		const view = panelView(pSel);
+		if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+			const next = moveIndex(kbFocus.index, e.key === 'ArrowUp' ? -1 : 1, view.length);
+			if (next == null) return;
+			e.preventDefault(); // we own the scroll — don't let the browser also scroll
+			kbFocus = { panel: pSel.panel, index: next };
+			const el = kbRowEl(pSel.panel, next);
+			if (el) panelScroll.reveal(pSel.panel, el); // the only sanctioned scroll writer
+		} else {
+			// ←/→ = the focused row's ‹k/N› cycler (only meaningful with siblings;
+			// cycleBranch PRESERVEs the panel's scroll position).
+			const msg = view[Math.min(kbFocus.index, view.length - 1)];
+			if (!msg || msg.nodeId == null || !msg.sib || msg.sib.count < 2) return;
+			e.preventDefault();
+			cycleBranch(pSel.panel, msg, e.key === 'ArrowLeft' ? -1 : 1);
+		}
+	}
+
 	// ── Prompt history (localStorage) ─────────────────────────────────
 	const HISTORY_KEY = 'tinkerscope-prompt-history';
 	let promptHistory = $state<string[]>([]);
@@ -1398,6 +1457,8 @@
 		window.addEventListener('keydown', onModKey);
 		window.addEventListener('keyup', onModKey);
 		window.addEventListener('blur', onBlur);
+		// Keyboard row navigation (see its section above for the guards).
+		window.addEventListener('keydown', onNavKeydown);
 
 		// Open the ONE live-state stream on load + wire the external-fold hooks.
 		live.start();
@@ -1433,6 +1494,7 @@
 			window.removeEventListener('keydown', onModKey);
 			window.removeEventListener('keyup', onModKey);
 			window.removeEventListener('blur', onBlur);
+			window.removeEventListener('keydown', onNavKeydown);
 		};
 	});
 </script>
@@ -1825,6 +1887,9 @@
 									otherPanels={panelSels.filter((x) => x.panel !== p.panel).map((x) => ({ id: x.panel, label: panelLabel(x) }))}
 									onSendToPanel={(dest) => sendBranchToPanel(p.panel, msg, dest)}
 									onCycle={(delta) => cycleBranch(p.panel, msg, delta)}
+									rowIndex={i}
+									focused={kbFocus?.panel === p.panel && kbFocus?.index === i}
+									onFocusRow={() => (kbFocus = { panel: p.panel, index: i })}
 									onTag={(content, sampleIndex, totalSamples, reasoning, quick) => quick ? quickTag(p.panel, content, sampleIndex, totalSamples, reasoning) : openTagForm(p.panel, content, sampleIndex, totalSamples, reasoning)}
 								/>
 							{/each}
