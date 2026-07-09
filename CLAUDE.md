@@ -182,6 +182,20 @@ extracted UI: `tests/small-smokes/browser_{chart_modal,modals}.py`.
 
 ## Build / verify
 
-See `docs/HANDOFF_BRANCHING.md` §6 for dev (HMR), typecheck+build, and browser-smoke
-commands. Python tests: `uv run pytest -q` (no remote calls — capabilities
-probe is stubbed).
+- **Web** (from `web/`): `npm run check` (svelte-check; keep it at **0 errors** —
+  the ~25 a11y warnings are known), `npm test` (the frameworkless `src/lib/*.test.ts`
+  suites via node), `npm run build`. The pre-commit hook builds on web/ commits —
+  but **merge commits skip it**: after `git merge`, run `npm run build` yourself
+  or the served `web/dist` silently stays stale.
+- **Python**: `uv run pytest -q` (no remote calls — capabilities probe is stubbed).
+- **Isolated instance for testing** — NEVER test against the user's live server
+  or `~/.local/state/tinkerscope`; run `scripts/dev-isolated.sh [--port N] [SCAN_DIR ...]`
+  instead: it snapshots the real state into a throwaway `XDG_STATE_HOME` (realistic
+  conversations/prefs as fixtures, live registry stripped) and launches from this
+  checkout. Build `web/` first; agents launch it with run_in_background.
+- **Browser smokes** (`tests/small-smokes/browser_*.py`, Playwright): point them at
+  an isolated instance. ⚠️ Playwright's `.click()` AUTO-SCROLLS off-screen targets
+  into view — when asserting scroll behavior, use programmatic `element.click()` /
+  keyboard dispatch or the auto-scroll fabricates false scroll-position failures
+  (cost a verifier two false rewrites once; see `browser_kbnav.py` for the pattern).
+- Dev-HMR loop + more smoke commands: `docs/HANDOFF_BRANCHING.md` §6.
