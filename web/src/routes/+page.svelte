@@ -6,15 +6,15 @@
 	import { live, emptyPanel } from '$lib/state.svelte';
 	import { conversations as convo } from '$lib/conversations.svelte';
 	import Message from '$lib/ChatMessage.svelte';
-	import { assembleAssistantRaw } from '$lib/render';
 	import {
 		OR_PREFIX, BASE_PREFIX, CKPT_PREFIX,
 		isOpenrouterSel, openrouterId,
 		isBaseSel, baseModelId,
 		isCkptSel, samplerPathOf
 	} from '$lib/model-sel';
-	import { drainSamples } from '$lib/chat-stream';
 	import { chat, type ChatParams, type ChatModelField } from '$lib/chat.svelte';
+	import { modelCatalog } from '$lib/model-catalog.svelte';
+	import { branchOps } from '$lib/branch-ops.svelte';
 	import { panelScroll } from '$lib/scroll.svelte';
 	import { isNavKey, moveIndex, isEditableTarget, anyModalOpen } from '$lib/kbnav';
 	import type { ChartPanelData, ChartTurn } from '$lib/chart';
@@ -34,29 +34,16 @@
 		activePath,
 		activeMessages,
 		appendUserTurn,
-		foldAssistant,
-		regenTarget,
-		regenReplace,
-		ancestryMessages,
-		treeFromMessages,
-		editUserFork,
-		editUserForkCopy,
-		editAssistant,
-		deleteSubtree,
-		deleteSiblings,
-		setSelected,
-		cycle as cycleTree,
 		siblingsOf
 	} from '$lib/tree';
 	import type {
 		Run,
-		OpenRouterModel,
-		TinkerModel,
 		Health,
 		PlaygroundState,
 		StatePatch,
 		ChatMessage,
 		Panel,
+		PanelSel,
 		ViewMessage
 	} from '$lib/types';
 
@@ -91,96 +78,14 @@
 		localStorage.setItem('playground-sample-view', v);
 	}
 
-	// ── Data: runs / openrouter / health ──────────────────────────────
-	let runs = $state<Run[]>([]);
-	let openrouterModels = $state<OpenRouterModel[]>([]);
+	// ── Data: health / backend error ──────────────────────────────────
+	// The model catalogs (runs / openrouterModels / tinker + OR typeahead
+	// catalogs / recents), their loaders, and the id→label resolvers all live in
+	// the `modelCatalog` store ($lib/model-catalog.svelte). This section keeps
+	// only the health snapshot + the shared backend-error banner.
 	let health = $state<Health | null>(null);
 	let backendError = $state('');
 	let refreshingModels = $state(false);
-
-	// Typeahead catalogs (lazy-loaded when their picker opens).
-	let tinkerModels = $state<TinkerModel[]>([]);
-	let tinkerCatalogLoaded = $state(false);
-	let tinkerCatalogLoading = $state(false);
-	let tinkerCatalogError = $state<string | null>(null);
-	let orCatalog = $state<OpenRouterModel[]>([]);
-	let orCatalogLoaded = $state(false);
-	let orCatalogLoading = $state(false);
-	let orCatalogError = $state<string | null>(null);
-
-	// Recently-used raw base models + loose checkpoints (localStorage) so a picked
-	// tinker model stays visible in the panel <select> across reloads even though
-	// it's not a Run. Two lightweight shapes — one per sentinel.
-	type RecentBase = { base_model: string; label: string };
-	type RecentCkpt = { sampler_path: string; label: string };
-	const RECENT_BASE_KEY = 'tinkerscope-recent-base-models';
-	const RECENT_CKPT_KEY = 'tinkerscope-recent-checkpoints';
-	let recentBaseModels = $state<RecentBase[]>([]);
-	let recentCheckpoints = $state<RecentCkpt[]>([]);
-	function rememberBaseModel(m: RecentBase) {
-		const next = [m, ...recentBaseModels.filter((x) => x.base_model !== m.base_model)].slice(0, 8);
-		recentBaseModels = next;
-		try { localStorage.setItem(RECENT_BASE_KEY, JSON.stringify(next)); } catch {}
-	}
-	function rememberCheckpoint(m: RecentCkpt) {
-		const next = [m, ...recentCheckpoints.filter((x) => x.sampler_path !== m.sampler_path)].slice(0, 8);
-		recentCheckpoints = next;
-		try { localStorage.setItem(RECENT_CKPT_KEY, JSON.stringify(next)); } catch {}
-	}
-
-	function runById(id: string | null | undefined): Run | undefined {
-		if (!id) return undefined;
-		return runs.find((r) => r.id === id);
-	}
-
-	function runLabel(r: Run): string {
-		if (r.config_error) return `${r.name} (config error)`;
-		return r.name;
-	}
-
-	// ── Model labels (sentinel/run id → display label) ────────────────
-	// The pure sentinel encoding (OR_/BASE_/CKPT_ prefixes + predicates +
-	// id extractors) lives in $lib/model-sel. These resolvers layer on it,
-	// reading the reactive catalogs (openrouterModels / tinkerModels / recents)
-	// to turn an id into something human-readable.
-	function openrouterBySel(id: string | null | undefined): OpenRouterModel | undefined {
-		const orId = openrouterId(id);
-		if (orId == null) return undefined;
-		return openrouterModels.find((m) => m.openrouter_model === orId);
-	}
-	function openrouterLabel(id: string | null | undefined): string {
-		const orId = openrouterId(id);
-		if (orId == null) return '';
-		const m = openrouterBySel(id);
-		return m?.label || orId;
-	}
-	function baseLabel(id: string | null | undefined): string {
-		const bm = baseModelId(id);
-		if (bm == null) return '';
-		const m = tinkerModels.find((t) => t.base_model === bm) ?? recentBaseModels.find((t) => t.base_model === bm);
-		return m?.label || bm;
-	}
-	function ckptLabel(id: string | null | undefined): string {
-		const sp = samplerPathOf(id);
-		if (sp == null) return '';
-		const m = tinkerModels.find((t) => t.sampler_path === sp) ?? recentCheckpoints.find((t) => t.sampler_path === sp);
-		return m?.label || sp;
-	}
-
-	// ── Model picker: selected-label + fold state ──────────────────────
-	// Filtering itself now lives on the dropdown (ModelDropdown → ModelTypeahead,
-	// type-to-narrow on open) rather than a separate "Filter models…" textbox.
-	// This just renders the trigger button's text — same iconography the old
-	// <select><option> text used (⊘/? sampleability, ◆/◇/↗ group markers).
-	function selectedModelLabel(sel: { run_id: string | null }): string {
-		if (!sel.run_id) return '';
-		if (isBaseSel(sel.run_id)) return `◆ ${baseLabel(sel.run_id)}`;
-		if (isCkptSel(sel.run_id)) return `◇ ${ckptLabel(sel.run_id)}`;
-		if (isOpenrouterSel(sel.run_id)) return `↗ ${openrouterLabel(sel.run_id)}`;
-		const r = runById(sel.run_id);
-		if (r) return `${r.sampleable === false ? '⊘ ' : r.sampleable === null ? '? ' : ''}${runLabel(r)}`;
-		return sel.run_id;
-	}
 
 	// The Models sidebar section is foldable (persisted locally) — collapse it
 	// once panels are set up to reclaim vertical space for the chat/params below.
@@ -207,7 +112,7 @@
 
 	// The N panels in display order, projected from the shared panels[] array. Each
 	// has a STABLE id (never an array index) so reorder/remove can't rebind a tree.
-	type PanelSel = { panel: Panel; run_id: string | null; checkpoint: string | null };
+	// PanelSel is shared (in $lib/types) — the catalog + branch-ops stores use it too.
 	let panelSels = $derived<PanelSel[]>(
 		(s.panels ?? []).map((ps) => ({ panel: ps.id, run_id: ps.run_id, checkpoint: ps.checkpoint }))
 	);
@@ -234,7 +139,7 @@
 				isOpenrouterSel(p.run_id) ||
 				isBaseSel(p.run_id) ||
 				isCkptSel(p.run_id) ||
-				runById(p.run_id)?.supports_thinking
+				modelCatalog.runById(p.run_id)?.supports_thinking
 		)
 	);
 
@@ -289,7 +194,7 @@
 		// OpenRouter / raw base / loose checkpoint have no checkpoint selector; tinker
 		// runs default to the last checkpoint with a sampler (usually "final").
 		if (isOpenrouterSel(runId) || isBaseSel(runId) || isCkptSel(runId)) return null;
-		const r = runById(runId);
+		const r = modelCatalog.runById(runId);
 		return r?.checkpoints.length ? r.checkpoints[r.checkpoints.length - 1].name : null;
 	}
 	function setRun(panel: Panel, runId: string) {
@@ -318,14 +223,14 @@
 	}
 	const MAX_PANELS = 6;
 	function addPanel() {
-		if (s.panels.length >= MAX_PANELS || runs.length + openrouterModels.length < 1) return;
+		if (s.panels.length >= MAX_PANELS || modelCatalog.runs.length + modelCatalog.openrouterModels.length < 1) return;
 		const id = nextPanelId();
 		// Pick a model not already shown, preferring a sampleable run.
 		const used = new Set(s.panels.map((p) => p.run_id));
 		const other =
-			runs.find((r) => !used.has(r.id) && r.sampleable !== false) ??
-			runs.find((r) => !used.has(r.id)) ??
-			runs[0];
+			modelCatalog.runs.find((r) => !used.has(r.id) && r.sampleable !== false) ??
+			modelCatalog.runs.find((r) => !used.has(r.id)) ??
+			modelCatalog.runs[0];
 		const ck = other?.checkpoints.length ? other.checkpoints[other.checkpoints.length - 1].name : null;
 		// Seed the new panel's tree from the FIRST panel so it starts from the same
 		// thread ('primary' may have been removed — first slot is the main thread).
@@ -365,7 +270,7 @@
 	}
 
 	// ── Sampleability / chat eligibility ──────────────────────────────
-	function panelRun(p: PanelSel): Run | undefined { return runById(p.run_id); }
+	function panelRun(p: PanelSel): Run | undefined { return modelCatalog.runById(p.run_id); }
 	/** Whether ONE panel's selected model is chat-eligible. OpenRouter refs + raw
 	 *  tinker base models + loose checkpoints are always eligible (the backend
 	 *  errors clearly if a key is missing). */
@@ -667,274 +572,19 @@
 		setConvUrl(convo.activeId, false); // remove resets/advances active → keep URL in sync
 	}
 
-	// ── Chat-thread branching: edit / regenerate / delete / cycle / select ──
-	// All operate on the per-panel TREE (the source of truth, owned by the convo
-	// store). A mutation commits via convo.setTree, which re-derives the active
-	// path, mirrors it into shared state (so the CLI follows), and debounce-saves.
-	/** Fire a (re)generation for one panel, folding the reply under `userParentId`.
-	 *  Regenerate respects the current composer prefill, exactly like a fresh send. */
-	function fireForPanel(panel: Panel, userParentId: string, messages: ChatMessage[]) {
-		const pSel = panelSels.find((x) => x.panel === panel);
-		if (!pSel) return;
-		const { fireMsgs, prefill } = withPrefill(messages);
-		fireOne(pSel, userParentId, fireMsgs, prefill);
-	}
-
-	/** Compute a panel's regen plan: plain = fork a sibling; replace = drop the
-	 *  active assistant branch first so the fresh reply takes its place. Commits
-	 *  any tree pruning and returns the fire target (or null if not regen-able). */
-	function regenPlan(
-		panel: Panel,
-		nodeId: string,
-		replace: boolean
-	): { userParentId: string; fireMessages: ChatMessage[] } | null {
-		const tree = convo.treeFor(panel);
-		if (replace) {
-			const r = regenReplace(tree, nodeId);
-			if (!r) return null;
-			convo.setTree(panel, r.tree);
-			return { userParentId: r.userParentId, fireMessages: r.fireMessages as ChatMessage[] };
-		}
-		const rt = regenTarget(tree, nodeId);
-		if (!rt) return null;
-		return { userParentId: rt.userParentId, fireMessages: rt.fireMessages as ChatMessage[] };
-	}
-
-	/** Prune a node + its subtree (one branch). all (shift) = prune EVERY sibling
-	 *  branch at this level too, truncating back to the parent. */
-	function deleteMessage(panel: Panel, msg: ViewMessage, all = false) {
-		if (panelBusy(panel) || msg.nodeId == null) return;
-		panelScroll.preserve(panel);
-		chat.clearPanelBucket(panel);
-		const tree = convo.treeFor(panel);
-		convo.setTree(panel, all ? deleteSiblings(tree, msg.nodeId) : deleteSubtree(tree, msg.nodeId));
-	}
-
-	/** Regenerate this panel's turn. plain = new sibling branch; replace (shift) =
-	 *  overwrite the current branch in place (other siblings kept). */
-	function regenerate(panel: Panel, msg: ViewMessage, replace = false) {
-		if (panelBusy(panel) || msg.nodeId == null) return;
-		panelScroll.preserve(panel);
-		chat.clearPanelBucket(panel);
-		const plan = regenPlan(panel, msg.nodeId, replace);
-		if (!plan) return;
-		fireForPanel(panel, plan.userParentId, plan.fireMessages);
-	}
-
-	/** Regenerate the turn at this row's DEPTH in EVERY panel (compare mode).
-	 *  Matches by active-path depth so each panel re-rolls its own model. */
-	function regenerateAll(panel: Panel, msg: ViewMessage, replace = false) {
-		if (msg.nodeId == null) return;
-		const depth = activePath(convo.treeFor(panel)).findIndex((n) => n.id === msg.nodeId);
-		if (depth < 0) return;
-		for (const p of panelSels) {
-			if (panelBusy(p.panel)) continue;
-			const node = activePath(convo.treeFor(p.panel))[depth];
-			if (!node) continue;
-			panelScroll.preserve(p.panel);
-			chat.clearPanelBucket(p.panel);
-			const plan = regenPlan(p.panel, node.id, replace);
-			if (plan) fireForPanel(p.panel, plan.userParentId, plan.fireMessages);
-		}
-	}
-
-	/** Continue (prefill) an assistant turn: re-fire with its content as the trailing
-	 *  prefill so the model EXTENDS it. The N continuations land as sibling branches
-	 *  (each = the current text + a fresh continuation) you cycle through; the
-	 *  original stays as a sibling too. */
-	function fireContinue(panel: Panel, nodeId: string) {
-		if (panelBusy(panel)) return;
-		const tree = convo.treeFor(panel);
-		const node = tree.nodes[nodeId];
-		if (!node || node.role !== 'assistant' || (!node.content && !node.reasoning)) return;
-		const userParentId = node.parent;
-		if (!userParentId || tree.nodes[userParentId]?.role !== 'user') return;
-		const pSel = panelSels.find((x) => x.panel === panel);
-		if (!pSel) return;
-		panelScroll.preserve(panel);
-		chat.clearPanelBucket(panel);
-		// Prefill = the FULL raw turn (reasoning + content reassembled), NOT just
-		// content: on auto-<think> families a content-only prefill makes the model
-		// read the answer as more thinking. assembleAssistantRaw closes the
-		// `<think>` (so the model extends the answer) or leaves it open for a
-		// thinking-only turn. ancestryMessages now carries prior-turn reasoning (the
-		// sampler structures it so the renderer applies its own history policy); the
-		// turn being CONTINUED is appended separately as this raw `<think>` prefill.
-		const prefill = assembleAssistantRaw(node.reasoning, node.content);
-		const fireMessages = [
-			...ancestryMessages(tree, userParentId),
-			{ role: 'assistant', content: prefill }
-		] as ChatMessage[];
-		fireOne(pSel, userParentId, fireMessages, prefill);
-	}
-
-	/** "+" continue. plain = this panel; all (shift) = the turn at this row's depth
-	 *  in every panel. */
-	function continueMessage(panel: Panel, msg: ViewMessage, all = false) {
-		if (msg.nodeId == null) return;
-		if (!all) { fireContinue(panel, msg.nodeId); return; }
-		const depth = activePath(convo.treeFor(panel)).findIndex((n) => n.id === msg.nodeId);
-		if (depth < 0) return;
-		for (const p of panelSels) {
-			const node = activePath(convo.treeFor(p.panel))[depth];
-			if (node) fireContinue(p.panel, node.id);
-		}
-	}
-
-	/** Cycle the active sibling at this row (‹k/N›). */
-	function cycleBranch(panel: Panel, msg: ViewMessage, delta: number) {
-		if (panelBusy(panel) || msg.nodeId == null) return;
-		panelScroll.preserve(panel);
-		chat.clearPanelBucket(panel);
-		convo.setTree(panel, cycleTree(convo.treeFor(panel), msg.nodeId, delta));
-	}
-
-	/** Pick an n>1 sample card as the active branch, then COLLAPSE to the single
-	 *  reply view (clear the bucket) — the other samples remain as cyclable ‹k/N›
-	 *  siblings in the tree. */
-	function selectSample(panel: Panel, msg: ViewMessage, sampleIndex: number) {
-		if (panelBusy(panel)) return;
-		const nid = msg.sampleNodeIds?.[sampleIndex];
-		if (!nid) return;
-		panelScroll.preserve(panel);
-		convo.setTree(panel, setSelected(convo.treeFor(panel), nid));
-		chat.clearPanelBucket(panel); // collapse the distribution view to the chosen branch
-	}
-
-	/** Continue ONE specific n>1 sample card: make it the active branch, then
-	 *  extend it via fireContinue — the continuations land as sibling branches
-	 *  (this sample stays as one of them). */
-	function continueSample(panel: Panel, msg: ViewMessage, sampleIndex: number) {
-		if (panelBusy(panel)) return;
-		const nid = msg.sampleNodeIds?.[sampleIndex];
-		if (!nid) return;
-		convo.setTree(panel, setSelected(convo.treeFor(panel), nid));
-		fireContinue(panel, nid);
-	}
-
-	/** Keep this sample, prune all its sibling samples, then collapse to it. */
-	function discardOtherSamples(panel: Panel, msg: ViewMessage, sampleIndex: number) {
-		if (panelBusy(panel)) return;
-		const keep = msg.sampleNodeIds?.[sampleIndex];
-		if (!keep) return;
-		panelScroll.preserve(panel);
-		let tree = setSelected(convo.treeFor(panel), keep);
-		for (const sib of siblingsOf(tree, keep)) {
-			if (sib !== keep) tree = deleteSubtree(tree, sib);
-		}
-		convo.setTree(panel, tree);
-		chat.clearPanelBucket(panel);
-	}
-
-	/** Delete one specific sample branch; drop it from the live cards too so the
-	 *  remaining samples stay on screen for further curation. */
-	function deleteSample(panel: Panel, msg: ViewMessage, sampleIndex: number) {
-		if (panelBusy(panel)) return;
-		const nid = msg.sampleNodeIds?.[sampleIndex];
-		if (!nid) return;
-		panelScroll.preserve(panel);
-		convo.setTree(panel, deleteSubtree(convo.treeFor(panel), nid));
-		// Remove the card from the bucket overlay (keep the rest visible).
-		const bucket = live.panels[panel];
-		if (bucket && bucket.samples.length > sampleIndex) {
-			const samples = bucket.samples.filter((_, i) => i !== sampleIndex);
-			live.panels[panel] = { ...bucket, samples, n: Math.max(1, samples.length) };
-			live.panels = { ...live.panels };
-		}
-	}
-
-	/** Edit → fork. User: fork+regen (shift = fork+copy-downstream, no gen).
-	 *  Assistant: a manual branch (no gen). Empty edits are ignored. */
-	function applyEdit(
-		panel: Panel,
-		msg: ViewMessage,
-		content: string,
-		reasoning: string | undefined,
-		copyDownstream: boolean
-	) {
-		if (panelBusy(panel) || msg.nodeId == null) return;
-		const text = content.trim();
-		// Assistant turns may be thinking-only (empty answer) — keep the edit if
-		// either field has text; user turns still require a non-empty body.
-		if (!text && !(msg.role === 'assistant' && reasoning && reasoning.trim())) return;
-		panelScroll.preserve(panel);
-		chat.clearPanelBucket(panel);
-		if (msg.role === 'user') {
-			if (copyDownstream) {
-				const r = editUserForkCopy(convo.treeFor(panel), msg.nodeId, text);
-				if (r) convo.setTree(panel, r.tree);
-			} else {
-				const r = editUserFork(convo.treeFor(panel), msg.nodeId, text);
-				if (!r) return;
-				convo.setTree(panel, r.tree);
-				fireForPanel(panel, r.newUserId, r.fireMessages as ChatMessage[]);
-			}
-		} else if (msg.role === 'assistant') {
-			const r = editAssistant(convo.treeFor(panel), msg.nodeId, text, reasoning);
-			if (r) convo.setTree(panel, r.tree);
-		}
-	}
-
-	/** Delete the turn at this row's DEPTH in EVERY panel (ctrl/cmd, compare).
-	 *  allSiblings (shift) prunes every sibling branch at that level too. */
-	function deleteMessageAll(panel: Panel, msg: ViewMessage, allSiblings = false) {
-		if (msg.nodeId == null) return;
-		const depth = activePath(convo.treeFor(panel)).findIndex((n) => n.id === msg.nodeId);
-		if (depth < 0) return;
-		for (const p of panelSels) {
-			const node = activePath(convo.treeFor(p.panel))[depth];
-			if (node) deleteMessage(p.panel, { ...msg, nodeId: node.id }, allSiblings);
-		}
-	}
-
-	/** Apply the same edit to the turn at this row's DEPTH in EVERY panel (ctrl/cmd,
-	 *  compare). copyDownstream (shift, user rows) forks a full copy with no gen. */
-	function applyEditAll(
-		panel: Panel,
-		msg: ViewMessage,
-		content: string,
-		reasoning: string | undefined,
-		copyDownstream: boolean
-	) {
-		if (msg.nodeId == null) return;
-		const depth = activePath(convo.treeFor(panel)).findIndex((n) => n.id === msg.nodeId);
-		if (depth < 0) return;
-		for (const p of panelSels) {
-			const node = activePath(convo.treeFor(p.panel))[depth];
-			if (node) applyEdit(p.panel, { ...msg, nodeId: node.id }, content, reasoning, copyDownstream);
-		}
-	}
-
-	/** Copy to the clipboard. `all` = the whole active thread as markdown with role
-	 *  headers (vs just this row). `withThinking` (shift) prepends each turn's reasoning
-	 *  as a `<think>…</think>` block before its content. Uses activePath (not
-	 *  activeMessages, which drops reasoning) so the thinking is actually available. */
-	function copyMessage(panel: Panel, msg: ViewMessage, all: boolean, withThinking: boolean) {
-		const fmt = (content?: string, reasoning?: string) =>
-			withThinking && reasoning && reasoning.trim()
-				? `<think>\n${reasoning}\n</think>\n\n${content ?? ''}`
-				: (content ?? '');
-		let text: string;
-		if (all) {
-			const nodes = activePath(convo.treeFor(panel)).filter((n) => n.role !== 'system');
-			const header = (r: string) => (r === 'user' ? 'User' : r === 'assistant' ? 'Assistant' : 'System');
-			text = nodes.map((n) => `## ${header(n.role)}\n\n${fmt(n.content, n.reasoning)}`).join('\n\n');
-		} else {
-			text = fmt(msg.content, msg.reasoning);
-		}
-		navigator.clipboard?.writeText(text);
-	}
-
-	/** Copy a branch's ancestry (root→this node) into ANOTHER panel as a fresh linear
-	 *  thread, so you can prompt that panel's model with exactly this context. */
-	function sendBranchToPanel(srcPanel: Panel, msg: ViewMessage, destPanel: Panel) {
-		if (msg.nodeId == null || destPanel === srcPanel || panelBusy(destPanel)) return;
-		const msgs = ancestryMessages(convo.treeFor(srcPanel), msg.nodeId) as ChatMessage[];
-		if (!msgs.length) return;
-		chat.clearPanelBucket(destPanel);
-		convo.setTree(destPanel, treeFromMessages(msgs));
-		panelScroll.snap(destPanel); // fresh thread in dest — land on its latest turn
-	}
+	// ── Chat-thread branching ─────────────────────────────────────────
+	// The edit / regenerate / delete / cycle / select / continue handlers live in
+	// the `branchOps` store ($lib/branch-ops.svelte) — all tree mutation, scroll
+	// policy, and bucket clearing. It's UI-agnostic, so wire its four +page seams
+	// here: the panel list, the per-panel busy gate, the composer prefill wrapper,
+	// and the fire glue (model + params resolution). Markup + keyboard-nav call the
+	// handlers as `branchOps.<name>(...)`.
+	branchOps.configure({
+		panelSels: () => panelSels,
+		panelBusy,
+		withPrefill,
+		fireOne
+	});
 
 	// ── Conversation rendering ────────────────────────────────────────
 	// Each column renders from ITS OWN branch TREE's active path (convo.treeFor(p)) —
@@ -1024,7 +674,7 @@
 			const msg = view[Math.min(kbFocus.index, view.length - 1)];
 			if (!msg || msg.nodeId == null || !msg.sib || msg.sib.count < 2) return;
 			e.preventDefault();
-			cycleBranch(pSel.panel, msg, e.key === 'ArrowLeft' ? -1 : 1);
+			branchOps.cycleBranch(pSel.panel, msg, e.key === 'ArrowLeft' ? -1 : 1);
 		}
 	}
 
@@ -1087,20 +737,15 @@
 	}
 
 	// ── Refresh / load ────────────────────────────────────────────────
-	async function loadRuns() {
-		try {
-			runs = await api.models();
-			backendError = '';
-		} catch (e: any) {
-			backendError = `Failed to load runs: ${e?.message ?? e}`;
-		}
-	}
+	// The catalog fetches live in the modelCatalog store; the two that surface a
+	// failure into the shared banner take this setter (its '' clears the banner).
+	const setBackendError = (m: string) => (backendError = m);
 
 	async function refreshModels() {
 		refreshingModels = true;
 		try {
 			await api.refreshModels();
-			await loadRuns();
+			await modelCatalog.loadRuns(setBackendError);
 		} catch (e: any) {
 			backendError = `Refresh failed: ${e?.message ?? e}`;
 		}
@@ -1108,35 +753,14 @@
 	}
 
 	// ── OpenRouter model management (UI-driven, no config files) ───────
-	async function loadOpenrouterModels() {
-		try { openrouterModels = await api.openrouterModels(); } catch (e: any) {
-			backendError = `Failed to load OpenRouter models: ${e?.message ?? e}`;
-		}
-	}
-
 	let showOrManager = $state(false);
 	let orAddPanel = $state<Panel>('primary'); // which panel to auto-select the new model into
 	let orBusy = $state(false);
 
-	// Lazy-load the full OpenRouter catalog (~341) the first time the manager opens.
-	async function loadOrCatalog(refresh = false) {
-		orCatalogLoading = true;
-		orCatalogError = null;
-		try {
-			const res = await api.openrouterAvailable(refresh);
-			orCatalog = res.models ?? [];
-			orCatalogError = res.available === false ? res.error || 'OpenRouter catalog unavailable' : null;
-			orCatalogLoaded = true;
-		} catch (e: any) {
-			orCatalogError = `Failed to load OpenRouter catalog: ${e?.message ?? e}`;
-		}
-		orCatalogLoading = false;
-	}
-
 	function openOrManager(panel: Panel) {
 		orAddPanel = panel;
 		showOrManager = true;
-		if (!orCatalogLoaded) loadOrCatalog();
+		if (!modelCatalog.orCatalogLoaded) modelCatalog.loadOrCatalog();
 	}
 
 	// Typeahead pick: persist to the saved quick-list (POST) AND select into the
@@ -1145,7 +769,7 @@
 		if (orBusy) return;
 		orBusy = true;
 		try {
-			openrouterModels = await api.addOpenrouterModel(item.id, item.label || undefined);
+			modelCatalog.openrouterModels = await api.addOpenrouterModel(item.id, item.label || undefined);
 			setRun(orAddPanel, OR_PREFIX + item.id);
 			showOrManager = false;
 		} catch (e: any) {
@@ -1158,10 +782,10 @@
 		if (orBusy) return;
 		orBusy = true;
 		try {
-			openrouterModels = await api.removeOpenrouterModel(id);
+			modelCatalog.openrouterModels = await api.removeOpenrouterModel(id);
 			// If a panel was pointing at the removed model, clear its selection
 			// back to the first sampleable run so the picker isn't stuck.
-			const fallback = runs.find((r) => r.sampleable !== false) ?? runs[0];
+			const fallback = modelCatalog.runs.find((r) => r.sampleable !== false) ?? modelCatalog.runs[0];
 			// Any panel pointing at the removed model falls back to the first run.
 			for (const p of panelSels) {
 				if (openrouterId(p.run_id) === id) setRun(p.panel, fallback?.id ?? '');
@@ -1176,24 +800,10 @@
 	let showTinkerPicker = $state(false);
 	let tinkerAddPanel = $state<Panel>('primary');
 
-	async function loadTinkerCatalog() {
-		tinkerCatalogLoading = true;
-		tinkerCatalogError = null;
-		try {
-			const res = await api.tinkerModels();
-			tinkerModels = res.models ?? [];
-			tinkerCatalogError = res.available === false ? res.error || 'Tinker base models unavailable' : null;
-			tinkerCatalogLoaded = true;
-		} catch (e: any) {
-			tinkerCatalogError = `Failed to load tinker base models: ${e?.message ?? e}`;
-		}
-		tinkerCatalogLoading = false;
-	}
-
 	function openTinkerPicker(panel: Panel) {
 		tinkerAddPanel = panel;
 		showTinkerPicker = true;
-		if (!tinkerCatalogLoaded) loadTinkerCatalog();
+		if (!modelCatalog.tinkerCatalogLoaded) modelCatalog.loadTinkerCatalog();
 	}
 
 	// Pick a tinker model from the combined catalog. Look the picked item up by id
@@ -1201,13 +811,13 @@
 	// {sampler_path}); a base model via the base: sentinel (sending {base_model}).
 	// Either way we remember it so it persists in the panel <select> across reloads.
 	function pickTinkerModel(item: { id: string; label: string }) {
-		const m = tinkerModels.find((t) => t.id === item.id);
+		const m = modelCatalog.tinkerModels.find((t) => t.id === item.id);
 		if (m?.kind === 'checkpoint' && m.sampler_path) {
-			rememberCheckpoint({ sampler_path: m.sampler_path, label: m.label || m.sampler_path });
+			modelCatalog.rememberCheckpoint({ sampler_path: m.sampler_path, label: m.label || m.sampler_path });
 			setRun(tinkerAddPanel, CKPT_PREFIX + m.sampler_path);
 		} else {
 			const bm = m?.base_model ?? item.id;
-			rememberBaseModel({ base_model: bm, label: item.label || bm });
+			modelCatalog.rememberBaseModel({ base_model: bm, label: item.label || bm });
 			setRun(tinkerAddPanel, BASE_PREFIX + bm);
 		}
 		showTinkerPicker = false;
@@ -1220,7 +830,7 @@
 
 	function openDatasetLoader() {
 		// Prefill with the primary panel's selected run's training dataset.
-		const r = runById(panelSels[0]?.run_id);
+		const r = modelCatalog.runById(panelSels[0]?.run_id);
 		datasetInitialPath = r?.dataset_path ?? '';
 		showDatasetLoader = true;
 	}
@@ -1368,10 +978,10 @@
 
 	function panelLabel(p: PanelSel | undefined): string {
 		if (!p) return '';
-		if (isOpenrouterSel(p.run_id)) return openrouterLabel(p.run_id);
-		if (isBaseSel(p.run_id)) return baseLabel(p.run_id);
-		if (isCkptSel(p.run_id)) return ckptLabel(p.run_id);
-		const r = runById(p.run_id);
+		if (isOpenrouterSel(p.run_id)) return modelCatalog.openrouterLabel(p.run_id);
+		if (isBaseSel(p.run_id)) return modelCatalog.baseLabel(p.run_id);
+		if (isCkptSel(p.run_id)) return modelCatalog.ckptLabel(p.run_id);
+		const r = modelCatalog.runById(p.run_id);
 		const name = r?.name ?? p.run_id ?? '?';
 		return p.checkpoint ? `${name}@${p.checkpoint}` : name;
 	}
@@ -1441,14 +1051,7 @@
 			const h = localStorage.getItem(HISTORY_KEY);
 			if (h) promptHistory = JSON.parse(h);
 		} catch {}
-		try {
-			const rb = localStorage.getItem(RECENT_BASE_KEY);
-			if (rb) recentBaseModels = JSON.parse(rb);
-		} catch {}
-		try {
-			const rc = localStorage.getItem(RECENT_CKPT_KEY);
-			if (rc) recentCheckpoints = JSON.parse(rc);
-		} catch {}
+		modelCatalog.restoreRecents();
 
 		// Track shift (alternate-action variant) + ctrl/cmd (apply to all panels) for
 		// the toolbar affordances. Read off the click too, but mirror for the icon swap.
@@ -1466,8 +1069,8 @@
 
 		(async () => {
 			try { health = await api.health(); } catch (e: any) { backendError = `Backend not reachable: ${e?.message ?? e}`; }
-			await loadRuns();
-			await loadOpenrouterModels();
+			await modelCatalog.loadRuns(setBackendError);
+			await modelCatalog.loadOpenrouterModels(setBackendError);
 			try { if (!live.state) live.state = await api.getState(); } catch {}
 			// Restore last-used model selection + sampling params from disk (only if
 			// this process's state is fresh) BEFORE conversations load, so the right
@@ -1648,37 +1251,23 @@
 				</button>
 				{#if !modelsCollapsed}
 				{#each panelSels as p (p.panel)}
-					{@const pr = runById(p.run_id)}
+					{@const pr = modelCatalog.runById(p.run_id)}
 					{@const isOr = isOpenrouterSel(p.run_id)}
 					{@const isBase = isBaseSel(p.run_id)}
 					{@const isCkpt = isCkptSel(p.run_id)}
-					{@const orModel = openrouterBySel(p.run_id)}
+					{@const orModel = modelCatalog.openrouterBySel(p.run_id)}
 					{@const baseM = baseModelId(p.run_id)}
 					{@const sp = samplerPathOf(p.run_id)}
-					<!-- A selected base model / checkpoint that isn't in recents yet (e.g.
-					     came from the CLI / shared state) still needs an entry so the
-					     dropdown shows it. -->
-					{@const baseInRecents = baseM != null && recentBaseModels.some((t) => t.base_model === baseM)}
-					{@const ckptInRecents = sp != null && recentCheckpoints.some((t) => t.sampler_path === sp)}
-					{@const modelItems = [
-						...runs.map((r) => ({
-							id: r.id,
-							label: `${r.sampleable === false ? '⊘ ' : r.sampleable === null ? '? ' : ''}${runLabel(r)}`,
-							disabled: r.sampleable === false,
-							search: [r.id, r.base_model, r.wandb_project, r.renderer_name].filter(Boolean).join(' ')
-						})),
-						...(baseM != null && !baseInRecents ? [{ id: BASE_PREFIX + baseM, label: `◆ ${baseLabel(p.run_id)}` }] : []),
-						...recentBaseModels.map((t) => ({ id: BASE_PREFIX + t.base_model, label: `◆ ${t.label || t.base_model}`, search: t.base_model })),
-						...(sp != null && !ckptInRecents ? [{ id: CKPT_PREFIX + sp, label: `◇ ${ckptLabel(p.run_id)}` }] : []),
-						...recentCheckpoints.map((t) => ({ id: CKPT_PREFIX + t.sampler_path, label: `◇ ${t.label || t.sampler_path}`, search: t.sampler_path })),
-						...openrouterModels.map((m) => ({ id: OR_PREFIX + m.openrouter_model, label: `↗ ${m.label || m.openrouter_model}`, search: m.openrouter_model }))
-					]}
+					<!-- The dropdown item list (runs + base/ckpt recents + OpenRouter, plus
+					     a CLI/shared-state selection not yet in recents) is built by the
+					     modelCatalog store — see its `modelItems`. -->
+					{@const modelItems = modelCatalog.modelItems(p.run_id)}
 					<div class="model-block">
 						<div class="model-slot-row">
 							<div class="model-slot-select">
 								<ModelDropdown
 									items={modelItems}
-									selectedLabel={selectedModelLabel(p)}
+									selectedLabel={modelCatalog.selectedModelLabel(p)}
 									placeholder="Select a model…"
 									filterPlaceholder={`Type to filter ${modelItems.length} models…`}
 									onpick={(id) => setRun(p.panel, id)}
@@ -1698,7 +1287,7 @@
 							{/if}
 						{:else if isCkpt}
 							<!-- Loose tinker sampler checkpoint: no checkpoint selector. -->
-							<div class="run-meta or-meta" title={sp}>◇ {ckptLabel(p.run_id)} · loose sampler</div>
+							<div class="run-meta or-meta" title={sp}>◇ {modelCatalog.ckptLabel(p.run_id)} · loose sampler</div>
 							{#if health && !health.tinker_key}
 								<div class="unsampleable-note">Set TINKER_API_KEY to sample this checkpoint.</div>
 							{/if}
@@ -1740,7 +1329,7 @@
 					</div>
 				{/each}
 				{#if panelSels.length < MAX_PANELS}
-					<button class="btn-add-model" onclick={addPanel} disabled={runs.length + openrouterModels.length < 1}>
+					<button class="btn-add-model" onclick={addPanel} disabled={modelCatalog.runs.length + modelCatalog.openrouterModels.length < 1}>
 						<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
 						{panelSels.length < 2 ? 'Compare' : 'Add panel'}
 					</button>
@@ -1875,18 +1464,18 @@
 									showRegenAll={isComparing}
 									thinking={s.thinking}
 									{sampleView}
-									onRegenerate={(allPanels, replace) => (allPanels ? regenerateAll(p.panel, msg, replace) : regenerate(p.panel, msg, replace))}
-									onContinue={(allPanels) => continueMessage(p.panel, msg, allPanels)}
-									onDelete={(allPanels, allSiblings) => (allPanels ? deleteMessageAll(p.panel, msg, allSiblings) : deleteMessage(p.panel, msg, allSiblings))}
-									onSelectSample={(idx) => selectSample(p.panel, msg, idx)}
-									onDiscardOthers={(idx) => discardOtherSamples(p.panel, msg, idx)}
-									onContinueSample={(idx) => continueSample(p.panel, msg, idx)}
-									onDeleteSample={(idx) => deleteSample(p.panel, msg, idx)}
-									onEdit={(content, reasoning, copyDownstream, allPanels) => (allPanels ? applyEditAll(p.panel, msg, content, reasoning, copyDownstream) : applyEdit(p.panel, msg, content, reasoning, copyDownstream))}
-									onCopy={(all, withThinking) => copyMessage(p.panel, msg, all, withThinking)}
+									onRegenerate={(allPanels, replace) => (allPanels ? branchOps.regenerateAll(p.panel, msg, replace) : branchOps.regenerate(p.panel, msg, replace))}
+									onContinue={(allPanels) => branchOps.continueMessage(p.panel, msg, allPanels)}
+									onDelete={(allPanels, allSiblings) => (allPanels ? branchOps.deleteMessageAll(p.panel, msg, allSiblings) : branchOps.deleteMessage(p.panel, msg, allSiblings))}
+									onSelectSample={(idx) => branchOps.selectSample(p.panel, msg, idx)}
+									onDiscardOthers={(idx) => branchOps.discardOtherSamples(p.panel, msg, idx)}
+									onContinueSample={(idx) => branchOps.continueSample(p.panel, msg, idx)}
+									onDeleteSample={(idx) => branchOps.deleteSample(p.panel, msg, idx)}
+									onEdit={(content, reasoning, copyDownstream, allPanels) => (allPanels ? branchOps.applyEditAll(p.panel, msg, content, reasoning, copyDownstream) : branchOps.applyEdit(p.panel, msg, content, reasoning, copyDownstream))}
+									onCopy={(all, withThinking) => branchOps.copyMessage(p.panel, msg, all, withThinking)}
 									otherPanels={panelSels.filter((x) => x.panel !== p.panel).map((x) => ({ id: x.panel, label: panelLabel(x) }))}
-									onSendToPanel={(dest) => sendBranchToPanel(p.panel, msg, dest)}
-									onCycle={(delta) => cycleBranch(p.panel, msg, delta)}
+									onSendToPanel={(dest) => branchOps.sendBranchToPanel(p.panel, msg, dest)}
+									onCycle={(delta) => branchOps.cycleBranch(p.panel, msg, delta)}
 									rowIndex={i}
 									focused={kbFocus?.panel === p.panel && kbFocus?.index === i}
 									onFocusRow={() => (kbFocus = { panel: p.panel, index: i })}
@@ -2017,15 +1606,15 @@
 <!-- OpenRouter Manager Modal -->
 {#if showOrManager}
 	<OrManagerModal
-		models={openrouterModels}
-		catalog={orCatalog}
-		loading={orCatalogLoading}
-		error={orCatalogError}
+		models={modelCatalog.openrouterModels}
+		catalog={modelCatalog.orCatalog}
+		loading={modelCatalog.orCatalogLoading}
+		error={modelCatalog.orCatalogError}
 		busy={orBusy}
 		keyMissing={health?.openrouter_key === false}
 		onpick={pickOpenrouterModel}
 		onremove={removeOpenrouterModel}
-		onrefresh={() => loadOrCatalog(true)}
+		onrefresh={() => modelCatalog.loadOrCatalog(true)}
 		onclose={() => (showOrManager = false)}
 	/>
 {/if}
@@ -2033,9 +1622,9 @@
 <!-- Tinker base model picker (typeahead over /api/tinker-models) -->
 {#if showTinkerPicker}
 	<TinkerPickerModal
-		models={tinkerModels}
-		loading={tinkerCatalogLoading}
-		error={tinkerCatalogError}
+		models={modelCatalog.tinkerModels}
+		loading={modelCatalog.tinkerCatalogLoading}
+		error={modelCatalog.tinkerCatalogError}
 		keyMissing={!!health && !health.tinker_key}
 		onpick={pickTinkerModel}
 		onclose={() => (showTinkerPicker = false)}

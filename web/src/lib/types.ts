@@ -105,6 +105,11 @@ export type Panel = string;
  *  layout. `live.state.panels` (PanelState) is this plus the messages echo. */
 export type PanelLayout = { id: Panel; run_id: string | null; checkpoint: string | null };
 
+/** The runtime projection of a panel's selection used across the workspace UI
+ *  (`panel` = the stable panel id, i.e. PanelLayout's `id`). Derived from the
+ *  shared `panels[]`; consumed by the model-catalog + branch-ops stores. */
+export type PanelSel = { panel: Panel; run_id: string | null; checkpoint: string | null };
+
 /** One comparison panel's selection + its active-path transcript echo. The echo is
  *  write-only (the branch tree in lib/tree.ts is the read source); it exists so the
  *  CLI and external-fold reconcile can see/replay each panel's path. */

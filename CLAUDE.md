@@ -75,6 +75,22 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     `ChatParams` bundle + a resolved `ChatModelField`, so it never touches the
     sampling UI. +page keeps thin glue (`paramsBundle`/`resolveModelField`/a
     `fireOne` wrapper) over it.
+  - `lib/model-catalog.svelte.ts` → `modelCatalog` — the **model catalogs +
+    labels**: `runs` / `openrouterModels` / the lazy tinker + OR typeahead
+    catalogs (+ their loading/error flags) / the localStorage recents; the
+    loaders (`loadRuns`/`loadOpenrouterModels` take an `onError` callback for
+    +page's shared banner; `loadOrCatalog`/`loadTinkerCatalog` own their error
+    state); the id→label resolvers (`runById`/`runLabel`/`openrouterLabel`/
+    `baseLabel`/`ckptLabel`/`selectedModelLabel`, layered on the pure
+    `lib/model-sel` sentinel encoding); and `modelItems(runId)`, the per-panel
+    dropdown item-list builder (was a giant inline `{@const}` in +page markup).
+  - `lib/branch-ops.svelte.ts` → `branchOps` — the **chat-thread branching
+    handlers** (edit / regenerate / delete / cycle / select / continue, per panel
+    and across-all-panels). All tree mutation goes through `convo.setTree`; scroll
+    policy (PRESERVE/SNAP) + bucket clearing live here. UI-agnostic, like `chat`:
+    +page injects its four seams once via `branchOps.configure({ panelSels,
+    panelBusy, withPrefill, fireOne })`, and markup / keyboard-nav call the
+    handlers as `branchOps.<name>(...)`.
   - `lib/highlights.svelte.ts` → `highlightStore` — user-defined render-time
     coloring rules + persistence.
   - `lib/scroll.svelte.ts` → `panelScroll` — **the only scrollTop writer**: the
