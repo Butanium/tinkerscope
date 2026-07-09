@@ -127,6 +127,17 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
 
 ## Later / optional
 
+- [ ] **Branch-switch render latency (~30–50 ms?) — uncertain observation
+  (2026-07-08).** While verifying the scroll rework, the verifier measured the
+  cycled branch's *content/cycler text* appearing ~30–50 ms after the click,
+  coincident with the `/api/state` SSE echo of the `#mirror` call — but couldn't
+  disentangle "render gated on the echo" from "handler + DOM-flush latency +
+  polling resolution". Rendering reads only local `convo.trees`, so it *should*
+  be near-instant. If cycling ever feels laggy, instrument this first; the fix
+  direction is the scroll-map's "decouple rendering from the #mirror echo" note
+  (scroll itself is already decoupled). Related quick win: `patchState` applies
+  nothing optimistically, so e.g. the thinking toggle's visual change waits for
+  the SSE round-trip (~50 ms).
 - [ ] **Forced-pick mode (toggle).** Today pick-a-sample is additive — sample 0
   auto-commits as the default and "Use this" overrides it. Optionally add a mode that
   *blocks* the next send until the user picks (dashboard behaviour). Decide if the
