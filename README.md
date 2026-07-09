@@ -144,6 +144,20 @@ tooltip change while Shift is held so you can see which action you'll get:
 | **Delete** | delete this one branch | delete **all** sibling branches at this turn |
 | **Bookmark** | save with a note (opens a form) | save **instantly**, no note |
 
+#### Keyboard navigation
+
+Click any message to **focus** it (a soft accent ring marks the one focused row
+per workspace). With a row focused:
+
+- **↑ / ↓** — move focus to the previous / next message of that panel's
+  currently-displayed thread (off-screen rows are scrolled into view, minimally).
+- **← / →** — step the focused row's ‹ k/N › branch cycler (wraps; focus and
+  scroll position stay put).
+- **Esc** — clear the focus.
+
+Keys are ignored while you're typing (composer, prefill, edits, renames…) or
+while a modal is open.
+
 #### Named conversations
 
 A dropdown at the top of the sidebar manages conversations: **create, switch,
@@ -233,9 +247,10 @@ remote calls.
 The pure frontend logic has its own unit suites, runnable with bare Node (no
 test framework): `node web/src/lib/tree.test.ts` (branch trees),
 `highlight.test.ts` (highlight matching + render), `chart.test.ts`
-(distribution-chart bucketing), `panel-view.test.ts`. There are also Playwright
-browser smokes under `tests/small-smokes/` that exercise branching, compare,
-the model-picker, and the distribution chart against a live server.
+(distribution-chart bucketing), `panel-view.test.ts`, `kbnav.test.ts` (keyboard
+row navigation). There are also Playwright browser smokes under
+`tests/small-smokes/` that exercise branching, compare, the model-picker, the
+distribution chart, and keyboard navigation against a live server.
 
 ---
 
