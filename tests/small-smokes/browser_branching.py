@@ -1,14 +1,17 @@
 """Browser smoke for conversation branching — fork / cycle / delete / edit-leak.
 
-100% TOKEN-FREE: it seeds a 2-turn transcript via /api/state (the on-load
-reconcile folds it into the conversation tree), then exercises SHIFT+CLICK edit
-(fork + copy the downstream conversation, no generation), ‹k/N› cycling, delete
-(prune a branch), and the edit-leak guard (cycling to a sibling under an open
-editor must drop the draft) — none of which call the model.
+100% TOKEN-FREE: seeds a 2-turn branch tree via POST /api/conversations (the
+modern panels[] API — one tree per panel), opens it with ?c=<id>, then exercises
+SHIFT+CLICK edit (fork + copy the downstream conversation, no generation), ‹k/N›
+cycling, delete (prune a branch), and the edit-leak guard (cycling to a sibling
+under an open editor must drop the draft) — none of which call the model.
 
 Oracle: the DOM (active path + the .branch-cycle control) plus GET
-/api/conversations (the persisted tree). The active path also round-trips through
-GET /api/state.messages.
+/api/conversations (the persisted per-panel tree, `trees.primary`). The active
+path also round-trips through GET /api/state.panels[0].messages.
+
+Non-destructive: creates its own conversation and deletes only that one, so it's
+safe against an instance that already has (fixture) conversations.
 
   uv run python tests/small-smokes/browser_branching.py [BASE_URL]
 """
@@ -22,39 +25,42 @@ from playwright.sync_api import sync_playwright
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8809"
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
 
-SEED = {
-    "mode": "single",
-    "messages": [
-        {"role": "user", "content": "U1 original question"},
-        {"role": "assistant", "content": "A1 original answer"},
-    ],
-    "compare_messages": [],
-}
 DRAFT = "LEAKED DRAFT MUST NOT LAND"
+
+
+def seed_tree():
+    """u0 -> a1 (linear, 2 rows)."""
+    nodes = {
+        "s0": {"id": "s0", "role": "user", "content": "U1 original question",
+               "parent": None, "children": ["s1"]},
+        "s1": {"id": "s1", "role": "assistant", "content": "A1 original answer",
+               "parent": "s0", "children": []},
+    }
+    return {"nodes": nodes, "rootChildren": ["s0"], "selected": {}}
 
 
 def _get(path):
     return json.load(urllib.request.urlopen(f"{BASE}{path}", timeout=10))
 
 
-def _post(path, body, method="POST"):
+def _post(path, body):
     req = urllib.request.Request(
         f"{BASE}{path}", data=json.dumps(body).encode(),
-        headers={"content-type": "application/json"}, method=method)
-    return urllib.request.urlopen(req, timeout=10).read()
-
-
-def _clean_conversations():
-    for c in _get("/api/conversations"):
-        urllib.request.urlopen(
-            urllib.request.Request(f"{BASE}/api/conversations/{c['id']}", method="DELETE"),
-            timeout=10,
-        ).read()
+        headers={"content-type": "application/json"}, method="POST")
+    return json.loads(urllib.request.urlopen(req, timeout=10).read() or b"{}")
 
 
 def main():
-    _clean_conversations()
-    _post("/api/state", SEED)
+    # Seed a fresh conversation with the branch tree (panel model unset — none of
+    # these ops call the model, so run_id can be null). Take the primary panel id
+    # from shared state so the seeded panel matches what the UI shows.
+    primary = _get("/api/state")["panels"][0]
+    conv = _post("/api/conversations", {
+        "name": "branching smoke",
+        "trees": {"primary": seed_tree()},
+        "panels": [{"id": "primary", "run_id": primary.get("run_id"),
+                    "checkpoint": primary.get("checkpoint")}],
+    })
 
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
@@ -62,8 +68,7 @@ def main():
         errors = []
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(BASE, wait_until="load", timeout=20000)
-        # The seeded transcript is folded into the tree on load and rendered.
+        page.goto(f"{BASE}/?c={conv['id']}", wait_until="load", timeout=20000)
         page.wait_for_function("document.body.innerText.includes('A1 original answer')", timeout=15000)
         assert page.locator(".message").count() == 2, "seed should render 2 turns"
 
@@ -113,21 +118,25 @@ def main():
 
         # ── 5. Oracles: persisted tree + active-path round-trip + no console errors ──
         page.wait_for_timeout(600)  # let the debounced save flush
-        convs = _get("/api/conversations")
-        assert len(convs) == 1, f"expected 1 conversation, got {len(convs)}"
-        tree = convs[0]["tree"]
+        ours = next(c for c in _get("/api/conversations") if c["id"] == conv["id"])
+        tree = ours["trees"]["primary"]
         contents = [n["content"] for n in tree["nodes"].values()]
         assert "U1 EDITED question" not in contents, "pruned node still on disk"
         assert "U1 original question" in contents and "A1 original answer" in contents
         st = _get("/api/state")
-        bodies = [m["content"] for m in st["messages"]]
+        bodies = [m["content"] for m in st["panels"][0]["messages"]]
         assert bodies == ["U1 original question", "A1 original answer"], bodies
         assert DRAFT not in json.dumps(tree), "leaked draft persisted"
         assert not errors, f"console/page errors: {errors}"
 
         browser.close()
-        print("messages oracle:", bodies)
-        print("BRANCHING SMOKE PASS")
+
+    # cleanup: remove only the seeded conversation
+    urllib.request.urlopen(
+        urllib.request.Request(f"{BASE}/api/conversations/{conv['id']}", method="DELETE"),
+        timeout=10).read()
+    print("messages oracle:", bodies)
+    print("BRANCHING SMOKE PASS")
 
 
 if __name__ == "__main__":
