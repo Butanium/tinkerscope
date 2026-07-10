@@ -25,7 +25,9 @@
 // in the bucket (so the modal can show "which samples are these" on click).
 
 import type { HighlightRule } from './types.ts';
+import type { TokenLogprob } from './tree.ts';
 import { ruleMatches, rulesForRole } from './highlight-match.ts';
+import { firstTokenDist } from './token-logprob.ts';
 
 const CHART_COLORS = [
 	'#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
@@ -38,8 +40,10 @@ export const NONE_COLOR = '#9aa4b2';
 const MIN_FRACTION = 0.03;
 
 /** One sampled assistant reply, as the chart consumes it. `content` may be ''
- *  (a sample that spent its whole budget thinking) — those still count. */
-export type ChartSample = { content: string; reasoning?: string };
+ *  (a sample that spent its whole budget thinking) — those still count.
+ *  `first` = the sample's FIRST generated token's logprob record (native tinker
+ *  only) — feeds the first-token distribution mode. */
+export type ChartSample = { content: string; reasoning?: string; first?: TokenLogprob };
 
 /** Which text of a sample the rules match against. */
 export type MatchScope = 'response' | 'thinking' | 'either';
@@ -236,6 +240,90 @@ export function chartByAnswers(sources: ChartSource[]): ChartData | null {
 	});
 
 	return { bars, legend };
+}
+
+/** Label for the first-token mode's remainder segment. */
+export const FT_REST = '[rest of distribution]';
+/** Named first-token segments are capped at the palette size (categorical hues
+ *  are assigned in fixed order, never cycled); overflow mass folds into FT_REST. */
+const MAX_FT_TOKENS = CHART_COLORS.length;
+
+/** MODEL-probability distribution over the FIRST generated token, per source.
+ *
+ *  Unlike the two sample-share modes above, a segment's `pct` here is the
+ *  model's own probability for that token at position 0 (exp of the stored
+ *  logprob — all samples of a batch share the prompt, so the newest sample's
+ *  top-K is the reference; see firstTokenDist). `count`/`sampleIdx` carry the
+ *  EMPIRICAL side — which samples actually drew that token — powering the
+ *  modal's click-to-inspect. The grey FT_REST segment is the probability mass
+ *  outside the captured tokens, so every bar still stacks to ~100%.
+ *
+ *  Bars stay 1:1 with `sources` (the modal's inspect indexes into them); a
+ *  source with no first-token data renders as an empty bar (n=0). Legend is
+ *  keyed by DISPLAY token, ordered by max model prob across sources, hues in
+ *  fixed order — the same first token gets the same color in every panel.
+ *  `mixed` = some source's samples disagree on the reference top-K (siblings
+ *  regenerated from a different checkpoint / renderer mode). */
+export function chartByFirstToken(
+	sources: ChartSource[]
+): { data: ChartData; mixed: boolean } | null {
+	if (sources.length === 0) return null;
+	const dists = sources.map((s) => firstTokenDist(s.samples));
+	if (dists.every((d) => d == null)) return null;
+
+	// Global token order: max model prob across sources, descending.
+	const best = new Map<string, number>();
+	for (const d of dists)
+		for (const e of d?.entries ?? []) best.set(e.token, Math.max(best.get(e.token) ?? 0, e.p));
+	const named = [...best.entries()]
+		.sort((a, b) => b[1] - a[1])
+		.map(([t]) => t)
+		.slice(0, MAX_FT_TOKENS);
+	const namedSet = new Set(named);
+	const colorOf: Record<string, string> = {};
+	named.forEach((t, i) => (colorOf[t] = CHART_COLORS[i]));
+
+	const legend = [
+		...named.map((t) => ({ key: t, label: t, colors: [colorOf[t]] })),
+		{ key: FT_REST, label: FT_REST, colors: [] as string[] }
+	];
+
+	const bars: ChartBar[] = sources.map(({ model, sub }, si) => {
+		const d = dists[si];
+		const byToken = new Map(d?.entries.map((e) => [e.token, e]) ?? []);
+		// Overflow (unnamed) entries fold into the rest segment, mass and samples alike.
+		const overflow = (d?.entries ?? []).filter((e) => !namedSet.has(e.token));
+		const restPct = ((d?.rest ?? 0) + overflow.reduce((s, e) => s + e.p, 0)) * 100;
+		const restIdx = overflow.flatMap((e) => e.sampleIdx);
+		return {
+			model,
+			sub,
+			total: d?.total ?? 0,
+			segments: [
+				...named.map((t) => {
+					const e = byToken.get(t);
+					return {
+						key: t,
+						label: t,
+						colors: [colorOf[t]],
+						pct: (e?.p ?? 0) * 100,
+						count: e?.count ?? 0,
+						sampleIdx: e?.sampleIdx ?? []
+					};
+				}),
+				{
+					key: FT_REST,
+					label: FT_REST,
+					colors: [],
+					pct: restPct,
+					count: restIdx.length,
+					sampleIdx: restIdx
+				}
+			]
+		};
+	});
+
+	return { data: { bars, legend }, mixed: dists.some((d) => d?.mixed) };
 }
 
 /** Wrap a model label onto multiple lines for the bar's x-axis tick. Splits on

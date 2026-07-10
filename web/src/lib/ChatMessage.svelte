@@ -7,6 +7,8 @@
 	// sibling branch instead of "use this".
 	import { renderContent, renderPrefilled, splitPrefill } from '$lib/render';
 	import { tip } from '$lib/tooltip.svelte';
+	import { logprobView } from '$lib/logprobs.svelte';
+	import TokenLogprobs from '$lib/TokenLogprobs.svelte';
 	import type { ViewMessage, SampleData } from '$lib/types';
 
 	let {
@@ -79,6 +81,11 @@
 	let prefillSplit = $derived(msg.prefill ? splitPrefill(msg.prefill) : null);
 
 	let isMultiSample = $derived(!!(msg.totalSamples && msg.totalSamples > 1));
+	// Token-inspector view (sidebar "Token probs" toggle + this turn has data).
+	// It renders the RAW token stream — thinking tokens included — so the
+	// separate reasoning fold is hidden while it's active (no double-render).
+	let tokView = $derived(logprobView.enabled && !!msg.token_logprobs?.length);
+	const sampleTok = (s: SampleData) => logprobView.enabled && !!s.token_logprobs?.length;
 	let canEdit = $derived(msg.nodeId != null && !busy);
 	// ‹k/N› on any committed row with siblings (the n>1 bucket uses its cards).
 	let hasSiblings = $derived(!!(msg.sib && msg.sib.count > 1) && !isMultiSample);
@@ -291,7 +298,7 @@
 			{#if sample.thinking !== undefined}{@render modeTag(sample.thinking)}{/if}
 			{#if sample.finish_reason === 'length'}{@render truncatedTag()}{/if}
 		</div>
-		{#if sample.reasoning}
+		{#if sample.reasoning && !sampleTok(sample)}
 			<details
 				class="sample-reasoning-block"
 				open={sampleView === 'cycle' ? reasoningOpen : undefined}
@@ -307,6 +314,8 @@
 		{#if rawSamples.has(idx) && sample.raw_text}
 			<pre class="raw-text-view">{sample.raw_text}</pre>
 			{#if sample.raw_meta}{@render rawMetaDisclosure(sample.raw_meta)}{/if}
+		{:else if sampleTok(sample)}
+			<TokenLogprobs tlp={sample.token_logprobs!} />
 		{:else}
 			<div class="sample-content">{@html prefillSplit ? renderPrefilled(sample.content, prefillSplit.answer, 'assistant') : renderContent(sample.content, 'assistant')}</div>
 		{/if}
@@ -382,6 +391,15 @@
 		class:mode-think={think}
 		data-tooltip={think ? 'Drawn with the thinking renderer' : 'Drawn with the non-thinking renderer'}
 		use:tip>{think ? 'think' : 'no think'}</span>
+{/snippet}
+
+<!-- "no token data" pill: the Token-probs toggle is on but this turn carries no
+     logprobs (OpenRouter / token-streamed paths / turns predating capture). -->
+{#snippet noTokTag()}
+	<span
+		class="mode-tag"
+		data-tooltip="No token logprobs on this turn — they're captured for native tinker sampling only (not OpenRouter or token-streamed single samples)"
+		use:tip>no token data</span>
 {/snippet}
 
 <!-- "truncated" badge: the sample/turn hit the max-tokens limit ('length' finish
@@ -516,10 +534,11 @@
 				<div class="message-role">{msg.role}</div>
 				{#if msg.thinking !== undefined && !isMultiSample}{@render modeTag(msg.thinking)}{/if}
 				{#if msg.finish_reason === 'length' && !isMultiSample}{@render truncatedTag()}{/if}
+				{#if logprobView.enabled && msg.role === 'assistant' && (msg.content || msg.reasoning || isMultiSample) && !msg.token_logprobs?.length && !(msg.samples ?? []).some((s) => s?.token_logprobs?.length)}{@render noTokTag()}{/if}
 			</div>
 			{#if showSampleCycler}{@render sampleCycler()}{:else}{@render cycler()}{/if}
 		</div>
-		{#if msg.role === 'assistant' && msg.reasoning && !isMultiSample}
+		{#if msg.role === 'assistant' && msg.reasoning && !isMultiSample && !tokView}
 			<details class="sample-reasoning-block reasoning-primary" open={isLastAssistant}>
 				<summary class="sample-reasoning-toggle">
 					<span>Thinking</span>
@@ -608,6 +627,8 @@
 			{#if rawSingle && msg.raw_text}
 				<pre class="raw-text-view">{msg.raw_text}</pre>
 					{#if msg.raw_meta}{@render rawMetaDisclosure(msg.raw_meta)}{/if}
+			{:else if tokView}
+				<TokenLogprobs tlp={msg.token_logprobs!} />
 			{:else}
 				<div class="message-content">{@html prefillSplit ? renderPrefilled(msg.content, prefillSplit.answer, msg.role) : renderContent(msg.content, msg.role)}</div>
 			{/if}

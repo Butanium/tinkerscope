@@ -110,6 +110,11 @@ class ChatRequest(BaseModel):
     top_k: int | None = None
     presence_penalty: float | None = None
     repetition_penalty: float | None = None
+    # Capture per-token logprobs + top-5 alternatives on the NATIVE tinker
+    # sampling paths (run_id / base_model n>1). Default ON; costs one extra
+    # prefill-only call per sample (see tinker_sampler._token_logprobs). The
+    # token-streamed oai paths and OpenRouter ignore it.
+    logprobs: bool = True
     # live-drive routing
     panel: str = "primary"                  # "primary" | "compare"
     broadcast: bool = True                   # mirror samples to the state bus
@@ -338,6 +343,7 @@ async def chat(req: ChatRequest):
                         messages=native_msgs if think else native_off,
                         n=n, temperature=temperature,
                         max_tokens=max_tokens, top_p=req.top_p,
+                        logprobs=req.logprobs,
                     )
 
                 if both:
@@ -379,6 +385,7 @@ async def chat(req: ChatRequest):
                         messages=native_msgs if think else native_off,
                         n=n,
                         temperature=temperature, max_tokens=max_tokens, top_p=req.top_p,
+                        logprobs=req.logprobs,
                     )
 
                 if both:

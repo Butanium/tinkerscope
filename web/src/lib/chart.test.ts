@@ -3,9 +3,9 @@
 //   node web/src/lib/chart.test.ts
 // (no dep added; respects the supply-chain age gate). Exit code != 0 on failure.
 
-import { chartByAnswers, chartByRules, chartRules, contrastText, wrapLabel } from './chart.ts';
+import { chartByAnswers, chartByFirstToken, chartByRules, chartRules, contrastText, FT_REST, wrapLabel } from './chart.ts';
 import { ruleMatches } from './highlight-match.ts';
-import type { HighlightRule } from './types.ts';
+import type { HighlightRule, TokenLogprob } from './types.ts';
 
 let passed = 0;
 let failed = 0;
@@ -226,6 +226,54 @@ ok('rules: no sources → null', chartByRules([], [RED]) === null);
 	eq('answers: total still counts it', d.bars[0].total, 2);
 }
 ok('answers: no sources → null', chartByAnswers([]) === null);
+
+// ── chartByFirstToken ─────────────────────────────────────────────────
+{
+	const lp = (p: number) => Math.log(p);
+	const first = (t: string, tid: number, p: number, top?: [string, number, number][]): TokenLogprob => ({ t, tid, lp: lp(p), top });
+	const TOP: [string, number, number][] = [
+		['Yes', 1, lp(0.6)],
+		['No', 2, lp(0.3)]
+	];
+	ok('firstToken: null without any data', chartByFirstToken([{ model: 'm', samples: [{ content: 'x' }] }]) == null);
+	ok('firstToken: null on empty sources', chartByFirstToken([]) == null);
+
+	const ft = chartByFirstToken([
+		{
+			model: 'a',
+			samples: [
+				{ content: 'Yes', first: first('Yes', 1, 0.6, TOP) },
+				{ content: 'Yes', first: first('Yes', 1, 0.6, TOP) },
+				{ content: 'No', first: first('No', 2, 0.3, TOP) }
+			]
+		},
+		{ model: 'b', samples: [{ content: 'plain openrouter sample' }] }
+	])!;
+	ok('firstToken: builds', ft != null);
+	eq('firstToken: bars stay 1:1 with sources', ft.data.bars.length, 2);
+	eq('firstToken: legend = tokens by max prob + rest', ft.data.legend.map((l) => l.key), ['Yes', 'No', FT_REST]);
+	const barA = ft.data.bars[0];
+	eq('firstToken: pct is MODEL prob ×100', Math.round(barA.segments[0].pct), 60);
+	eq('firstToken: empirical count rides along', barA.segments[0].count, 2);
+	eq('firstToken: inspect indices', barA.segments[0].sampleIdx, [0, 1]);
+	const rest = barA.segments.find((s) => s.key === FT_REST)!;
+	ok('firstToken: rest mass ≈ 10%', Math.abs(rest.pct - 10) < 1e-6, `got ${rest.pct}`);
+	const barB = ft.data.bars[1];
+	eq('firstToken: no-data source → empty bar (n=0)', barB.total, 0);
+	ok('firstToken: no-data bar has zero mass', barB.segments.every((s) => s.pct === 0));
+	ok('firstToken: unmixed', !ft.mixed);
+
+	const mixedFt = chartByFirstToken([
+		{
+			model: 'a',
+			samples: [
+				{ content: 'x', first: first('Yes', 1, 0.9, [['Yes', 1, lp(0.9)]]) },
+				{ content: 'y', first: first('Hi', 5, 0.5, [['Hi', 5, lp(0.5)]]) }
+			]
+		}
+	])!;
+	ok('firstToken: disagreeing top-K flags mixed', mixedFt.mixed);
+}
 
 // ── label helpers ─────────────────────────────────────────────────────
 eq('wrapLabel splits on separators', wrapLabel('run_name@120', 8), ['run name', '120']);

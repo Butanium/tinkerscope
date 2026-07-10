@@ -198,6 +198,83 @@ def _to_render_msg(m: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Per-token logprobs (native sampling only)
+# ---------------------------------------------------------------------------
+TOPK_LOGPROBS = 5
+
+
+async def _token_logprobs(
+    client: Any, model_input: Any, tokens: list[int], fallback_lps: Any, tokenizer: Any
+) -> list[dict] | None:
+    """Per-generated-token logprobs + top-K alternatives for one sample.
+
+    The sampled tokens' own logprobs come back free on every SampleResponse
+    (``seq.logprobs``), but tinker has NO top-k for *generated* tokens — its
+    ``topk_prompt_logprobs`` covers prompt positions only. So we re-submit
+    prompt+completion as a prefill (``max_tokens=1``) with
+    ``include_prompt_logprobs + topk_prompt_logprobs`` and read positions
+    [L, L+T): generated token t sits at full-sequence position L+t (same
+    convention as tinker_cookbook's SDFT teacher top-K recovery; verified live —
+    prefill lp matches the sampling call's own lp to ~1e-2). One extra
+    prefill-only call per sample; `lp` is taken from THIS call so it's the same
+    forward pass as `top`. On any failure, degrade to the sampling call's own
+    per-token logprobs with no alternatives — never fail the sample over its
+    diagnostics.
+
+    Wire/persisted entry shape: {t, tid, lp, top?: [[text, tid, lp] × K]},
+    `top` most-probable-first.
+    """
+    import tinker
+    from tinker import types as tt
+
+    L = model_input.length
+
+    def _fallback() -> list[dict] | None:
+        if fallback_lps is None:
+            return None
+        return [
+            {"t": tokenizer.decode([tid]), "tid": int(tid), "lp": float(fallback_lps[t])}
+            for t, tid in enumerate(tokens)
+        ]
+
+    try:
+        full = tinker.ModelInput(
+            chunks=[*model_input.chunks, tt.EncodedTextChunk(tokens=list(tokens))]
+        )
+        resp = await client.sample_async(
+            prompt=full,
+            num_samples=1,
+            sampling_params=tt.SamplingParams(max_tokens=1),
+            include_prompt_logprobs=True,
+            topk_prompt_logprobs=TOPK_LOGPROBS,
+        )
+        plp = resp.prompt_logprobs
+        topk = resp.topk_prompt_logprobs
+        out: list[dict] = []
+        for t, tid in enumerate(tokens):
+            pos = L + t
+            lp = plp[pos] if plp is not None and pos < len(plp) else None
+            if lp is None and fallback_lps is not None:
+                lp = fallback_lps[t]
+            entry: dict = {
+                "t": tokenizer.decode([tid]),
+                "tid": int(tid),
+                "lp": float(lp) if lp is not None else None,
+            }
+            if topk is not None and pos < len(topk) and topk[pos]:
+                entry["top"] = [
+                    [tokenizer.decode([a]), int(a), float(b)]
+                    for a, b in topk[pos][:TOPK_LOGPROBS]
+                ]
+            out.append(entry)
+        return out
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        return _fallback()
+
+
+# ---------------------------------------------------------------------------
 # Sampler manager: caches ServiceClient, sampling clients, renderers, tokenizers
 # ---------------------------------------------------------------------------
 class SamplerManager:
@@ -290,13 +367,17 @@ class SamplerManager:
         temperature: float,
         max_tokens: int,
         top_p: float | None = None,
+        logprobs: bool = True,
     ) -> AsyncIterator[dict]:
         """Yield one result dict per completed sample, as they finish.
 
         Each yielded dict: {sample_index, content, reasoning?, raw_text,
-        raw_meta, finish_reason} — or {sample_index, error} on a per-sample
-        failure. `raw_meta` is the tokenizer-debugging blob (prompt/completion
-        tokens via convert_ids_to_tokens) shown in the raw-view dropdown.
+        raw_meta, finish_reason, token_logprobs?} — or {sample_index, error} on
+        a per-sample failure. `raw_meta` is the tokenizer-debugging blob
+        (prompt/completion tokens via convert_ids_to_tokens) shown in the
+        raw-view dropdown. `token_logprobs` (default ON, see _token_logprobs)
+        costs one extra prefill-only call per sample, awaited before the sample
+        is yielded; pass logprobs=False to skip it.
         """
         from tinker import types as tt
 
@@ -386,6 +467,12 @@ class SamplerManager:
                     # content/reasoning already span prefill+completion → the
                     # client must NOT re-prepend the prefill.
                     item["prefill_incorporated"] = True
+                if logprobs:
+                    tlp = await _token_logprobs(
+                        client, model_input, list(seq.tokens), seq.logprobs, tokenizer
+                    )
+                    if tlp:
+                        item["token_logprobs"] = tlp
                 return item
             except Exception as e:  # surface per-sample failure, keep the rest
                 return {"sample_index": idx, "error": f"{type(e).__name__}: {e}"}

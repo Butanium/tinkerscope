@@ -93,6 +93,10 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     handlers as `branchOps.<name>(...)`.
   - `lib/highlights.svelte.ts` → `highlightStore` — user-defined render-time
     coloring rules + persistence.
+  - `lib/logprobs.svelte.ts` → `logprobView` — the sidebar **"Token probs"**
+    display toggle (localStorage-persisted). Display-only: capture is the
+    server default for native tinker sampling, so flipping it on works
+    retroactively on stored turns.
   - `lib/scroll.svelte.ts` → `panelScroll` — **the only scrollTop writer**: the
     per-panel FOLLOW (streaming, stick-to-bottom gated) / PRESERVE (tree
     mutations keep position) / SNAP (send, conversation open) / REVEAL
@@ -115,8 +119,17 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     `tests/small-smokes/browser_label_trunc.py`.
   - `lib/chart.ts` — distribution-chart bucketing: `chartByRules` (samples
     bucketed by the SET of matching highlight rules — grey none / solid single /
-    striped combo) + `chartByAnswers` (legacy exact-match histogram) + label
-    helpers. **Has `chart.test.ts`.**
+    striped combo) + `chartByAnswers` (legacy exact-match histogram) +
+    `chartByFirstToken` (the MODEL's probability distribution over the first
+    generated token, from stored `token_logprobs` — segment pct = model prob,
+    count/sampleIdx = the empirical side) + label helpers. **Has `chart.test.ts`.**
+  - `lib/token-logprob.ts` — token-logprob display math: `prob`/`pctLabel`,
+    `surprisalAlpha` (the single-hue heat tint — alpha ∝ -logprob), `displayToken`
+    (whitespace glyphs), `firstTokenDist` (one panel's position-0 distribution:
+    newest sample's top-K as reference + sampled outliers; flags `mixed`).
+    **Has `token-logprob.test.ts`**; smokes `tests/small-smokes/
+    browser_token_logprobs.py` (seeded, deterministic) + `…_live.py` (real
+    tinker sampling end-to-end).
   - `lib/kbnav.ts` — keyboard row-navigation helpers: nav-key set, clamped
     focus-index stepping, the typing-target/modal-open guards. Consumed by
     +page's *Keyboard row navigation* section (click a row → focus ring; ↑/↓
@@ -156,10 +169,18 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     chips (drop a rule the prompt makes ubiquitous from the bucketing;
     chart-only, session-scoped) / with-vs-without-thinking sample filter
     (shown only when the picked turn mixes both) / click-a-segment-to-inspect.
+    Third mode "first token": the model's OWN probability distribution over the
+    first generated token (needs stored `token_logprobs`; disabled otherwise).
     Deterministic smoke (seeded tree, no sampling):
     `tests/small-smokes/browser_chart_rules.py`.
   - `lib/ChatMessage.svelte` — one chat row (committed node OR live bucket turn)
-    + its per-row toolbar (edit/regen/branch/pin…).
+    + its per-row toolbar (edit/regen/branch/pin…). With `logprobView` on, an
+    assistant body with `token_logprobs` renders `TokenLogprobs` instead of
+    markdown (turns without data wear a "no token data" pill).
+  - `lib/TokenLogprobs.svelte` — the token inspector body: the raw generated
+    token stream (thinking tags and all — exact token boundaries beat markdown
+    here), each token tinted by surprisal; hover → fixed-position popover with
+    the token's probability + top-5 alternative bars.
   - `lib/ModelTypeahead.svelte` — the type-to-filter model combobox (used by the
     OpenRouter + Tinker picker modals, and as the panel body of `ModelDropdown`).
   - `lib/ModelDropdown.svelte` — select-like trigger button + floating panel

@@ -191,7 +191,8 @@ export function parseSample(data: any): SampleData {
 		raw_meta: data?.raw_meta || undefined,
 		finish_reason: data?.finish_reason || undefined,
 		// per-sample renderer mode — only present on thinking='both' chats
-		thinking: typeof data?.thinking === 'boolean' ? data.thinking : undefined
+		thinking: typeof data?.thinking === 'boolean' ? data.thinking : undefined,
+		token_logprobs: Array.isArray(data?.token_logprobs) ? data.token_logprobs : undefined
 	};
 }
 

@@ -44,6 +44,7 @@ export async function drainSamples(res: Response): Promise<SampleLike[]> {
 						prefill_incorporated: d.prefill_incorporated,
 						finish_reason: d.finish_reason,
 						thinking: typeof d.thinking === 'boolean' ? d.thinking : undefined,
+						token_logprobs: Array.isArray(d.token_logprobs) ? d.token_logprobs : undefined,
 						sample_index: d.sample_index ?? samples.length
 					});
 				}

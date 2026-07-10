@@ -28,6 +28,7 @@
 	import ModelDropdown from '$lib/ModelDropdown.svelte';
 	import TruncLabel from '$lib/TruncLabel.svelte';
 	import { loadHighlightRules } from '$lib/highlights.svelte';
+	import { logprobView } from '$lib/logprobs.svelte';
 	import HighlightRules from '$lib/HighlightRules.svelte';
 	import type { Pin } from '$lib/types';
 	import { tip, tooltip } from '$lib/tooltip.svelte';
@@ -1037,14 +1038,14 @@
 				const samples = siblingsOf(tree, node.id)
 					.map((id) => tree.nodes[id])
 					.filter((n) => n && n.role === 'assistant' && (n.content || n.reasoning))
-					.map((n) => ({ content: n.content, reasoning: n.reasoning }));
+					.map((n) => ({ content: n.content, reasoning: n.reasoning, first: n.token_logprobs?.[0] }));
 				if (samples.length > 0) turns.push({ question: lastQ, samples });
 			}
 			const bucket = live.panels[p.panel];
 			if (bucket?.running) {
 				const streamed = (bucket.samples ?? [])
 					.filter((x) => x && (x.content || x.reasoning) && !x.error)
-					.map((x) => ({ content: x.content ?? '', reasoning: x.reasoning }));
+					.map((x) => ({ content: x.content ?? '', reasoning: x.reasoning, first: x.token_logprobs?.[0] }));
 				if (streamed.length > 0) turns.push({ question: lastQ, samples: streamed, streaming: true });
 			}
 			if (turns.length > 0)
@@ -1390,6 +1391,16 @@
 					<span class="seg-toggle" data-tooltip="How an n>1 distribution renders: All = every card stacked (scroll); Cycle = one card at a time with ‹/›" use:tip>
 						<button class="seg-btn" class:active={sampleView === 'all'} onclick={() => setSampleView('all')}>All</button>
 						<button class="seg-btn" class:active={sampleView === 'cycle'} onclick={() => setSampleView('cycle')}>Cycle</button>
+					</span>
+				</label>
+			</div>
+
+			<div class="sidebar-section">
+				<label class="sidebar-label thinking-toggle-row">
+					<span>Token probs</span>
+					<span class="seg-toggle" data-tooltip="On = assistant turns show their raw token stream; hover a token for its probability + top-5 alternatives. Captured on native tinker sampling (display-only toggle — data is always stored)" use:tip>
+						<button class="seg-btn" class:active={!logprobView.enabled} onclick={() => logprobView.set(false)}>Off</button>
+						<button class="seg-btn" class:active={logprobView.enabled} onclick={() => logprobView.set(true)}>On</button>
 					</span>
 				</label>
 			</div>
