@@ -8,6 +8,8 @@ import pytest
 
 from tinkerscope.api.routes.chat import (
     ChatRequest,
+    _committed_turn,
+    _prefill_reaches_sample,
     _prep_prefill_lists,
     _resolve_prefill_scope,
 )
@@ -120,6 +122,59 @@ def test_scope_thinking_matrix(scope, thinking, expected):
 
 
 # --------------------------------------------------------------------------- #
+# Transcript-commit: the representative turn stored for multi-turn memory must
+# reflect whether the prefill actually REACHED that sample's half — a one-sided
+# scope that dropped it from the prompt must not be re-prepended.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    "scope, thinking, idx, n, reached",
+    [
+        # thinking='both': sample 0 = non-thinking half, sample n = thinking half.
+        ("all", "both", 0, 2, True),
+        ("all", "both", 2, 2, True),
+        ("think", "both", 0, 2, False),   # non-thinking half — prefill dropped (the bug)
+        ("think", "both", 2, 2, True),    # thinking half — kept
+        ("non_think", "both", 0, 2, True),   # non-thinking half — kept
+        ("non_think", "both", 2, 2, False),  # thinking half — dropped
+        # single-mode: every sample's half IS `thinking`.
+        ("think", True, 0, 1, True),
+        ("think", False, 0, 1, False),
+        ("non_think", True, 0, 1, False),
+        ("non_think", False, 0, 1, True),
+        ("all", False, 0, 1, True),
+    ],
+)
+def test_prefill_reaches_sample(scope, thinking, idx, n, reached):
+    assert _prefill_reaches_sample(scope, thinking, n, idx) is reached
+
+
+def test_committed_turn_prefill_reached_prepends_when_not_incorporated():
+    msgs = [{"role": "user", "content": "q"}, {"role": "assistant", "content": "P"}]
+    turn = _committed_turn(msgs, "cont", incorporated=False, prefill_reached=True)
+    assert turn == [{"role": "user", "content": "q"}, {"role": "assistant", "content": "Pcont"}]
+
+
+def test_committed_turn_prefill_reached_keeps_incorporated_verbatim():
+    msgs = [{"role": "user", "content": "q"}, {"role": "assistant", "content": "P"}]
+    turn = _committed_turn(msgs, "Pcont", incorporated=True, prefill_reached=True)
+    assert turn == [{"role": "user", "content": "q"}, {"role": "assistant", "content": "Pcont"}]
+
+
+def test_committed_turn_prefill_not_reached_drops_the_prefill_node():
+    """The regression: prefill in the request but NOT applied to this sample's half —
+    store the fresh completion alone, never prefill+completion."""
+    msgs = [{"role": "user", "content": "q"}, {"role": "assistant", "content": "P"}]
+    turn = _committed_turn(msgs, "fresh", incorporated=False, prefill_reached=False)
+    assert turn == [{"role": "user", "content": "q"}, {"role": "assistant", "content": "fresh"}]
+
+
+def test_committed_turn_no_prefill_appends():
+    msgs = [{"role": "user", "content": "q"}]
+    turn = _committed_turn(msgs, "ans", incorporated=False, prefill_reached=False)
+    assert turn == [{"role": "user", "content": "q"}, {"role": "assistant", "content": "ans"}]
+
+
+# --------------------------------------------------------------------------- #
 # End-to-end wiring: thinking='both' routes the on/off lists to the right halves
 # through the real /api/chat handler (mocked OpenRouter producer, broadcast off).
 # --------------------------------------------------------------------------- #
@@ -182,3 +237,35 @@ def test_chat_deprecated_bool_still_strips_nonthinking_half(client, monkeypatch)
     by_think = {c["thinking"]: c for c in calls}
     assert by_think[True]["has_prefill"] is True
     assert by_think[False]["has_prefill"] is False
+
+
+def test_chat_think_scope_both_commits_unprefixed_turn(client, monkeypatch):
+    """End-to-end regression: scope='think' + thinking='both' — the representative
+    sample (index 0 = the non-thinking half, which had the prefill dropped) must be
+    committed to the panel transcript WITHOUT the prefill re-prepended."""
+
+    async def fake_one(*, model, messages, thinking, **kw):
+        # the thinking half still sees the prefill, the non-thinking half doesn't —
+        # but both return continuation-only "cont" (openrouter path, not incorporated)
+        return {"content": "cont", "raw_text": "cont"}
+
+    monkeypatch.setattr("tinkerscope.api.openrouter.sample_one", fake_one)
+    r = client.post(
+        "/api/chat",
+        json={
+            "openrouter_model": "x/y",
+            "messages": [{"role": "user", "content": "q"}, {"role": "assistant", "content": "PREFILL"}],
+            "thinking": "both",
+            "prefill_scope": "think",
+            "n_samples": 1,
+            "panel": "primary",
+            "broadcast": False,
+        },
+    )
+    assert r.status_code == 200, r.text
+    # The committed panel transcript (via BUS.chat_end) must store the fresh
+    # completion alone — NOT "PREFILLcont" — because sample 0's half dropped it.
+    panels = {p["id"]: p for p in client.get("/api/state").json()["panels"]}
+    committed = panels["primary"]["messages"]
+    assert committed[-1] == {"role": "assistant", "content": "cont"}, committed
+    assert committed[-1]["content"] != "PREFILLcont"

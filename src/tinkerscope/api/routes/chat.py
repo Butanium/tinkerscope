@@ -159,6 +159,36 @@ def _prep_prefill_lists(
     return sampling_on, native_on, sampling_off, native_off
 
 
+def _prefill_reaches_sample(scope: str, thinking: bool | str, n: int, sample_index: int) -> bool:
+    """Did the trailing-assistant prefill reach the prompt for THIS sample's half?
+
+    In thinking="both" the non-thinking half is sample_index 0..n-1 and the thinking
+    half n..2n-1; in a single-mode send every sample's half IS `thinking`. "all"
+    reaches both halves, "think" only the thinking half, "non_think" only the
+    non-thinking half — the same split _prep_prefill_lists applies to the prompt."""
+    is_thinking = (sample_index >= n) if thinking == "both" else (thinking is True)
+    return scope == "all" or (scope == "think") == is_thinking
+
+
+def _committed_turn(
+    msgs: list[dict], chosen: str, incorporated: bool, prefill_reached: bool
+) -> list[dict]:
+    """The representative assistant turn stored in the panel transcript (multi-turn
+    memory). A trailing assistant message in `msgs` is a prefill: if it REACHED this
+    sample's half, merge it into one turn — native paths already folded it into
+    `chosen` (`incorporated`), other paths return continuation-only so we prepend. If
+    it did NOT reach this half (a one-sided prefill_scope dropped it from the prompt
+    this sample saw), drop the standalone prefill node and store the fresh completion
+    alone — otherwise the transcript would claim the model saw a prefill it never did.
+    No trailing assistant → just append the completion."""
+    if msgs and msgs[-1]["role"] == "assistant":
+        if prefill_reached:
+            full = chosen if incorporated else msgs[-1]["content"] + chosen
+            return [*msgs[:-1], {"role": "assistant", "content": full}]
+        return [*msgs[:-1], {"role": "assistant", "content": chosen}]
+    return [*msgs, {"role": "assistant", "content": chosen}]
+
+
 def _resolve_checkpoint(run: discovery.Run, name: str | None):
     """Return the Checkpoint to sample (by name, else last one with a sampler_path)."""
     with_sampler = [c for c in run.checkpoints if c.sampler_path]
@@ -474,19 +504,15 @@ async def chat(req: ChatRequest):
             else:
                 event, err_msg, commit = "chat_done", None, False
             # multi-turn memory: commit the representative assistant turn (sample 0)
-            # into THIS panel's transcript so the next turn carries it. A trailing
-            # assistant message in `msgs` is a prefill — merge it into ONE turn
-            # (drop the standalone prefill node); native sampling already folded it
-            # into `chosen`, other paths return continuation-only so we prepend.
+            # into THIS panel's transcript so the next turn carries it. _committed_turn
+            # merges the trailing-assistant prefill into ONE turn when it reached this
+            # sample's half (a one-sided prefill_scope may have dropped it — then the
+            # prefill node is dropped instead of falsely prepended).
             end_patch: dict = {}
             if commit:
                 idx0 = 0 if 0 in produced else min(produced)
-                chosen = produced[idx0]
-                if msgs and msgs[-1]["role"] == "assistant":
-                    full = chosen if incorporated.get(idx0) else msgs[-1]["content"] + chosen
-                    turn = [*msgs[:-1], {"role": "assistant", "content": full}]
-                else:
-                    turn = [*msgs, {"role": "assistant", "content": chosen}]
+                reached = _prefill_reaches_sample(scope, req.thinking, n, idx0)
+                turn = _committed_turn(msgs, produced[idx0], incorporated.get(idx0, False), reached)
                 end_patch = {"panel": req.panel, "messages": turn}
             await BUS.chat_end(event, **end_patch)
             if req.broadcast:
