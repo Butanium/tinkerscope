@@ -123,7 +123,20 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     (TruncLabel) ellipsizes only the head and always shows the distinguishing
     tail. Sibling-aware mode anchors the tail at the divergence from the closest
     visible sibling. **Has `label-split.test.ts`**; browser smoke
-    `tests/small-smokes/browser_label_trunc.py`.
+    `tests/small-smokes/browser_label_trunc.py` (now the ModelDropdown-trigger
+    single-label site — sibling LIST rows moved to the diff view below).
+  - `lib/label-diff.ts` — `diffLabels(labels)`: the "smarter" layer over
+    tail-preserve for the case it can't handle — sibling runs that share BOTH ends
+    and differ only MID-name (`…_base_ed_sheeran_…` vs `…_instruct_…`, which a tail
+    cap renders identically). Clusters the visible labels by first segment, then
+    positionally votes over aligned indices: cluster-constant runs collapse to a
+    dimmed `…`, every varying segment shows in full (reaches interior constants a
+    prefix/suffix scheme can't; degrades to prefix-only elision on ragged families).
+    Peels the `⊘/?/◆/◇/↗` status-icon prefix so aged-out runs still cluster.
+    Returns null per row → caller falls back to TruncLabel. Invariants (distinct
+    labels never collide; only cluster-constant segments elide) are in
+    **`label-diff.test.ts`** against both real fixture families; browser smoke
+    `tests/small-smokes/browser_label_diff.py`.
   - `lib/chart.ts` — distribution-chart bucketing: `chartByRules` (samples
     bucketed by the SET of matching highlight rules — grey none / solid single /
     striped combo) + `chartByAnswers` (legacy exact-match histogram) +
@@ -190,16 +203,24 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     the token's probability + top-5 alternative bars.
   - `lib/ModelTypeahead.svelte` — the type-to-filter model combobox (used by the
     OpenRouter + Tinker picker modals, and as the panel body of `ModelDropdown`).
+    Rows render via `DiffLabel` when the visible siblings form a diffable family
+    (`diffLabels(visibleLabels)`), else `TruncLabel`. Search still matches the full
+    label, so filtering is unaffected by the compact display.
   - `lib/ModelDropdown.svelte` — select-like trigger button + floating panel
     wrapping `ModelTypeahead`; the sidebar's per-panel model picker (click →
     type to filter, no separate "Filter models…" textbox).
   - `lib/HighlightRules.svelte` — the highlight-rules editor UI.
   - `lib/TruncLabel.svelte` — the middle-ellipsis label: a two-span flex trick
     (head clips with `flex:0 1 auto`, tail always shows) over `splitTail`, plus
-    the full-name `use:tip` tooltip backstop. Used everywhere a run/model label
-    renders truncated — the `ModelTypeahead` rows (sibling-aware), the
-    `ModelDropdown` trigger, and +page's `.column-title` / `.send-chip`. So two
-    runs sharing a long prefix stay distinguishable at any width.
+    the full-name `use:tip` tooltip backstop. The SINGLE-LABEL renderer — the
+    `ModelDropdown` trigger and +page's `.column-title` / `.send-chip` — plus the
+    fallback for `ModelTypeahead` rows a diff family doesn't cover. So two runs
+    sharing a long prefix stay distinguishable at any width.
+  - `lib/DiffLabel.svelte` — the diff-view label: renders `label-diff`'s compact
+    parts (varying segments at full emphasis, cluster-constant anchors + `…` dimmed)
+    with the same `use:tip` tooltip / aria-label affordances as TruncLabel; only
+    the leading family anchor may shrink under width pressure. Used for
+    `ModelTypeahead` rows when `diffLabels` returns a render for the row.
 
 Cross-component CSS utility classes (`.sidebar-label`, `.btn-new`,
 `.backend-error`, …) live in **global `app.css`** — scoped `+page.svelte` styles
