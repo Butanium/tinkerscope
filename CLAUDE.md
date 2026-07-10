@@ -137,6 +137,15 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     labels never collide; only cluster-constant segments elide) are in
     **`label-diff.test.ts`** against both real fixture families; browser smoke
     `tests/small-smokes/browser_label_diff.py`.
+  - `lib/fuzzy.ts` — typo-tolerant model search: `tieredFilter(query, items,
+    matches)` keeps exact substring as the primary tier (behavior-identical when it
+    yields ≥1) and only on ZERO substring matches engages a bigram-Dice fuzzy tier
+    (`fuzzyFilter`/`fuzzyScore`) so `ed_shreean`/`instrcut` still surface the run.
+    Token-wise (split on non-alnum, `lr1e-3` whole), length-weighted over the
+    query's tokens (a run matching MORE of the query ranks higher), threshold 0.4
+    (tuned on fixture names: typos ≥0.53, garbage ≤0.28), ranked + capped ~20,
+    bigram sets cached per token. **Has `fuzzy.test.ts`**; browser smoke
+    `tests/small-smokes/browser_fuzzy_search.py`.
   - `lib/chart.ts` — distribution-chart bucketing: `chartByRules` (samples
     bucketed by the SET of matching highlight rules — grey none / solid single /
     striped combo) + `chartByAnswers` (legacy exact-match histogram) +
@@ -205,7 +214,10 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     OpenRouter + Tinker picker modals, and as the panel body of `ModelDropdown`).
     Rows render via `DiffLabel` when the visible siblings form a diffable family
     (`diffLabels(visibleLabels)`), else `TruncLabel`. Search still matches the full
-    label, so filtering is unaffected by the compact display.
+    label, so filtering is unaffected by the compact display. Filtering is TIERED
+    (`lib/fuzzy` `tieredFilter`): exact substring primary, typo-tolerant fuzzy
+    fallback only on zero substring matches — with a subtle "no exact matches —
+    close matches:" note when the fuzzy tier is showing.
   - `lib/ModelDropdown.svelte` — select-like trigger button + floating panel
     wrapping `ModelTypeahead`; the sidebar's per-panel model picker (click →
     type to filter, no separate "Filter models…" textbox).
