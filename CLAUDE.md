@@ -109,6 +109,13 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     cycle, siblings). The single source of branching truth. **Has `tree.test.ts`.**
   - `lib/model-sel.ts` — the `openrouter:`/`base:`/`ckpt:` sentinel encoding
     (prefixes, predicates, id extractors) for a panel's model selection.
+  - `lib/panel-order.ts` — `reorderPanels(panels, fromId, toGap)` (move a panel by
+    stable id to a gap index; returns the SAME ref on no-op/unknown so callers can
+    skip a redundant write) + `isNoopGap`. Powers the column-header drag-to-reorder
+    in +page's *Panel drag-to-reorder* section — reordering the shared `panels[]`
+    updates the chat columns, the sidebar Models pickers, and the send-chips at
+    once (all render from that one array). **Has `panel-order.test.ts`**; browser
+    smoke `tests/small-smokes/browser_panel_drag.py`.
   - `lib/label-split.ts` — `splitTail(label, siblings?)`: tail-preserving
     truncation ("middle ellipsis") for run/model labels. Sibling runs share a
     long prefix and differ only in the last few chars (`…_s1_lr1e-3` vs

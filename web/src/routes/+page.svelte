@@ -19,6 +19,7 @@
 	import { isNavKey, moveIndex, isEditableTarget, anyModalOpen } from '$lib/kbnav';
 	import type { ChartPanelData, ChartTurn } from '$lib/chart';
 	import { buildPanelView } from '$lib/panel-view';
+	import { reorderPanels, isNoopGap } from '$lib/panel-order';
 	import ChartModal from '$lib/ChartModal.svelte';
 	import TagModal from '$lib/TagModal.svelte';
 	import DatasetModal from '$lib/DatasetModal.svelte';
@@ -263,6 +264,49 @@
 		convo.dropTree(panel);
 		dropPanelBucket(panel);
 		convo.dropPanelUi(panel);
+	}
+
+	// ── Panel drag-to-reorder ─────────────────────────────────────────
+	// Reorder columns by dragging a column header. Display order IS the shared
+	// panels[] order, so one full-replace patch moves the chat column, its sidebar
+	// model picker, and the send-chip together. Content (trees / live buckets /
+	// scroll) is keyed by STABLE panel id, so it travels with the column for free.
+	// `dragOverGap` is a gap index (0=before first … N=after last) from the dragover
+	// midpoint test; the drop indicator hides at gaps where a drop is a no-op.
+	let dragPanelId = $state<string | null>(null);
+	let dragOverGap = $state<number | null>(null);
+	function onPanelDragStart(e: DragEvent, panelId: string) {
+		dragPanelId = panelId;
+		if (e.dataTransfer) {
+			e.dataTransfer.effectAllowed = 'move';
+			e.dataTransfer.setData('text/plain', panelId); // Firefox won't start a drag without data
+		}
+	}
+	function onPanelDragOver(e: DragEvent, index: number) {
+		if (dragPanelId === null) return;
+		e.preventDefault(); // mark this column a valid drop target
+		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		dragOverGap = e.clientX < rect.left + rect.width / 2 ? index : index + 1;
+	}
+	function onPanelDrop(e: DragEvent) {
+		if (dragPanelId === null || dragOverGap === null) return;
+		e.preventDefault();
+		const next = reorderPanels(s.panels, dragPanelId, dragOverGap);
+		if (next !== s.panels) {
+			patchState({ panels: next.map((p) => ({ ...p })) }, true);
+			convo.save(); // persist the layout with the conversation (like setRun)
+		}
+		dragPanelId = null;
+		dragOverGap = null;
+	}
+	function onPanelDragEnd() {
+		dragPanelId = null;
+		dragOverGap = null;
+	}
+	/** Show the drop indicator at gap `gap` only when a drop there would move something. */
+	function showDropAt(gap: number): boolean {
+		return dragPanelId !== null && dragOverGap === gap && !isNoopGap(s.panels, dragPanelId, gap);
 	}
 
 	// ── Param edits → shared state ────────────────────────────────────
@@ -1468,9 +1512,17 @@
 		<!-- Chat area -->
 		<div class="chat-area">
 			<div class="chat-columns" class:multi={isComparing}>
-				{#each panelSels as p (p.panel)}
+				{#each panelSels as p, i (p.panel)}
 					{#if convo.reducedPanels.has(p.panel)}
-						<div class="chat-column reduced">
+						<div
+							class="chat-column reduced"
+							class:drop-left={showDropAt(i)}
+							class:drop-right={i === panelSels.length - 1 && showDropAt(panelSels.length)}
+							ondragover={(e) => onPanelDragOver(e, i)}
+							ondrop={onPanelDrop}
+							ondragend={onPanelDragEnd}
+							role="group"
+						>
 							<button class="restore-panel" onclick={() => convo.restorePanel(p.panel)} title="Restore this panel">
 								<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
 								<span class="restore-label" use:tip data-tooltip={panelLabel(p)}>{panelLabel(p)}</span>
@@ -1479,9 +1531,26 @@
 					{:else}
 					{@const view = panelView(p)}
 					{@const run = live.panels[p.panel] ?? emptyPanel()}
-					<div class="chat-column">
+					<div
+						class="chat-column"
+						class:dragging={dragPanelId === p.panel}
+						class:drop-left={showDropAt(i)}
+						class:drop-right={i === panelSels.length - 1 && showDropAt(panelSels.length)}
+						ondragover={(e) => onPanelDragOver(e, i)}
+						ondrop={onPanelDrop}
+						ondragend={onPanelDragEnd}
+						role="group"
+					>
 						{#if isComparing}
-							<div class="column-header">
+							<div
+								class="column-header"
+								draggable="true"
+								ondragstart={(e) => onPanelDragStart(e, p.panel)}
+								role="group"
+							>
+								<span class="drag-grip" use:tip data-tooltip="Drag to reorder panel" aria-hidden="true">
+									<svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor"><circle cx="2.5" cy="3" r="1.2" /><circle cx="7.5" cy="3" r="1.2" /><circle cx="2.5" cy="7" r="1.2" /><circle cx="7.5" cy="7" r="1.2" /><circle cx="2.5" cy="11" r="1.2" /><circle cx="7.5" cy="11" r="1.2" /></svg>
+								</span>
 								<span class="column-title"><TruncLabel label={panelLabel(p)} /></span>
 								<button class="reduce-panel" onclick={() => convo.reducePanel(p.panel)} title="Reduce this panel" aria-label="Reduce panel">
 									<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
@@ -1756,10 +1825,17 @@
 	.chat-columns.multi { gap: 1px; background: var(--color-border); }
 	.chat-column { flex: 1; min-width: 280px; display: flex; flex-direction: column; overflow: hidden; background: var(--color-bg); }
 	.chat-column.reduced { flex: 0 0 auto; min-width: 0; }
+	/* Drag-to-reorder: source fades, target edge lights up at the drop gap. */
+	.chat-column.dragging { opacity: 0.4; }
+	.chat-column.drop-left { box-shadow: inset 3px 0 0 0 var(--color-accent); }
+	.chat-column.drop-right { box-shadow: inset -3px 0 0 0 var(--color-accent); }
 	.restore-panel { display: flex; align-items: center; gap: var(--space-2); height: 100%; padding: var(--space-2) var(--space-3); writing-mode: vertical-rl; background: var(--color-surface); border: none; border-right: 1px solid var(--color-border); color: var(--color-text-muted); cursor: pointer; font-size: 0.72rem; font-weight: 600; }
 	.restore-panel:hover { color: var(--color-accent); background: var(--color-surface-alt); }
 	.restore-label { max-height: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.column-header { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); font-size: 0.78rem; font-weight: 600; color: var(--color-accent); background: var(--color-surface); border-bottom: 1px solid var(--color-border); }
+	.column-header { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); font-size: 0.78rem; font-weight: 600; color: var(--color-accent); background: var(--color-surface); border-bottom: 1px solid var(--color-border); cursor: grab; }
+	.chat-column.dragging .column-header { cursor: grabbing; }
+	.drag-grip { display: inline-flex; align-items: center; flex-shrink: 0; color: var(--color-text-muted); opacity: 0.55; }
+	.column-header:hover .drag-grip { opacity: 1; color: var(--color-accent); }
 	.column-title { flex: 1; min-width: 0; display: flex; overflow: hidden; }
 	.reduce-panel { display: flex; align-items: center; padding: 2px; background: none; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--color-text-muted); cursor: pointer; flex-shrink: 0; }
 	.reduce-panel:hover { color: var(--color-accent); border-color: var(--color-border); }
