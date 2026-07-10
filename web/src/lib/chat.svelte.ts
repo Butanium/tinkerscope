@@ -124,12 +124,34 @@ class ChatStore {
 		}
 	}
 
-	/** Stop one panel if given, else all in-flight panels. */
+	/** Stop one panel if given, else EVERY panel with an in-flight chat — ours or not.
+	 *  Three moves per targeted panel:
+	 *    1. our OWN chats: abort the fetch, so the server sees the disconnect and fires
+	 *       its guaranteed terminal (chat_end → running clears, partials committed).
+	 *    2. UNOWNED chats (fired by tinkpg / another tab: bus-running but no local
+	 *       controller): POST the cancel endpoint by chat_id so the server stops them
+	 *       too — abortByPanel alone could never reach these.
+	 *    3. eager UI release: clear the bucket's `running` NOW so the spinner/composer
+	 *       lock lift immediately even if the terminal round-trips slowly. `samples` +
+	 *       `chat_id` stay, so partial streamed content remains visible (buildPanelView
+	 *       keeps the bucket while samples.length > 0). */
 	stopGeneration(panel?: Panel) {
-		const panels = panel ? [panel] : (Object.keys(this.abortByPanel) as Panel[]);
-		for (const k of panels) {
-			this.abortByPanel[k]?.abort();
-			this.abortByPanel[k] = null;
+		const targets = (
+			panel
+				? [panel]
+				: [...new Set([...Object.keys(this.abortByPanel), ...Object.keys(live.panels)])]
+		) as Panel[];
+		for (const k of targets) {
+			const ac = this.abortByPanel[k];
+			if (ac) {
+				ac.abort();
+				this.abortByPanel[k] = null;
+			} else if (live.panels[k]?.running) {
+				const cid = live.panels[k]?.chat_id;
+				if (cid != null) api.cancelChat(cid).catch(() => {});
+			}
+			const b = live.panels[k];
+			if (b?.running) live.panels[k] = { ...b, running: false };
 		}
 	}
 }

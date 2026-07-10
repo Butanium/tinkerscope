@@ -32,8 +32,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass
 from typing import AsyncIterator, Awaitable, Callable, Literal
 
+import anyio
 from fastapi import APIRouter
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
@@ -43,6 +45,24 @@ from ..state import BUS
 from ..tinker_sampler import get_sampler, select_renderer_name
 
 router = APIRouter(prefix="/api", tags=["chat"])
+
+
+@dataclass
+class _InFlight:
+    """A live chat's producer task + a flag the cancel endpoint sets before it
+    cancels. `cancelled` lets the terminal path tell an intentional stop (→ error
+    terminal on 0 samples, so nothing folds an empty branch) from a natural end."""
+
+    task: asyncio.Task
+    cancelled: bool = False
+
+
+# chat_id -> the task pumping its samples. POST /api/chat/{chat_id}/cancel cancels
+# that task to stop a chat THIS client doesn't own (CLI / another tab), which unwinds
+# the producer (its finally cancels the remote sampling tasks) and drives the SAME
+# guaranteed-terminal path as a client disconnect. Entries are removed by gen()'s
+# finally, so a cancel for an already-finished chat is a harmless not_found.
+_INFLIGHT: dict[int, _InFlight] = {}
 
 
 class ChatMessage(BaseModel):
@@ -369,11 +389,91 @@ async def chat(req: ChatRequest):
                 {"chat_id": chat_id, "panel": req.panel, "n": total, "label": label, "client_token": req.client_token},
             )
 
-        # ── stream samples (delta chunks for n==1, whole samples otherwise) ──
+        # ── stream samples, with EXACTLY ONE terminal event on every exit path ──
+        # Three ways this chat can end — done / producer error / cancelled (client
+        # disconnect OR the cancel endpoint) — must each fire one chat_end + one
+        # terminal broadcast, or `running` sticks true forever and every busy-surface
+        # (spinner, composer lock, Stop button) wedges. `_terminal()` is that single
+        # exit, idempotent via `terminated`.
         produced: dict[int, str] = {}
         incorporated: dict[int, bool] = {}  # did the backend already fold the prefill in?
+        terminated = False
+
+        async def _terminal(*, error: str | None = None, cancelled: bool = False) -> None:
+            """The one terminal exit. Decides the event + whether to commit the turn:
+              - error given          → chat_error(error), no commit (a mid-stream fault)
+              - ≥1 completed sample   → chat_done + commit sample 0 (partial data is real
+                                        data — a stop after some samples keeps them)
+              - cancelled, 0 samples  → chat_error("cancelled") so no consumer folds an
+                                        empty branch (#onExternalDone reconciles chat_done)
+              - clean end, 0 samples  → chat_done, nothing to commit (every sample errored)
+            """
+            nonlocal terminated
+            if terminated:
+                return
+            terminated = True
+            if error is not None:
+                event, err_msg, commit = "chat_error", error, False
+            elif produced:
+                event, err_msg, commit = "chat_done", None, True
+            elif cancelled:
+                event, err_msg, commit = "chat_error", "cancelled", False
+            else:
+                event, err_msg, commit = "chat_done", None, False
+            # multi-turn memory: commit the representative assistant turn (sample 0)
+            # into THIS panel's transcript so the next turn carries it. A trailing
+            # assistant message in `msgs` is a prefill — merge it into ONE turn
+            # (drop the standalone prefill node); native sampling already folded it
+            # into `chosen`, other paths return continuation-only so we prepend.
+            end_patch: dict = {}
+            if commit:
+                idx0 = 0 if 0 in produced else min(produced)
+                chosen = produced[idx0]
+                if msgs and msgs[-1]["role"] == "assistant":
+                    full = chosen if incorporated.get(idx0) else msgs[-1]["content"] + chosen
+                    turn = [*msgs[:-1], {"role": "assistant", "content": full}]
+                else:
+                    turn = [*msgs, {"role": "assistant", "content": chosen}]
+                end_patch = {"panel": req.panel, "messages": turn}
+            await BUS.chat_end(event, **end_patch)
+            if req.broadcast:
+                payload = {"chat_id": chat_id, "panel": req.panel, "client_token": req.client_token}
+                if err_msg is not None:
+                    payload["error"] = err_msg
+                await BUS.broadcast(event, payload)
+
+        # Run the producer in its OWN task, relaying items through a queue. This is what
+        # lets the cancel endpoint stop a chat we're not the consumer of: cancelling
+        # `worker` closes produce_iter (its finally cancels the remote sampling tasks)
+        # and makes the drain loop below fall through to _terminal — the same path a
+        # client disconnect takes. Best-effort on the remote side: the tinker SDK runs
+        # sample calls on its own loop, so a cancel only stops us listening, never the
+        # remote compute already in flight.
+        q: asyncio.Queue = asyncio.Queue()
+
+        async def _pump() -> None:
+            try:
+                async for item in produce_iter:
+                    q.put_nowait(("item", item))
+            except Exception as e:  # producer fault — transported, _terminal reports it
+                q.put_nowait(("error", f"{type(e).__name__}: {e}"))
+            finally:
+                q.put_nowait(("end", None))  # non-blocking (unbounded q) — safe under cancel
+
+        worker = asyncio.create_task(_pump())
+        inflight = _InFlight(task=worker)
+        _INFLIGHT[chat_id] = inflight
+
+        prod_error: str | None = None
         try:
-            async for item in produce_iter:
+            while True:
+                kind, payload = await q.get()
+                if kind == "end":
+                    break
+                if kind == "error":
+                    prod_error = payload
+                    continue  # keep draining whatever the producer already queued
+                item = payload
                 if "delta" in item:
                     item.setdefault("sample_index", 0)
                     yield {"event": "delta", "data": json.dumps(item)}
@@ -387,38 +487,42 @@ async def chat(req: ChatRequest):
                 yield {"event": "message", "data": json.dumps(item)}
                 if req.broadcast:
                     await BUS.broadcast("sample", {"chat_id": chat_id, "panel": req.panel, **item})
-            # multi-turn memory: commit the representative assistant turn (sample 0)
-            # into THIS panel's transcript so the next turn carries it. A trailing
-            # assistant message in `msgs` is a prefill — merge it into ONE turn
-            # (drop the standalone prefill node); native sampling already folded it
-            # into `chosen`, other paths return continuation-only so we prepend.
-            end_patch: dict = {}
-            if produced:
-                idx0 = 0 if 0 in produced else min(produced)
-                chosen = produced[idx0]
-                if msgs and msgs[-1]["role"] == "assistant":
-                    full = chosen if incorporated.get(idx0) else msgs[-1]["content"] + chosen
-                    turn = [*msgs[:-1], {"role": "assistant", "content": full}]
-                else:
-                    turn = [*msgs, {"role": "assistant", "content": chosen}]
-                end_patch = {"panel": req.panel, "messages": turn}
-            await BUS.chat_end("chat_done", **end_patch)
-            if req.broadcast:
-                await BUS.broadcast(
-                    "chat_done",
-                    {"chat_id": chat_id, "panel": req.panel, "client_token": req.client_token},
-                )
-            yield {"event": "done", "data": "{}"}
-        except Exception as e:
-            await BUS.chat_end("chat_done")
-            if req.broadcast:
-                await BUS.broadcast(
-                    "chat_error",
-                    {"chat_id": chat_id, "panel": req.panel, "error": str(e), "client_token": req.client_token},
-                )
-            yield {"event": "error", "data": json.dumps({"error": str(e)})}
+            if prod_error is not None:
+                await _terminal(error=prod_error)
+                yield {"event": "error", "data": json.dumps({"error": prod_error})}
+            else:
+                await _terminal(cancelled=inflight.cancelled)
+                yield {"event": "done", "data": "{}"}
+        finally:
+            _INFLIGHT.pop(chat_id, None)
+            if not worker.done():
+                worker.cancel()  # client gone / endpoint cancel → stop the producer
+            # A client disconnect cancels gen() mid-`await q.get()`: the CancelledError
+            # (BaseException) / GeneratorExit skips both _terminal calls above. Fire it
+            # here, SHIELDED so its awaits (BUS lock, broadcast) survive the cancellation
+            # instead of being re-cancelled at the first checkpoint; the original
+            # cancellation re-raises after the scope exits (we never swallow it).
+            if not terminated:
+                with anyio.CancelScope(shield=True):
+                    await _terminal(cancelled=True)
 
     return EventSourceResponse(gen())
+
+
+@router.post("/chat/{chat_id}/cancel")
+async def cancel_chat(chat_id: int) -> dict:
+    """Stop an in-flight chat by id. This is how the browser's "Stop all" reaches a
+    chat it doesn't own (fired by tinkpg or another tab, so it has no local AbortController
+    to trip): cancelling the producer task drives the SAME guaranteed terminal as a client
+    disconnect — chat_end fires, `running` clears for every subscriber, and any samples
+    that already completed are still committed. Idempotent: a chat that already ended
+    isn't in the registry, so this is a harmless not_found."""
+    inflight = _INFLIGHT.get(chat_id)
+    if inflight is None:
+        return {"status": "not_found", "chat_id": chat_id}
+    inflight.cancelled = True
+    inflight.task.cancel()
+    return {"status": "cancelling", "chat_id": chat_id}
 
 
 @router.post("/close")

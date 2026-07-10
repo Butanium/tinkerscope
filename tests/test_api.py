@@ -378,3 +378,149 @@ def test_chat_openrouter_runs_gen_and_strips_reasoning(client, monkeypatch):
     # dropped (sampling_msgs), never forwarded to the OAI call.
     assert seen["messages"], "producer was never called"
     assert all(set(m.keys()) <= {"role", "content"} for m in seen["messages"]), seen["messages"]
+
+
+# --------------------------------------------------------------------------- #
+# /api/chat cancellation — a client disconnect OR POST /api/chat/{id}/cancel must
+# each fire EXACTLY ONE terminal (chat_end + one broadcast) so `running` never sticks.
+# Driven against the raw gen() (resp.body_iterator) with a mocked, hangable producer —
+# no remote tokens. The BUS is a process singleton (state.py isn't reloaded), so we
+# reset it per test for isolation.
+# --------------------------------------------------------------------------- #
+import asyncio  # noqa: E402
+
+import pytest  # noqa: E402
+
+
+async def _drain(sub) -> list:
+    """Pull every already-queued bus message off a subscriber, non-blocking."""
+    out = []
+    while not sub.empty():
+        out.append(sub.get_nowait())
+    return out
+
+
+@pytest.fixture
+def chat_mod(backend):
+    """The reloaded chat route module paired with a freshly-reset BUS singleton."""
+    import tinkerscope.api.routes.chat as chat_route
+    import tinkerscope.api.state as state_mod
+
+    bus = state_mod.BUS
+    bus.state = state_mod.PlaygroundState()
+    bus._inflight = 0
+    bus._subs.clear()
+    chat_route._INFLIGHT.clear()
+    return chat_route, bus
+
+
+def _req(chat_route, **over):
+    base = dict(
+        openrouter_model="x/y",
+        messages=[{"role": "user", "content": "q"}],
+        n_samples=1,
+        panel="primary",
+        broadcast=True,
+    )
+    base.update(over)
+    return chat_route.ChatRequest(**base)
+
+
+async def test_chat_disconnect_commits_partial_and_fires_one_terminal(chat_mod, monkeypatch):
+    """Client hits Stop → its fetch aborts → gen() is cancelled mid-stream. The
+    guaranteed-terminal `finally` must still fire (shielded): _inflight → 0, running
+    clears, and the ONE completed sample is committed (partial data is real data)."""
+    chat_route, bus = chat_mod
+
+    async def one_then_hang(**kw):
+        yield {"content": "partial answer", "sample_index": 0, "raw_text": "partial answer"}
+        await asyncio.Event().wait()  # the client disconnects before we finish
+
+    monkeypatch.setattr("tinkerscope.api.openrouter.sample_one_stream", one_then_hang)
+
+    sub = await bus.subscribe()
+    resp = await chat_route.chat(_req(chat_route, client_token="ct-own"))
+    gen = resp.body_iterator
+
+    ev = await asyncio.wait_for(gen.__anext__(), timeout=2)
+    assert ev["event"] == "message"
+    await gen.aclose()  # GeneratorExit into the suspended q.get() — simulates disconnect
+    await asyncio.sleep(0.02)  # let the cancelled producer task unwind
+
+    assert bus._inflight == 0
+    assert bus.state.running is False
+    terminals = [m for m in await _drain(sub) if m["type"] in ("chat_done", "chat_error")]
+    assert len(terminals) == 1, terminals
+    assert terminals[0]["type"] == "chat_done"
+    assert terminals[0]["client_token"] == "ct-own"
+    prim = next(p for p in bus.state.panels if p.id == "primary")
+    assert prim.messages[-1] == {"role": "assistant", "content": "partial answer"}
+
+
+async def test_chat_cancel_endpoint_zero_samples_is_error_terminal(chat_mod, monkeypatch):
+    """POST /api/chat/{id}/cancel on a chat with 0 completed samples fires the
+    error-flavored terminal (so #onExternalDone never folds an empty branch), clears
+    running, and drops the registry entry. Unknown ids are a harmless not_found."""
+    chat_route, bus = chat_mod
+
+    started = asyncio.Event()
+
+    async def hang_before_any_sample(**kw):
+        started.set()
+        await asyncio.Event().wait()
+        yield {}  # unreachable
+
+    monkeypatch.setattr("tinkerscope.api.openrouter.sample_one_stream", hang_before_any_sample)
+
+    sub = await bus.subscribe()
+    resp = await chat_route.chat(_req(chat_route, client_token="ct-cli"))
+    gen = resp.body_iterator
+
+    collected = []
+
+    async def consume():
+        async for ev in gen:
+            collected.append(ev)
+
+    task = asyncio.create_task(consume())
+    await asyncio.wait_for(started.wait(), timeout=2)
+    await asyncio.sleep(0.02)  # let chat_start register the chat in the cancel registry
+
+    cid = bus.state.chat_id
+    assert cid in chat_route._INFLIGHT
+    assert (await chat_route.cancel_chat(cid))["status"] == "cancelling"
+    await asyncio.wait_for(task, timeout=2)  # cancellation drives gen() to its terminal
+
+    assert bus._inflight == 0
+    assert bus.state.running is False
+    assert cid not in chat_route._INFLIGHT
+    terminals = [m for m in await _drain(sub) if m["type"] in ("chat_done", "chat_error")]
+    assert len(terminals) == 1, terminals
+    assert terminals[0]["type"] == "chat_error"
+    assert terminals[0]["error"] == "cancelled"
+    prim = next(p for p in bus.state.panels if p.id == "primary")
+    assert prim.messages[-1]["role"] == "user"  # nothing committed
+    assert (await chat_route.cancel_chat(999999))["status"] == "not_found"
+
+
+async def test_chat_normal_completion_fires_exactly_one_terminal(chat_mod, monkeypatch):
+    """Regression guard for the refactor: an uninterrupted chat still fires one
+    chat_done, commits the sample, and leaves _inflight balanced."""
+    chat_route, bus = chat_mod
+
+    async def quick(**kw):
+        yield {"content": "done answer", "sample_index": 0, "raw_text": "done answer"}
+
+    monkeypatch.setattr("tinkerscope.api.openrouter.sample_one_stream", quick)
+
+    sub = await bus.subscribe()
+    resp = await chat_route.chat(_req(chat_route, client_token="ct-x"))
+    events = [ev async for ev in resp.body_iterator]
+
+    assert events[-1]["event"] == "done"
+    assert bus._inflight == 0
+    assert bus.state.running is False
+    terminals = [m for m in await _drain(sub) if m["type"] in ("chat_done", "chat_error")]
+    assert len(terminals) == 1 and terminals[0]["type"] == "chat_done"
+    prim = next(p for p in bus.state.panels if p.id == "primary")
+    assert prim.messages[-1] == {"role": "assistant", "content": "done answer"}

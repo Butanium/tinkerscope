@@ -122,7 +122,12 @@ export const api = {
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(req),
 			signal
-		})
+		}),
+	// Cancel an in-flight chat by id — how Stop-all reaches a chat this tab doesn't
+	// own (CLI / another tab, so no local AbortController). Server fires the same
+	// terminal a client disconnect would. not_found if it already ended.
+	cancelChat: (chat_id: number) =>
+		j<{ status: string; chat_id: number }>(`/api/chat/${chat_id}/cancel`, { method: 'POST' })
 };
 
 /**
