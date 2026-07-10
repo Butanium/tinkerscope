@@ -175,19 +175,40 @@
 	// ── State driving: POST /api/state so terminal + browser stay synced ──
 	let patchTimer: ReturnType<typeof setTimeout> | null = null;
 	let pendingPatch: StatePatch = {};
+	let patchSeq = 0; // stale-response guard: only the LATEST flush may assign live.state
+
+	/** Flush any pending debounced patch NOW and assign the response into
+	 *  live.state (same optimistic pattern as convo's #loadTrees — the SSE echo
+	 *  alone lags, and anything that reads live.state right after a flush, like
+	 *  a conversation switch's save, would read stale state). Clearing the timer
+	 *  + emptying pendingPatch here means an already-scheduled timer that fires
+	 *  later finds nothing and no-ops — no double POST. Resolves after the
+	 *  assignment, so `await convo.flushStatePatch?.()` is a real barrier. */
+	function flushPatchState(): Promise<void> {
+		if (patchTimer) {
+			clearTimeout(patchTimer);
+			patchTimer = null;
+		}
+		if (!Object.keys(pendingPatch).length) return Promise.resolve();
+		const body = pendingPatch;
+		pendingPatch = {};
+		const seq = ++patchSeq;
+		return api
+			.setState(body)
+			.then((next) => {
+				// A newer flush may have raced ahead — its snapshot wins; the ordered
+				// SSE stream corrects any residue either way.
+				if (next && seq === patchSeq) live.state = next;
+			})
+			.catch((e) => console.warn('state patch failed', e));
+	}
 
 	/** Debounced state patch (sliders/typing fire rapidly). */
 	function patchState(patch: StatePatch, immediate = false) {
 		pendingPatch = { ...pendingPatch, ...patch };
 		if (patchTimer) clearTimeout(patchTimer);
-		const flush = () => {
-			const body = pendingPatch;
-			pendingPatch = {};
-			patchTimer = null;
-			api.setState(body).catch((e) => console.warn('state patch failed', e));
-		};
-		if (immediate) flush();
-		else patchTimer = setTimeout(flush, 200);
+		if (immediate) void flushPatchState();
+		else patchTimer = setTimeout(() => void flushPatchState(), 200);
 	}
 
 	// Push the OPEN conversation's id onto the state bus whenever it changes, so the
@@ -1132,6 +1153,10 @@
 		// Open the ONE live-state stream on load + wire the external-fold hooks.
 		live.start();
 		convo.init();
+		// Pre-transition barrier: the convo store flushes our pending debounced
+		// state patch (response assigned into live.state) before any conversation
+		// switch — see flushStatePatch/#preSwitch for why (the system-prompt leak).
+		convo.flushStatePatch = flushPatchState;
 
 		(async () => {
 			try { health = await api.health(); } catch (e: any) { backendError = `Backend not reachable: ${e?.message ?? e}`; }

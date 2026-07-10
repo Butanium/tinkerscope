@@ -47,6 +47,21 @@ class ConversationsStore {
 	/** Transient hint shown when the terminal/another tab branched the conversation. */
 	externalNotice = $state<string | null>(null);
 
+	/** Hook (assigned by +page, which owns patchState): flush the pending debounced
+	 *  /api/state patch — assigning its response into live.state — BEFORE any
+	 *  conversation transition. Without this barrier a half-typed system prompt's
+	 *  200ms timer fires AFTER the new conversation loads and silently leaks onto
+	 *  it (persisted!), while the old conversation loses the edit — see
+	 *  tests/small-smokes/browser_sysprompt_switch.py. Every transition goes
+	 *  through #preSwitch so a future switch path gets the barrier for free. */
+	flushStatePatch: (() => Promise<void>) | null = null;
+
+	/** The one pre-transition barrier: settle the page's pending state patch so
+	 *  live.state is current before we persist against it or swap away from it. */
+	async #preSwitch(): Promise<void> {
+		await this.flushStatePatch?.();
+	}
+
 	// ── per-conversation panel UI (persisted with the conversation) ───────
 	/** Panels folded out of view (tree kept alive). */
 	reducedPanels = $state<Set<string>>(new Set());
@@ -333,6 +348,7 @@ class ConversationsStore {
 	 *  otherwise open the newest. Returns whether `preferredId` was honored (false
 	 *  ⇒ it was absent or unknown, so the caller can normalize the URL / notify). */
 	async load(preferredId?: string | null): Promise<boolean> {
+		await this.#preSwitch();
 		const list = await api.listConversations();
 		this.list = list;
 		if (!list.length) {
@@ -351,6 +367,9 @@ class ConversationsStore {
 
 	async switchTo(id: string): Promise<void> {
 		if (id === this.activeId) return;
+		// Settle the pending state patch FIRST: flush() below reads live.state
+		// (system_prompt, panel layout) when persisting the conversation we're leaving.
+		await this.#preSwitch();
 		// If we're leaving an untouched draft, drop it (flush below materializes it first
 		// if it had any pending change, clearing #draftId so the discard then no-ops).
 		const leavingDraft = this.#draftId !== null && this.#draftId === this.activeId;
@@ -373,6 +392,7 @@ class ConversationsStore {
 	 *  persisted until the first real change materializes it (#doSave). So a 'New' you
 	 *  never touch leaves nothing behind on disk. */
 	async create(name = 'Untitled', panels?: PanelLayout[], id?: string): Promise<void> {
+		await this.#preSwitch();
 		await this.flush();
 		live.clearBuckets();
 		// A previous untouched draft is abandoned (don't pile up empty 'Untitled's).
@@ -441,6 +461,7 @@ class ConversationsStore {
 	}
 
 	async remove(id: string): Promise<void> {
+		await this.#preSwitch();
 		await this.flush();
 		const removingDraft = id === this.#draftId;
 		// Never leave zero conversations: the last one resets in place (same id,
@@ -472,6 +493,7 @@ class ConversationsStore {
 
 	/** Reset every open panel's tree for a fresh thread under the SAME conversation. */
 	async resetActive(): Promise<void> {
+		await this.#preSwitch();
 		live.clearBuckets();
 		await this.#freshTrees();
 		this.save();
