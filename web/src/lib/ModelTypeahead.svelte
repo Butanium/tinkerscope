@@ -10,6 +10,7 @@
 	import TruncLabel from './TruncLabel.svelte';
 	import DiffLabel from './DiffLabel.svelte';
 	import { diffLabels } from './label-diff';
+	import { tieredFilter } from './fuzzy';
 
 	// `search`: extra hidden text matched but never displayed (e.g. a run's
 	// wandb project / base model, so filtering isn't limited to the visible
@@ -47,11 +48,13 @@
 		);
 	}
 
-	const filtered = $derived.by(() => {
-		const q = query.trim().toLowerCase();
-		const matches = q ? items.filter((it) => isMatch(it, q)) : items;
-		return matches.slice(0, maxRows);
-	});
+	// Tiered filter (see lib/fuzzy): exact substring is primary and behavior-
+	// identical whenever it yields ≥1 row; only a ZERO-substring query falls back
+	// to the typo-tolerant fuzzy tier (ranked, capped). `fuzzyActive` drives the
+	// "no exact matches — close matches:" note; an empty fuzzy tier → normal empty.
+	const result = $derived(tieredFilter(query, items, isMatch, { maxRows }));
+	const filtered = $derived(result.rows);
+	const fuzzyActive = $derived(result.fuzzy);
 
 	// The visible labels drive sibling-aware tail-preserving truncation: each
 	// row's label is split so its divergence from its closest visible sibling
@@ -65,12 +68,9 @@
 	// fall back to TruncLabel. Filtering is unaffected (search still uses full label).
 	const diffs = $derived(diffLabels(visibleLabels));
 
-	// Total matches (for the "+N more" hint when the list is truncated).
-	const totalMatches = $derived.by(() => {
-		const q = query.trim().toLowerCase();
-		if (!q) return items.length;
-		return items.filter((it) => isMatch(it, q)).length;
-	});
+	// Total matches (for the "+N more" hint when the list is truncated). In the
+	// fuzzy tier this equals the shown shortlist, so no "+N more" hint shows.
+	const totalMatches = $derived(result.total);
 
 	// Keep the active index in range — and off a disabled row — as the filtered
 	// list changes (typing narrows it, items reload, etc).
@@ -143,6 +143,9 @@
 			{#if filtered.length === 0}
 				<div class="typeahead-empty">No matches</div>
 			{:else}
+				{#if fuzzyActive}
+					<div class="typeahead-fuzzy-note">no exact matches — close matches:</div>
+				{/if}
 				{#each filtered as it, i (it.id)}
 					<button
 						type="button"
@@ -218,6 +221,16 @@
 		color: var(--color-text-muted);
 		font-style: italic;
 		padding: var(--space-2) var(--space-3);
+	}
+	.typeahead-fuzzy-note {
+		font-size: 0.72rem;
+		color: var(--color-text-muted);
+		font-style: italic;
+		padding: var(--space-2) var(--space-3);
+		border-bottom: 1px solid var(--color-border-light);
+		position: sticky;
+		top: 0;
+		background: var(--color-bg);
 	}
 	.typeahead-row {
 		display: flex;
