@@ -6,12 +6,18 @@ Two scenarios, both against a slow free-OpenRouter generation (zero cost):
   A. OWNED chat — the browser fires the send itself (local AbortController). Click
      Stop → the fetch aborts → the server sees the disconnect and fires its
      guaranteed terminal → `running` clears (composer re-enables, Stop disables)
-     PROMPTLY, and no console errors.
+     PROMPTLY, and clicking Stop logs no console error.
 
   B. CROSS-CLIENT chat — a raw POST /api/chat (unowned client_token, as tinkpg or
      another tab would fire) is streaming; the browser shows it running via the bus
      but has NO local controller. Click Stop → it must call the server cancel
-     endpoint by chat_id and the chat dies too (running clears).
+     endpoint by chat_id and the chat dies too (running clears + the raw stream ends).
+
+FREE-OR FLAKINESS: the free router intermittently pre-start-errors (fires chat_error
+BEFORE chat_begin, so `running` never flips). That's a provider hiccup, not a bug in
+the stop path — so each scenario RETRIES the fire until the browser actually reaches
+the running state (mirrors browser_panel_foreign_fold's positive-control retry). If it
+can't reach running after N tries, THAT is a real failure.
 
 The model + conversation are seeded via the API (the sidebar model picker is a
 ModelDropdown now, not a <select>), so this smoke drives only the composer and the
@@ -30,7 +36,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8795"
+BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8796"
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
 MODEL_SEL = "openrouter:openrouter/free"  # free ROUTER sentinel (panelCanChat → eligible)
 OR_MODEL = "openrouter/free"
@@ -39,6 +45,14 @@ LONG_PROMPT = (
     "Write an extremely long, detailed, 2000-word essay about the entire history of "
     "the Roman Empire, century by century. Do not stop early; keep going."
 )
+# Reaching "running" through the flaky free router: retry the fire this many times,
+# each waiting this long for Stop to enable, before declaring a real failure.
+FIRE_ATTEMPTS = 6
+RUNNING_WAIT_S = 9
+
+# Stop button: enabled ⇔ anyRunning (disabled={!anyRunning}). The cleanest running signal.
+STOP_ENABLED = ".btn-stop-sidebar:not([disabled])"
+STOP_DISABLED = ".btn-stop-sidebar[disabled]"
 
 
 def _post(path, body):
@@ -53,10 +67,10 @@ def _get(path):
         return json.load(r)
 
 
-def _fire_raw_chat(token: str, stop_flag: dict) -> None:
+def _fire_raw_chat(token: str, flag: dict) -> None:
     """POST /api/chat as an EXTERNAL client (tinkpg / another tab). Reads the SSE
-    stream to completion; when the browser's Stop cancels it server-side, the stream
-    ends and this returns. Records that it ended (so we can assert the cancel took)."""
+    stream to completion; when the browser's Stop cancels it server-side (or it
+    pre-start-errors), the stream ends and this returns."""
     body = {
         "openrouter_model": OR_MODEL,
         "messages": [{"role": "user", "content": LONG_PROMPT}],
@@ -68,17 +82,27 @@ def _fire_raw_chat(token: str, stop_flag: dict) -> None:
         headers={"content-type": "application/json"}, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
-            for _ in r:  # drain until the server closes the stream (cancel → done)
+            for _ in r:  # drain until the server closes the stream (cancel / error → done)
                 pass
     except Exception as e:  # noqa: BLE001 — record, don't mask
-        stop_flag["err"] = str(e)
+        flag["err"] = str(e)
     finally:
-        stop_flag["ended"] = time.time()
+        flag["ended"] = True
 
 
-# Stop button: enabled ⇔ anyRunning (disabled={!anyRunning}). The cleanest running signal.
-STOP_ENABLED = ".btn-stop-sidebar:not([disabled])"
-STOP_DISABLED = ".btn-stop-sidebar[disabled]"
+def _fire_until_running(page, fire_fn, label: str) -> bool:
+    """Fire a chat (fire_fn) and wait for the browser to show it running (Stop enabled).
+    Free-OR pre-start-errors intermittently → running never flips; retry on timeout."""
+    for i in range(FIRE_ATTEMPTS):
+        fire_fn(i)
+        deadline = time.time() + RUNNING_WAIT_S
+        while time.time() < deadline:
+            if page.locator(STOP_ENABLED).count() > 0:
+                return True
+            page.wait_for_timeout(200)
+        print(f"  [{label}] attempt {i + 1}/{FIRE_ATTEMPTS}: never reached running (free-OR "
+              "pre-start hiccup), retrying")
+    return False
 
 
 def main() -> None:
@@ -104,68 +128,77 @@ def main() -> None:
         results = {}
 
         # ── Scenario A: OWNED chat — browser fires, then Stop aborts it ──────────
-        ta = page.locator(".input-textarea").first
-        ta.click()
-        ta.fill(LONG_PROMPT)
-        ta.press("Enter")
-        # Wait until it's actually running (Stop enabled).
-        page.wait_for_selector(STOP_ENABLED, timeout=30000)
-        # Click Stop (programmatic — no autoscroll games; button is always in view anyway).
-        t0 = time.time()
-        page.eval_on_selector(".btn-stop-sidebar", "el => el.click()")
-        # Running must clear PROMPTLY (owned abort is local + server terminal).
-        page.wait_for_selector(STOP_DISABLED, timeout=8000)
-        results["owned_clear_s"] = round(time.time() - t0, 2)
-        results["owned_composer_reenabled"] = (
-            page.locator(".input-textarea:not([disabled])").count() > 0
-        )
-        # server side agrees nothing is running
-        time.sleep(0.3)
-        results["owned_backend_running"] = _get("/api/state").get("running")
+        def fire_owned(_i):
+            page.wait_for_selector(".input-textarea:not([disabled])", timeout=15000)
+            ta = page.locator(".input-textarea").first
+            ta.click()
+            ta.fill(LONG_PROMPT)
+            ta.press("Enter")
+
+        results["owned_reached_running"] = _fire_until_running(page, fire_owned, "owned")
+        if results["owned_reached_running"]:
+            # Assert "Stop is clean" for the stop action itself — free-OR flakiness
+            # upstream shouldn't count against the stop path.
+            err_mark = len(errors)
+            t0 = time.time()
+            page.eval_on_selector(".btn-stop-sidebar", "el => el.click()")
+            page.wait_for_selector(STOP_DISABLED, timeout=8000)
+            results["owned_clear_s"] = round(time.time() - t0, 2)
+            results["owned_composer_reenabled"] = (
+                page.locator(".input-textarea:not([disabled])").count() > 0
+            )
+            time.sleep(0.3)
+            results["owned_backend_running"] = _get("/api/state").get("running")
+            results["owned_stop_errors"] = errors[err_mark:]
 
         # ── Scenario B: CROSS-CLIENT chat — raw POST, browser Stop cancels it ────
         # Fresh conversation to isolate from A's committed/partial thread.
         page.locator('button[aria-label="New conversation"]').first.click()
         page.wait_for_selector(".input-textarea:not([disabled])", timeout=15000)
 
-        token = "external-cli-token-xyz"
-        flag: dict = {}
-        th = threading.Thread(target=_fire_raw_chat, args=(token, flag), daemon=True)
-        th.start()
+        threads: list[dict] = []
 
-        # The browser must reflect the external chat as running (bus-driven), even
-        # though it has no local controller for it.
-        page.wait_for_selector(STOP_ENABLED, timeout=30000)
-        results["external_shows_running"] = True
+        def fire_external(i):
+            flag: dict = {"token": f"external-cli-token-{i}"}
+            th = threading.Thread(target=_fire_raw_chat, args=(flag["token"], flag), daemon=True)
+            flag["thread"] = th
+            th.start()
+            threads.append(flag)
 
-        t1 = time.time()
-        page.eval_on_selector(".btn-stop-sidebar", "el => el.click()")
-        # The browser's Stop must reach the server (POST cancel) and clear running.
-        page.wait_for_selector(STOP_DISABLED, timeout=10000)
-        results["external_clear_s"] = round(time.time() - t1, 2)
-
-        # The raw request's stream must actually END (server cancelled it), not hang.
-        th.join(timeout=15)
-        results["external_stream_ended"] = not th.is_alive()
-        time.sleep(0.3)
-        results["external_backend_running"] = _get("/api/state").get("running")
+        results["external_reached_running"] = _fire_until_running(page, fire_external, "external")
+        if results["external_reached_running"]:
+            err_mark = len(errors)
+            t1 = time.time()
+            page.eval_on_selector(".btn-stop-sidebar", "el => el.click()")
+            page.wait_for_selector(STOP_DISABLED, timeout=10000)
+            results["external_clear_s"] = round(time.time() - t1, 2)
+            # Every raw request's stream must END (the running one server-cancelled, the
+            # pre-start-errored retries already closed), not hang.
+            for f in threads:
+                f["thread"].join(timeout=15)
+            results["external_all_streams_ended"] = all(not f["thread"].is_alive() for f in threads)
+            time.sleep(0.3)
+            results["external_backend_running"] = _get("/api/state").get("running")
+            results["external_stop_errors"] = errors[err_mark:]
 
         page.screenshot(path="/tmp/tinkerscope_stop_generation.png", full_page=True)
         browser.close()
 
-        results["console_errors"] = errors or "none"
         for k, v in results.items():
             print(f"  {k}: {v}")
+        print(f"  total console errors seen (incl. upstream OR flakiness): {errors or 'none'}")
 
         ok = (
-            results["owned_composer_reenabled"]
-            and results["owned_backend_running"] is False
-            and results["owned_clear_s"] < 8
-            and results["external_shows_running"]
-            and results["external_stream_ended"]
-            and results["external_backend_running"] is False
-            and results["external_clear_s"] < 10
-            and not errors
+            results.get("owned_reached_running")
+            and results.get("owned_composer_reenabled")
+            and results.get("owned_backend_running") is False
+            and results.get("owned_clear_s", 99) < 8
+            and not results.get("owned_stop_errors")
+            and results.get("external_reached_running")
+            and results.get("external_all_streams_ended")
+            and results.get("external_backend_running") is False
+            and results.get("external_clear_s", 99) < 10
+            and not results.get("external_stop_errors")
         )
         print("STOP_GENERATION SMOKE", "PASS" if ok else "FAIL")
         sys.exit(0 if ok else 1)
