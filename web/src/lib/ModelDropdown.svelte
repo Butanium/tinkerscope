@@ -14,6 +14,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import ModelTypeahead from './ModelTypeahead.svelte';
+	import TruncLabel from './TruncLabel.svelte';
 
 	type Item = { id: string; label: string; disabled?: boolean; search?: string };
 
@@ -90,7 +91,7 @@
 		onclick={toggle}
 	>
 		<span class="model-dropdown-trigger-label" class:placeholder={!selectedLabel}>
-			{selectedLabel || placeholder}
+			{#if selectedLabel}<TruncLabel label={selectedLabel} />{:else}{placeholder}{/if}
 		</span>
 		<svg class="model-dropdown-chevron" class:open width="12" height="12" viewBox="0 0 16 16" fill="none">
 			<path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
@@ -136,6 +137,8 @@
 	.model-dropdown-trigger-label {
 		flex: 1;
 		min-width: 0;
+		display: flex;
+		align-items: center;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;

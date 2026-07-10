@@ -7,6 +7,8 @@
 	// AND as the panel body of `ModelDropdown.svelte` (the sidebar's per-panel
 	// model picker — a select-like trigger button wrapping this component).
 
+	import TruncLabel from './TruncLabel.svelte';
+
 	// `search`: extra hidden text matched but never displayed (e.g. a run's
 	// wandb project / base model, so filtering isn't limited to the visible
 	// label). `disabled`: shown but not pickable (e.g. a run tinker can no
@@ -48,6 +50,11 @@
 		const matches = q ? items.filter((it) => isMatch(it, q)) : items;
 		return matches.slice(0, maxRows);
 	});
+
+	// The visible labels drive sibling-aware tail-preserving truncation: each
+	// row's label is split so its divergence from its closest visible sibling
+	// survives (runs sharing a long prefix stay distinguishable — see TruncLabel).
+	const visibleLabels = $derived(filtered.map((it) => it.label));
 
 	// Total matches (for the "+N more" hint when the list is truncated).
 	const totalMatches = $derived.by(() => {
@@ -137,7 +144,7 @@
 						onmouseenter={() => { if (!it.disabled) active = i; }}
 						onclick={() => pick(it)}
 					>
-						<span class="typeahead-row-label">{it.label}</span>
+						<span class="typeahead-row-label"><TruncLabel label={it.label} siblings={visibleLabels} /></span>
 						{#if it.label !== it.id}
 							<span class="typeahead-row-id">{it.id}</span>
 						{/if}
@@ -223,10 +230,10 @@
 	.typeahead-row-label {
 		font-size: 0.82rem;
 		color: var(--color-text);
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+		align-self: stretch;
+		min-width: 0;
 		max-width: 100%;
+		overflow: hidden;
 	}
 	.typeahead-row-id {
 		font-size: 0.7rem;

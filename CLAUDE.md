@@ -105,6 +105,14 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     cycle, siblings). The single source of branching truth. **Has `tree.test.ts`.**
   - `lib/model-sel.ts` — the `openrouter:`/`base:`/`ckpt:` sentinel encoding
     (prefixes, predicates, id extractors) for a panel's model selection.
+  - `lib/label-split.ts` — `splitTail(label, siblings?)`: tail-preserving
+    truncation ("middle ellipsis") for run/model labels. Sibling runs share a
+    long prefix and differ only in the last few chars (`…_s1_lr1e-3` vs
+    `…_s1_lr5e-3`); this carves the label into `{head, tail}` so the renderer
+    (TruncLabel) ellipsizes only the head and always shows the distinguishing
+    tail. Sibling-aware mode anchors the tail at the divergence from the closest
+    visible sibling. **Has `label-split.test.ts`**; browser smoke
+    `tests/small-smokes/browser_label_trunc.py`.
   - `lib/chart.ts` — distribution-chart bucketing: `chartByRules` (samples
     bucketed by the SET of matching highlight rules — grey none / solid single /
     striped combo) + `chartByAnswers` (legacy exact-match histogram) + label
@@ -158,6 +166,12 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     wrapping `ModelTypeahead`; the sidebar's per-panel model picker (click →
     type to filter, no separate "Filter models…" textbox).
   - `lib/HighlightRules.svelte` — the highlight-rules editor UI.
+  - `lib/TruncLabel.svelte` — the middle-ellipsis label: a two-span flex trick
+    (head clips with `flex:0 1 auto`, tail always shows) over `splitTail`, plus
+    the full-name `use:tip` tooltip backstop. Used everywhere a run/model label
+    renders truncated — the `ModelTypeahead` rows (sibling-aware), the
+    `ModelDropdown` trigger, and +page's `.column-title` / `.send-chip`. So two
+    runs sharing a long prefix stay distinguishable at any width.
 
 Cross-component CSS utility classes (`.sidebar-label`, `.btn-new`,
 `.backend-error`, …) live in **global `app.css`** — scoped `+page.svelte` styles

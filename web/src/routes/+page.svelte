@@ -26,6 +26,7 @@
 	import OrManagerModal from '$lib/OrManagerModal.svelte';
 	import TinkerPickerModal from '$lib/TinkerPickerModal.svelte';
 	import ModelDropdown from '$lib/ModelDropdown.svelte';
+	import TruncLabel from '$lib/TruncLabel.svelte';
 	import { loadHighlightRules } from '$lib/highlights.svelte';
 	import HighlightRules from '$lib/HighlightRules.svelte';
 	import type { Pin } from '$lib/types';
@@ -1432,7 +1433,7 @@
 						<div class="chat-column reduced">
 							<button class="restore-panel" onclick={() => convo.restorePanel(p.panel)} title="Restore this panel">
 								<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
-								<span class="restore-label">{panelLabel(p)}</span>
+								<span class="restore-label" use:tip data-tooltip={panelLabel(p)}>{panelLabel(p)}</span>
 							</button>
 						</div>
 					{:else}
@@ -1441,7 +1442,7 @@
 					<div class="chat-column">
 						{#if isComparing}
 							<div class="column-header">
-								<span class="column-title">{panelLabel(p)}</span>
+								<span class="column-title"><TruncLabel label={panelLabel(p)} /></span>
 								<button class="reduce-panel" onclick={() => convo.reducePanel(p.panel)} title="Reduce this panel" aria-label="Reduce panel">
 									<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
 								</button>
@@ -1524,7 +1525,7 @@
 					<div class="send-targets">
 						<span class="send-targets-label">Send to</span>
 						{#each panelSels as p (p.panel)}
-							<button class="send-chip" class:on={convo.sendTargets.has(p.panel)} class:reduced={convo.reducedPanels.has(p.panel)} onclick={() => convo.toggleSendTarget(p.panel)} title={convo.reducedPanels.has(p.panel) ? 'Reduced panel — click to send here anyway' : 'Toggle this panel as a send target'}>{panelLabel(p)}</button>
+							<button class="send-chip" class:on={convo.sendTargets.has(p.panel)} class:reduced={convo.reducedPanels.has(p.panel)} onclick={() => convo.toggleSendTarget(p.panel)} title={convo.reducedPanels.has(p.panel) ? 'Reduced panel — click to send here anyway' : 'Toggle this panel as a send target'}><TruncLabel label={panelLabel(p)} /></button>
 						{/each}
 					</div>
 				{/if}
@@ -1717,13 +1718,13 @@
 	.restore-panel:hover { color: var(--color-accent); background: var(--color-surface-alt); }
 	.restore-label { max-height: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	.column-header { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); font-size: 0.78rem; font-weight: 600; color: var(--color-accent); background: var(--color-surface); border-bottom: 1px solid var(--color-border); }
-	.column-title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.column-title { flex: 1; min-width: 0; display: flex; overflow: hidden; }
 	.reduce-panel { display: flex; align-items: center; padding: 2px; background: none; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--color-text-muted); cursor: pointer; flex-shrink: 0; }
 	.reduce-panel:hover { color: var(--color-accent); border-color: var(--color-border); }
 	/* ── Composer send-targeting chips ─────────────────────────────── */
 	.send-targets { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-2) 0 0; }
 	.send-targets-label { font-size: 0.68rem; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
-	.send-chip { font-size: 0.7rem; padding: 2px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: var(--color-bg); color: var(--color-text-muted); cursor: pointer; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.send-chip { font-size: 0.7rem; padding: 2px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: var(--color-bg); color: var(--color-text-muted); cursor: pointer; max-width: 160px; display: inline-flex; overflow: hidden; }
 	.send-chip.on { background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent); }
 	.send-chip.reduced { opacity: 0.6; font-style: italic; }
 	/* ── Assistant prefill field ───────────────────────────────────── */
