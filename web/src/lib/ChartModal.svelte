@@ -44,6 +44,7 @@
 	import Modal from './Modal.svelte';
 	import {
 		chartByAnswers,
+		chartByFirstToken,
 		chartByRules,
 		chartRules,
 		contrastText,
@@ -60,7 +61,7 @@
 	let { sources, onclose }: { sources: ChartPanelData[]; onclose: () => void } = $props();
 
 	// ── controls ──────────────────────────────────────────────────────
-	let mode = $state<'rules' | 'answers'>(
+	let mode = $state<'rules' | 'answers' | 'firsttoken'>(
 		chartRules(highlightStore.rules).length > 0 ? 'rules' : 'answers'
 	);
 	let turnSel = $state('last'); // 'last' | stringified turn index
@@ -163,11 +164,29 @@
 		return q.length > 200 ? '…' + q.slice(-200) : q;
 	}
 
+	// First-token mode availability: ANY turn of any active source carries a
+	// logprob record (not just the picked turn — the picker defaults to the
+	// latest turn, which may be an OpenRouter regen without data).
+	const hasFirstToken = $derived(
+		activeSources.some((s) => s.turns.some((t) => t.samples.some((x) => x.first)))
+	);
+	const ft = $derived(mode === 'firsttoken' ? chartByFirstToken(chartSources) : null);
+
 	const data = $derived(
 		mode === 'rules'
 			? chartByRules(chartSources, activeRules, matchScope === 'split' ? 'response' : matchScope)
-			: chartByAnswers(chartSources)
+			: mode === 'firsttoken'
+				? (ft?.data ?? null)
+				: chartByAnswers(chartSources)
 	);
+
+	/** Per-segment hover text — first-token mode reads differently: pct is the
+	 *  MODEL's probability, count is how often it was actually sampled. */
+	function segTooltip(seg: { label: string; count: number; pct: number; sampleIdx: number[] }, total: number): string {
+		if (mode === 'firsttoken')
+			return `‘${seg.label}’ — model p=${seg.pct.toFixed(1)}% · sampled ${seg.count}/${total}${seg.count > 0 ? ' · click to inspect' : ''}`;
+		return `${seg.label} — ${seg.count}/${total} (${seg.pct.toFixed(0)}%) · click to inspect`;
+	}
 
 	// ── SVG layout ────────────────────────────────────────────────────
 	// Consecutive sub-labeled bars sharing a model (split's response|thinking
@@ -243,6 +262,11 @@
 					data-tooltip="Bucket samples by which highlight rules match them" use:tip>highlight rules</button>
 				<button class="chart-mode-btn" class:active={mode === 'answers'} onclick={() => (mode = 'answers')}
 					data-tooltip="Bucket samples by exact answer text (short constrained answers)" use:tip>exact answers</button>
+				<button class="chart-mode-btn" class:active={mode === 'firsttoken'} disabled={!hasFirstToken}
+					onclick={() => { mode = 'firsttoken'; inspect = null; }}
+					data-tooltip={hasFirstToken
+						? "The model's own probability distribution over the FIRST generated token (from stored logprobs)"
+						: 'Needs token logprobs — captured on native tinker sampling only'} use:tip>first token</button>
 			</div>
 			{#if turnCount > 1}
 				<select class="chart-turn" bind:value={turnSel} aria-label="Charted turn">
@@ -313,9 +337,14 @@
 				{#if streaming}<p>streaming…</p>{/if}
 			</div>
 		{/if}
+		{#if mode === 'firsttoken' && ft?.mixed}
+			<div class="chart-note">⚠ this turn mixes batches with different first-token distributions (regenerated on another checkpoint or renderer mode) — bars use the NEWEST batch's top-K; older batches' sampled tokens are kept with their own probabilities.</div>
+		{/if}
 		{#if !data || !layout}
 			{#if activeSources.length === 0}
 				<div class="backend-error">All panels with data are folded — enable “include folded panels” above to chart them.</div>
+			{:else if mode === 'firsttoken'}
+				<div class="backend-error">No token logprobs on this turn — first-token distributions need native tinker samples (OpenRouter and token-streamed single samples don't carry them).</div>
 			{:else if mode === 'rules' && allRulesOff}
 				<div class="backend-error">Every highlight rule is toggled off for this chart — click a rule chip above to re-include it.</div>
 			{:else if mode === 'rules'}
@@ -355,7 +384,7 @@
 									class="chart-seg"
 									class:selected={inspect?.bar === pb.bi && inspect?.key === seg.key}
 									role="button" tabindex="0" aria-label="{seg.label}: {seg.count} of {pb.bar.total}"
-									data-tooltip="{seg.label} — {seg.count}/{pb.bar.total} ({seg.pct.toFixed(0)}%) · click to inspect"
+									data-tooltip={segTooltip(seg, pb.bar.total)}
 									use:tip
 									onclick={() => toggleInspect(pb.bi, seg.key)}
 									onkeydown={(e) => e.key === 'Enter' && toggleInspect(pb.bi, seg.key)}
@@ -425,6 +454,8 @@
 	.chart-mode-btn { border: none; background: var(--color-bg); color: var(--color-text-muted); font-size: 0.76rem; padding: 4px 10px; cursor: pointer; }
 	.chart-mode-btn + .chart-mode-btn { border-left: 1px solid var(--color-border); }
 	.chart-mode-btn.active { background: var(--color-accent); color: #fff; }
+	.chart-mode-btn:disabled { opacity: 0.45; cursor: default; }
+	.chart-note { font-size: 0.76rem; color: #b45309; background: #f59e0b14; border: 1px solid #f59e0b66; border-radius: var(--radius); padding: var(--space-2) var(--space-3); margin-bottom: var(--space-3); }
 	.chart-turn, .chart-think { font-size: 0.78rem; padding: 3px 6px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-bg); color: var(--color-text); max-width: 340px; }
 	.chart-check { display: inline-flex; align-items: center; gap: 5px; font-size: 0.78rem; color: var(--color-text-muted); cursor: pointer; user-select: none; }
 	.chart-rules { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }

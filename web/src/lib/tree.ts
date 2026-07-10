@@ -14,6 +14,30 @@ export const ROOT = '__root__';
 
 export type NodeRole = 'user' | 'assistant' | 'system';
 
+/** Per-generated-token logprob record (native tinker sampling only — see
+ *  docs/API_CONTRACT.md). Raw data: persisted on the node so later features can
+ *  recompute (charts, hover) without resampling. */
+export type TokenLogprob = {
+	/** decoded token text (single-token decode — may show � on a UTF-8 split) */
+	t: string;
+	tid: number;
+	/** logprob of the sampled token at this position (null = unavailable) */
+	lp: number | null;
+	/** top-K alternatives, most probable first: [text, tid, logprob] */
+	top?: [string, number, number][];
+};
+
+function cloneTokenLogprobs(tlp: TokenLogprob[] | undefined): TokenLogprob[] | undefined {
+	// Structural copy (cloneTree escapes $state proxies field-by-field; these
+	// entries are never mutated but must not leak proxy references into clones).
+	return tlp?.map((e) => ({
+		t: e.t,
+		tid: e.tid,
+		lp: e.lp,
+		top: e.top?.map((a) => [...a] as [string, number, number])
+	}));
+}
+
 export type TreeNode = {
 	id: string;
 	role: NodeRole;
@@ -32,6 +56,9 @@ export type TreeNode = {
 	 *  batches (false = non-thinking half, true = thinking half); persisted so the
 	 *  think / no-think chip survives reload. Absent on single-mode turns. */
 	thinking?: boolean;
+	/** Per-token logprobs + top-K alternatives (native tinker sampling only);
+	 *  persisted — powers the token-hover inspector + the first-token chart. */
+	token_logprobs?: TokenLogprob[];
 	parent: string | null; // null = child of the virtual root
 	children: string[]; // ordered
 };
@@ -59,6 +86,8 @@ export type SampleLike = {
 	finish_reason?: string;
 	/** Renderer mode (thinking='both' batches only) — see TreeNode.thinking. */
 	thinking?: boolean;
+	/** Per-token logprobs (native tinker sampling only) — see TreeNode. */
+	token_logprobs?: TokenLogprob[];
 	sample_index?: number;
 };
 
@@ -121,6 +150,7 @@ function cloneTree(t: ConvTree): ConvTree {
 			prefill: n.prefill,
 			finish_reason: n.finish_reason,
 			thinking: n.thinking,
+			token_logprobs: cloneTokenLogprobs(n.token_logprobs),
 			parent: n.parent,
 			children: [...n.children]
 		};
@@ -245,6 +275,7 @@ export function foldAssistant(
 			prefill: s.prefill,
 			finish_reason: s.finish_reason,
 			thinking: s.thinking,
+			token_logprobs: cloneTokenLogprobs(s.token_logprobs),
 			parent: parentUserId,
 			children: []
 		};

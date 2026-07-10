@@ -42,6 +42,7 @@ export function bucketTurn(run: PanelRun, prefill?: string): ViewMessage {
 		raw_meta: one?.raw_meta,
 		prefill: pf,
 		finish_reason: one?.finish_reason,
+		token_logprobs: one?.token_logprobs,
 		running: run.running
 	};
 }
@@ -60,6 +61,7 @@ export function buildPanelView(tree: ConvTree, run: PanelRun, prefill?: string):
 		prefill: n.prefill,
 		finish_reason: n.finish_reason,
 		thinking: n.thinking,
+		token_logprobs: n.token_logprobs,
 		nodeId: n.id,
 		sib: siblingInfo(tree, n.id),
 		isBucket: false

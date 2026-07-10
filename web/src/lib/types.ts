@@ -1,6 +1,8 @@
 // Types mirroring the tinkerscope backend API (see docs/API_CONTRACT.md).
 
-import type { ConvTree } from './tree';
+import type { ConvTree, TokenLogprob } from './tree';
+
+export type { TokenLogprob };
 
 export type Checkpoint = {
 	name: string;
@@ -179,6 +181,8 @@ export type ChatRequest = {
 	top_k?: number | null;
 	presence_penalty?: number | null;
 	repetition_penalty?: number | null;
+	/** Capture per-token logprobs (native tinker paths; server default true). */
+	logprobs?: boolean;
 	panel: Panel;
 	broadcast: boolean;
 	/** Opaque ownership token echoed on chat_start/done/error so the browser can
@@ -226,6 +230,9 @@ export type SampleData = {
 	/** Which renderer mode produced this sample — set only on thinking='both' chats
 	 *  (false = the non-thinking half, true = the thinking half). */
 	thinking?: boolean;
+	/** Per-token logprobs + top-5 alternatives — native tinker sampling only
+	 *  (see docs/API_CONTRACT.md). Persists through the fold onto the tree node. */
+	token_logprobs?: TokenLogprob[];
 };
 
 /**
@@ -250,6 +257,9 @@ export type ViewMessage = {
 	/** Renderer mode of this turn's sample — set only for thinking='both' batches
 	 *  (shows the think / no-think chip when cycling the folded siblings). */
 	thinking?: boolean;
+	/** Per-token logprobs of this turn's sample (native tinker only) — powers the
+	 *  token-hover inspector when the sidebar "Token probs" toggle is on. */
+	token_logprobs?: TokenLogprob[];
 	samples?: SampleData[];
 	totalSamples?: number;
 	running?: boolean;

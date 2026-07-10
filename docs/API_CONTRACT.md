@@ -151,6 +151,11 @@ as opaque JSON. Saves are flock-serialized; a corrupt file is backed up to
                           // carry no prefill). No-op without a trailing assistant turn.
   "top_p": null, "top_k": null,
   "presence_penalty": null, "repetition_penalty": null,
+  "logprobs": true,       // capture per-token logprobs + top-5 alternatives on the
+                          // NATIVE tinker sampling paths (run_id any n; base_model n>1).
+                          // Default ON; costs one extra prefill-only tinker call per
+                          // sample. The token-streamed n==1 oai paths and OpenRouter
+                          // don't support it and ignore the flag.
   "panel": "primary",     // "primary" | "compare" — which compare pane this is
   "broadcast": true,       // also mirror samples to the state bus (browser)
   "client_token": null     // optional opaque ownership token, echoed verbatim on the
@@ -166,10 +171,20 @@ as opaque JSON. Saves are flock-serialized; a corrupt file is backed up to
   token-streaming path); n>1 sends whole samples, no deltas. A consumer that saw
   deltas for a sample uses the later `message` event to *finalize* (clean content),
   not to reprint.
-- `event: message` → `data:` one sample: `{sample_index, content, raw_text, finish_reason, reasoning?, thinking?}` or `{sample_index, error}`.
+- `event: message` → `data:` one sample: `{sample_index, content, raw_text, finish_reason, reasoning?, thinking?, token_logprobs?}` or `{sample_index, error}`.
   `thinking` (bool) is present **only on `thinking:"both"` chats** and says which
   half produced the sample (false = non-thinking, true = thinking); single-mode
   chats omit it.
+  `token_logprobs` (native tinker sampling with `logprobs:true`, the default) is
+  one entry per GENERATED token: `{t, tid, lp, top?}` — `t` the decoded token
+  text, `tid` its id, `lp` its logprob, `top` the top-5 alternatives as
+  `[text, tid, logprob]` (most probable first). `lp` and `top` come from the
+  same forward pass (a follow-up prefill call with `topk_prompt_logprobs` —
+  tinker has no generated-token top-k natively; see
+  `tinker_sampler._token_logprobs`); if that call fails the entries degrade to
+  the sampling call's own `lp` with no `top`. The browser folds this onto the
+  tree node (persisted with the conversation) — it powers the token-hover
+  inspector and the chart's first-token mode.
 - `event: done` → `data: {}` (all samples finished)
 - `event: error` → `data: {error}` (whole request failed, e.g. unsampleable run)
 
