@@ -170,7 +170,11 @@ def main() -> None:
             if page.query_selector("select.chart-turn"):
                 page.select_option("select.chart-turn", value="0")
                 page.wait_for_timeout(200)
-            legend = [el.inner_text() for el in page.query_selector_all(".chart-legend-label")]
+            # Since the first-token ops landing (4db0ccb) the token entries render
+            # as interactive CHIPS (.ft-chip-label); only the grey rest keeps the
+            # plain legend row — read both.
+            legend = [el.inner_text() for el in
+                      page.query_selector_all(".ft-chip-label, .ft-rest-legend .chart-legend-label")]
             checks.append(("legend = tokens + rest",
                            "Blue" in legend and "Gray" in legend
                            and "[rest of distribution]" in legend))

@@ -388,7 +388,9 @@ export function chartByFirstToken(
 		const removedMass = excludedUnits.reduce((s, u) => s + unitMass(si, u), 0);
 		const removedSamples = excludedUnits.reduce((s, u) => s + unitCount(si, u), 0);
 		const keep = 1 - removedMass;
-		retained.push(keep);
+		// Only DATA-BEARING bars vote on the mass note: an empty bar trivially
+		// "retains 100%" and would stretch the honest range to a false NN–100%.
+		if (dists[si] != null) retained.push(keep);
 		const scale = keep > 0 ? 1 / keep : 0;
 		const shownMass = named.reduce((s, u) => s + unitMass(si, u), 0);
 		// Total mass is 1 for a source with a distribution, 0 for a no-data source

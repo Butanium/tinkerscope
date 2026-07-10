@@ -326,6 +326,21 @@ ok('answers: no sources → null', chartByAnswers([]) === null);
 	eq('exclude absent: no mass note', exGhost.massNote, undefined);
 	eq('exclude absent: n unchanged', exGhost.data.bars[0].total, 3);
 
+	// mass note spans DATA-BEARING bars only: a no-data source (empty bar) has no
+	// mass to retain, and letting it push 100% into the range turns an honest
+	// "over 70%" into a false "over 70–100%".
+	const withEmpty = chartByFirstToken(
+		[...src(), { model: 'nodata', samples: [{ content: 'x' }] }],
+		{ excluded: new Set(['No']) }
+	)!;
+	ok(
+		'mass note ignores no-data bars',
+		withEmpty.massNote != null &&
+			Math.abs(withEmpty.massNote.min - 0.7) < 1e-6 &&
+			Math.abs(withEmpty.massNote.max - 0.7) < 1e-6,
+		`got ${JSON.stringify(withEmpty.massNote)}`
+	);
+
 	// ADD a recorded-but-hidden token (Perhaps, p=.05): its own segment carved
 	// from the rest mass, count 0 (recorded in a top-K but sampled by nobody here).
 	const add = chartByFirstToken(src(), { added: [[{ token: 'Perhaps', tid: 9, p: 0.05 }]] })!;
