@@ -19,7 +19,7 @@
 	import { isNavKey, moveIndex, isEditableTarget, anyModalOpen } from '$lib/kbnav';
 	import type { ChartPanelData, ChartTurn } from '$lib/chart';
 	import { buildPanelView } from '$lib/panel-view';
-	import { reorderPanels, isNoopGap } from '$lib/panel-order';
+	import { DragReorder } from '$lib/drag-reorder.svelte';
 	import ChartModal from '$lib/ChartModal.svelte';
 	import TagModal from '$lib/TagModal.svelte';
 	import DatasetModal from '$lib/DatasetModal.svelte';
@@ -43,6 +43,7 @@
 		Run,
 		Health,
 		PlaygroundState,
+		PanelState,
 		StatePatch,
 		ChatMessage,
 		Panel,
@@ -227,9 +228,9 @@
 		while (ids.has('p-' + n)) n++;
 		return 'p-' + n;
 	}
-	const MAX_PANELS = 6;
 	function addPanel() {
-		if (s.panels.length >= MAX_PANELS || modelCatalog.runs.length + modelCatalog.openrouterModels.length < 1) return;
+		// No panel-count cap — the columns row scrolls horizontally at min-width.
+		if (modelCatalog.runs.length + modelCatalog.openrouterModels.length < 1) return;
 		const blank = shiftDown; // Shift+add = a fresh empty panel (vs the clone default)
 		const id = nextPanelId();
 		// Defensive: a re-minted id ('compare', 'p-2'…) may still carry a stale live
@@ -267,46 +268,18 @@
 	}
 
 	// ── Panel drag-to-reorder ─────────────────────────────────────────
-	// Reorder columns by dragging a column header. Display order IS the shared
-	// panels[] order, so one full-replace patch moves the chat column, its sidebar
-	// model picker, and the send-chip together. Content (trees / live buckets /
-	// scroll) is keyed by STABLE panel id, so it travels with the column for free.
-	// `dragOverGap` is a gap index (0=before first … N=after last) from the dragover
-	// midpoint test; the drop indicator hides at gaps where a drop is a no-op.
-	let dragPanelId = $state<string | null>(null);
-	let dragOverGap = $state<number | null>(null);
-	function onPanelDragStart(e: DragEvent, panelId: string) {
-		dragPanelId = panelId;
-		if (e.dataTransfer) {
-			e.dataTransfer.effectAllowed = 'move';
-			e.dataTransfer.setData('text/plain', panelId); // Firefox won't start a drag without data
-		}
-	}
-	function onPanelDragOver(e: DragEvent, index: number) {
-		if (dragPanelId === null) return;
-		e.preventDefault(); // mark this column a valid drop target
-		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-		dragOverGap = e.clientX < rect.left + rect.width / 2 ? index : index + 1;
-	}
-	function onPanelDrop(e: DragEvent) {
-		if (dragPanelId === null || dragOverGap === null) return;
-		e.preventDefault();
-		const next = reorderPanels(s.panels, dragPanelId, dragOverGap);
-		if (next !== s.panels) {
-			patchState({ panels: next.map((p) => ({ ...p })) }, true);
-			convo.save(); // persist the layout with the conversation (like setRun)
-		}
-		dragPanelId = null;
-		dragOverGap = null;
-	}
-	function onPanelDragEnd() {
-		dragPanelId = null;
-		dragOverGap = null;
-	}
-	/** Show the drop indicator at gap `gap` only when a drop there would move something. */
-	function showDropAt(gap: number): boolean {
-		return dragPanelId !== null && dragOverGap === gap && !isNoopGap(s.panels, dragPanelId, gap);
+	// Reorder columns by dragging a column header's GRIP (only the grip is
+	// draggable — a draggable ancestor would kill selection of the model-name
+	// text). Display order IS the shared panels[] order, so one full-replace patch
+	// moves the chat column, its sidebar model picker, and the send-chip together.
+	// Content (trees / live buckets / scroll) is keyed by STABLE panel id, so it
+	// travels with the column for free. The generic drag state + gap math live in
+	// the shared DragReorder ('x' = horizontal columns); the indicator hides at
+	// no-op gaps.
+	const panelDrag = new DragReorder('x');
+	function applyPanelReorder(next: PanelState[]) {
+		patchState({ panels: next.map((p) => ({ ...p })) }, true);
+		convo.save(); // persist the layout with the conversation (like setRun)
 	}
 
 	// ── Param edits → shared state ────────────────────────────────────
@@ -451,6 +424,12 @@
 	// is remembered (shown as a peek) so re-opening restores it. So a prefill is applied
 	// to sends only while open + non-empty.
 	let showPrefill = $state(false);
+	// System prompt lives next to the prefill chip (moved out of the sidebar). Same
+	// per-conversation persistence (setSystemPrompt → patchState + save). `showSystem`
+	// is transient open/closed; the chip's ACTIVE state is derived from the stored
+	// value so a set prompt stays glanceable even while folded.
+	let showSystem = $state(false);
+	let systemActive = $derived((s.system_prompt ?? '').trim().length > 0);
 	// Which half(s) of a send the prefill applies to (All / Think only / Non-think
 	// only). In 'both' mode the backend keeps/strips it per-half; in a single-mode
 	// send a mismatched scope drops the prefill entirely (see withPrefill).
@@ -1415,13 +1394,11 @@
 						</div>
 					</div>
 				{/each}
-				{#if panelSels.length < MAX_PANELS}
-					<button class="btn-add-model" class:shift-alt={shiftDown} onclick={addPanel} disabled={modelCatalog.runs.length + modelCatalog.openrouterModels.length < 1}
+				<button class="btn-add-model" class:shift-alt={shiftDown} onclick={addPanel} disabled={modelCatalog.runs.length + modelCatalog.openrouterModels.length < 1}
 						data-tooltip={shiftDown ? 'Add a BLANK panel (empty thread)' : 'Add panel · clones this conversation (Shift: blank)'} use:tip>
 						<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
 						{panelSels.length < 2 ? 'Compare' : 'Add panel'}
 					</button>
-				{/if}
 				{/if}
 			</div>
 
@@ -1513,11 +1490,6 @@
 			{/if}
 
 			<div class="sidebar-section">
-				<label class="sidebar-label">System prompt</label>
-				<textarea class="sidebar-textarea" value={s.system_prompt ?? ''} oninput={(e) => setSystemPrompt((e.target as HTMLTextAreaElement).value)} rows="4" placeholder="Optional system prompt..."></textarea>
-			</div>
-
-			<div class="sidebar-section">
 				<HighlightRules />
 			</div>
 		</aside>
@@ -1529,11 +1501,11 @@
 					{#if convo.reducedPanels.has(p.panel)}
 						<div
 							class="chat-column reduced"
-							class:drop-left={showDropAt(i)}
-							class:drop-right={i === panelSels.length - 1 && showDropAt(panelSels.length)}
-							ondragover={(e) => onPanelDragOver(e, i)}
-							ondrop={onPanelDrop}
-							ondragend={onPanelDragEnd}
+							class:drop-left={panelDrag.showAt(s.panels, i)}
+							class:drop-right={i === panelSels.length - 1 && panelDrag.showAt(s.panels, panelSels.length)}
+							ondragover={(e) => panelDrag.over(e, i)}
+							ondrop={(e) => panelDrag.drop(e, s.panels, applyPanelReorder)}
+							ondragend={() => panelDrag.end()}
 							role="group"
 						>
 							<button class="restore-panel" onclick={() => convo.restorePanel(p.panel)} title="Restore this panel">
@@ -1546,22 +1518,26 @@
 					{@const run = live.panels[p.panel] ?? emptyPanel()}
 					<div
 						class="chat-column"
-						class:dragging={dragPanelId === p.panel}
-						class:drop-left={showDropAt(i)}
-						class:drop-right={i === panelSels.length - 1 && showDropAt(panelSels.length)}
-						ondragover={(e) => onPanelDragOver(e, i)}
-						ondrop={onPanelDrop}
-						ondragend={onPanelDragEnd}
+						class:dragging={panelDrag.dragId === p.panel}
+						class:drop-left={panelDrag.showAt(s.panels, i)}
+						class:drop-right={i === panelSels.length - 1 && panelDrag.showAt(s.panels, panelSels.length)}
+						ondragover={(e) => panelDrag.over(e, i)}
+						ondrop={(e) => panelDrag.drop(e, s.panels, applyPanelReorder)}
+						ondragend={() => panelDrag.end()}
 						role="group"
 					>
 						{#if isComparing}
-							<div
-								class="column-header"
-								draggable="true"
-								ondragstart={(e) => onPanelDragStart(e, p.panel)}
-								role="group"
-							>
-								<span class="drag-grip" use:tip data-tooltip="Drag to reorder panel" aria-hidden="true">
+							<div class="column-header">
+								<span
+									class="drag-grip"
+									draggable="true"
+									ondragstart={(e) => panelDrag.start(e, p.panel)}
+									use:tip
+									data-tooltip="Drag to reorder panel"
+									role="button"
+									tabindex="-1"
+									aria-label="Drag to reorder panel"
+								>
 									<svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor"><circle cx="2.5" cy="3" r="1.2" /><circle cx="7.5" cy="3" r="1.2" /><circle cx="2.5" cy="7" r="1.2" /><circle cx="7.5" cy="7" r="1.2" /><circle cx="2.5" cy="11" r="1.2" /><circle cx="7.5" cy="11" r="1.2" /></svg>
 								</span>
 								<span class="column-title"><TruncLabel label={panelLabel(p)} /></span>
@@ -1651,8 +1627,16 @@
 						{/each}
 					</div>
 				{/if}
-				<!-- Assistant prefill: the model continues from this text. -->
+				<!-- System prompt + assistant prefill chips (system prompt moved here
+				     from the sidebar so it sits next to prefill above the composer). -->
 				<div class="prefill-row">
+					<button
+						class="prefill-toggle"
+						class:on={systemActive}
+						onclick={() => (showSystem = !showSystem)}
+						data-tooltip="Per-conversation system prompt. Collapse to fold (the text is kept); the chip stays highlighted while a prompt is set."
+						use:tip
+					>{systemActive ? '✎ system on' : '＋ system prompt'}</button>
 					<button
 						class="prefill-toggle"
 						class:on={prefillActive}
@@ -1677,6 +1661,15 @@
 						<button class="prefill-clear" onclick={() => { prefillInput = ''; showPrefill = false; }}>clear</button>
 					{/if}
 				</div>
+				{#if showSystem}
+					<textarea
+						class="prefill-textarea"
+						value={s.system_prompt ?? ''}
+						oninput={(e) => setSystemPrompt((e.target as HTMLTextAreaElement).value)}
+						rows="3"
+						placeholder="Optional system prompt..."
+					></textarea>
+				{/if}
 				{#if showPrefill}
 					<textarea
 						class="prefill-textarea"
@@ -1786,7 +1779,6 @@
 	.sidebar-select { padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text); font-size: 0.82rem; }
 	.sidebar-select option:disabled { color: var(--color-text-muted); }
 	.sidebar-slider { width: 100%; accent-color: var(--color-accent); }
-	.sidebar-textarea { padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text); font-size: 0.82rem; font-family: var(--font-sans); resize: vertical; width: 100%; }
 	.sidebar-top-actions { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
 	/* A `.sidebar-label` that's also a fold toggle (e.g. the Models section
 	   header): reset button chrome, spread label text + chevron apart. */
@@ -1845,10 +1837,11 @@
 	.restore-panel { display: flex; align-items: center; gap: var(--space-2); height: 100%; padding: var(--space-2) var(--space-3); writing-mode: vertical-rl; background: var(--color-surface); border: none; border-right: 1px solid var(--color-border); color: var(--color-text-muted); cursor: pointer; font-size: 0.72rem; font-weight: 600; }
 	.restore-panel:hover { color: var(--color-accent); background: var(--color-surface-alt); }
 	.restore-label { max-height: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.column-header { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); font-size: 0.78rem; font-weight: 600; color: var(--color-accent); background: var(--color-surface); border-bottom: 1px solid var(--color-border); cursor: grab; }
-	.chat-column.dragging .column-header { cursor: grabbing; }
-	.drag-grip { display: inline-flex; align-items: center; flex-shrink: 0; color: var(--color-text-muted); opacity: 0.55; }
+	.column-header { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); font-size: 0.78rem; font-weight: 600; color: var(--color-accent); background: var(--color-surface); border-bottom: 1px solid var(--color-border); }
+	/* ONLY the grip is draggable (a draggable header would kill title selection). */
+	.drag-grip { display: inline-flex; align-items: center; flex-shrink: 0; color: var(--color-text-muted); opacity: 0.55; cursor: grab; }
 	.column-header:hover .drag-grip { opacity: 1; color: var(--color-accent); }
+	.chat-column.dragging .drag-grip { cursor: grabbing; }
 	.column-title { flex: 1; min-width: 0; display: flex; overflow: hidden; }
 	.reduce-panel { display: flex; align-items: center; padding: 2px; background: none; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--color-text-muted); cursor: pointer; flex-shrink: 0; }
 	.reduce-panel:hover { color: var(--color-accent); border-color: var(--color-border); }

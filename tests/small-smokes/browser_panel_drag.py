@@ -32,6 +32,7 @@ BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:5180"
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
 SHOT_BEFORE = "/tmp/tinkerscope_panel_drag_before.png"
 SHOT_AFTER = "/tmp/tinkerscope_panel_drag_after.png"
+SHOT_SCALE = "/tmp/tinkerscope_panel_drag_8panels.png"
 
 # (panel id, base-model label, thread marker) in seeded slot order.
 PANELS = [
@@ -78,14 +79,40 @@ def seed() -> str:
     return conv["id"]
 
 
-# Synthesize an HTML5 drag: header of column `src_index` → left region of column
-# `tgt_index`. Our handlers key off a module-level dragPanelId set on dragstart and
-# a gap computed from clientX vs the target column's midpoint, so a plain event
+def seed_scale(n: int) -> str:
+    """An n-panel conversation (n > cap) to prove the cap is gone + layout scales."""
+    pids = ["primary", "compare"] + [f"p-{i}" for i in range(2, n)]
+    trees = {
+        pid: {
+            "nodes": {"u1": {"id": "u1", "role": "user", "content": f"SCALE-{i} q",
+                             "parent": None, "children": ["a1"]},
+                      "a1": {"id": "a1", "role": "assistant", "content": f"SCALE-{i} a",
+                             "parent": "u1", "children": []}},
+            "rootChildren": ["u1"], "selected": {"__root__": "u1", "u1": "a1"},
+        }
+        for i, pid in enumerate(pids)
+    }
+    conv = api("POST", "/api/conversations", {
+        "name": f"panel-scale-{n}-smoke",
+        "trees": trees,
+        "panels": [{"id": pid, "run_id": f"base:Scale-{i}", "checkpoint": None}
+                   for i, pid in enumerate(pids)],
+        "seen_panels": pids,
+    })
+    return conv["id"]
+
+
+# Synthesize an HTML5 drag: drag `srcSel` inside column `srcIndex` → the left
+# region of column `tgtIndex`. Our handlers key off the DragReorder state set on
+# dragstart + a gap from clientX vs the target column's midpoint, so a plain event
 # sequence with a shared DataTransfer is enough (dataTransfer content is unused).
+# srcSel defaults to '.drag-grip' — the ONLY draggable element (the amendment:
+# the header is NOT draggable so its title text stays selectable). Passing
+# '.column-title' instead lets us assert dragging the TITLE is inert.
 DND_JS = """
-({srcIndex, tgtIndex, xFrac}) => {
+({srcIndex, tgtIndex, xFrac, srcSel}) => {
   const cols = [...document.querySelectorAll('.chat-columns > .chat-column')];
-  const src = cols[srcIndex].querySelector('.column-header');
+  const src = cols[srcIndex].querySelector(srcSel || '.drag-grip');
   const tgt = cols[tgtIndex];
   const tr = tgt.getBoundingClientRect();
   const sr = src.getBoundingClientRect();
@@ -100,6 +127,20 @@ DND_JS = """
   fire(tgt, 'dragover', x, y);
   fire(tgt, 'drop', x, y);
   fire(src, 'dragend', sr.left + sr.width / 2, sr.top + sr.height / 2);
+}
+"""
+
+# Programmatically select a column's title text; returns the selected string.
+SELECT_TITLE_JS = """
+(colIndex) => {
+  const title = [...document.querySelectorAll('.chat-columns > .chat-column')][colIndex]
+    .querySelector('.column-title');
+  const range = document.createRange();
+  range.selectNodeContents(title);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  return sel.toString();
 }
 """
 
@@ -160,6 +201,7 @@ def sidebar_order(page) -> list[str]:
 
 def main() -> None:
     conv_id = seed()
+    conv8_id = None
     checks: list[tuple[str, bool]] = []
     try:
         with sync_playwright() as p:
@@ -212,6 +254,20 @@ def main() -> None:
                 [model_by_marker[m] for m in after_cols] == after_side,
             ))
 
+            # Amendment: the title text stays selectable (only the grip drags).
+            selected = page.evaluate(SELECT_TITLE_JS, 0)
+            checks.append((f"column title text is selectable ({selected!r})",
+                           bool(selected and selected.strip())))
+
+            # Amendment: dragging the TITLE (not the grip) must NOT reorder.
+            order_pre = column_order(page)
+            page.evaluate(DND_JS, {"srcIndex": 1, "tgtIndex": 0, "xFrac": 0.25,
+                                   "srcSel": ".column-title"})
+            page.wait_for_timeout(200)
+            order_post = column_order(page)
+            checks.append((f"dragging the title is inert (order {order_post})",
+                           order_post == order_pre))
+
             # Persistence is debounced (400ms) — wait for the save to land on the
             # server, then assert the conversation itself carries the new order.
             persisted = wait_persisted(conv_id, ["p-2", "primary", "compare"])
@@ -231,19 +287,57 @@ def main() -> None:
             checks.append((f"order survives reload {reload_cols}",
                            reload_cols == ["CHARLIE-THREAD", "ALPHA-THREAD", "BRAVO-THREAD"]))
 
+            # ── Phase 2: no MAX_PANELS cap + horizontal-scroll layout at 8 panels ──
+            conv8_id = seed_scale(8)
+            page.goto(f"{BASE}/?c={conv8_id}", wait_until="load", timeout=20000)
+            page.wait_for_function(
+                "document.querySelectorAll('.chat-columns > .chat-column').length === 8",
+                timeout=15000,
+            )
+            n_cols = page.eval_on_selector_all(".chat-columns > .chat-column", "els => els.length")
+            checks.append((f"8 panels render — no cap refusal ({n_cols})", n_cols == 8))
+            layout = page.eval_on_selector(
+                ".chat-columns",
+                """el => ({ overflow: el.scrollWidth > el.clientWidth + 1,
+                            minW: Math.min(...[...el.querySelectorAll(':scope > .chat-column')]
+                                             .map(c => c.offsetWidth)) })""",
+            )
+            checks.append((f"columns row scrolls horizontally ({layout})", layout["overflow"]))
+            checks.append((f"columns hold min-width ~280 ({layout['minW']}px)",
+                           layout["minW"] >= 270))
+
+            # Drag panel 8 (index 7, may be off-screen) → slot 1, across the scroll.
+            page.evaluate(DND_JS, {"srcIndex": 7, "tgtIndex": 0, "xFrac": 0.25})
+            page.wait_for_function(
+                """() => {
+                  const c = document.querySelector('.chat-columns > .chat-column .messages');
+                  return c && c.innerText.includes('SCALE-7');
+                }""",
+                timeout=10000,
+            )
+            page.eval_on_selector(".chat-columns", "el => el.scrollLeft = 0")
+            page.screenshot(path=SHOT_SCALE)
+            first_scale = page.eval_on_selector(
+                ".chat-columns > .chat-column .messages", "e => e.innerText"
+            )
+            checks.append(("drag panel 8 → slot 1 across scroll",
+                           "SCALE-7" in first_scale))
+
             checks.append((f"no console errors ({len(errors)})", not errors))
             if errors:
                 print("CONSOLE ERRORS:", errors)
             browser.close()
     finally:
         api("DELETE", f"/api/conversations/{conv_id}")
+        if conv8_id:
+            api("DELETE", f"/api/conversations/{conv8_id}")
 
     print()
     ok = True
     for name, passed in checks:
         print(f"  {'✓' if passed else '✗'} {name}")
         ok = ok and passed
-    print(f"\nscreenshots: {SHOT_BEFORE}  {SHOT_AFTER}")
+    print(f"\nscreenshots: {SHOT_BEFORE}  {SHOT_AFTER}  {SHOT_SCALE}")
     if not ok:
         raise SystemExit("panel-drag smoke FAILED")
     print("panel-drag smoke PASSED")

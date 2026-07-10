@@ -104,18 +104,37 @@ This is one coherent feature: an **N-way comparison workspace**.
 
 ## 4. Smaller pending items (independent of the N-panel work)
 
-- **Panel drag-to-reorder** — DONE. Drag a chat-column header (grip handle + grab
-  cursor; only when comparing) to reorder the columns; a drop indicator lights the
-  target gap and the dragged column fades. One `patchState({panels}, true)` moves
-  the shared `panels[]`, so the chat columns, the sidebar Models pickers, and the
-  send-chips all follow (same array); `convo.save()` persists the layout with the
-  conversation (same debounced path as `setRun`). Content (trees/live buckets/scroll)
-  is keyed by stable panel id, so it travels with its column — reordering during a
-  live generation is fine. Pure move in `lib/panel-order.ts` (`panel-order.test.ts`);
-  handlers in +page's *Panel drag-to-reorder* section; smoke `browser_panel_drag.py`.
+- **Panel drag-to-reorder** — DONE. Drag a chat-column header's **grip handle** (a
+  ⠿ glyph, cursor:grab; only when comparing) to reorder the columns; a drop indicator
+  lights the target gap and the dragged column fades. **Only the grip is `draggable`**
+  — the header itself is not, so the model-name title text stays selectable (a
+  `draggable` ancestor kills text selection cross-browser). One `patchState({panels},
+  true)` moves the shared `panels[]`, so the chat columns, the sidebar Models pickers,
+  and the send-chips all follow (same array); `convo.save()` persists the layout with
+  the conversation (same debounced path as `setRun`). Content (trees/live buckets/
+  scroll) is keyed by stable panel id, so it travels with its column — reordering
+  during a live generation is fine. Shared drag helper `lib/drag-reorder.svelte.ts`
+  (`DragReorder`) over pure `lib/reorder.ts` (`reorder.test.ts`); handlers in +page's
+  *Panel drag-to-reorder* section; smoke `browser_panel_drag.py`.
   **Semantics note:** slot 1 is special — it's the clone-source for add-panel and the
   "main thread" slot — so dragging a different panel into slot 1 deliberately changes
   which panel new panels clone from. Intended.
+- **Highlight rules drag-to-reorder** — DONE. The sidebar Highlights rows are
+  drag-reorderable via a per-row grip (replaced the up/down arrows). Reuses the same
+  `DragReorder` (axis `'y'`) + the existing `reorderHighlightRules` store method, so
+  rule-precedence/persistence semantics are untouched. Grip-only, so the row's name
+  input stays editable. `HighlightRules.svelte`; smoke `browser_highlight_drag.py`.
+  *Trade-off (recorded decision):* the arrows were keyboard-accessible, DnD is not —
+  accepted per Clément's ask; a keyboard reorder affordance could be re-added later.
+- **No panel-count cap** — DONE. Removed `MAX_PANELS` (was 6). Backend/CLI never
+  capped. The columns row already scrolls horizontally (`.chat-columns overflow-x:auto`
+  + `.chat-column min-width:280px`), send-chips already `flex-wrap`, sidebar Models
+  grows vertically — verified clean at 8 panels (`browser_panel_drag.py` phase 2).
+- **System prompt → chip** — DONE. Moved out of the sidebar to a "＋ system prompt"
+  chip beside "prefill assistant" above the composer (mirrors the prefill chip: click
+  toggles a textarea; the chip shows an active state whenever a prompt is set, even
+  folded). Persistence unchanged (`setSystemPrompt → patchState + save`, per-conversation).
+  Smoke `browser_system_chip.py`.
 - **Backend restart needed** to activate wandb-**project** filtering: the field is
   wired front+back, but `run.sh` dev mode runs without `--reload`, so the new
   `discovery.py` Run fields load only on a fresh backend process. Restart =

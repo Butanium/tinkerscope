@@ -109,13 +109,19 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     cycle, siblings). The single source of branching truth. **Has `tree.test.ts`.**
   - `lib/model-sel.ts` — the `openrouter:`/`base:`/`ckpt:` sentinel encoding
     (prefixes, predicates, id extractors) for a panel's model selection.
-  - `lib/panel-order.ts` — `reorderPanels(panels, fromId, toGap)` (move a panel by
-    stable id to a gap index; returns the SAME ref on no-op/unknown so callers can
-    skip a redundant write) + `isNoopGap`. Powers the column-header drag-to-reorder
-    in +page's *Panel drag-to-reorder* section — reordering the shared `panels[]`
-    updates the chat columns, the sidebar Models pickers, and the send-chips at
-    once (all render from that one array). **Has `panel-order.test.ts`**; browser
-    smoke `tests/small-smokes/browser_panel_drag.py`.
+  - `lib/reorder.ts` — list-agnostic drag-reorder math: `reorderById(items, fromId,
+    toGap)` (move an item by stable id to a gap index; returns the SAME ref on
+    no-op/unknown so callers skip a redundant write) + `isNoopGap` + `gapFromPointer`
+    (axis-aware midpoint test). **Has `reorder.test.ts`.** The reactive glue is
+    `lib/drag-reorder.svelte.ts` → **`DragReorder`** (a class you instantiate PER
+    list — `'x'` for the panel columns, `'y'` for the highlight rule rows): owns the
+    `dragId`/`overGap` drag state + the `start`/`over`/`drop`/`end`/`showAt` handlers.
+    Only a dedicated GRIP is `draggable` (never a container wrapping selectable text/
+    inputs — a draggable ancestor kills text selection). Drives both the column-header
+    drag (+page *Panel drag-to-reorder* — reordering the shared `panels[]` moves the
+    chat columns, sidebar Models pickers, and send-chips at once) and the highlight
+    rule-row drag (`HighlightRules.svelte`, replaced the up/down arrows → `reorderHighlightRules`).
+    Smokes `tests/small-smokes/browser_{panel,highlight}_drag.py`.
   - `lib/label-split.ts` — `splitTail(label, siblings?)`: tail-preserving
     truncation ("middle ellipsis") for run/model labels. Sibling runs share a
     long prefix and differ only in the last few chars (`…_s1_lr1e-3` vs

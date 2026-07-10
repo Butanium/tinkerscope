@@ -16,6 +16,7 @@
 		reorderHighlightRules
 	} from '$lib/highlights.svelte';
 	import { deriveRuleName } from '$lib/highlight-match';
+	import { DragReorder } from '$lib/drag-reorder.svelte';
 	import type { HighlightRule } from '$lib/types';
 
 	const ROLES = ['', 'user', 'assistant', 'system'] as const;
@@ -69,13 +70,13 @@
 		paletteFor = null;
 		await upsertHighlightRule({ ...rule, color });
 	}
-	function move(rule: HighlightRule, delta: -1 | 1) {
-		const ids = rules.map((r) => r.id);
-		const i = ids.indexOf(rule.id);
-		const t = i + delta;
-		if (t < 0 || t >= ids.length) return;
-		[ids[i], ids[t]] = [ids[t], ids[i]];
-		reorderHighlightRules(ids);
+	// Drag-to-reorder (replaces the old up/down arrows). Only the grip is
+	// draggable so the rule's name input / preview text stay selectable+editable;
+	// 'y' = a vertical list. reorderHighlightRules already owns the optimistic
+	// local reorder + the PUT (rule-precedence semantics unchanged).
+	const ruleDrag = new DragReorder('y');
+	function applyRuleReorder(next: HighlightRule[]) {
+		reorderHighlightRules(next.map((r) => r.id));
 	}
 
 	// ── draft mutators (reassign so reactivity fires) ──
@@ -174,11 +175,28 @@
 	{/if}
 
 	{#each rules as rule, i (rule.id)}
-		<div class="hr-rule" class:editing={editingId === rule.id}>
-			<div class="hr-reorder">
-				<button onclick={() => move(rule, -1)} disabled={i === 0} title="move up">▲</button>
-				<button onclick={() => move(rule, 1)} disabled={i === rules.length - 1} title="move down">▼</button>
-			</div>
+		<div
+			class="hr-rule"
+			class:editing={editingId === rule.id}
+			class:dragging={ruleDrag.dragId === rule.id}
+			class:drop-top={ruleDrag.showAt(rules, i)}
+			class:drop-bottom={i === rules.length - 1 && ruleDrag.showAt(rules, rules.length)}
+			ondragover={(e) => ruleDrag.over(e, i)}
+			ondrop={(e) => ruleDrag.drop(e, rules, applyRuleReorder)}
+			ondragend={() => ruleDrag.end()}
+			role="listitem"
+		>
+			<span
+				class="hr-grip"
+				draggable="true"
+				ondragstart={(e) => ruleDrag.start(e, rule.id)}
+				title="Drag to reorder"
+				role="button"
+				tabindex="-1"
+				aria-label="Drag to reorder rule"
+			>
+				<svg width="8" height="14" viewBox="0 0 8 14" fill="currentColor"><circle cx="2" cy="3" r="1" /><circle cx="6" cy="3" r="1" /><circle cx="2" cy="7" r="1" /><circle cx="6" cy="7" r="1" /><circle cx="2" cy="11" r="1" /><circle cx="6" cy="11" r="1" /></svg>
+			</span>
 
 			<div class="hr-color-wrap">
 				<button
@@ -311,25 +329,32 @@
 		background: var(--color-surface-hover);
 	}
 
-	.hr-reorder {
-		display: flex;
-		flex-direction: column;
-		line-height: 0.6;
-	}
-	.hr-reorder button {
-		background: none;
-		border: none;
+	/* Drag-to-reorder grip (replaces the up/down arrows). ONLY the grip is
+	   draggable — the row's name input + preview text stay selectable. */
+	.hr-grip {
+		display: inline-flex;
+		align-items: center;
+		flex-shrink: 0;
 		color: var(--color-text-light);
-		font-size: 0.55rem;
-		cursor: pointer;
-		padding: 0;
+		opacity: 0.55;
+		cursor: grab;
 	}
-	.hr-reorder button:hover:not(:disabled) {
+	.hr-rule:hover .hr-grip {
+		opacity: 1;
 		color: var(--color-accent);
 	}
-	.hr-reorder button:disabled {
-		opacity: 0.25;
-		cursor: default;
+	.hr-rule.dragging {
+		opacity: 0.4;
+	}
+	.hr-rule.dragging .hr-grip {
+		cursor: grabbing;
+	}
+	/* Vertical list → horizontal indicator line at the target gap. */
+	.hr-rule.drop-top {
+		box-shadow: inset 0 3px 0 0 var(--color-accent);
+	}
+	.hr-rule.drop-bottom {
+		box-shadow: inset 0 -3px 0 0 var(--color-accent);
 	}
 
 	.hr-color-wrap {
