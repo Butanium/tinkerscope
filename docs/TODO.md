@@ -42,6 +42,13 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
     tinker paths (run_id / base_model) can probe; OpenRouter / loose sampler_path
     can't reproduce position 0.
 
+- [ ] **First-token units key by DISPLAY token, not tid.** `chartByFirstToken`
+  buckets per source by the decoded display string, so distinct tids with an
+  identical display form (byte-fallback `�`, tokenizer collisions) collapse
+  last-wins and the shadowed token's mass silently folds into the rest. Rare, and
+  keying by display is what makes color-sharing across panels work; disambiguating
+  (e.g. suffix the tid on collision) is a design call for whoever hits it.
+
 ## Done
 
 - [x] **Refactor: extract chat rendering into components.** `web/src/routes/+page.svelte`
