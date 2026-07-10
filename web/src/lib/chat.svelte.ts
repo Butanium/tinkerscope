@@ -23,7 +23,7 @@ export type ChatParams = Pick<
 	| 'max_tokens'
 	| 'n_samples'
 	| 'thinking'
-	| 'prefill_thinking_only'
+	| 'prefill_scope'
 	| 'top_p'
 	| 'top_k'
 	| 'presence_penalty'
@@ -101,11 +101,14 @@ class ChatStore {
 			// path, which also splits prefilled <think> into `reasoning`).
 			const samples = await drainSamples(res);
 			if (samples.length) {
-				// prefill_thinking_only + thinking='both': the backend stripped the
-				// prefill from the non-thinking half (tagged sm.thinking === false),
-				// so those samples must not get it prepended (nor carry `prefill`).
+				// thinking='both' + a one-sided prefill scope: the backend stripped the
+				// prefill from the OTHER half, so those samples must not get it prepended
+				// (nor carry `prefill`). 'think' scope drops the non-thinking half
+				// (sm.thinking === false); 'non_think' drops the thinking half
+				// (sm.thinking === true). Symmetric — see routes/chat.py.
 				const skipPrefill = (sm: (typeof samples)[number]) =>
-					!!params.prefill_thinking_only && sm.thinking === false;
+					(params.prefill_scope === 'think' && sm.thinking === false) ||
+					(params.prefill_scope === 'non_think' && sm.thinking === true);
 				const folded = prefill
 					? samples.map((sm) =>
 							sm.error || skipPrefill(sm)

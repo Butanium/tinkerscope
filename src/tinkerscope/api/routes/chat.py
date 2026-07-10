@@ -95,10 +95,16 @@ class ChatRequest(BaseModel):
     # False / True pick one renderer mode; "both" draws n_samples WITHOUT thinking
     # (sample_index 0..n-1) plus n_samples WITH (n..2n-1) in one chat — 2n total.
     thinking: bool | Literal["both"] = False
-    # Apply the trailing-assistant prefill ONLY to thinking-mode sampling: a
-    # thinking=False request drops the prefill turn entirely; thinking="both"
-    # keeps it for the thinking half and strips it from the non-thinking half.
-    # No-op when the messages don't end with an assistant turn.
+    # Which half(s) of a send the trailing-assistant prefill applies to:
+    #   "all"       — prefill both the thinking and non-thinking sides (default)
+    #   "think"     — prefill the thinking side only; drop it from the non-thinking side
+    #   "non_think" — prefill the non-thinking side only; drop it from the thinking side
+    # In thinking="both" the two sides run together, so the mismatched half is
+    # stripped; in a single-mode send (thinking True/False) a scope that doesn't
+    # match that mode drops the prefill entirely. No-op when the messages don't end
+    # with an assistant turn. `prefill_thinking_only` is the deprecated predecessor,
+    # kept as an alias (True ≡ scope "think") for any stale client.
+    prefill_scope: Literal["all", "think", "non_think"] | None = None
     prefill_thinking_only: bool = False
     top_p: float | None = None
     top_k: int | None = None
@@ -117,8 +123,35 @@ class ChatRequest(BaseModel):
 
 def _drop_trailing_assistant(msgs: list[dict]) -> list[dict]:
     """Strip the prefill convention's trailing assistant turn (used by
-    prefill_thinking_only for the non-thinking side of a chat)."""
+    prefill_scope to drop the prefill from whichever side it doesn't apply to)."""
     return msgs[:-1] if msgs and msgs[-1]["role"] == "assistant" else msgs
+
+
+def _resolve_prefill_scope(req: ChatRequest) -> str:
+    """Effective prefill scope: the explicit field wins; else the deprecated
+    `prefill_thinking_only` bool maps to "think"/"all"."""
+    if req.prefill_scope is not None:
+        return req.prefill_scope
+    return "think" if req.prefill_thinking_only else "all"
+
+
+def _prep_prefill_lists(
+    sampling_msgs: list[dict], native_msgs: list[dict], scope: str
+) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
+    """Apply prefill_scope to the full (prefill-carrying) message lists.
+
+    Returns (sampling_on, native_on, sampling_off, native_off): the *_on lists feed
+    think=True renderer paths, the *_off lists feed think=False paths (a plain
+    thinking=False send uses *_off for everything; thinking="both" uses *_on for the
+    thinking half and *_off for the non-thinking half). The trailing-assistant
+    prefill is dropped from whichever side `scope` excludes — "think" drops it from
+    *_off, "non_think" from *_on, "all" keeps it on both. No-op when the lists don't
+    end with an assistant turn."""
+    sampling_off = _drop_trailing_assistant(sampling_msgs) if scope == "think" else sampling_msgs
+    native_off = _drop_trailing_assistant(native_msgs) if scope == "think" else native_msgs
+    sampling_on = _drop_trailing_assistant(sampling_msgs) if scope == "non_think" else sampling_msgs
+    native_on = _drop_trailing_assistant(native_msgs) if scope == "non_think" else native_msgs
+    return sampling_on, native_on, sampling_off, native_off
 
 
 def _resolve_checkpoint(run: discovery.Run, name: str | None):
@@ -216,11 +249,15 @@ async def chat(req: ChatRequest):
         sampling_msgs = [sys_msg, *sampling_msgs]
         native_msgs = [sys_msg, *native_msgs]
 
-    # prefill_thinking_only: non-thinking sampling must not see the prefill. The
-    # *_off variants feed every think=False path; think=True paths keep the full
-    # lists. A plain thinking=False request just swaps to the stripped lists.
-    sampling_off = _drop_trailing_assistant(sampling_msgs) if req.prefill_thinking_only else sampling_msgs
-    native_off = _drop_trailing_assistant(native_msgs) if req.prefill_thinking_only else native_msgs
+    # prefill_scope decides which side keeps the trailing-assistant prefill.
+    # sampling_msgs/native_msgs become the ON (think=True) lists; the *_off variants
+    # feed think=False paths. A plain thinking=False request then swaps the ON lists
+    # to the off lists. (Logic + the per-scope matrix live in _prep_prefill_lists,
+    # unit-tested in tests/test_chat_prefill.py.)
+    scope = _resolve_prefill_scope(req)
+    sampling_msgs, native_msgs, sampling_off, native_off = _prep_prefill_lists(
+        sampling_msgs, native_msgs, scope
+    )
     if req.thinking is False:
         sampling_msgs, native_msgs = sampling_off, native_off
 

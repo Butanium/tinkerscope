@@ -45,6 +45,7 @@
 		ChatMessage,
 		Panel,
 		PanelSel,
+		PrefillScope,
 		ViewMessage
 	} from '$lib/types';
 
@@ -102,12 +103,15 @@
 	let ctrlDown = $state(false);
 
 	// ── Live shared state (single source of truth for selection/params) ──
-	// Render from live.state; fall back to defaults until the first snapshot.
+	// Render from live.state; fall back to defaults until the first snapshot. These
+	// MUST mirror the backend dataclass defaults (src/tinkerscope/api/state.py
+	// PlaygroundState) — the snapshot replaces DEFAULTS on connect, so a mismatch
+	// makes the pre-snapshot flash look like a param reset.
 	const DEFAULTS: PlaygroundState = {
 		panels: [{ id: 'primary', run_id: null, checkpoint: null, messages: [] }],
 		conversation_id: null,
-		system_prompt: null, temperature: 0.7, max_tokens: 4000, n_samples: 1,
-		thinking: false, top_p: 0.8, chat_id: 0, running: false, last_event: null, last_event_ts: 0
+		system_prompt: null, temperature: 1.0, max_tokens: 1024, n_samples: 1,
+		thinking: false, top_p: null, chat_id: 0, running: false, last_event: null, last_event_ts: 0
 	};
 	let s = $derived<PlaygroundState>(live.state ?? DEFAULTS);
 
@@ -271,9 +275,11 @@
 	function setTopP(v: number) { if (Number.isNaN(v)) return; patchState({ top_p: Math.max(0, Math.min(1, v)) }); }
 	function setThinking(next: boolean | 'both') {
 		// Tri-state: Off / On / Both. Both fires n samples without thinking + n
-		// with (2n total, no-think half first) in one chat.
+		// with (2n total, no-think half first) in one chat. Deliberately touches
+		// ONLY `thinking` — sampling params (temperature/top_p/top_k/…) are the
+		// user's own; the Qwen presets apply solely via the explicit "Reset to Qwen
+		// defaults" button, never as a side effect of cycling thinking mode.
 		patchState({ thinking: next }, true);
-		applyQwenDefaults(next);
 	}
 
 	// ── Sampleability / chat eligibility ──────────────────────────────
@@ -320,7 +326,7 @@
 				temperature: s.temperature, max_tokens: s.max_tokens, n_samples: s.n_samples,
 				thinking: s.thinking, top_p: s.top_p,
 				top_k: topK, presence_penalty: presencePenalty, repetition_penalty: repetitionPenalty,
-				prefill: prefillInput, prefill_on: showPrefill, prefill_think_only: prefillThinkOnly
+				prefill: prefillInput, prefill_on: showPrefill, prefill_scope: prefillScope
 			});
 			if (json === lastSessionJson) return; // selection/params unchanged (e.g. mid-stream)
 			lastSessionJson = json;
@@ -332,7 +338,7 @@
 		void s.panels;
 		void s.temperature; void s.max_tokens; void s.n_samples; void s.thinking; void s.top_p;
 		void topK; void presencePenalty; void repetitionPenalty;
-		void prefillInput; void showPrefill; void prefillThinkOnly;
+		void prefillInput; void showPrefill; void prefillScope;
 		persistSession();
 	});
 	/** Restore the saved selection/params — only when the process state is fresh
@@ -342,8 +348,11 @@
 			const prefs = await api.getPrefs();
 			const raw = prefs[SESSION_PREF_KEY];
 			// Only restore into a FRESH process (no panel has a run selected yet), so we
-			// never clobber a session another tab/CLI already set.
-			const freshState = (live.state?.panels ?? []).every((p) => p.run_id == null);
+			// never clobber a session another tab/CLI already set. Require a real
+			// snapshot first: a null live.state (getState failed) must NOT count as
+			// "fresh" — `[].every(...)` is vacuously true, which would push our prefs
+			// over whatever the live process actually holds.
+			const freshState = live.state != null && (live.state.panels ?? []).every((p) => p.run_id == null);
 			if (raw) {
 				const sess = JSON.parse(raw);
 				// Browser-local fields restore on EVERY load: a page reload keeps the
@@ -354,7 +363,10 @@
 				if (typeof sess.repetition_penalty === 'number') repetitionPenalty = sess.repetition_penalty;
 				if (typeof sess.prefill === 'string') prefillInput = sess.prefill;
 				if (typeof sess.prefill_on === 'boolean') showPrefill = sess.prefill_on;
-				if (typeof sess.prefill_think_only === 'boolean') prefillThinkOnly = sess.prefill_think_only;
+				if (sess.prefill_scope === 'all' || sess.prefill_scope === 'think' || sess.prefill_scope === 'non_think')
+					prefillScope = sess.prefill_scope;
+				else if (typeof sess.prefill_think_only === 'boolean') // migrate the deprecated bool
+					prefillScope = sess.prefill_think_only ? 'think' : 'all';
 			}
 			if (raw && freshState) {
 				const sess = JSON.parse(raw);
@@ -394,17 +406,27 @@
 	// is remembered (shown as a peek) so re-opening restores it. So a prefill is applied
 	// to sends only while open + non-empty.
 	let showPrefill = $state(false);
-	// Apply the prefill only to thinking-mode sampling: thinking=false sends skip
-	// it entirely; 'both' sends give it to the thinking half only (backend flag).
-	let prefillThinkOnly = $state(false);
+	// Which half(s) of a send the prefill applies to (All / Think only / Non-think
+	// only). In 'both' mode the backend keeps/strips it per-half; in a single-mode
+	// send a mismatched scope drops the prefill entirely (see withPrefill).
+	let prefillScope = $state<PrefillScope>('all');
 	let prefillActive = $derived(showPrefill && prefillInput.trim().length > 0);
+	/** Whether the active prefill+scope actually applies to the CURRENT thinking mode.
+	 *  'think' scope needs thinking on the table (on / both); 'non_think' needs the
+	 *  non-thinking side (off / both). A single-mode send that's all-thinking or
+	 *  all-non-thinking on the wrong side ⇒ the prefill doesn't apply at all. */
+	let prefillEffective = $derived(
+		prefillActive &&
+			!(prefillScope === 'think' && s.thinking === false) &&
+			!(prefillScope === 'non_think' && s.thinking === true)
+	);
 	/** Append the active prefill (if any) as a trailing assistant turn so the model
 	 *  EXTENDS it; the returned `prefill` is prepended to each folded sample. Whitespace
-	 *  is preserved (a trailing `</think>\n\n` matters). Disabled (collapsed) ⇒ no-op. */
+	 *  is preserved (a trailing `</think>\n\n` matters). Disabled (collapsed) ⇒ no-op.
+	 *  A scope that doesn't apply to the current thinking mode is a no-op too — mirror
+	 *  of the backend's per-half drop, kept symmetric across think / non_think. */
 	function withPrefill(msgs: ChatMessage[]): { fireMsgs: ChatMessage[]; prefill?: string } {
-		if (!prefillActive) return { fireMsgs: msgs };
-		// think-only prefill with thinking off ⇒ the prefill simply doesn't apply.
-		if (prefillThinkOnly && s.thinking === false) return { fireMsgs: msgs };
+		if (!prefillEffective) return { fireMsgs: msgs };
 		return { fireMsgs: [...msgs, { role: 'assistant', content: prefillInput }], prefill: prefillInput };
 	}
 	// Per-panel composer drafts for the "continue this panel" bubbles (compare).
@@ -461,7 +483,7 @@
 			max_tokens: s.max_tokens,
 			n_samples: s.n_samples,
 			thinking: s.thinking,
-			prefill_thinking_only: prefillThinkOnly,
+			prefill_scope: prefillScope,
 			top_p: s.top_p,
 			top_k: topK,
 			presence_penalty: presencePenalty,
@@ -1542,15 +1564,17 @@
 						class="prefill-toggle"
 						class:on={prefillActive}
 						onclick={() => (showPrefill = !showPrefill)}
-						data-tooltip="Prefill the assistant turn — the model continues from your text. Type raw <think> tags (Qwen/Kimi: open it yourself; DeepSeek auto-opens it). Collapse to disable (text is kept); click again to restore."
+						data-tooltip="Prefill the assistant turn — the model continues from your text. Type raw <think> tags (DeepSeek/Kimi/Qwen3.5 auto-open one in thinking mode, so a redundant <think> is dropped; Qwen3 opens nothing). Collapse to disable (text is kept); click again to restore."
 						use:tip
 					>{prefillActive ? '✎ prefill on' : '＋ prefill assistant'}</button>
 					{#if showPrefill}
-						<label class="prefill-think-only" data-tooltip="Apply the prefill only when thinking is on — with Both, only the thinking half gets it" use:tip>
-							<input type="checkbox" bind:checked={prefillThinkOnly} /> think-only
-						</label>
-						{#if prefillThinkOnly && prefillActive && s.thinking === false}
-							<span class="prefill-inactive-note">inactive — thinking is off</span>
+						<span class="prefill-scope seg-toggle" data-tooltip="Which half(s) of the send get the prefill. Think only / Non-think only apply it to that side; with Both the other half is left un-prefilled. A single-mode send on the wrong side drops it entirely." use:tip>
+							<button class="seg-btn" class:active={prefillScope === 'all'} onclick={() => (prefillScope = 'all')}>All</button>
+							<button class="seg-btn" class:active={prefillScope === 'think'} onclick={() => (prefillScope = 'think')}>Think only</button>
+							<button class="seg-btn" class:active={prefillScope === 'non_think'} onclick={() => (prefillScope = 'non_think')}>Non-think only</button>
+						</span>
+						{#if prefillActive && !prefillEffective}
+							<span class="prefill-inactive-note">inactive — thinking is {s.thinking === false ? 'off' : 'on'}</span>
 						{/if}
 					{/if}
 					{#if prefillInput.trim() && !showPrefill}
@@ -1565,7 +1589,7 @@
 						class="prefill-textarea"
 						bind:value={prefillInput}
 						rows="3"
-						placeholder={'Assistant prefill — the model EXTENDS this. Raw format, e.g.\n  <think>\\nLet me reason…            (only some thinking — model keeps going inside)\n  <think>\\nfull reasoning\\n</think>\\n\\n   (full thinking, model writes the answer)\nDeepSeek auto-opens <think>, so omit it there.'}
+						placeholder={'Assistant prefill — the model EXTENDS this. Raw format, e.g.\n  <think>\\nLet me reason…            (only some thinking — model keeps going inside)\n  <think>\\nfull reasoning\\n</think>\\n\\n   (full thinking, model writes the answer)\nDeepSeek/Kimi/Qwen3.5 auto-open <think> (a redundant one is dropped); Qwen3 opens nothing.'}
 					></textarea>
 				{/if}
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -1738,7 +1762,8 @@
 	.prefill-row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0 0; }
 	.prefill-toggle { font-size: 0.7rem; padding: 2px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: var(--color-bg); color: var(--color-text-muted); cursor: pointer; flex-shrink: 0; }
 	.prefill-toggle.on { background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent); }
-	.prefill-think-only { display: inline-flex; align-items: center; gap: 4px; font-size: 0.68rem; color: var(--color-text-muted); cursor: pointer; user-select: none; flex-shrink: 0; }
+	.prefill-scope { flex-shrink: 0; }
+	.prefill-scope .seg-btn { padding: 2px 9px; font-size: 0.68rem; letter-spacing: normal; }
 	.prefill-inactive-note { font-size: 0.66rem; color: var(--color-warn, #b45309); font-style: italic; flex-shrink: 0; }
 	.prefill-peek { font-size: 0.68rem; color: var(--color-text-muted); font-family: var(--font-mono, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; border: none; background: none; text-align: left; cursor: pointer; padding: 0; opacity: 0.75; }
 	.prefill-peek:hover { color: var(--color-accent); opacity: 1; }

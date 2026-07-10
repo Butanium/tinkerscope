@@ -160,6 +160,9 @@ export type StatePatch = {
 	top_p?: number | null;
 };
 
+/** Scope of the assistant prefill across a send's thinking/non-thinking halves. */
+export type PrefillScope = 'all' | 'think' | 'non_think';
+
 export type ChatRequest = {
 	run_id?: string | null;
 	checkpoint?: string | null;
@@ -172,8 +175,13 @@ export type ChatRequest = {
 	max_tokens: number;
 	n_samples: number;
 	thinking: boolean | 'both';
-	/** Apply the trailing-assistant prefill only to thinking-mode sampling
-	 *  ('both': only the thinking half gets it; false: dropped entirely). */
+	/** Which half(s) of a send the trailing-assistant prefill applies to:
+	 *  'all' = both, 'think' = thinking side only, 'non_think' = non-thinking side
+	 *  only. In 'both' mode the backend keeps/strips the prefill per-half; in a
+	 *  single-mode send the mismatched scope drops the prefill entirely. */
+	prefill_scope?: PrefillScope;
+	/** @deprecated superseded by prefill_scope; true ≡ prefill_scope 'think'. Still
+	 *  accepted server-side as an alias for any stale client. */
 	prefill_thinking_only?: boolean;
 	top_p?: number | null;
 	top_k?: number | null;

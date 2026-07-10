@@ -144,11 +144,16 @@ as opaque JSON. Saves are flock-serialized; a corrupt file is backed up to
                           // the `thinking` field on message/sample events). Applies to
                           // run_id / base_model / openrouter_model; the loose sampler_path
                           // path ignores thinking entirely (server default template).
-  "prefill_thinking_only": false, // apply the trailing-assistant prefill ONLY to
-                          // thinking-mode sampling: thinking=false drops the prefill
-                          // turn entirely; "both" keeps it for the thinking half and
-                          // strips it from the non-thinking half (whose samples then
-                          // carry no prefill). No-op without a trailing assistant turn.
+  "prefill_scope": "all", // "all" | "think" | "non_think" — which half(s) of the send
+                          // the trailing-assistant prefill applies to. "think" prefills
+                          // the thinking side only, "non_think" the non-thinking side only,
+                          // "all" both. In "both" mode the excluded half is stripped (its
+                          // samples carry no prefill); in a single-mode send (thinking
+                          // true/false) a scope that doesn't match that mode drops the
+                          // prefill entirely. No-op without a trailing assistant turn.
+                          // Default "all".
+  "prefill_thinking_only": false, // DEPRECATED alias for prefill_scope; true ≡ "think".
+                          // Still accepted for stale clients; prefill_scope wins if both set.
   "top_p": null, "top_k": null,
   "presence_penalty": null, "repetition_penalty": null,
   "panel": "primary",     // "primary" | "compare" — which compare pane this is

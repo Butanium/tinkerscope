@@ -102,18 +102,21 @@ def _append_to_prompt(model_input: Any, tokenizer: Any, prefill: str) -> Any:
     """Append the user's prefill text to the NORMAL generation prompt.
 
     i.e. build the prompt the renderer would send for a fresh assistant turn —
-    which keeps each family's own opener (Kimi/DeepSeek auto-open ``<think>``,
-    Qwen opens nothing) — then tack the prefill tokens on the end so the model
-    EXTENDS it. Simpler and more faithful than the renderer's ``prefill=`` arg,
-    which some families (Kimi) use to *replace* their auto-``<think>`` rather than
-    add to it (so a prefill would silently drop the thinking opener)."""
+    which keeps each family's own opener (DeepSeek / Kimi K2.5-2.6 / Qwen3.5
+    auto-open ``<think>`` in thinking mode; Qwen3 opens nothing) — then tack the
+    prefill tokens on the end so the model EXTENDS it. Simpler and more faithful
+    than the renderer's ``prefill=`` arg, which some families (Kimi) use to
+    *replace* their auto-``<think>`` rather than add to it (so a prefill would
+    silently drop the thinking opener)."""
     import tinker
 
-    # Families that auto-open ``<think>`` (DeepSeek/Kimi) already end the prompt
-    # with it; a reconstructed prefill (Continue / edited CoT) also carries a
-    # leading ``<think>``. Drop the redundant one so we don't emit ``<think><think>``.
-    # Qwen opens nothing, so its prefill keeps the tag it needs. Also makes a
-    # hand-typed composer prefill forgiving on auto-think runs.
+    # Families that auto-open ``<think>`` (DeepSeek / Kimi / Qwen3.5) already end
+    # the prompt with it; a reconstructed prefill (Continue / edited CoT) also
+    # carries a leading ``<think>``. Drop the redundant one so we don't emit
+    # ``<think><think>``. The check is on the actual prompt suffix, not the family
+    # name, so it's correct for every renderer (Qwen3, which opens nothing, keeps
+    # the tag its prefill needs). Also makes a hand-typed composer prefill forgiving
+    # on auto-think runs.
     if re.match(r"\s*<think>", prefill) and tokenizer.decode(model_input.to_ints()).rstrip().endswith("<think>"):
         prefill = re.sub(r"^\s*<think>\s*", "", prefill, count=1)
     ids = tokenizer.encode(prefill, add_special_tokens=False)

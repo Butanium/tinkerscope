@@ -673,7 +673,8 @@ def _chat_body(
 
     A non-empty `prefill` is sent as a trailing {role:'assistant'} message; the
     server treats that as a prefill the renderer appends verbatim, so the model
-    EXTENDS it. Type raw `<think>` (Qwen/Kimi: open it yourself; DeepSeek auto-opens).
+    EXTENDS it. Type raw `<think>`; DeepSeek/Kimi/Qwen3.5 auto-open one in thinking
+    mode (a redundant `<think>` is dropped), Qwen3 opens nothing.
     """
     messages: list[dict] = [{"role": "user", "content": prompt}]
     if prefill:
