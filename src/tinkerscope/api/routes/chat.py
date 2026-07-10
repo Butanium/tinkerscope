@@ -383,10 +383,19 @@ async def chat(req: ChatRequest):
             "top_p": req.top_p,
         }
         chat_id = await BUS.chat_begin(**state_patch)
+        # Stamp every broadcast with the conversation open WHEN THE CHAT STARTED (read
+        # synchronously after chat_begin — no await, so it can't drift). The browser's
+        # external-fold hook folds a chat_done onto a panel id ONLY if this id matches
+        # the conversation it currently has open; panel ids are re-minted across
+        # conversations on a shared, process-wide bus, so without this a chat generated
+        # for one conversation grafts onto a reused panel of another. None when no
+        # conversation is open (CLI-only / legacy) — the browser folds those (lockstep).
+        conv_id = BUS.state.conversation_id
         if req.broadcast:
             await BUS.broadcast(
                 "chat_start",
-                {"chat_id": chat_id, "panel": req.panel, "n": total, "label": label, "client_token": req.client_token},
+                {"chat_id": chat_id, "panel": req.panel, "n": total, "label": label,
+                 "client_token": req.client_token, "conversation_id": conv_id},
             )
 
         # ── stream samples, with EXACTLY ONE terminal event on every exit path ──
@@ -437,7 +446,10 @@ async def chat(req: ChatRequest):
                 end_patch = {"panel": req.panel, "messages": turn}
             await BUS.chat_end(event, **end_patch)
             if req.broadcast:
-                payload = {"chat_id": chat_id, "panel": req.panel, "client_token": req.client_token}
+                # conversation_id scopes the browser's external fold (see #onExternalDone):
+                # every terminal flavour — done / error / cancelled — carries the origin stamp.
+                payload = {"chat_id": chat_id, "panel": req.panel, "client_token": req.client_token,
+                           "conversation_id": conv_id}
                 if err_msg is not None:
                     payload["error"] = err_msg
                 await BUS.broadcast(event, payload)

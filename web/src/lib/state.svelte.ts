@@ -72,6 +72,16 @@ class LiveStore {
 		this.panels = {};
 	}
 
+	/** Drop ONE panel's bucket. Used when a panel id is re-minted (addPanel) and when
+	 *  a foreign-conversation chat is skipped (conversations.#onExternalDone) so its
+	 *  streamed samples don't linger as a render overlay on the reused panel. */
+	dropBucket(panel: Panel): void {
+		if (!(panel in this.panels)) return;
+		const next = { ...this.panels };
+		delete next[panel];
+		this.panels = next;
+	}
+
 	/** True while ANY panel has an in-flight chat (gates the external-fold reconcile,
 	 *  so it MUST cover every panel, not a fixed primary/compare pair). */
 	get anyRunning(): boolean {

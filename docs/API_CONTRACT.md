@@ -201,11 +201,11 @@ chat_id/running/last_event*). POST `/api/state` with a subset to drive selection
 Event names = the message's `type`:
 - `snapshot` → `{type:"snapshot", state}` (full state, sent first on connect)
 - `patch` → `{type:"patch", event, state}` (state changed; e.g. event="chat_start"/"chat_done"/"patch")
-- `chat_start` → `{type:"chat_start", chat_id, panel, n, label, client_token?}` (a chat began; clear that panel's samples. `n` = TOTAL expected samples — 2×n_samples on a `thinking:"both"` chat)
+- `chat_start` → `{type:"chat_start", chat_id, panel, n, label, client_token?, conversation_id?}` (a chat began; clear that panel's samples. `n` = TOTAL expected samples — 2×n_samples on a `thinking:"both"` chat. `conversation_id` = the conversation open when the chat started — the browser folds an external chat only when this matches its active conversation; null = fold anyway, see below)
 - `delta` → `{type:"delta", chat_id, panel, sample_index, delta, kind}` (streamed token chunk; n==1 only — accumulate per chat_id/panel/sample_index, then the `sample` event finalizes)
 - `sample` → `{type:"sample", chat_id, panel, sample_index, content, raw_text, finish_reason, reasoning?, thinking?}` (`thinking` only on `thinking:"both"` chats — which half drew this sample)
-- `chat_done` → `{type:"chat_done", chat_id, panel, client_token?}`
-- `chat_error` → `{type:"chat_error", chat_id, panel, error, client_token?}`
+- `chat_done` → `{type:"chat_done", chat_id, panel, client_token?, conversation_id?}` (`conversation_id` scopes the external fold — see `chat_start`)
+- `chat_error` → `{type:"chat_error", chat_id, panel, error, client_token?, conversation_id?}`
 - `ping` → `{}` (15s heartbeat; ignore)
 
 **Live-drive model:** the browser renders selection + params + the conversation

@@ -209,8 +209,7 @@
 
 	/** Drop a panel's live sample bucket (so a stale run can't show after remove). */
 	function dropPanelBucket(panel: Panel) {
-		const { [panel]: _drop, ...rest } = live.panels;
-		live.panels = rest;
+		live.dropBucket(panel);
 	}
 
 	// ── Panel lifecycle: add / remove / reduce / restore ──────────────
@@ -225,7 +224,12 @@
 	const MAX_PANELS = 6;
 	function addPanel() {
 		if (s.panels.length >= MAX_PANELS || modelCatalog.runs.length + modelCatalog.openrouterModels.length < 1) return;
+		const blank = shiftDown; // Shift+add = a fresh empty panel (vs the clone default)
 		const id = nextPanelId();
+		// Defensive: a re-minted id ('compare', 'p-2'…) may still carry a stale live
+		// sample bucket from a prior panel with the same id — drop it so a straggler
+		// sample can't overlay the fresh panel.
+		dropPanelBucket(id);
 		// Pick a model not already shown, preferring a sampleable run.
 		const used = new Set(s.panels.map((p) => p.run_id));
 		const other =
@@ -233,9 +237,11 @@
 			modelCatalog.runs.find((r) => !used.has(r.id)) ??
 			modelCatalog.runs[0];
 		const ck = other?.checkpoints.length ? other.checkpoints[other.checkpoints.length - 1].name : null;
-		// Seed the new panel's tree from the FIRST panel so it starts from the same
-		// thread ('primary' may have been removed — first slot is the main thread).
-		convo.duplicateTo(panelSels[0]?.panel ?? 'primary', id);
+		// Default: seed the new panel's tree from the FIRST panel so it starts from the
+		// same thread (compare a second model on the same conversation; 'primary' may
+		// have been removed — first slot is the main thread). Shift: start it blank.
+		if (blank) convo.freshTree(id);
+		else convo.duplicateTo(panelSels[0]?.panel ?? 'primary', id);
 		const seedMsgs = activeMessages(convo.treeFor(id)) as ChatMessage[];
 		const nextPanels = [
 			...s.panels.map((p) => ({ ...p })),
@@ -1220,7 +1226,7 @@
 								<option value={c.id}>{c.name || 'Untitled'}</option>
 							{/each}
 						</select>
-						<button class="conv-icon-btn" class:shift-alt={shiftDown} title={shiftDown ? 'New BLANK conversation (no model selected)' : 'New conversation (keeps the current models; Shift+click for a blank one)'} disabled={anyRunning || convo.busy} aria-label="New conversation" onclick={newConversation}>
+						<button class="conv-icon-btn" class:shift-alt={shiftDown} data-tooltip={shiftDown ? 'New BLANK conversation (no models)' : 'New conversation · keeps current models (Shift: blank)'} use:tip disabled={anyRunning || convo.busy} aria-label="New conversation" onclick={newConversation}>
 							{#if shiftDown}
 								<!-- blank-page + plus: a fresh conversation with no model -->
 								<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M4 1.5h5L12.5 5v6.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /><path d="M8.5 1.5V5h3.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /><path d="M7.5 7v3M6 8.5h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" /></svg>
@@ -1330,7 +1336,8 @@
 					</div>
 				{/each}
 				{#if panelSels.length < MAX_PANELS}
-					<button class="btn-add-model" onclick={addPanel} disabled={modelCatalog.runs.length + modelCatalog.openrouterModels.length < 1}>
+					<button class="btn-add-model" class:shift-alt={shiftDown} onclick={addPanel} disabled={modelCatalog.runs.length + modelCatalog.openrouterModels.length < 1}
+						data-tooltip={shiftDown ? 'Add a BLANK panel (empty thread)' : 'Add panel · clones this conversation (Shift: blank)'} use:tip>
 						<svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
 						{panelSels.length < 2 ? 'Compare' : 'Add panel'}
 					</button>

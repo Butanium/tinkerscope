@@ -27,7 +27,10 @@ class StatePatch(BaseModel):
       - `panels`: full-replace the panel list (the browser sends this on every
         selection change — one `{id, run_id, checkpoint, messages}` per panel).
       - `panel` + `run_id`/`checkpoint`/`messages`: a targeted sub-patch of ONE
-        panel by id (the CLI / single-panel drivers). Creates the panel if absent.
+        panel by id (the CLI / single-panel drivers). Routed to an EXISTING panel
+        only — an unknown id is dropped, never auto-created (see state.py
+        `_patch_panel`: the `panels` full-replace is the sole panel-existence source,
+        so a stale `messages` echo can't resurrect a removed panel).
     Sampling params are global (shared across panels)."""
 
     panels: list[dict] | None = None

@@ -27,6 +27,40 @@ conversations via a dropdown.
    `/api/chat` body; the backend echoes it on the `chat_start`/`chat_done`/
    `chat_error` bus broadcasts. The external-fold hook skips any chat whose
    token is in `ownTokens`. Tokens are removed when `fireChat` finishes.
+3b. **External folds are conversation-scoped.** Panel ids (`compare`, `p-2`…) are
+   re-minted across conversations and `PlaygroundState` is a process-wide singleton
+   (shared by every tab + the CLI), so a `chat_done` for one conversation must NOT
+   graft onto a freshly-reused panel id of another (the "new panel loads a weird
+   random conversation" bug). Each chat broadcast is stamped with `conversation_id`
+   = the conversation open **when the chat started** (chat.py snapshots
+   `state.conversation_id` right after `chat_begin` — race-free, no await between;
+   preferred over a request field because tinkpg has no per-chat conversation of its
+   own to send, and the browser's own chats bypass the gate via the ownership token
+   anyway — a request field would be a second, racier source of truth for the same
+   fact). `#onExternalDone` folds a `chat_done` only when its stamp == `convo.activeId`.
+
+   **The null-stamp hole (deliberate).** The stamp is null when NO conversation was
+   open in shared state at chat start — i.e. a pure-CLI/headless session with no
+   browser pushing its id, or a legacy browser that never writes `conversation_id`,
+   or the split-second on first load before the browser's opening push lands. A null
+   stamp is **folded, not dropped** — the conservative choice. Rationale: a graft
+   requires a *different, non-null* origin colliding with the open conversation; null
+   cannot express that, so folding a null-stamped chat can't reproduce the bug. What
+   it CAN do is break a legitimate CLI/legacy live-drive turn the user is waiting to
+   see. So folding-on-null trades a bug that null can't cause for a feature it would
+   otherwise break — the lesser evil. (The day tinkpg learns to set `conversation_id`,
+   tighten this to reject null.)
+
+   **Asymmetry — only `#onExternalDone` is origin-gated, `#afterLoad` is not.** The
+   `chat_done` event carries an origin stamp, so `#onExternalDone` can scope by it.
+   `#afterLoad` instead reads the panel `messages` echoes in shared state, which
+   carry **no** origin — but it's structurally safe without a gate: `#loadTrees`
+   clears every echo to `[]` synchronously (no await) before `#afterLoad` runs, so
+   its reconcile loop is dormant at load and cannot graft a foreign turn. Gating it
+   on the live (non-stamped) `state.conversation_id` would be a near-no-op (the
+   browser continuously pushes its own activeId into that single field) and could
+   even skip a legitimate same-conversation reconcile during a switch lag, so it's
+   deliberately left ungated.
 4. **Backend + CLI logic unchanged** except: `chat.py` accepts an optional
    `client_token` and echoes it on the three chat broadcasts (additive); the
    conversations store backs up a corrupt file instead of silently resetting.

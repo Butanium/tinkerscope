@@ -141,6 +141,14 @@ class ConversationsStore {
 		this.save();
 	}
 
+	/** Seed a panel with an EMPTY thread (Shift+add panel = blank, vs duplicateTo's
+	 *  clone-the-first-panel default). Mirrors + persists like duplicateTo. */
+	freshTree(panel: Panel): void {
+		this.trees = { ...this.trees, [panel]: emptyTree() };
+		this.#mirror();
+		this.save();
+	}
+
 	/** Drop a panel's tree (on panel removal). The LAST tree is never dropped —
 	 *  a conversation always keeps at least one panel (any id). */
 	dropTree(panel: Panel): void {
@@ -525,6 +533,11 @@ class ConversationsStore {
 	 *  if not running), then UNCONDITIONALLY mirror the active paths so a fresh/
 	 *  restarted backend still learns the loaded conversation. */
 	#afterLoad(): void {
+		// NB: unlike #onExternalDone, this is NOT origin-scoped by conversation_id — the
+		// panel `messages` echoes it reads carry no origin stamp, and #loadTrees clears
+		// every echo to [] synchronously before this runs (no await between), so the loop
+		// is structurally dormant at load and can't graft a foreign turn. See
+		// docs/BRANCHING_DESIGN.md §3b for why the two fold paths are scoped differently.
 		if (!live.anyRunning) {
 			for (const ps of live.state?.panels ?? []) {
 				const echo = (ps.messages ?? []) as Msg[];
@@ -545,9 +558,22 @@ class ConversationsStore {
 		};
 	}
 
-	#onExternalDone(panel: Panel, data: { client_token?: string | null }): void {
+	#onExternalDone(panel: Panel, data: { client_token?: string | null; conversation_id?: string | null }): void {
 		// Own chats are folded by fireChat from their response stream — skip.
 		if (data?.client_token && this.#ownTokens.has(data.client_token)) return;
+		// Conversation-scoped fold. Panel ids ('compare', 'p-2'…) are re-minted across
+		// conversations and PlaygroundState is a process-wide singleton (shared by every
+		// tab + the CLI), so a chat_done stamped with a DIFFERENT conversation than the
+		// one open must NOT graft onto a freshly-reused panel id (the "new panel loads a
+		// weird conversation" bug). A null stamp (CLI/legacy that never set
+		// conversation_id) folds — conservative, keeps the live-drive lockstep alive.
+		if (data?.conversation_id != null && data.conversation_id !== this.activeId) {
+			// Foreign chat completed on a panel id this conversation now reuses: don't
+			// fold it, and drop its live bucket so the foreign stream doesn't linger as a
+			// render overlay on our panel.
+			live.dropBucket(panel);
+			return;
+		}
 		const ps = (live.state?.panels ?? []).find((p) => p.id === panel);
 		const msgs = ps?.messages as Msg[] | undefined;
 		if (!msgs || !msgs.length) return;
