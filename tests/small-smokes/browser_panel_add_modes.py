@@ -5,6 +5,11 @@ model on the same conversation), and make Shift+add start the panel EMPTY. This
 smoke pins both: a plain add clones panel 0's thread; a Shift+add gives an empty
 panel (0 messages).
 
+⚠️ Needs a MODELS-BEARING instance: the Add-panel button disables when the model
+catalog is empty, so a `dev-isolated.sh --fresh` launch with no scan root times
+out on the click (a false red). Point the instance at a run dir, e.g.:
+  scripts/dev-isolated.sh --fresh --port N ~/projects2/negation_neglect/datasets/training_datasets/
+
   uv run python tests/small-smokes/browser_panel_add_modes.py [BASE_URL]
 """
 import json
