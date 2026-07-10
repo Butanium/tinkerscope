@@ -8,6 +8,8 @@
 	// model picker — a select-like trigger button wrapping this component).
 
 	import TruncLabel from './TruncLabel.svelte';
+	import DiffLabel from './DiffLabel.svelte';
+	import { diffLabels } from './label-diff';
 
 	// `search`: extra hidden text matched but never displayed (e.g. a run's
 	// wandb project / base model, so filtering isn't limited to the visible
@@ -55,6 +57,13 @@
 	// row's label is split so its divergence from its closest visible sibling
 	// survives (runs sharing a long prefix stay distinguishable — see TruncLabel).
 	const visibleLabels = $derived(filtered.map((it) => it.label));
+
+	// The "smarter" layer over tail-preserve (see label-diff): where the visible
+	// siblings form a family that shares BOTH ends and differs mid-name, show a
+	// compact diff render (varying segments in full, constant runs → dimmed `…`)
+	// instead of a tail cap that would render them identically. null per row →
+	// fall back to TruncLabel. Filtering is unaffected (search still uses full label).
+	const diffs = $derived(diffLabels(visibleLabels));
 
 	// Total matches (for the "+N more" hint when the list is truncated).
 	const totalMatches = $derived.by(() => {
@@ -144,7 +153,13 @@
 						onmouseenter={() => { if (!it.disabled) active = i; }}
 						onclick={() => pick(it)}
 					>
-						<span class="typeahead-row-label"><TruncLabel label={it.label} siblings={visibleLabels} /></span>
+						<span class="typeahead-row-label">
+							{#if diffs[i]}
+								<DiffLabel label={it.label} parts={diffs[i]!} />
+							{:else}
+								<TruncLabel label={it.label} siblings={visibleLabels} />
+							{/if}
+						</span>
 						{#if it.label !== it.id}
 							<span class="typeahead-row-id">{it.id}</span>
 						{/if}
