@@ -524,3 +524,104 @@ async def test_chat_normal_completion_fires_exactly_one_terminal(chat_mod, monke
     assert len(terminals) == 1 and terminals[0]["type"] == "chat_done"
     prim = next(p for p in bus.state.panels if p.id == "primary")
     assert prim.messages[-1] == {"role": "assistant", "content": "done answer"}
+
+
+async def test_chat_cancel_during_chat_start_broadcast_still_fires_terminal(chat_mod, monkeypatch):
+    """A disconnect landing while gen() is suspended in the chat_start broadcast —
+    AFTER chat_begin bumped _inflight, before the guaranteed-terminal try — must
+    still fire exactly one terminal. Otherwise `running` wedges true forever, and
+    the chat is beyond rescue: it was never registered in _INFLIGHT either, so the
+    cancel endpoint not_founds. The broadcast awaits the (contended) bus lock, so
+    the window is real whenever any other chat is streaming."""
+    chat_route, bus = chat_mod
+
+    async def never_yield(**kw):
+        await asyncio.Event().wait()
+        yield {}  # unreachable
+
+    monkeypatch.setattr("tinkerscope.api.openrouter.sample_one_stream", never_yield)
+
+    in_start_broadcast = asyncio.Event()
+    real_broadcast = bus.broadcast
+
+    async def contended_broadcast(event, payload):
+        if event == "chat_start":
+            in_start_broadcast.set()
+            await asyncio.sleep(0.2)  # the contended-lock window the cancel lands in
+        await real_broadcast(event, payload)
+
+    monkeypatch.setattr(bus, "broadcast", contended_broadcast)
+
+    sub = await bus.subscribe()
+    resp = await chat_route.chat(_req(chat_route, client_token="ct-race"))
+    gen = resp.body_iterator
+
+    async def consume():
+        async for _ in gen:
+            pass
+
+    task = asyncio.create_task(consume())
+    await asyncio.wait_for(in_start_broadcast.wait(), timeout=2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await asyncio.sleep(0.05)  # let the cancelled producer task unwind
+
+    assert bus._inflight == 0
+    assert bus.state.running is False
+    terminals = [m for m in await _drain(sub) if m["type"] in ("chat_done", "chat_error")]
+    assert len(terminals) == 1, terminals
+    assert terminals[0]["type"] == "chat_error"
+    assert terminals[0]["error"] == "cancelled"
+
+
+async def test_chat_cancel_mid_terminal_still_completes_terminal(chat_mod, monkeypatch):
+    """A disconnect landing while _terminal is ALREADY mid-flight (suspended on the
+    contended bus lock inside chat_end, on the normal-completion path) must not
+    half-fire the terminal: `terminated` is already True so the finally skips, and
+    without a shield inside _terminal the chat_done broadcast never goes out —
+    every subscriber's spinner wedges while _inflight stays stuck."""
+    chat_route, bus = chat_mod
+
+    async def quick(**kw):
+        yield {"content": "answer", "sample_index": 0, "raw_text": "answer"}
+
+    monkeypatch.setattr("tinkerscope.api.openrouter.sample_one_stream", quick)
+
+    in_chat_end = asyncio.Event()
+    real_chat_end = bus.chat_end
+
+    async def contended_chat_end(event="chat_done", **patch):
+        in_chat_end.set()
+        await asyncio.sleep(0.2)  # the contended-lock window the cancel lands in
+        await real_chat_end(event, **patch)
+
+    monkeypatch.setattr(bus, "chat_end", contended_chat_end)
+
+    sub = await bus.subscribe()
+    resp = await chat_route.chat(_req(chat_route, client_token="ct-mid"))
+    gen = resp.body_iterator
+
+    async def consume():
+        async for _ in gen:
+            pass
+
+    task = asyncio.create_task(consume())
+    await asyncio.wait_for(in_chat_end.wait(), timeout=2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    # The guarantee is "terminal started ⇒ terminal COMPLETES", not "before gen
+    # returns" — the shielded work outlives the cancelled awaiter. Poll for it.
+    for _ in range(100):
+        if bus._inflight == 0:
+            break
+        await asyncio.sleep(0.02)
+
+    assert bus._inflight == 0
+    assert bus.state.running is False
+    terminals = [m for m in await _drain(sub) if m["type"] in ("chat_done", "chat_error")]
+    assert len(terminals) == 1, terminals
+    assert terminals[0]["type"] == "chat_done"
+    prim = next(p for p in bus.state.panels if p.id == "primary")
+    assert prim.messages[-1] == {"role": "assistant", "content": "answer"}

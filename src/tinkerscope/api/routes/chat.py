@@ -35,7 +35,6 @@ import json
 from dataclasses import dataclass
 from typing import AsyncIterator, Awaitable, Callable, Literal
 
-import anyio
 from fastapi import APIRouter
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
@@ -63,6 +62,11 @@ class _InFlight:
 # guaranteed-terminal path as a client disconnect. Entries are removed by gen()'s
 # finally, so a cancel for an already-finished chat is a harmless not_found.
 _INFLIGHT: dict[int, _InFlight] = {}
+
+# Strong refs to in-flight terminal-event tasks (see _terminal in gen()): the loop
+# holds only weak refs, and the awaiting frame may be torn down by the very
+# cancellation the task is shielding against.
+_TERMINAL_TASKS: set[asyncio.Task] = set()
 
 
 class ChatMessage(BaseModel):
@@ -465,19 +469,16 @@ async def chat(req: ChatRequest):
         # for one conversation grafts onto a reused panel of another. None when no
         # conversation is open (CLI-only / legacy) — the browser folds those (lockstep).
         conv_id = BUS.state.conversation_id
-        if req.broadcast:
-            await BUS.broadcast(
-                "chat_start",
-                {"chat_id": chat_id, "panel": req.panel, "n": total, "label": label,
-                 "client_token": req.client_token, "conversation_id": conv_id},
-            )
 
         # ── stream samples, with EXACTLY ONE terminal event on every exit path ──
         # Three ways this chat can end — done / producer error / cancelled (client
         # disconnect OR the cancel endpoint) — must each fire one chat_end + one
         # terminal broadcast, or `running` sticks true forever and every busy-surface
         # (spinner, composer lock, Stop button) wedges. `_terminal()` is that single
-        # exit, idempotent via `terminated`.
+        # exit, idempotent via `terminated`. The guarantee window opens HERE, right
+        # after chat_begin bumped _inflight: everything that awaits from now on —
+        # including the chat_start broadcast — runs inside the try below, so a
+        # cancellation landing on any of those awaits still reaches the finally.
         produced: dict[int, str] = {}
         incorporated: dict[int, bool] = {}  # did the backend already fold the prefill in?
         terminated = False
@@ -514,15 +515,32 @@ async def chat(req: ChatRequest):
                 reached = _prefill_reaches_sample(scope, req.thinking, n, idx0)
                 turn = _committed_turn(msgs, produced[idx0], incorporated.get(idx0, False), reached)
                 end_patch = {"panel": req.panel, "messages": turn}
-            await BUS.chat_end(event, **end_patch)
-            if req.broadcast:
-                # conversation_id scopes the browser's external fold (see #onExternalDone):
-                # every terminal flavour — done / error / cancelled — carries the origin stamp.
-                payload = {"chat_id": chat_id, "panel": req.panel, "client_token": req.client_token,
-                           "conversation_id": conv_id}
-                if err_msg is not None:
-                    payload["error"] = err_msg
-                await BUS.broadcast(event, payload)
+            async def _fire() -> None:
+                await BUS.chat_end(event, **end_patch)
+                if req.broadcast:
+                    # conversation_id scopes the browser's external fold (#onExternalDone):
+                    # every terminal flavour — done / error / cancelled — carries the stamp.
+                    payload = {"chat_id": chat_id, "panel": req.panel, "client_token": req.client_token,
+                               "conversation_id": conv_id}
+                    if err_msg is not None:
+                        payload["error"] = err_msg
+                    await BUS.broadcast(event, payload)
+
+            # Decoupled task + asyncio.shield, NOT an inline await or an anyio
+            # shielded scope: a disconnect can cancel gen() while _terminal is
+            # already mid-flight (suspended on the contended bus lock) — `terminated`
+            # is True by then so the finally skips, and the CancelledError is
+            # injected at the CURRENT suspension point, which no in-task cancel
+            # scope can prevent (anyio shields only block anyio-scope cancellation;
+            # a native task.cancel() pierces them). Running the work in its own task
+            # means the injection hits the AWAITER: the terminal always runs to
+            # completion, and the cancellation still re-raises here (never
+            # swallowed). _TERMINAL_TASKS keeps a strong ref — the loop holds only
+            # weak refs, and after the awaiter is torn down nothing else would.
+            t = asyncio.create_task(_fire())
+            _TERMINAL_TASKS.add(t)
+            t.add_done_callback(_TERMINAL_TASKS.discard)
+            await asyncio.shield(t)
 
         # Run the producer in its OWN task, relaying items through a queue. This is what
         # lets the cancel endpoint stop a chat we're not the consumer of: cancelling
@@ -548,6 +566,12 @@ async def chat(req: ChatRequest):
 
         prod_error: str | None = None
         try:
+            if req.broadcast:
+                await BUS.broadcast(
+                    "chat_start",
+                    {"chat_id": chat_id, "panel": req.panel, "n": total, "label": label,
+                     "client_token": req.client_token, "conversation_id": conv_id},
+                )
             while True:
                 kind, payload = await q.get()
                 if kind == "end":
@@ -579,14 +603,14 @@ async def chat(req: ChatRequest):
             _INFLIGHT.pop(chat_id, None)
             if not worker.done():
                 worker.cancel()  # client gone / endpoint cancel → stop the producer
-            # A client disconnect cancels gen() mid-`await q.get()`: the CancelledError
-            # (BaseException) / GeneratorExit skips both _terminal calls above. Fire it
-            # here, SHIELDED so its awaits (BUS lock, broadcast) survive the cancellation
-            # instead of being re-cancelled at the first checkpoint; the original
-            # cancellation re-raises after the scope exits (we never swallow it).
+            # A client disconnect cancels gen() mid-await (q.get, a broadcast, even
+            # the chat_start broadcast): the CancelledError (BaseException) /
+            # GeneratorExit skips both _terminal calls above. Fire it here; _terminal
+            # shields its own awaits (BUS lock, broadcast) so they survive the pending
+            # cancellation instead of being re-cancelled at the first checkpoint; the
+            # original cancellation re-raises after the scope exits (never swallowed).
             if not terminated:
-                with anyio.CancelScope(shield=True):
-                    await _terminal(cancelled=True)
+                await _terminal(cancelled=True)
 
     return EventSourceResponse(gen())
 
