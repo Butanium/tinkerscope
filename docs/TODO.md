@@ -127,6 +127,19 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
 
 ## Later / optional
 
+- [ ] **Fold aborted-chat partials into the committed tree (deterministically).**
+  When Stop hits an OWN chat, the completed samples stay visible in the live bucket
+  and — in the common timing — get folded into the tree via `#onExternalDone`'s
+  reconcile off the server-committed transcript (the server now commits the partial
+  on a cancelled chat_done). But that fold is a race between `endToken` and the
+  chat_done bus event, so it isn't guaranteed; the shipped floor is "partial visible
+  in the bucket, no stuck state." A deterministic fold from `#fireChat`'s AbortError
+  branch was NOT done because the fold's prefill-incorporation context
+  (`prefill_incorporated` per sample) isn't carried on the UI-agnostic chat store's
+  bucket samples, so prepending the prefill could double it. To do this right, thread
+  the per-sample `prefill_incorporated` through the bucket (or fold from the server's
+  committed `ps.messages` unconditionally for own cancelled chats). See
+  `lib/chat.svelte.ts` `#fireChat` catch + `stopGeneration`.
 - [ ] **Branch-switch render latency (~30–50 ms?) — uncertain observation
   (2026-07-08).** While verifying the scroll rework, the verifier measured the
   cycled branch's *content/cycler text* appearing ~30–50 ms after the click,
