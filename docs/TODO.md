@@ -127,6 +127,15 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
 
 ## Later / optional
 
+- [ ] **Echo-lag persist race on layout mutations (reorder / setRun).** A panel
+  mutation persists via `patchState(...)` + `convo.save()`, but `#doSave` reads the
+  panel LAYOUT from `live.state` ~400 ms later, and `patchState`'s flush discards
+  the setState response — `live.state` learns only via the SSE echo. If that echo
+  lags past the save debounce, the OLD layout is persisted once (self-heals on the
+  next save). Traced during the 2026-07-09 drag-reorder review; same family as the
+  system-prompt × conversation-switch contamination (whose fix — assign the
+  setState response into `live.state` + flush pending patches before a switch —
+  would close this too).
 - [ ] **Fold aborted-chat partials into the committed tree (deterministically).**
   When Stop hits an OWN chat, the completed samples stay visible in the live bucket
   and — in the common timing — get folded into the tree via `#onExternalDone`'s
