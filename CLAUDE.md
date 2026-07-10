@@ -157,7 +157,19 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     striped combo) + `chartByAnswers` (legacy exact-match histogram) +
     `chartByFirstToken` (the MODEL's probability distribution over the first
     generated token, from stored `token_logprobs` — segment pct = model prob,
-    count/sampleIdx = the empirical side) + label helpers. **Has `chart.test.ts`.**
+    count/sampleIdx = the empirical side) + label helpers. `chartByFirstToken`
+    takes `FirstTokenOpts {excluded, added, groups}`: it works on **units** (a
+    token OR a merged group via `ftGroupKey`), so exclude (mass renormalized out,
+    → `massNote`), **add** a recorded-but-hidden token (surfaced from the rest —
+    `AddedToken`, its p sourced from stored logprobs, NOT a model call), and
+    **merge** (drag tokens into one color, prob+count summed) all compose. **Has
+    `chart.test.ts`** (exclude/add/merge cases); browser smoke
+    `tests/small-smokes/browser_chart_firsttoken_ops.py`.
+  - `lib/token-search.ts` — `normalizeForMatch` / `matchKind` / `searchStoredTokens`:
+    the first-token add-search's tiered matching (exact ‹ prefix ‹ contains) with
+    space-marker normalization (leading space / ▁ / Ġ ≡ bare, case-insensitive),
+    over tokens already recorded for the turn (top-K alts + sampled first tokens).
+    **Has `token-search.test.ts`.**
   - `lib/token-logprob.ts` — token-logprob display math: `prob`/`pctLabel`,
     `surprisalAlpha` (the single-hue heat tint — alpha ∝ -logprob), `displayToken`
     (whitespace glyphs), `firstTokenDist` (one panel's position-0 distribution:
@@ -205,9 +217,16 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     chart-only, session-scoped) / with-vs-without-thinking sample filter
     (shown only when the picked turn mixes both) / click-a-segment-to-inspect.
     Third mode "first token": the model's OWN probability distribution over the
-    first generated token (needs stored `token_logprobs`; disabled otherwise).
-    Deterministic smoke (seeded tree, no sampling):
-    `tests/small-smokes/browser_chart_rules.py`.
+    first generated token (needs stored `token_logprobs`; disabled otherwise). In
+    that mode the legend becomes an **interactive chip row**: click a chip to
+    exclude/re-include (renormalizes, shows the "over NN% of mass" note), drag one
+    chip onto another to **merge** into one color (bespoke onto-drop DnD, not the
+    gap-shaped `lib/drag-reorder`), and a search box **adds** a recorded-but-hidden
+    token (from stored logprobs — `token-search` + `chart`'s `added`, no model
+    call). All session-scoped module state, like the rule chips.
+    Deterministic smokes (seeded tree, no sampling):
+    `tests/small-smokes/browser_chart_rules.py` (rules) +
+    `browser_chart_firsttoken_ops.py` (exclude / add / merge).
   - `lib/ChatMessage.svelte` — one chat row (committed node OR live bucket turn)
     + its per-row toolbar (edit/regen/branch/pin…). With `logprobView` on, an
     assistant body with `token_logprobs` renders `TokenLogprobs` instead of

@@ -27,7 +27,7 @@
 import type { HighlightRule } from './types.ts';
 import type { TokenLogprob } from './tree.ts';
 import { ruleMatches, rulesForRole } from './highlight-match.ts';
-import { firstTokenDist } from './token-logprob.ts';
+import { firstTokenDist, type FirstTokenEntry } from './token-logprob.ts';
 
 const CHART_COLORS = [
 	'#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
@@ -75,12 +75,16 @@ export type ChartSegment = {
 	count: number;
 	/** Indices into the source's `samples` — powers click-to-inspect. */
 	sampleIdx: number[];
+	/** First-token mode: the display tokens fused into this segment when it is a
+	 *  MERGED group (≥2). Absent on single-token / rule / answer segments. */
+	members?: string[];
 };
 export type ChartBar = { model: string; sub?: string; total: number; segments: ChartSegment[] };
 export type ChartData = {
 	bars: ChartBar[];
-	/** Segment order = stack order (bottom → top) = legend order. */
-	legend: { key: string; label: string; colors: string[] }[];
+	/** Segment order = stack order (bottom → top) = legend order. `members` is set
+	 *  for a first-token merged group (≥2 fused tokens), for the interactive chip. */
+	legend: { key: string; label: string; colors: string[]; members?: string[] }[];
 };
 
 /** The text a rule matches against for one sample, per scope. */
@@ -248,6 +252,32 @@ export const FT_REST = '[rest of distribution]';
  *  are assigned in fixed order, never cycled); overflow mass folds into FT_REST. */
 const MAX_FT_TOKENS = CHART_COLORS.length;
 
+/** A recorded token the user pulled out of the grey rest into its own colored
+ *  segment. Its `p` (model probability at position 0) comes from the ALREADY-
+ *  STORED logprobs of THIS source (a sample's top-K or a sibling's sampled first
+ *  token) — no model call. `token` is the display form; deduped against the
+ *  source's sampled entries, so adding an already-shown token is a no-op. */
+export type AddedToken = { token: string; tid: number; p: number };
+
+/** First-token mode viewing tweaks (session-scoped, owned by the modal):
+ *   - `excluded`  UNIT keys (a display token, or a merged group's key) dropped
+ *                 from the distribution; their mass is renormalized out.
+ *   - `added`     per-source (bar-aligned) recorded tokens surfaced from the rest.
+ *   - `groups`    shared merges — each inner array is display tokens fused into
+ *                 ONE unit (one color, summed prob + count). Applied to every bar.
+ *  A "unit" is one token or one merged group; naming/coloring/exclusion all work
+ *  on units, so a merge composes with exclude and renormalization for free. */
+export type FirstTokenOpts = {
+	excluded?: Set<string>;
+	added?: AddedToken[][];
+	groups?: string[][];
+};
+
+/** Stable, order-independent key for a merged group of display tokens. */
+export function ftGroupKey(members: string[]): string {
+	return '⧉' + [...members].sort().join('␟');
+}
+
 /** MODEL-probability distribution over the FIRST generated token, per source.
  *
  *  Unlike the two sample-share modes above, a segment's `pct` here is the
@@ -256,74 +286,146 @@ const MAX_FT_TOKENS = CHART_COLORS.length;
  *  top-K is the reference; see firstTokenDist). `count`/`sampleIdx` carry the
  *  EMPIRICAL side — which samples actually drew that token — powering the
  *  modal's click-to-inspect. The grey FT_REST segment is the probability mass
- *  outside the captured tokens, so every bar still stacks to ~100%.
+ *  outside the shown units, so every bar still stacks to ~100%.
  *
  *  Bars stay 1:1 with `sources` (the modal's inspect indexes into them); a
  *  source with no first-token data renders as an empty bar (n=0). Legend is
- *  keyed by DISPLAY token, ordered by max model prob across sources, hues in
- *  fixed order — the same first token gets the same color in every panel.
- *  `mixed` = some source's samples disagree on the reference top-K (siblings
- *  regenerated from a different checkpoint / renderer mode). */
+ *  keyed by UNIT (a display token or a merged group), ordered by max model prob
+ *  across sources, hues in fixed order — the same unit gets the same color in
+ *  every panel. `mixed` = some source's samples disagree on the reference top-K
+ *  (siblings regenerated from a different checkpoint / renderer mode). `massNote`
+ *  = the fraction of original mass still shown (min..max across bars), set only
+ *  when an exclusion actually removed something — the "renormalized over NN%"
+ *  honesty affordance. */
 export function chartByFirstToken(
-	sources: ChartSource[]
-): { data: ChartData; mixed: boolean } | null {
+	sources: ChartSource[],
+	opts: FirstTokenOpts = {}
+): { data: ChartData; mixed: boolean; massNote?: { min: number; max: number } } | null {
 	if (sources.length === 0) return null;
 	const dists = sources.map((s) => firstTokenDist(s.samples));
 	if (dists.every((d) => d == null)) return null;
 
-	// Global token order: max model prob across sources, descending.
+	const excluded = opts.excluded ?? new Set<string>();
+
+	// Per-source entries = the sampled distribution PLUS any recorded tokens the user
+	// surfaced (deduped by display token — surfacing an already-shown token is a
+	// no-op; the sampled entry already carries its exact p). Added-only tokens enter
+	// with count 0 (recorded in a top-K but never sampled by a sibling here).
+	type SrcDist = { entries: FirstTokenEntry[]; total: number; mixed: boolean };
+	const perSource: SrcDist[] = dists.map((d, si) => {
+		const entries: FirstTokenEntry[] = (d?.entries ?? []).map((e) => ({ ...e }));
+		const present = new Set(entries.map((e) => e.token));
+		for (const add of opts.added?.[si] ?? []) {
+			if (present.has(add.token)) continue;
+			present.add(add.token);
+			entries.push({ token: add.token, tid: add.tid, p: add.p, count: 0, sampleIdx: [] });
+		}
+		return { entries, total: d?.total ?? 0, mixed: d?.mixed ?? false };
+	});
+
+	// ── units: a token or a merged group. Grouping is first-group-wins; every
+	//    other token is its own singleton unit. ──────────────────────────────
+	type Unit = { key: string; members: string[]; label: string };
+	const unitOf = new Map<string, Unit>(); // token -> its unit
+	const units: Unit[] = [];
+	for (const g of opts.groups ?? []) {
+		const members = g.filter((t, i) => g.indexOf(t) === i && !unitOf.has(t));
+		if (members.length < 2) continue; // a 1-member "group" is just a singleton
+		const unit: Unit = { key: ftGroupKey(members), members, label: members.join(' + ') };
+		units.push(unit);
+		for (const t of members) unitOf.set(t, unit);
+	}
+	const singleton = (t: string): Unit => {
+		let u = unitOf.get(t);
+		if (!u) {
+			u = { key: t, members: [t], label: t };
+			unitOf.set(t, u);
+			units.push(u);
+		}
+		return u;
+	};
+	for (const ps of perSource) for (const e of ps.entries) singleton(e.token);
+
+	// Per-source per-unit aggregation (sum members' p / count / sample indices).
+	const byToken = perSource.map((ps) => new Map(ps.entries.map((e) => [e.token, e])));
+	const unitMass = (si: number, u: Unit) =>
+		u.members.reduce((s, t) => s + (byToken[si].get(t)?.p ?? 0), 0);
+	const unitCount = (si: number, u: Unit) =>
+		u.members.reduce((s, t) => s + (byToken[si].get(t)?.count ?? 0), 0);
+	const unitIdx = (si: number, u: Unit) =>
+		u.members.flatMap((t) => byToken[si].get(t)?.sampleIdx ?? []);
+
+	// Global unit order over NON-excluded units: max mass across sources.
 	const best = new Map<string, number>();
-	for (const d of dists)
-		for (const e of d?.entries ?? []) best.set(e.token, Math.max(best.get(e.token) ?? 0, e.p));
+	for (const u of units) {
+		if (excluded.has(u.key)) continue;
+		let m = 0;
+		for (let si = 0; si < perSource.length; si++) m = Math.max(m, unitMass(si, u));
+		best.set(u.key, m);
+	}
+	const unitByKey = new Map(units.map((u) => [u.key, u]));
 	const named = [...best.entries()]
 		.sort((a, b) => b[1] - a[1])
-		.map(([t]) => t)
+		.map(([k]) => unitByKey.get(k)!)
 		.slice(0, MAX_FT_TOKENS);
-	const namedSet = new Set(named);
 	const colorOf: Record<string, string> = {};
-	named.forEach((t, i) => (colorOf[t] = CHART_COLORS[i]));
+	named.forEach((u, i) => (colorOf[u.key] = CHART_COLORS[i]));
+	const withMembers = (u: Unit) => (u.members.length > 1 ? { members: u.members } : {});
 
 	const legend = [
-		...named.map((t) => ({ key: t, label: t, colors: [colorOf[t]] })),
+		...named.map((u) => ({ key: u.key, label: u.label, colors: [colorOf[u.key]], ...withMembers(u) })),
 		{ key: FT_REST, label: FT_REST, colors: [] as string[] }
 	];
 
+	// Excluding a unit drops its mass + samples and renormalizes the survivors back
+	// to 100% (scale = 1/kept). rest = 1 − removedMass − Σ(named unit mass): sampled
+	// tokens outside every named unit stay folded in rest (with their samples), and
+	// a surfaced token that made `named` is carved out of it — both fall out of this
+	// one identity. `retained[si]` = fraction of the original mass still shown.
+	const excludedUnits = units.filter((u) => excluded.has(u.key));
+	const retained: number[] = [];
 	const bars: ChartBar[] = sources.map(({ model, sub }, si) => {
-		const d = dists[si];
-		const byToken = new Map(d?.entries.map((e) => [e.token, e]) ?? []);
-		// Overflow (unnamed) entries fold into the rest segment, mass and samples alike.
-		const overflow = (d?.entries ?? []).filter((e) => !namedSet.has(e.token));
-		const restPct = ((d?.rest ?? 0) + overflow.reduce((s, e) => s + e.p, 0)) * 100;
-		const restIdx = overflow.flatMap((e) => e.sampleIdx);
+		const removedMass = excludedUnits.reduce((s, u) => s + unitMass(si, u), 0);
+		const removedSamples = excludedUnits.reduce((s, u) => s + unitCount(si, u), 0);
+		const keep = 1 - removedMass;
+		retained.push(keep);
+		const scale = keep > 0 ? 1 / keep : 0;
+		const shownMass = named.reduce((s, u) => s + unitMass(si, u), 0);
+		// Total mass is 1 for a source with a distribution, 0 for a no-data source
+		// (OpenRouter / token-streamed) — which renders as an empty bar, not 100% rest.
+		const massTotal = dists[si] != null ? 1 : 0;
+		const restMass = Math.max(0, massTotal - removedMass - shownMass);
+		// Rest samples = sampled entries whose token is in no named/excluded unit.
+		const shownOrGone = new Set(
+			[...named, ...excludedUnits].flatMap((u) => u.members)
+		);
+		const restIdx = perSource[si].entries
+			.filter((e) => !shownOrGone.has(e.token))
+			.flatMap((e) => e.sampleIdx);
 		return {
 			model,
 			sub,
-			total: d?.total ?? 0,
+			total: perSource[si].total - removedSamples,
 			segments: [
-				...named.map((t) => {
-					const e = byToken.get(t);
-					return {
-						key: t,
-						label: t,
-						colors: [colorOf[t]],
-						pct: (e?.p ?? 0) * 100,
-						count: e?.count ?? 0,
-						sampleIdx: e?.sampleIdx ?? []
-					};
-				}),
-				{
-					key: FT_REST,
-					label: FT_REST,
-					colors: [],
-					pct: restPct,
-					count: restIdx.length,
-					sampleIdx: restIdx
-				}
+				...named.map((u) => ({
+					key: u.key,
+					label: u.label,
+					colors: [colorOf[u.key]],
+					pct: unitMass(si, u) * scale * 100,
+					count: unitCount(si, u),
+					sampleIdx: unitIdx(si, u),
+					...withMembers(u)
+				})),
+				{ key: FT_REST, label: FT_REST, colors: [], pct: restMass * scale * 100, count: restIdx.length, sampleIdx: restIdx }
 			]
 		};
 	});
 
-	return { data: { bars, legend }, mixed: dists.some((d) => d?.mixed) };
+	// Note only when something was actually removed from at least one bar.
+	const massNote = retained.some((r) => r < 1)
+		? { min: Math.min(...retained), max: Math.max(...retained) }
+		: undefined;
+	return { data: { bars, legend }, mixed: perSource.some((p) => p.mixed), massNote };
 }
 
 /** Wrap a model label onto multiple lines for the bar's x-axis tick. Splits on

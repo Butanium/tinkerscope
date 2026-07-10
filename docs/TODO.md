@@ -16,6 +16,32 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
   When fixed: drop `and req.run_id is None` and re-verify a LoRA run at n=1 streams the
   *finetune* (not base) via `tests/small-smokes/lora_completions_vs_chat_mwe.py`.
 
+## Parked (validated approach, not shipped)
+
+- [ ] **First-token vocab probe — probe an UNRECORDED token's position-0 prob.**
+  The shipped first-token chart's "add a token" feature only surfaces tokens that
+  are *already recorded* in this turn's samples (some sample's top-K or a sibling's
+  sampled first token). If we later want to answer "what's P(` D`) at position 0
+  when ` D` was never in any recorded top-K?", we need a model call. **The approach
+  is validated and cheap to resurrect (~an afternoon):**
+  - **Mechanism:** `SamplingClient.compute_logprobs_async(prompt + [candidate])[L]`
+    where `L = model_input.length` (the generation prompt built by the run's
+    renderer). Verified live against the Qwen base model — the probed lp matches the
+    sampled call's stored top-K lp to **Δ=0.0000** (it's the same forward pass). Use
+    `compute_logprobs` over the `sample_async(max_tokens=1)+prompt_logprobs` trick:
+    both give identical values, but compute_logprobs skips generation (cheaper).
+  - **Batching:** none available — `sample`/`compute_logprobs` each take a single
+    `ModelInput`; there is no multi-prompt call. Fire M candidates as concurrent
+    futures (`asyncio.gather`), one forward pass each (~L tokens).
+  - **Vocab search:** decode the whole vocab once and cache (`tok.decode([i])` for
+    every id — ~0.5s for Qwen's 248k, faithful display incl. byte-level markers),
+    then rank exact→prefix→contains with the space-marker normalization that
+    `web/src/lib/token-search.ts` already implements (mirror it in Python).
+  - **Prototype:** `tests/small-smokes/parked_first_token_probe.py` — the live
+    alignment check (compute_logprobs vs sample_async vs stored top-K). Only native
+    tinker paths (run_id / base_model) can probe; OpenRouter / loose sampler_path
+    can't reproduce position 0.
+
 ## Done
 
 - [x] **Refactor: extract chat rendering into components.** `web/src/routes/+page.svelte`

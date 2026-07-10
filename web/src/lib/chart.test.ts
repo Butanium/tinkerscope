@@ -3,7 +3,7 @@
 //   node web/src/lib/chart.test.ts
 // (no dep added; respects the supply-chain age gate). Exit code != 0 on failure.
 
-import { chartByAnswers, chartByFirstToken, chartByRules, chartRules, contrastText, FT_REST, wrapLabel } from './chart.ts';
+import { chartByAnswers, chartByFirstToken, chartByRules, chartRules, contrastText, FT_REST, ftGroupKey, wrapLabel } from './chart.ts';
 import { ruleMatches } from './highlight-match.ts';
 import type { HighlightRule, TokenLogprob } from './types.ts';
 
@@ -273,6 +273,110 @@ ok('answers: no sources → null', chartByAnswers([]) === null);
 		}
 	])!;
 	ok('firstToken: disagreeing top-K flags mixed', mixedFt.mixed);
+}
+
+// ── chartByFirstToken: exclude + renormalize + inject probes ───────────
+{
+	const lp = (p: number) => Math.log(p);
+	const first = (t: string, tid: number, p: number, top?: [string, number, number][]): TokenLogprob => ({ t, tid, lp: lp(p), top });
+	// Yes .6, No .3, rest .1 (top-K covers .9 of the mass).
+	const TOP: [string, number, number][] = [['Yes', 1, lp(0.6)], ['No', 2, lp(0.3)]];
+	const src = () => [{
+		model: 'a',
+		samples: [
+			{ content: 'Yes', first: first('Yes', 1, 0.6, TOP) },
+			{ content: 'Yes', first: first('Yes', 1, 0.6, TOP) },
+			{ content: 'No', first: first('No', 2, 0.3, TOP) }
+		]
+	}];
+	const seg = (ft: NonNullable<ReturnType<typeof chartByFirstToken>>, key: string) =>
+		ft.data.bars[0].segments.find((s) => s.key === key)!;
+
+	// empty exclusion is a no-op (no mass note, identical to plain call)
+	const base = chartByFirstToken(src())!;
+	const emptyExcl = chartByFirstToken(src(), { excluded: new Set() })!;
+	eq('exclude: empty set → no mass note', emptyExcl.massNote, undefined);
+	eq('exclude: empty set → pcts unchanged', emptyExcl.data.bars[0].segments.map((s) => Math.round(s.pct)),
+		base.data.bars[0].segments.map((s) => Math.round(s.pct)));
+
+	// exclude ONE: No(.3) gone → kept mass .7, survivors renormalize /.7
+	const exNo = chartByFirstToken(src(), { excluded: new Set(['No']) })!;
+	ok('exclude one: Yes renorms .6/.7≈85.7%', Math.abs(seg(exNo, 'Yes').pct - (0.6 / 0.7) * 100) < 1e-6, `got ${seg(exNo, 'Yes').pct}`);
+	ok('exclude one: rest renorms .1/.7≈14.3%', Math.abs(seg(exNo, FT_REST).pct - (0.1 / 0.7) * 100) < 1e-6);
+	ok('exclude one: bar re-stacks to 100%', Math.abs(exNo.data.bars[0].segments.reduce((s, x) => s + x.pct, 0) - 100) < 1e-6);
+	eq('exclude one: No dropped from legend', exNo.data.legend.map((l) => l.key).includes('No'), false);
+	eq('exclude one: excluded samples leave n (3→2)', exNo.data.bars[0].total, 2);
+	ok('exclude one: mass note = 70% kept', exNo.massNote != null && Math.abs(exNo.massNote.min - 0.7) < 1e-6 && Math.abs(exNo.massNote.max - 0.7) < 1e-6);
+
+	// exclude MANY: Yes + No gone → only rest (.1) survives → 100% rest
+	const exBoth = chartByFirstToken(src(), { excluded: new Set(['Yes', 'No']) })!;
+	ok('exclude many: rest = 100%', Math.abs(seg(exBoth, FT_REST).pct - 100) < 1e-6, `got ${seg(exBoth, FT_REST).pct}`);
+	eq('exclude many: no named tokens left', exBoth.data.legend.map((l) => l.key), [FT_REST]);
+	eq('exclude many: n = 0 (all sampled tokens excluded)', exBoth.data.bars[0].total, 0);
+	ok('exclude many: mass note = 10% kept', exBoth.massNote != null && Math.abs(exBoth.massNote.min - 0.1) < 1e-6);
+
+	// all-but-one: exclude Yes → No + rest renormalize over .4
+	const exYes = chartByFirstToken(src(), { excluded: new Set(['Yes']) })!;
+	ok('all-but-one: No renorms .3/.4=75%', Math.abs(seg(exYes, 'No').pct - 75) < 1e-6, `got ${seg(exYes, 'No').pct}`);
+	ok('all-but-one: rest renorms .1/.4=25%', Math.abs(seg(exYes, FT_REST).pct - 25) < 1e-6);
+	ok('all-but-one: mass note = 40%', exYes.massNote != null && Math.abs(exYes.massNote.min - 0.4) < 1e-6);
+
+	// excluding a token ABSENT from the bar → no-op (no removal, no note)
+	const exGhost = chartByFirstToken(src(), { excluded: new Set(['Maybe']) })!;
+	eq('exclude absent: no mass note', exGhost.massNote, undefined);
+	eq('exclude absent: n unchanged', exGhost.data.bars[0].total, 3);
+
+	// ADD a recorded-but-hidden token (Perhaps, p=.05): its own segment carved
+	// from the rest mass, count 0 (recorded in a top-K but sampled by nobody here).
+	const add = chartByFirstToken(src(), { added: [[{ token: 'Perhaps', tid: 9, p: 0.05 }]] })!;
+	const pSeg = seg(add, 'Perhaps');
+	ok('add: surfaced segment present', pSeg != null);
+	ok('add: pct = recorded p ×100 = 5%', Math.abs(pSeg.pct - 5) < 1e-6, `got ${pSeg.pct}`);
+	eq('add: count is 0 (recorded, not sampled here)', pSeg.count, 0);
+	ok('add: rest shrinks by the surfaced mass (.1-.05=5%)', Math.abs(seg(add, FT_REST).pct - 5) < 1e-6, `got ${seg(add, FT_REST).pct}`);
+	eq('add: n unchanged (surfacing adds no samples)', add.data.bars[0].total, 3);
+
+	// add a token that WAS sampled → no double-count (dedupe by display token)
+	const addDup = chartByFirstToken(src(), { added: [[{ token: 'Yes', tid: 1, p: 0.6 }]] })!;
+	ok('add dup: sampled Yes not doubled', Math.abs(seg(addDup, 'Yes').pct - 60) < 1e-6, `got ${seg(addDup, 'Yes').pct}`);
+}
+
+// ── chartByFirstToken: merge tokens into one group ─────────────────────
+{
+	const lp = (p: number) => Math.log(p);
+	const first = (t: string, tid: number, p: number, top?: [string, number, number][]): TokenLogprob => ({ t, tid, lp: lp(p), top });
+	// '.' .5, '!' .3, '?' .1, rest .1
+	const TOP: [string, number, number][] = [['.', 1, lp(0.5)], ['!', 2, lp(0.3)], ['?', 3, lp(0.1)]];
+	const src = () => [{
+		model: 'a',
+		samples: [
+			{ content: '.', first: first('.', 1, 0.5, TOP) },
+			{ content: '.', first: first('.', 1, 0.5, TOP) },
+			{ content: '!', first: first('!', 2, 0.3, TOP) },
+			{ content: '?', first: first('?', 3, 0.1, TOP) }
+		]
+	}];
+	const GKEY = ftGroupKey(['.', '!']);
+
+	// merge '.' + '!' → one unit: prob = .8, count = 3, one color, members listed
+	const m = chartByFirstToken(src(), { groups: [['.', '!']] })!;
+	const g = m.data.bars[0].segments.find((s) => s.key === GKEY)!;
+	ok('merge: group segment present', g != null);
+	ok('merge: group prob = sum members (.5+.3=80%)', Math.abs(g.pct - 80) < 1e-6, `got ${g.pct}`);
+	eq('merge: group count = sum members (2+1)', g.count, 3);
+	eq('merge: group inspect = both members samples', g.sampleIdx.sort(), [0, 1, 2]);
+	eq('merge: group names its members', g.members, ['.', '!']);
+	eq('merge: one color for the group', g.colors.length, 1);
+	eq("merge: '.' and '!' gone as singletons", m.data.bars[0].segments.some((s) => s.key === '.' || s.key === '!'), false);
+	ok("merge: '?' still its own segment", m.data.bars[0].segments.some((s) => s.key === '?'));
+	eq('merge: group in legend with members', m.data.legend.find((l) => l.key === GKEY)?.members, ['.', '!']);
+
+	// merge composes with EXCLUDE: excluding the group removes ALL members' mass
+	const me = chartByFirstToken(src(), { groups: [['.', '!']], excluded: new Set([GKEY]) })!;
+	ok('merge+exclude: group gone from bar', !me.data.bars[0].segments.some((s) => s.key === GKEY));
+	ok("merge+exclude: '?' renorms .1/.2=50%", Math.abs(me.data.bars[0].segments.find((s) => s.key === '?')!.pct - 50) < 1e-6);
+	ok('merge+exclude: mass note = 20% kept (.5+.3 removed)', me.massNote != null && Math.abs(me.massNote.min - 0.2) < 1e-6, `got ${JSON.stringify(me.massNote)}`);
+	eq('merge+exclude: excluded samples leave n (4→1)', me.data.bars[0].total, 1);
 }
 
 // ── label helpers ─────────────────────────────────────────────────────

@@ -38,6 +38,16 @@
 	// survives the modal's destroy-on-close; deliberately NOT persisted — it's a
 	// per-question viewing tweak, not a property of the rule.
 	let chartOff = $state<string[]>([]);
+
+	// First-token mode tweaks — same module-scoped, not-persisted lifetime as
+	// chartOff. Keyed by UNIT (a display token, or a merged group's ftGroupKey):
+	//   ftExcluded  units dropped from the distribution + renormalized out
+	//   ftGroups    merges — each is a list of display tokens fused into one color
+	//   ftAdded     recorded-but-hidden tokens surfaced from the rest (by identity;
+	//               each panel resolves its OWN recorded p for the tid)
+	let ftExcluded = $state<string[]>([]);
+	let ftGroups = $state<string[][]>([]);
+	let ftAdded = $state<{ token: string; tid: number }[]>([]);
 </script>
 
 <script lang="ts">
@@ -48,12 +58,17 @@
 		chartByRules,
 		chartRules,
 		contrastText,
+		ftGroupKey,
+		FT_REST,
 		NONE_COLOR,
 		wrapLabel,
+		type AddedToken,
 		type ChartPanelData,
 		type ChartSource,
 		type MatchScope
 	} from './chart';
+	import { displayToken, prob } from './token-logprob';
+	import { searchStoredTokens, type TokenCandidate } from './token-search';
 	import { highlightStore } from './highlights.svelte';
 	import { renderContent } from './render';
 	import { tip } from '$lib/tooltip.svelte';
@@ -170,7 +185,55 @@
 	const hasFirstToken = $derived(
 		activeSources.some((s) => s.turns.some((t) => t.samples.some((x) => x.first)))
 	);
-	const ft = $derived(mode === 'firsttoken' ? chartByFirstToken(chartSources) : null);
+	// ── first-token: recorded tokens (search + add) ───────────────────
+	// Everything with a recorded position-0 logprob for the charted turn, per
+	// source: each sample's sampled first token + its top-K alternatives, deduped
+	// by tid keeping the max lp (same prompt+position ⇒ the lp is the same up to
+	// jitter — never summed). Both the search index and the source of an added
+	// token's per-panel probability.
+	function recordedMap(src: ChartSource): Map<number, { raw: string; lp: number }> {
+		const m = new Map<number, { raw: string; lp: number }>();
+		const consider = (raw: string, tid: number, lp: number | null) => {
+			if (lp == null) return;
+			const cur = m.get(tid);
+			if (!cur || lp > cur.lp) m.set(tid, { raw, lp });
+		};
+		for (const s of src.samples) {
+			const f = s.first;
+			if (!f) continue;
+			consider(f.t, f.tid, f.lp);
+			for (const [t, tid, lp] of f.top ?? []) consider(t, tid, lp);
+		}
+		return m;
+	}
+	const ftRecorded = $derived(mode === 'firsttoken' ? chartSources.map(recordedMap) : []);
+	// Union across panels (dedup handled in searchStoredTokens), for the add-search.
+	const ftCandidates = $derived.by((): TokenCandidate[] => {
+		const out: TokenCandidate[] = [];
+		for (const m of ftRecorded) for (const [tid, { raw, lp }] of m) out.push({ t: raw, tid, lp });
+		return out;
+	});
+	// Resolve `ftAdded` (identities) to per-source AddedToken[] using each panel's
+	// own recorded p; a panel that never recorded the tid contributes nothing there.
+	const ftAddedPerSource = $derived.by((): AddedToken[][] =>
+		ftRecorded.map((m) =>
+			ftAdded.flatMap((a) => {
+				const r = m.get(a.tid);
+				const p = r ? prob(r.lp) : null;
+				return p != null ? [{ token: a.token, tid: a.tid, p }] : [];
+			})
+		)
+	);
+
+	const ft = $derived(
+		mode === 'firsttoken'
+			? chartByFirstToken(chartSources, {
+					excluded: new Set(ftExcluded),
+					groups: ftGroups,
+					added: ftAddedPerSource
+				})
+			: null
+	);
 
 	const data = $derived(
 		mode === 'rules'
@@ -179,6 +242,86 @@
 				? (ft?.data ?? null)
 				: chartByAnswers(chartSources)
 	);
+
+	// ── first-token: the interactive chip row (exclude / merge / add) ──
+	// Named units (colored, click→exclude, drag→merge) + excluded units (greyed,
+	// click→re-include). Added tokens carry a ✕ to drop them back into the rest.
+	const addedTids = $derived(new Set(ftAdded.map((a) => a.tid)));
+	const namedTokens = $derived(
+		new Set((ft?.data.legend ?? []).filter((l) => l.key !== FT_REST).flatMap((l) => l.members ?? [l.key]))
+	);
+	/** Members behind a unit key (a group's tokens, or the token itself). */
+	function unitMembers(key: string): string[] {
+		return ftGroups.find((g) => ftGroupKey(g) === key) ?? [key];
+	}
+	type FtChip = { key: string; label: string; members: string[]; color?: string; excluded: boolean; addedTid?: number };
+	const ftChips = $derived.by((): FtChip[] => {
+		if (mode !== 'firsttoken' || !ft) return [];
+		const chips: FtChip[] = ft.data.legend
+			.filter((l) => l.key !== FT_REST)
+			.map((l) => {
+				const members = l.members ?? [l.key];
+				// tag a singleton chip that is an added-token so it gets a remove ✕
+				const added = members.length === 1 ? ftAdded.find((a) => a.token === members[0]) : undefined;
+				return { key: l.key, label: l.label, members, color: l.colors[0], excluded: false, addedTid: added?.tid };
+			});
+		for (const key of ftExcluded) {
+			const members = unitMembers(key);
+			chips.push({ key, label: members.join(' + '), members, excluded: true });
+		}
+		return chips;
+	});
+
+	// ── first-token: add-token search ─────────────────────────────────
+	let ftQuery = $state('');
+	// Matches that are actually HIDDEN — not already a shown named unit, not already
+	// added. (Surfacing an already-shown token would be a no-op.)
+	const ftMatches = $derived.by(() => {
+		if (mode !== 'firsttoken' || !ftQuery.trim()) return [];
+		return searchStoredTokens(ftQuery, ftCandidates)
+			.filter((m) => !addedTids.has(m.tid) && !namedTokens.has(displayToken(m.t)))
+			.slice(0, 20);
+	});
+
+	function toggleFtExclude(key: string) {
+		ftExcluded = ftExcluded.includes(key) ? ftExcluded.filter((k) => k !== key) : [...ftExcluded, key];
+		inspect = null; // segment keys shift under exclusion
+	}
+	function addToken(m: { t: string; tid: number }) {
+		const token = displayToken(m.t);
+		if (!ftAdded.some((a) => a.tid === m.tid)) ftAdded = [...ftAdded, { token, tid: m.tid }];
+		ftQuery = '';
+	}
+	function removeAdded(tid: number) {
+		const gone = ftAdded.find((a) => a.tid === tid);
+		ftAdded = ftAdded.filter((a) => a.tid !== tid);
+		// also drop it from any merge + exclusion so it fully returns to the rest
+		if (gone) {
+			ftGroups = ftGroups
+				.map((g) => g.filter((t) => t !== gone.token))
+				.filter((g) => g.length >= 2);
+			ftExcluded = ftExcluded.filter((k) => k !== gone.token);
+		}
+		inspect = null;
+	}
+	/** Merge two units (drag one chip onto another): fuse their tokens into one
+	 *  group, dropping any prior group those tokens belonged to. */
+	function mergeUnits(srcKey: string, dstKey: string) {
+		if (srcKey === dstKey) return;
+		const merged = [...new Set([...unitMembers(dstKey), ...unitMembers(srcKey)])];
+		ftGroups = [...ftGroups.filter((g) => !g.some((t) => merged.includes(t))), merged];
+		// a fresh group is un-excluded; clear any stale member exclusions
+		ftExcluded = ftExcluded.filter((k) => k !== srcKey && k !== dstKey && !merged.includes(k));
+		inspect = null;
+	}
+	function unmerge(key: string) {
+		ftGroups = ftGroups.filter((g) => ftGroupKey(g) !== key);
+		ftExcluded = ftExcluded.filter((k) => k !== key);
+		inspect = null;
+	}
+	// bespoke drag-onto-target (the shared lib/drag-reorder is gap-shaped, not this)
+	let ftDrag = $state<string | null>(null);
+	let ftDragOver = $state<string | null>(null);
 
 	/** Per-segment hover text — first-token mode reads differently: pct is the
 	 *  MODEL's probability, count is how often it was actually sampled. */
@@ -340,6 +483,11 @@
 		{#if mode === 'firsttoken' && ft?.mixed}
 			<div class="chart-note">⚠ this turn mixes batches with different first-token distributions (regenerated on another checkpoint or renderer mode) — bars use the NEWEST batch's top-K; older batches' sampled tokens are kept with their own probabilities.</div>
 		{/if}
+		{#if mode === 'firsttoken' && ft?.massNote}
+			<div class="chart-note">↺ renormalized over {ft.massNote.min === ft.massNote.max
+				? `${(ft.massNote.min * 100).toFixed(0)}%`
+				: `${(ft.massNote.min * 100).toFixed(0)}–${(ft.massNote.max * 100).toFixed(0)}%`} of the original probability mass (some tokens excluded).</div>
+		{/if}
 		{#if !data || !layout}
 			{#if activeSources.length === 0}
 				<div class="backend-error">All panels with data are folded — enable “include folded panels” above to chart them.</div>
@@ -408,14 +556,83 @@
 					</text>
 				{/each}
 			</svg>
-			<div class="chart-legend">
-				{#each data.legend as entry (entry.key)}
-					<div class="chart-legend-item">
-						<span class="chart-legend-swatch" style={swatchStyle(entry.colors)}></span>
-						<span class="chart-legend-label">{entry.label}</span>
+			{#if mode === 'firsttoken'}
+				<!-- Interactive legend: click a chip to exclude/re-include, drag one onto
+				     another to merge into one color, ✕ to un-merge / drop an added token. -->
+				<div class="ft-chips" role="group" aria-label="First-token units">
+					{#each ftChips as chip (chip.key)}
+						{@const merged = chip.members.length > 1}
+						<div
+							class="ft-chip"
+							class:off={chip.excluded}
+							class:merged
+							class:drop-target={ftDragOver === chip.key && ftDrag !== chip.key}
+							draggable={!chip.excluded}
+							role="button"
+							tabindex="0"
+							aria-pressed={!chip.excluded}
+							data-tooltip={chip.excluded
+								? 'Excluded — click to re-include'
+								: merged
+									? 'Merged group — click to exclude, drag onto another to grow, ✕ to split'
+									: 'Click to exclude · drag onto another token to merge them into one color'}
+							use:tip
+							onclick={() => toggleFtExclude(chip.key)}
+							onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), toggleFtExclude(chip.key))}
+							ondragstart={(e) => { ftDrag = chip.key; e.dataTransfer?.setData('text/plain', chip.key); }}
+							ondragend={() => { ftDrag = null; ftDragOver = null; }}
+							ondragover={(e) => { if (ftDrag && ftDrag !== chip.key) { e.preventDefault(); ftDragOver = chip.key; } }}
+							ondragleave={() => { if (ftDragOver === chip.key) ftDragOver = null; }}
+							ondrop={(e) => { e.preventDefault(); if (ftDrag) mergeUnits(ftDrag, chip.key); ftDrag = null; ftDragOver = null; }}
+						>
+							<span class="chart-legend-swatch" style={chip.color ? `background: ${chip.color}` : `background: ${NONE_COLOR}`}></span>
+							<span class="ft-chip-label">{chip.label}</span>
+							{#if merged}
+								<button class="ft-chip-x" title="Split this group" aria-label="Split group"
+									onclick={(e) => { e.stopPropagation(); unmerge(chip.key); }}>⊗</button>
+							{:else if chip.addedTid != null}
+								<button class="ft-chip-x" title="Remove — back into the rest" aria-label="Remove added token"
+									onclick={(e) => { e.stopPropagation(); removeAdded(chip.addedTid!); }}>✕</button>
+							{/if}
+						</div>
+					{/each}
+					<div class="chart-legend-item ft-rest-legend">
+						<span class="chart-legend-swatch" style="background: {NONE_COLOR}"></span>
+						<span class="chart-legend-label">{FT_REST}</span>
 					</div>
-				{/each}
-			</div>
+				</div>
+				<!-- Add a recorded-but-hidden token (from stored logprobs; no model call). -->
+				<div class="ft-add">
+					<input class="ft-add-input" type="text" placeholder="add a hidden token… (e.g. “ D”)"
+						bind:value={ftQuery}
+						data-tooltip="Search tokens recorded for this turn (top-K alternatives + sampled first tokens across panels) and pull one out of the grey rest into its own color"
+						use:tip />
+					{#if ftQuery.trim()}
+						<div class="ft-matches">
+							{#if ftMatches.length === 0}
+								<span class="ft-no-match">no hidden token matches “{ftQuery.trim()}” in this turn's recorded logprobs</span>
+							{:else}
+								{#each ftMatches as m (m.tid)}
+									<button class="ft-match" onclick={() => addToken(m)}
+										data-tooltip="{m.kind} match · recorded p={((prob(m.lp) ?? 0) * 100).toFixed(1)}% — click to add" use:tip>
+										<span class="ft-match-tok">{displayToken(m.t)}</span>
+										<span class="ft-match-p">{((prob(m.lp) ?? 0) * 100).toFixed(1)}%</span>
+									</button>
+								{/each}
+							{/if}
+						</div>
+					{/if}
+				</div>
+			{:else}
+				<div class="chart-legend">
+					{#each data.legend as entry (entry.key)}
+						<div class="chart-legend-item">
+							<span class="chart-legend-swatch" style={swatchStyle(entry.colors)}></span>
+							<span class="chart-legend-label">{entry.label}</span>
+						</div>
+					{/each}
+				</div>
+			{/if}
 			{#if inspected}
 				<div class="chart-inspect">
 					<div class="chart-inspect-head">
@@ -477,6 +694,25 @@
 	.chart-legend-item { display: flex; align-items: center; gap: var(--space-1); }
 	.chart-legend-swatch { width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; }
 	.chart-legend-label { font-size: 0.78rem; color: var(--color-text); }
+	/* first-token interactive legend */
+	.ft-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--color-border-light); }
+	.ft-chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--color-border); border-radius: 999px; background: var(--color-bg); color: var(--color-text); font-size: 0.76rem; padding: 2px 8px 2px 6px; cursor: grab; user-select: none; }
+	.ft-chip:hover { border-color: var(--color-text-muted); }
+	.ft-chip.off { opacity: 0.45; text-decoration: line-through; cursor: pointer; }
+	.ft-chip.merged { border-style: dashed; border-color: var(--color-text-muted); }
+	.ft-chip.drop-target { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+	.ft-chip-label { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.ft-chip-x { border: none; background: none; color: var(--color-text-muted); font-size: 0.85rem; line-height: 1; cursor: pointer; padding: 0 1px; }
+	.ft-chip-x:hover { color: var(--color-text); }
+	.ft-rest-legend { margin-left: var(--space-2); }
+	.ft-add { position: relative; margin-top: var(--space-3); }
+	.ft-add-input { width: 260px; max-width: 100%; font-size: 0.78rem; padding: 4px 8px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-bg); color: var(--color-text); }
+	.ft-matches { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-2); max-height: 120px; overflow-y: auto; }
+	.ft-match { display: inline-flex; align-items: center; gap: 5px; border: 1px dashed var(--color-border); border-radius: var(--radius); background: var(--color-bg); color: var(--color-text); font-size: 0.74rem; padding: 2px 7px; cursor: pointer; }
+	.ft-match:hover { border-color: var(--color-accent); }
+	.ft-match-tok { font-family: var(--font-mono, monospace); }
+	.ft-match-p { color: var(--color-text-muted); }
+	.ft-no-match { font-size: 0.74rem; color: var(--color-text-muted); font-style: italic; }
 	.chart-inspect { margin-top: var(--space-3); border: 1px solid var(--color-border-light); border-radius: var(--radius); background: var(--color-bg); }
 	.chart-inspect-head { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border-light); }
 	.chart-inspect-title { font-size: 0.8rem; font-weight: 600; color: var(--color-text); flex: 1; }
