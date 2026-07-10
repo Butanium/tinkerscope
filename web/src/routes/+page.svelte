@@ -551,11 +551,24 @@
 	}
 
 	/** Fire one panel's generation with the current model + params. Thin context
-	 *  assembly over chat.fireOne, which owns the request / abort / fold lifecycle. */
-	function fireOne(pSel: PanelSel, userParentId: string, messages: ChatMessage[], prefill?: string) {
+	 *  assembly over chat.fireOne, which owns the request / abort / fold lifecycle.
+	 *  `paramsOverride` patches the composer bundle for this fire (branchOps'
+	 *  continue forces prefill_scope 'all' — its prefill is the continuation, not
+	 *  the composer prefill the scope tri-state governs). */
+	function fireOne(
+		pSel: PanelSel,
+		userParentId: string,
+		messages: ChatMessage[],
+		prefill?: string,
+		paramsOverride?: Partial<ChatParams>
+	) {
 		const model = resolveModelField(pSel);
 		if (!model) return;
-		chat.fireOne(pSel.panel, model, userParentId, messages, paramsBundle(), prefill, (m) => (backendError = m));
+		chat.fireOne(
+			pSel.panel, model, userParentId, messages,
+			{ ...paramsBundle(), ...paramsOverride }, prefill,
+			(m) => (backendError = m)
+		);
 	}
 
 	async function newConversation(e?: MouseEvent) {

@@ -101,14 +101,19 @@ class ChatStore {
 			// path, which also splits prefilled <think> into `reasoning`).
 			const samples = await drainSamples(res);
 			if (samples.length) {
-				// thinking='both' + a one-sided prefill scope: the backend stripped the
-				// prefill from the OTHER half, so those samples must not get it prepended
-				// (nor carry `prefill`). 'think' scope drops the non-thinking half
-				// (sm.thinking === false); 'non_think' drops the thinking half
-				// (sm.thinking === true). Symmetric — see routes/chat.py.
+				// A one-sided prefill scope: the backend stripped the prefill from the
+				// side the scope excludes, so those samples must not get it prepended
+				// (nor carry `prefill`). A sample's side is its own tag when present
+				// (thinking='both' tags each sample); single-mode samples are untagged,
+				// so fall back to the request's mode — mirrors _prefill_reaches_sample
+				// in routes/chat.py. 'think' scope drops the non-thinking side,
+				// 'non_think' the thinking side; a mismatched single-mode send drops
+				// every sample's prefill (the backend dropped it from the prompt).
+				const sideOf = (sm: (typeof samples)[number]) =>
+					typeof sm.thinking === 'boolean' ? sm.thinking : params.thinking === true;
 				const skipPrefill = (sm: (typeof samples)[number]) =>
-					(params.prefill_scope === 'think' && sm.thinking === false) ||
-					(params.prefill_scope === 'non_think' && sm.thinking === true);
+					(params.prefill_scope === 'think' && !sideOf(sm)) ||
+					(params.prefill_scope === 'non_think' && sideOf(sm));
 				const folded = prefill
 					? samples.map((sm) =>
 							sm.error || skipPrefill(sm)

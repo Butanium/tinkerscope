@@ -14,7 +14,7 @@
 
 import { live } from './state.svelte';
 import { conversations as convo } from './conversations.svelte';
-import { chat } from './chat.svelte';
+import { chat, type ChatParams } from './chat.svelte';
 import { panelScroll } from './scroll.svelte';
 import { assembleAssistantRaw } from './render';
 import {
@@ -43,8 +43,15 @@ export type BranchOpsDeps = {
 	panelBusy: (panel: Panel) => boolean;
 	/** Wrap messages with the active composer prefill (if any) for a fire. */
 	withPrefill: (msgs: ChatMessage[]) => { fireMsgs: ChatMessage[]; prefill?: string };
-	/** Fire one panel's generation with the current model + params. */
-	fireOne: (pSel: PanelSel, userParentId: string, messages: ChatMessage[], prefill?: string) => void;
+	/** Fire one panel's generation with the current model + params. `paramsOverride`
+	 *  patches over the composer's params bundle for THIS fire. */
+	fireOne: (
+		pSel: PanelSel,
+		userParentId: string,
+		messages: ChatMessage[],
+		prefill?: string,
+		paramsOverride?: Partial<ChatParams>
+	) => void;
 };
 
 class BranchOps {
@@ -151,7 +158,14 @@ class BranchOps {
 			...ancestryMessages(tree, userParentId),
 			{ role: 'assistant', content: prefill }
 		] as ChatMessage[];
-		this.#d.fireOne(pSel, userParentId, fireMessages, prefill);
+		// Force scope 'all': this trailing-assistant prefill is the CONTINUATION —
+		// extending the turn is the whole point. The composer's prefill-scope
+		// tri-state applies to the composer prefill only; letting it ride along
+		// here (it's in every params bundle, and it persists in session prefs)
+		// silently drops the continuation from the prompt on a mismatched
+		// single-mode send, then the fold prepends it anyway — a merged turn the
+		// model never saw. Guarded by browser_continue_scope.py.
+		this.#d.fireOne(pSel, userParentId, fireMessages, prefill, { prefill_scope: 'all' });
 	}
 
 	/** "+" continue. plain = this panel; all (shift) = the turn at this row's depth
