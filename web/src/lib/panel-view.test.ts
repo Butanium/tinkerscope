@@ -100,6 +100,17 @@ test('run.error appends an error ViewMessage', () => {
 	const last = out[out.length - 1];
 	eq(last.nodeId, null);
 	ok(last.content.includes('backend exploded'));
+	ok(last.notice === undefined, 'a real error is not a notice');
+});
+
+// ── the deliberate-stop terminal renders as a neutral notice, not an error ──
+test("error 'cancelled' becomes a stopped notice row", () => {
+	const { tree } = folded(1);
+	const out = buildPanelView(tree, run({ error: 'cancelled' }));
+	const last = out[out.length - 1];
+	eq(last.notice, 'stopped');
+	eq(last.nodeId, null);
+	ok(!last.content.includes('Error'), 'no error costume on a user stop');
 });
 
 // ── bucketTurn directly: n=1 vs n>1 shape ──

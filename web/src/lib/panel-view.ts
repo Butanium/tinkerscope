@@ -106,6 +106,13 @@ export function buildPanelView(tree: ConvTree, run: PanelRun, prefill?: string):
 			isBucket: true
 		});
 	}
-	if (run.error) out.push({ role: 'assistant', content: `Error: ${run.error}`, nodeId: null });
+	if (run.error === 'cancelled') {
+		// The deliberate-stop terminal (chat_error("cancelled"), 0 samples — only
+		// _terminal mints this bare string; producer faults are "Type: msg") is a
+		// user action, not a failure — render a neutral strip, not an error row.
+		out.push({ role: 'assistant', content: '', notice: 'stopped', nodeId: null });
+	} else if (run.error) {
+		out.push({ role: 'assistant', content: `Error: ${run.error}`, nodeId: null });
+	}
 	return out;
 }

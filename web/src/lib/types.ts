@@ -276,4 +276,7 @@ export type ViewMessage = {
 	sampleNodeIds?: string[];
 	activeSampleIndex?: number;
 	isBucket?: boolean;
+	/** Non-content status row (e.g. 'stopped' after a 0-sample cancel) — rendered
+	 *  as a muted strip, not an assistant message; all other fields ignored. */
+	notice?: string;
 };

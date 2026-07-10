@@ -517,7 +517,11 @@
 	</button>
 {/snippet}
 
-{#if msg.role !== 'assistant' || msg.content || msg.reasoning || isMultiSample || (msg.samples && msg.samples.some((x) => x && x.content))}
+{#if msg.notice}
+	<!-- Status strip (e.g. 'stopped' after a deliberate 0-sample cancel) — not a
+	     message: no role header, no toolbar, muted. -->
+	<div class="message-notice" data-row={rowIndex}>⏹ {msg.notice}</div>
+{:else if msg.role !== 'assistant' || msg.content || msg.reasoning || isMultiSample || (msg.samples && msg.samples.some((x) => x && x.content))}
 	<!-- Row click (anywhere, buttons included) moves the keyboard focus here.
 	     svelte-ignore: this is a mouse-only convenience — the keyboard already
 	     has its own path to focus (↑/↓), so no key handler belongs on the div. -->
@@ -670,6 +674,8 @@
 {/if}
 
 <style>
+	/* Neutral status strip (msg.notice) — a deliberate stop, not an error. */
+	.message-notice { padding: var(--space-2) var(--space-4); font-size: 0.75rem; font-style: italic; color: var(--color-text-muted); }
 	/* Message header: role label on the left, the ‹k/N› cycler pinned top-right
 	   (level with the role) so it stays put as the message/card resizes. */
 	.message-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin-bottom: var(--space-2); }
