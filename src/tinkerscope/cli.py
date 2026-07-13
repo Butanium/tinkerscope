@@ -838,8 +838,11 @@ def cmd_state(
 
 
 def _conversations() -> list[dict]:
-    """Fetch all saved conversation trees for this scan-root set."""
-    return _get("/api/conversations")
+    """Fetch all saved conversation trees for this scan-root set.
+
+    `?bodies=1` because every CLI consumer (link-by-active-path, browse, resolve)
+    reads the trees; the bare endpoint returns blob-less summaries (storage v2)."""
+    return _get("/api/conversations?bodies=1")
 
 
 def _link_panel_to_conv(panel_msgs: list[dict], convs: list[dict]) -> list[tuple[str, str, str]]:

@@ -1,66 +1,34 @@
-"""Saved conversation TREES — branchable chat sessions, per scan-root-set.
+"""Saved conversation TREES — branchable chat sessions, per scan-root-set (v2).
 
-Each conversation is a named, branchable chat: a per-panel tree (`tree` for the
-primary panel, `compare_tree` for the compare panel) plus metadata. The tree
-shape is OPAQUE to the server — the browser owns it (see `web/src/lib/tree.ts`);
-we only round-trip it as plain JSON. The linear ACTIVE PATH the sampler/CLI read
-lives in `PlaygroundState.messages` (separate concern); the tree is the superset
-that adds off-path siblings and is NOT broadcast over the state bus.
+Each conversation is a named, branchable chat: a per-panel tree (`trees` keyed by
+panel id) plus metadata. The tree shape is OPAQUE to the server — the browser owns
+it (see `web/src/lib/tree.ts`); we only round-trip it as plain JSON.
 
-Persisted to `<state_dir>/conversations.json` as a LIST of entries (mirrors
-highlights.py — ordered, id-addressable). Saves are far more frequent than
-highlight adds (potentially every branch edit), and two tabs / a tab + the CLI
-can both write, so every read-modify-write is wrapped in `store.locked` — the
-in-repo flock pattern — to prevent lost updates clobbering sibling entries.
+Storage v2 (see `docs/STORAGE_V2.md` + `api/conversation_store.py`): each
+conversation is its OWN light file under `<state>/conversations/<id>.json`, and a
+node's two heavy fields (`token_logprobs`, `raw_meta`) live in per-node write-once
+blobs under `<id>.blobs/`. This router is a thin HTTP layer over the store, which
+owns the on-disk layout, the boot migration, the in-memory summary cache, and the
+`store.locked` flock convention. Wire contract:
+
+  GET    /api/conversations           → summaries (no trees); ?bodies=1 → light bodies
+  GET    /api/conversations/{id}       → one light body
+  POST   /api/conversations/{id}/node-blobs {nodes:[...]} → {id: {token_logprobs?, raw_meta?}}
+  POST   /api/conversations            → create (unchanged shape; server strips blobs)
+  PATCH  /api/conversations/{id}       → layout-only metadata (no tree bytes)
+  PUT    /api/conversations/{id}/tree  → PARTIAL tree upsert (dirty panels) + dropped_trees
+  DELETE /api/conversations/{id}       → remove light file + blobs dir
 """
 from __future__ import annotations
 
-import json
-import time
-import uuid
-from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from ..settings import SETTINGS
-from ..store import locked, write_json
+from .. import conversation_store as store
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _read() -> list[dict]:
-    """Load the conversation list.
-
-    Unlike highlights/prefs (where a silent reset-to-default is harmless), these
-    are user-authored trees: on a corrupt file we MUST NOT return `[]` and let
-    the next save overwrite the only copy. So we side-step store.read_json's
-    swallow-and-default and, on a parse error, MOVE the bad file aside to
-    `conversations.json.corrupt-<ts>` before returning empty — the backup
-    survives the next write, and `corrupted=True` lets the client surface a
-    banner.
-    """
-    path = SETTINGS.conversations_path
-    if not path.exists():
-        return []
-    try:
-        return json.loads(path.read_text())
-    except json.JSONDecodeError:
-        backup = path.with_suffix(path.suffix + f".corrupt-{int(time.time())}")
-        try:
-            path.rename(backup)
-        except OSError:
-            pass
-        return []
-
-
-def _write(items: list[dict]) -> None:
-    write_json(SETTINGS.conversations_path, items)
 
 
 class ConversationCreate(BaseModel):
@@ -87,12 +55,26 @@ class ConversationCreate(BaseModel):
     seen_panels: list[str] = []
 
 
-class ConversationRename(BaseModel):
-    name: str
+class ConversationPatch(BaseModel):
+    """Layout-only metadata patch (v2 §2.4). Every field optional — only provided
+    keys apply — so a model swap / send-target toggle ships NO tree bytes. `name`
+    alone is the old rename call."""
+
+    name: str | None = None
+    system_prompt: str | None = None
+    panels: list[dict[str, Any]] | None = None
+    reduced_panels: list[str] | None = None
+    send_targets: list[str] | None = None
+    seen_panels: list[str] | None = None
 
 
 class TreeSave(BaseModel):
+    # PARTIAL upsert map: only DIRTY panels (merged over the stored trees). Nodes MAY
+    # carry inline token_logprobs/raw_meta (fresh folds) — the server strips them into
+    # write-once blobs and stores light nodes.
     trees: dict[str, Any]
+    # Panels removed since the last save — dropped from the stored trees.
+    dropped_trees: list[str] = []
     system_prompt: str | None = None
     # Per-conversation panel UI (all OPAQUE panel-id lists; the browser owns the
     # semantics — see web/src/lib/conversations.svelte.ts):
@@ -100,8 +82,7 @@ class TreeSave(BaseModel):
     #   send_targets   — panels the composer fires a send to
     #   seen_panels    — defaulting bookkeeping (a panel is defaulted into
     #                    send_targets exactly once, when first seen). Persisted so
-    #                    a restart restores the exact deselected/folded state
-    #                    instead of re-defaulting every panel ON.
+    #                    a restart restores the exact deselected/folded state.
     reduced_panels: list[str] = []
     send_targets: list[str] = []
     seen_panels: list[str] = []
@@ -109,17 +90,40 @@ class TreeSave(BaseModel):
     panels: list[dict[str, Any]] = []
 
 
+class NodeBlobsRequest(BaseModel):
+    # Node ids to fetch heavy blobs for (POST, not GET, because the list can be long).
+    nodes: list[str] = []
+
+
 @router.get("")
-def list_conversations() -> list[dict]:
-    """All saved conversations (ordered; newest activity is the client's to sort)."""
-    return _read()
+def list_conversations(bodies: int = Query(0)) -> list[dict]:
+    """Summaries by default (no trees); ?bodies=1 → light bodies (trees incl., blobs
+    excl.) for the CLI's link/browse paths."""
+    return store.list_bodies() if bodies else store.list_summaries()
+
+
+@router.get("/{conversation_id}")
+def get_conversation(conversation_id: str) -> dict:
+    """One light conversation body (trees incl., blobs excl.)."""
+    body = store.get_body(conversation_id)
+    if body is None:
+        raise HTTPException(404, f"no conversation {conversation_id}")
+    return body
+
+
+@router.post("/{conversation_id}/node-blobs")
+def get_node_blobs(conversation_id: str, req: NodeBlobsRequest) -> dict:
+    """Heavy blobs for a batch of node ids: {node_id: {token_logprobs?, raw_meta?}}.
+    Unknown ids are omitted (not an error)."""
+    return store.get_blobs(conversation_id, req.nodes)
 
 
 @router.post("")
 def create_conversation(req: ConversationCreate) -> dict:
     """Create a conversation. The server mints the id + timestamps unless the client
     supplied an id (a draft being persisted for the first time), in which case it
-    upserts by that id — so a save race can't duplicate the entry."""
+    upserts by that id — so a save race can't duplicate the entry. Heavy node fields
+    are stripped into write-once blobs; the returned body is light."""
     trees = req.trees
     if trees is None:
         # transitional: synthesize {trees} from a legacy {tree, compare_tree} body
@@ -130,79 +134,50 @@ def create_conversation(req: ConversationCreate) -> dict:
             trees["compare"] = req.compare_tree
     if not trees:
         trees = {"primary": {}}
-    entry = {
-        "id": req.id or str(uuid.uuid4()),
-        "name": req.name,
-        "system_prompt": req.system_prompt,
-        "trees": trees,
-        # Panel layout the conversation opens with (inherited from the current
-        # conversation, or a single blank panel). Empty ⇒ legacy fallback (browser
-        # keeps whatever panels are currently shown).
-        "panels": req.panels or [],
-        # Panel-UI lists (folded / send-targets / seen). Usually empty for a brand-new
-        # conversation; carried so a draft persisted after a UI toggle keeps that state.
-        "reduced_panels": req.reduced_panels,
-        "send_targets": req.send_targets,
-        "seen_panels": req.seen_panels,
-        "created_at": _now(),
-        "updated_at": _now(),
-    }
-    with locked("conversations"):
-        items = _read()
-        # Upsert by client-supplied id (idempotent first-save of a draft).
-        for i, c in enumerate(items):
-            if c.get("id") == entry["id"]:
-                entry["created_at"] = c.get("created_at", entry["created_at"])
-                items[i] = entry
-                _write(items)
-                return entry
-        items.append(entry)
-        _write(items)
-    return entry
+    return store.upsert(
+        id=req.id,
+        name=req.name,
+        system_prompt=req.system_prompt,
+        trees=trees,
+        panels=req.panels or [],
+        reduced_panels=req.reduced_panels,
+        send_targets=req.send_targets,
+        seen_panels=req.seen_panels,
+    )
 
 
 @router.patch("/{conversation_id}")
-def rename_conversation(conversation_id: str, req: ConversationRename) -> dict:
-    with locked("conversations"):
-        items = _read()
-        for c in items:
-            if c.get("id") == conversation_id:
-                c["name"] = req.name
-                c["updated_at"] = _now()
-                _write(items)
-                return c
-    raise HTTPException(404, f"no conversation {conversation_id}")
+def patch_conversation(conversation_id: str, req: ConversationPatch) -> dict:
+    """Layout-only metadata update — rename + system_prompt + panel layout/UI, no
+    tree bytes. Returns the updated summary."""
+    fields = req.model_dump(exclude_unset=True)
+    summary = store.patch_meta(conversation_id, fields)
+    if summary is None:
+        raise HTTPException(404, f"no conversation {conversation_id}")
+    return summary
 
 
 @router.put("/{conversation_id}/tree")
 def save_conversation_tree(conversation_id: str, req: TreeSave) -> dict:
-    """Hot path: persist a conversation's tree(s) after a branch edit."""
-    with locked("conversations"):
-        items = _read()
-        for c in items:
-            if c.get("id") == conversation_id:
-                c["trees"] = req.trees
-                c["system_prompt"] = req.system_prompt
-                c["panels"] = req.panels
-                c["reduced_panels"] = req.reduced_panels
-                c["send_targets"] = req.send_targets
-                c["seen_panels"] = req.seen_panels
-                c["updated_at"] = _now()
-                # self-heal: a legacy {tree, compare_tree} entry upgrades to {trees}
-                # on its first save — drop the stale keys so they can't linger.
-                c.pop("tree", None)
-                c.pop("compare_tree", None)
-                _write(items)
-                return {"status": "ok", "id": conversation_id}
-    raise HTTPException(404, f"no conversation {conversation_id}")
+    """Hot path: persist a conversation's DIRTY panel tree(s) after a branch edit.
+    `trees` is a partial upsert (dirty panels only) + `dropped_trees` for removals."""
+    ok = store.save_tree(
+        conversation_id,
+        trees_partial=req.trees,
+        dropped_trees=req.dropped_trees,
+        system_prompt=req.system_prompt,
+        panels=req.panels,
+        reduced_panels=req.reduced_panels,
+        send_targets=req.send_targets,
+        seen_panels=req.seen_panels,
+    )
+    if not ok:
+        raise HTTPException(404, f"no conversation {conversation_id}")
+    return {"status": "ok", "id": conversation_id}
 
 
 @router.delete("/{conversation_id}")
 def delete_conversation(conversation_id: str) -> dict:
-    with locked("conversations"):
-        items = _read()
-        kept = [c for c in items if c.get("id") != conversation_id]
-        if len(kept) == len(items):
-            raise HTTPException(404, f"no conversation {conversation_id}")
-        _write(kept)
+    if not store.delete(conversation_id):
+        raise HTTPException(404, f"no conversation {conversation_id}")
     return {"status": "ok"}

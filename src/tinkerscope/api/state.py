@@ -94,15 +94,32 @@ class StateBus:
     # `panel` id routes these to that panel; without `panel` they're ignored.
     _PANEL_FIELDS = ("run_id", "checkpoint", "messages")
 
-    @staticmethod
-    def _as_panel(p: Any) -> PanelState:
+    # Storage-v2 diet: the per-panel transcript echoes are text mirrors the CLI reads
+    # (role/content only — verified it reads nothing else); the heavy per-node fields
+    # never belong on the bus. Strip them defensively on ingest so a snapshot can't
+    # carry megabytes of logprobs, regardless of what a client echoes. Does NOT touch
+    # the live sample-stream events (detached fire delivers full samples through the
+    # bucket; that path is untouched — see docs/STORAGE_V2.md §2.5).
+    _HEAVY_MSG_FIELDS = ("token_logprobs", "raw_meta")
+
+    @classmethod
+    def _light_msgs(cls, msgs: Any) -> list[dict]:
+        return [
+            {k: v for k, v in m.items() if k not in cls._HEAVY_MSG_FIELDS}
+            if isinstance(m, dict)
+            else m
+            for m in (msgs or [])
+        ]
+
+    @classmethod
+    def _as_panel(cls, p: Any) -> PanelState:
         if isinstance(p, PanelState):
             return p
         return PanelState(
             id=p["id"],
             run_id=p.get("run_id"),
             checkpoint=p.get("checkpoint"),
-            messages=p.get("messages") or [],
+            messages=cls._light_msgs(p.get("messages")),
         )
 
     def _patch_panel(self, panel_id: str, key: str, value: Any) -> None:
@@ -132,10 +149,12 @@ class StateBus:
                 # {panel_id: messages} — the store's active-path echo for every panel,
                 # mirrored in one patch without touching run_id/checkpoint.
                 for pid, msgs in (v or {}).items():
-                    self._patch_panel(pid, "messages", msgs)
+                    self._patch_panel(pid, "messages", self._light_msgs(msgs))
             elif k in self._PANEL_FIELDS:
                 if panel_id is not None:
-                    self._patch_panel(panel_id, k, v)
+                    self._patch_panel(
+                        panel_id, k, self._light_msgs(v) if k == "messages" else v
+                    )
             elif hasattr(self.state, k):
                 setattr(self.state, k, v)
 

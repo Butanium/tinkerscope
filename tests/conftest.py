@@ -161,6 +161,12 @@ def _reload_backend(monkeypatch: pytest.MonkeyPatch, scan_root: Path, state_home
     discovery_mod._runs_cache = None
     discovery_mod._caps_cache = None
 
+    # Reload the conversation store BEFORE its router so its in-memory caches reset
+    # against the fresh (empty) state dir and it resolves the reloaded settings paths.
+    import tinkerscope.api.conversation_store as conversation_store_mod
+
+    importlib.reload(conversation_store_mod)
+
     # Reload the routers + app so they bind to the reloaded settings/discovery.
     import tinkerscope.api.routes.models as models_route
     import tinkerscope.api.routes.datasets as datasets_route
