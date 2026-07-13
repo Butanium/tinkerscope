@@ -112,9 +112,8 @@ test('panel both dirty AND dropped → upsert wins, drop filtered out', () => {
 });
 
 // ── report ────────────────────────────────────────────────────────────
+console.log(`save-plan.test.ts: ${passed} passed, ${failed} failed`);
 if (failed) {
-	console.error(fails.join('\n'));
-	console.error(`\n${failed} failed, ${passed} passed`);
-	process.exit(1);
+	// A top-level throw exits node non-zero (no @types/node / process needed).
+	throw new Error('\n' + fails.join('\n\n'));
 }
-console.log(`save-plan.test.ts: all ${passed} tests passed`);

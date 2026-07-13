@@ -27,6 +27,13 @@ class NodeBlobStore {
 	#convId: string | null = null;
 	/** Node ids with an in-flight fetch — never double-fetched. */
 	#inflight = new Set<string>();
+	// Micro-batching: each mounted row ensure()s its own node, so flipping the
+	// token-probs toggle on a long conversation fires one call PER ROW in the
+	// same tick. A short collection window folds that burst into one POST.
+	#queue = new Set<string>();
+	#flushTimer: ReturnType<typeof setTimeout> | null = null;
+	#flushPromise: Promise<void> | null = null;
+	#resolveFlush: (() => void) | null = null;
 
 	/** Rebind to a (possibly different) conversation and drop everything cached.
 	 *  Call on EVERY conversation transition, before the new trees land. */
@@ -34,6 +41,14 @@ class NodeBlobStore {
 		this.#convId = convId;
 		this.#cache = {};
 		this.#inflight.clear();
+		this.#queue.clear();
+		if (this.#flushTimer) {
+			clearTimeout(this.#flushTimer);
+			this.#flushTimer = null;
+		}
+		this.#resolveFlush?.(); // settle any awaiting caller — its ids are moot now
+		this.#resolveFlush = null;
+		this.#flushPromise = null;
 	}
 
 	/** The cached blobs for a node (reactive), or undefined while unknown/unfetched. */
@@ -47,21 +62,42 @@ class NodeBlobStore {
 		this.#cache[nodeId] = blobs;
 	}
 
-	/** Batch-fetch blobs for any of `nodeIds` not yet cached or in flight.
-	 *  Fire-and-forget for UI callers (reactivity delivers the result); returns
-	 *  the fetch promise so tests/smokes can await it. */
+	/** Queue blobs of any of `nodeIds` not yet cached/in flight for a batched
+	 *  fetch (20 ms collection window → one POST). Fire-and-forget for UI callers
+	 *  (reactivity delivers the result); returns a promise that settles when the
+	 *  batch containing these ids lands, so tests/smokes can await it. */
 	ensure(nodeIds: string[]): Promise<void> {
+		if (!this.#convId) return Promise.resolve();
+		for (const id of nodeIds) {
+			if (!(id in this.#cache) && !this.#inflight.has(id)) this.#queue.add(id);
+		}
+		if (!this.#queue.size) return Promise.resolve();
+		if (!this.#flushPromise) {
+			this.#flushPromise = new Promise((res) => (this.#resolveFlush = res));
+			this.#flushTimer = setTimeout(() => this.#flush(), 20);
+		}
+		return this.#flushPromise;
+	}
+
+	#flush(): void {
+		this.#flushTimer = null;
 		const convId = this.#convId;
-		if (!convId) return Promise.resolve();
-		const missing = nodeIds.filter((id) => !(id in this.#cache) && !this.#inflight.has(id));
-		if (!missing.length) return Promise.resolve();
-		for (const id of missing) this.#inflight.add(id);
-		return api
-			.fetchNodeBlobs(convId, missing)
+		const ids = [...this.#queue];
+		this.#queue.clear();
+		const settle = this.#resolveFlush!;
+		this.#resolveFlush = null;
+		this.#flushPromise = null;
+		if (!convId || !ids.length) {
+			settle();
+			return;
+		}
+		for (const id of ids) this.#inflight.add(id);
+		api
+			.fetchNodeBlobs(convId, ids)
 			.then((res) => {
+				for (const id of ids) this.#inflight.delete(id);
 				if (this.#convId !== convId) return; // conversation switched mid-fetch — stale
-				for (const id of missing) {
-					this.#inflight.delete(id);
+				for (const id of ids) {
 					// Omitted id ⇒ the server has no blob for it — cache {} so the
 					// consumer's has_* affordance can settle and we never refetch.
 					this.#cache[id] = res[id] ?? {};
@@ -69,9 +105,10 @@ class NodeBlobStore {
 			})
 			.catch((e) => {
 				// Transient failure: un-mark so a later ensure() retries.
-				for (const id of missing) this.#inflight.delete(id);
+				for (const id of ids) this.#inflight.delete(id);
 				console.warn('node-blobs fetch failed', e);
-			});
+			})
+			.finally(settle);
 	}
 }
 

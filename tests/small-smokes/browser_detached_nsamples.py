@@ -80,7 +80,7 @@ def main():
             time.sleep(3.0)  # let the fold + debounced save land
 
         send_and_wait("Give me a one-word mood.")
-        conv1 = next(c for c in _get("/api/conversations") if c["id"] == cid)
+        conv1 = _get(f"/api/conversations/{cid}")  # v2: list is summaries-only
         sibs1 = sibling_count(conv1["trees"]["primary"])
         # OpenRouter free can error a sample or two — require the MAJORITY folded as
         # siblings (the distribution is real), not a strict ==N.
@@ -88,7 +88,7 @@ def main():
         print(f"(1) first turn folded {sibs1}/{N} samples as sibling branches  ✓")
 
         send_and_wait("Now a one-word color.")
-        conv2 = next(c for c in _get("/api/conversations") if c["id"] == cid)
+        conv2 = _get(f"/api/conversations/{cid}")
         tree = conv2["trees"]["primary"]
         # Two user turns now, each with an assistant distribution → ≥2 user nodes and
         # the deepest assistant fold still ≥2 siblings.

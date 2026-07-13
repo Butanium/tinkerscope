@@ -129,6 +129,13 @@ class ConversationsStore {
 	 *  empty conversation it could not load — marking dirt then would PUT that
 	 *  emptiness over the stored data, so saves latch off until a successful load. */
 	#loadFailed = false;
+	/** Set when the open conversation was loaded through the LEGACY {tree,
+	 *  compare_tree} read-shim (pre-multipanel storage; the v2 migration preserves
+	 *  that shape). Its first structural save must ship the FULL trees map: the
+	 *  server's self-heal drops the legacy keys and keeps only the `trees` sent,
+	 *  so a partial upsert would silently lose the un-sent panel. Cleared once a
+	 *  tree save lands (the conversation is a normal `trees` conv from then on). */
+	#fullTreeSaveNeeded = false;
 	/** Supersedes an in-flight switchTo body fetch when a newer switch starts. */
 	#switchSeq = 0;
 	#noticeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -409,9 +416,18 @@ class ConversationsStore {
 				const name = this.list.find((c) => c.id === id)?.name ?? 'Untitled';
 				await api.createConversation({ id, name, ...fields, trees: { ...this.trees } });
 			} else {
-				const plan = planSave({ dirtyTrees, droppedTrees, layoutDirty }, fields);
+				// First structural save of a legacy-shape conversation: expand to ALL
+				// trees (see #fullTreeSaveNeeded) — refs at fire time, activeId === id
+				// here by flush discipline. Layout-only PATCHes don't clear the flag
+				// (they don't touch trees, so the legacy keys survive them).
+				const expand = this.#fullTreeSaveNeeded && (dirtyTrees.size > 0 || droppedTrees.size > 0);
+				const effectiveDirty = expand
+					? new Map([...Object.entries(this.trees), ...dirtyTrees])
+					: dirtyTrees;
+				const plan = planSave({ dirtyTrees: effectiveDirty, droppedTrees, layoutDirty }, fields);
 				if (plan.kind === 'put') await api.saveConversationTree(id, plan.body);
 				else if (plan.kind === 'patch') await api.patchConversation(id, plan.body);
+				if (expand) this.#fullTreeSaveNeeded = false;
 			}
 			this.list = this.list.map((c) =>
 				c.id === id ? { ...c, updated_at: new Date().toISOString() } : c
@@ -536,6 +552,7 @@ class ConversationsStore {
 		this.activeId = draft.id;
 		this.#draftId = draft.id;
 		this.#loadFailed = false;
+		this.#fullTreeSaveNeeded = false; // a draft is never legacy-shaped
 		nodeBlobs.reset(draft.id);
 		this.reducedPanels = new Set();
 		this.sendTargets = new Set(ids);
@@ -653,6 +670,7 @@ class ConversationsStore {
 		const keep = layout ? new Set(layout.map((p) => p.id)) : null;
 
 		if (conv.trees && typeof conv.trees === 'object') {
+			this.#fullTreeSaveNeeded = false;
 			const map: Record<string, ConvTree> = {};
 			for (const [pid, t] of Object.entries(conv.trees)) map[pid] = asTree(t);
 			// Drop trees for panels not in the cleaned layout: a save can capture a tree
@@ -663,6 +681,9 @@ class ConversationsStore {
 			if (!Object.keys(map).length) map[layout?.[0]?.id ?? 'primary'] = emptyTree();
 			this.trees = map;
 		} else {
+			// Legacy shape → the first structural save must ship the full map (partial
+			// upsert + the server's legacy-key self-heal would drop the other panel).
+			this.#fullTreeSaveNeeded = true;
 			const map: Record<string, ConvTree> = { primary: asTree(conv.tree) };
 			if (conv.compare_tree) map.compare = asTree(conv.compare_tree);
 			this.trees = map;

@@ -96,10 +96,12 @@ def main() -> None:
             # async browser-side PUT after generation ends.
             carrying: list = []
             for _ in range(30):
-                convs = api("GET", "/api/conversations")
-                conv = next((c for c in convs if c["id"] == conv_id), None)
+                conv = api("GET", f"/api/conversations/{conv_id}")
                 nodes = (conv or {}).get("trees", {}).get("primary", {}).get("nodes", {})
-                carrying = [n for n in nodes.values() if n.get("token_logprobs")]
+                flagged = [n["id"] for n in nodes.values() if n.get("has_token_logprobs")]
+                blobs = api("POST", f"/api/conversations/{conv_id}/node-blobs",
+                            {"nodes": flagged}) if flagged else {}
+                carrying = [b for b in blobs.values() if b.get("token_logprobs")]
                 if carrying:
                     break
                 time.sleep(1)

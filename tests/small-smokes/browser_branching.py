@@ -118,7 +118,7 @@ def main():
 
         # ── 5. Oracles: persisted tree + active-path round-trip + no console errors ──
         page.wait_for_timeout(600)  # let the debounced save flush
-        ours = next(c for c in _get("/api/conversations") if c["id"] == conv["id"])
+        ours = _get(f"/api/conversations/{conv['id']}")  # v2: list is summaries-only
         tree = ours["trees"]["primary"]
         contents = [n["content"] for n in tree["nodes"].values()]
         assert "U1 EDITED question" not in contents, "pruned node still on disk"

@@ -54,9 +54,8 @@ def backend_state() -> dict:
 
 def assistant_children(conv_id: str) -> list[dict]:
     """The assistant siblings under the (single) user node of a conversation."""
-    with urllib.request.urlopen(f"{BASE}/api/conversations", timeout=5) as r:
-        convs = json.load(r)
-    conv = next(c for c in convs if c["id"] == conv_id)
+    with urllib.request.urlopen(f"{BASE}/api/conversations/{conv_id}", timeout=5) as r:
+        conv = json.load(r)  # v2: list is summaries-only, fetch the body
     nodes = conv["trees"]["primary"]["nodes"]
     return [n for n in nodes.values() if n["role"] == "assistant"]
 

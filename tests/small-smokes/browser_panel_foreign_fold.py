@@ -134,7 +134,7 @@ def main():
         page.screenshot(path=str(SHOT_DIR / "fold_fixed_negative.png"), full_page=True)
         # …but it must NOT be in B's persisted tree.
         page.wait_for_timeout(500)
-        B_after = next(c for c in _get("/api/conversations") if c["id"] == B["id"])
+        B_after = _get(f"/api/conversations/{B['id']}")  # v2: list is summaries-only
         neg_disk = not any(
             FOREIGN in n["content"]
             for tr in B_after["trees"].values() for n in tr.get("nodes", {}).values())
@@ -153,7 +153,7 @@ def main():
             page.wait_for_timeout(500)
         pos_banner = BANNER in page.inner_text("body")  # the lockstep fold flashes it
         page.wait_for_timeout(600)
-        B_after2 = next(c for c in _get("/api/conversations") if c["id"] == B["id"])
+        B_after2 = _get(f"/api/conversations/{B['id']}")
         pos_disk = any(
             LOCKSTEP in n["content"]
             for n in B_after2["trees"].get("compare", {}).get("nodes", {}).values())
@@ -175,7 +175,7 @@ def main():
                 pass
             page.wait_for_timeout(500)
         page.wait_for_timeout(600)
-        B_after3 = next(c for c in _get("/api/conversations") if c["id"] == B["id"])
+        B_after3 = _get(f"/api/conversations/{B['id']}")
         null_disk = any(
             NULLSTAMP in n["content"]
             for n in B_after3["trees"].get("compare", {}).get("nodes", {}).values())

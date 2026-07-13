@@ -85,7 +85,7 @@ def main() -> None:
             time.sleep(1.2)  # let the (now pre-switch-flushed) patch + debounced saves land
 
             live_sp = api("GET", "/api/state").get("system_prompt")
-            convs = {c["id"]: c for c in api("GET", "/api/conversations")}
+            convs = {cid: api("GET", f"/api/conversations/{cid}") for cid in (a, b)}  # v2: bodies per id
             ta = page.input_value(SYS_TA) if page.locator(SYS_TA).count() else ""
 
             checks.append((f"conversation A kept the edit ({convs[a].get('system_prompt')!r})",
