@@ -44,6 +44,7 @@ SHOT_DIR = Path("/tmp/claude-1000/-home-c-dumas-tools-tinkerscope/"
                 "6535889f-5ec1-46d1-b033-8db9788307b6/scratchpad")
 FOREIGN = "FOREIGN_A_must_not_graft_into_B"
 LOCKSTEP = "SAME_CONV_lockstep_must_fold"
+NULLSTAMP = "NULL_STAMP_legacy_cli_must_fold"
 BANNER = "Terminal started a new conversation"
 
 
@@ -114,7 +115,15 @@ def main():
         assert [pp["id"] for pp in _get("/api/state")["panels"]] == ["primary", "compare"]
 
         # ── NEGATIVE: external chat stamped A must NOT fold into B ──
-        done = _drive("compare", f"{FOREIGN} — reply with just: ACK", A["id"])
+        done = False
+        for _ in range(4):  # free router occasionally 502s — retry the infra, not the logic
+            try:
+                if _drive("compare", f"{FOREIGN} — reply with just: ACK", A["id"]):
+                    done = True
+                    break
+            except Exception:
+                pass
+            page.wait_for_timeout(500)
         assert done, "foreign chat did not complete (chat_done) — can't test the gate; rerun"
         page.wait_for_timeout(1500)  # settle any (buggy) fold/banner reaction
         neg_ui = FOREIGN not in page.inner_text("body")
@@ -150,6 +159,27 @@ def main():
             for n in B_after2["trees"].get("compare", {}).get("nodes", {}).values())
         page.screenshot(path=str(SHOT_DIR / "fold_fixed_positive.png"), full_page=True)
 
+        # ── NULL-STAMP (legacy CLI): a chat with conversation_id=null MUST still fold
+        # into the OPEN conversation. Unchanged behavior, but newly load-bearing now
+        # that every browser send rides the same fold gate (detached fire) — a CLI/
+        # legacy chat that never set conversation_id keeps the live-drive lockstep. ──
+        null_ui = False
+        for _ in range(4):
+            try:
+                if _drive("compare", f"{NULLSTAMP} — reply with just: ACK", None):
+                    page.wait_for_function(
+                        f"document.body.innerText.includes({json.dumps(NULLSTAMP)})", timeout=15000)
+                    null_ui = True
+                    break
+            except Exception:
+                pass
+            page.wait_for_timeout(500)
+        page.wait_for_timeout(600)
+        B_after3 = next(c for c in _get("/api/conversations") if c["id"] == B["id"])
+        null_disk = any(
+            NULLSTAMP in n["content"]
+            for n in B_after3["trees"].get("compare", {}).get("nodes", {}).values())
+
         browser.close()
 
     for c in (A, B):
@@ -164,9 +194,12 @@ def main():
     print(f"POSITIVE — lockstep chat folded (UI):                 {pos_ui}")
     print(f"POSITIVE — lockstep chat persisted (tree):            {pos_disk}")
     print(f"POSITIVE — banner DID flash (the user-visible tell):  {pos_banner}")
+    print(f"NULL-STAMP — legacy/CLI chat folded (UI):             {null_ui}")
+    print(f"NULL-STAMP — legacy/CLI chat persisted (tree):        {null_disk}")
     print("console/page errors:", errors or "none")
     ok = (gate_exercised and neg_disk and neg_ui and neg_banner_absent
-          and pos_ui and pos_disk and pos_banner and not errors)
+          and pos_ui and pos_disk and pos_banner
+          and null_ui and null_disk and not errors)
     print("PANEL FOREIGN-FOLD SMOKE:", "PASS (fold is conversation-scoped)" if ok else "FAIL")
     sys.exit(0 if ok else 1)
 
