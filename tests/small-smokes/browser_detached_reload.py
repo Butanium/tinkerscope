@@ -138,7 +138,7 @@ def main():
 
     # Coherence + no-double-fold on the persisted trees: each panel that completed
     # (chat_done) folded EXACTLY ONE assistant under its single user turn.
-    conv = next(c for c in _get("/api/conversations") if c["id"] == cid)
+    conv = _get(f"/api/conversations/{cid}")  # v2: list is summaries-only
     trees = conv.get("trees") or {}
     done = [pid for pid, t in bus.terminals.items() if t == "chat_done"]
     bad = []

@@ -48,7 +48,10 @@ def _clean():
 
 def _tree():
     cs = _get("/api/conversations")
-    return cs[0]["tree"] if cs else {"nodes": {}}
+    if not cs:
+        return {"nodes": {}}
+    body = _get(f"/api/conversations/{cs[0]['id']}")  # v2: list is summaries-only
+    return (body.get("trees") or {}).get("primary") or body.get("tree") or {"nodes": {}}
 
 
 def _nodes(role=None):

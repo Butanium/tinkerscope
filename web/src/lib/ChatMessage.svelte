@@ -8,6 +8,7 @@
 	import { renderContent, renderPrefilled, splitPrefill } from '$lib/render';
 	import { tip } from '$lib/tooltip.svelte';
 	import { logprobView } from '$lib/logprobs.svelte';
+	import { nodeBlobs } from '$lib/node-blobs.svelte';
 	import TokenLogprobs from '$lib/TokenLogprobs.svelte';
 	import type { ViewMessage, SampleData } from '$lib/types';
 
@@ -81,11 +82,29 @@
 	let prefillSplit = $derived(msg.prefill ? splitPrefill(msg.prefill) : null);
 
 	let isMultiSample = $derived(!!(msg.totalSamples && msg.totalSamples > 1));
+	// Heavy fields of a COMMITTED (light) node resolve through the per-node blob
+	// cache: inline when fresh this session, else lazily fetched by the effects
+	// below the first time a view actually needs them. `has*` (inline OR flag) is
+	// the affordance truth — data exists even while the payload isn't here yet.
+	let blob = $derived(msg.nodeId ? nodeBlobs.get(msg.nodeId) : undefined);
+	let tlp = $derived(msg.token_logprobs?.length ? msg.token_logprobs : blob?.token_logprobs);
+	let rawMeta = $derived(msg.raw_meta ?? blob?.raw_meta);
+	let hasTok = $derived(!!msg.token_logprobs?.length || !!msg.has_token_logprobs);
+	let hasMeta = $derived(!!msg.raw_meta || !!msg.has_raw_meta);
 	// Token-inspector view (sidebar "Token probs" toggle + this turn has data).
 	// It renders the RAW token stream — thinking tokens included — so the
 	// separate reasoning fold is hidden while it's active (no double-render).
-	let tokView = $derived(logprobView.enabled && !!msg.token_logprobs?.length);
+	let tokView = $derived(logprobView.enabled && !!tlp?.length);
 	const sampleTok = (s: SampleData) => logprobView.enabled && !!s.token_logprobs?.length;
+	// Lazy blob fetches — fire only when a view NEEDS the payload: the token
+	// inspector when the toggle is on, the request/response disclosure when the
+	// raw view opens. ensure() dedupes (cached/in-flight ids are skipped).
+	$effect(() => {
+		if (logprobView.enabled && hasTok && !tlp && msg.nodeId) void nodeBlobs.ensure([msg.nodeId]);
+	});
+	$effect(() => {
+		if (rawSingle && hasMeta && rawMeta == null && msg.nodeId) void nodeBlobs.ensure([msg.nodeId]);
+	});
 	let canEdit = $derived(msg.nodeId != null && !busy);
 	// ‹k/N› on any committed row with siblings (the n>1 bucket uses its cards).
 	let hasSiblings = $derived(!!(msg.sib && msg.sib.count > 1) && !isMultiSample);
@@ -538,7 +557,7 @@
 				<div class="message-role">{msg.role}</div>
 				{#if msg.thinking !== undefined && !isMultiSample}{@render modeTag(msg.thinking)}{/if}
 				{#if msg.finish_reason === 'length' && !isMultiSample}{@render truncatedTag()}{/if}
-				{#if logprobView.enabled && msg.role === 'assistant' && (msg.content || msg.reasoning || isMultiSample) && !msg.token_logprobs?.length && !(msg.samples ?? []).some((s) => s?.token_logprobs?.length)}{@render noTokTag()}{/if}
+				{#if logprobView.enabled && msg.role === 'assistant' && (msg.content || msg.reasoning || isMultiSample) && !hasTok && !(msg.samples ?? []).some((s) => s?.token_logprobs?.length)}{@render noTokTag()}{/if}
 			</div>
 			{#if showSampleCycler}{@render sampleCycler()}{:else}{@render cycler()}{/if}
 		</div>
@@ -630,9 +649,9 @@
 		{:else}
 			{#if rawSingle && msg.raw_text}
 				<pre class="raw-text-view">{msg.raw_text}</pre>
-					{#if msg.raw_meta}{@render rawMetaDisclosure(msg.raw_meta)}{/if}
+					{#if rawMeta}{@render rawMetaDisclosure(rawMeta)}{:else if hasMeta}<div class="blob-loading">loading request &amp; response…</div>{/if}
 			{:else if tokView}
-				<TokenLogprobs tlp={msg.token_logprobs!} />
+				<TokenLogprobs tlp={tlp!} />
 			{:else}
 				<div class="message-content">{@html prefillSplit ? renderPrefilled(msg.content, prefillSplit.answer, msg.role) : renderContent(msg.content, msg.role)}</div>
 			{/if}
@@ -674,6 +693,14 @@
 {/if}
 
 <style>
+	/* transient strip while a light node's raw_meta blob is being fetched */
+	.blob-loading {
+		font-size: 0.72rem;
+		opacity: 0.55;
+		font-style: italic;
+		padding: 2px 0;
+	}
+
 	/* Neutral status strip (msg.notice) — a deliberate stop, not an error. */
 	.message-notice { padding: var(--space-2) var(--space-4); font-size: 0.75rem; font-style: italic; color: var(--color-text-muted); }
 	/* Message header: role label on the left, the ‹k/N› cycler pinned top-right

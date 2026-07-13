@@ -18,6 +18,7 @@
 
 import { live } from './state.svelte';
 import { conversations as convo } from './conversations.svelte';
+import { nodeBlobs } from './node-blobs.svelte';
 import { api } from './api';
 import { foldAssistant, type SampleLike } from './tree';
 import type { Panel, ChatMessage, ChatRequest, SampleData } from './types';
@@ -133,7 +134,15 @@ class ChatStore {
 		if (bucket && bucket.chat_id === data.chat_id && bucket.samples.some((s) => s)) {
 			const folded = this.#foldSamples(bucket.samples, ctx);
 			if (folded.length) {
-				const { tree } = foldAssistant(convo.treeFor(panel), ctx.userParentId, folded);
+				const { tree, ids } = foldAssistant(convo.treeFor(panel), ctx.userParentId, folded);
+				// Seed the per-node blob cache from the fresh nodes (we have the data in
+				// hand — no fetch ever needed for this session's own turns). The nodes
+				// keep the heavy fields INLINE too: the next dirty-panel PUT ships them
+				// once and the server strips them into blobs (docs/STORAGE_V2.md §2.4).
+				for (const id of ids) {
+					const n = tree.nodes[id];
+					nodeBlobs.seed(id, { token_logprobs: n.token_logprobs, raw_meta: n.raw_meta });
+				}
 				convo.setTree(panel, tree);
 			}
 		}

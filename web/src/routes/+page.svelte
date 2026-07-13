@@ -13,6 +13,7 @@
 		isCkptSel, samplerPathOf
 	} from '$lib/model-sel';
 	import { chat, type ChatParams, type ChatModelField } from '$lib/chat.svelte';
+	import { nodeBlobs } from '$lib/node-blobs.svelte';
 	import { modelCatalog } from '$lib/model-catalog.svelte';
 	import { branchOps } from '$lib/branch-ops.svelte';
 	import { panelScroll } from '$lib/scroll.svelte';
@@ -1094,7 +1095,15 @@
 				const samples = siblingsOf(tree, node.id)
 					.map((id) => tree.nodes[id])
 					.filter((n) => n && n.role === 'assistant' && (n.content || n.reasoning))
-					.map((n) => ({ content: n.content, reasoning: n.reasoning, first: n.token_logprobs?.[0] }));
+					.map((n) => ({
+						content: n.content,
+						reasoning: n.reasoning,
+						// Inline on fresh folds; light nodes resolve through the blob cache
+						// (reactive — fills in once ChartModal's ensure() fetch lands).
+						first: (n.token_logprobs ?? nodeBlobs.get(n.id)?.token_logprobs)?.[0],
+						nodeId: n.id,
+						hasFirst: !!(n.token_logprobs?.length || n.has_token_logprobs)
+					}));
 				if (samples.length > 0) turns.push({ question: lastQ, samples });
 			}
 			const bucket = live.panels[p.panel];

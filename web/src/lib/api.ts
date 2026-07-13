@@ -11,10 +11,13 @@ import type {
 	StatePatch,
 	ChatRequest,
 	Conversation,
+	ConversationSummary,
+	NodeBlobs,
 	HighlightRule,
 	PanelLayout
 } from './types';
 import type { ConvTree } from './tree';
+import type { ConvFields } from './save-plan';
 
 async function j<T>(path: string, init?: RequestInit): Promise<T> {
 	const r = await fetch(path, {
@@ -83,8 +86,19 @@ export const api = {
 		j<Record<string, unknown>>('/api/pins', { method: 'POST', body: JSON.stringify(entry) }),
 	deletePin: (id: string) =>
 		j<{ status: string }>(`/api/pins/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-	// conversations (branchable trees; server adds id/created_at/updated_at)
-	listConversations: () => j<Conversation[]>('/api/conversations'),
+	// conversations (branchable trees; server adds id/created_at/updated_at).
+	// Storage v2: the LIST is summaries only; a conversation's light body (trees
+	// incl., per-node blobs excl.) is fetched per-id; heavy per-node blobs are
+	// batch-fetched; PUT /tree upserts only the dirty panels; PATCH carries any
+	// layout-only change with zero tree bytes. See docs/STORAGE_V2.md §2.4.
+	listConversations: () => j<ConversationSummary[]>('/api/conversations'),
+	getConversation: (id: string) =>
+		j<Conversation>(`/api/conversations/${encodeURIComponent(id)}`),
+	fetchNodeBlobs: (id: string, nodes: string[]) =>
+		j<Record<string, NodeBlobs>>(`/api/conversations/${encodeURIComponent(id)}/node-blobs`, {
+			method: 'POST',
+			body: JSON.stringify({ nodes })
+		}),
 	createConversation: (entry: {
 		id?: string;
 		name?: string;
@@ -95,23 +109,18 @@ export const api = {
 		send_targets?: string[];
 		seen_panels?: string[];
 	}) => j<Conversation>('/api/conversations', { method: 'POST', body: JSON.stringify(entry) }),
-	renameConversation: (id: string, name: string) =>
-		j<Conversation>(`/api/conversations/${encodeURIComponent(id)}`, {
+	patchConversation: (id: string, patch: Partial<ConvFields> & { name?: string }) =>
+		j<ConversationSummary>(`/api/conversations/${encodeURIComponent(id)}`, {
 			method: 'PATCH',
-			body: JSON.stringify({ name })
+			body: JSON.stringify(patch)
 		}),
 	saveConversationTree: (
 		id: string,
-		trees: Record<string, ConvTree>,
-		system_prompt: string | null,
-		panels: PanelLayout[],
-		reduced_panels: string[],
-		send_targets: string[],
-		seen_panels: string[]
+		body: ConvFields & { trees: Record<string, ConvTree>; dropped_trees: string[] }
 	) =>
 		j<{ status: string; id: string }>(`/api/conversations/${encodeURIComponent(id)}/tree`, {
 			method: 'PUT',
-			body: JSON.stringify({ trees, system_prompt, panels, reduced_panels, send_targets, seen_panels })
+			body: JSON.stringify(body)
 		}),
 	deleteConversation: (id: string) =>
 		j<{ status: string }>(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' }),

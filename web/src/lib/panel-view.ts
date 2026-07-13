@@ -62,6 +62,10 @@ export function buildPanelView(tree: ConvTree, run: PanelRun, prefill?: string):
 		finish_reason: n.finish_reason,
 		thinking: n.thinking,
 		token_logprobs: n.token_logprobs,
+		// Light-node blob flags (storage v2): the heavy fields above may be absent
+		// with the data living server-side — consumers resolve via lib/node-blobs.
+		has_token_logprobs: n.has_token_logprobs,
+		has_raw_meta: n.has_raw_meta,
 		nodeId: n.id,
 		sib: siblingInfo(tree, n.id),
 		isBucket: false

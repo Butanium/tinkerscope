@@ -152,7 +152,7 @@ def main():
         # (3) every COMPLETED panel folded its reply — assert on the persisted trees
         # (setTree → debounced save). Give the saves a beat to flush, then GET.
         time.sleep(2.0)
-        conv = next(c for c in _get("/api/conversations") if c["id"] == cid)
+        conv = _get(f"/api/conversations/{cid}")  # v2: list is summaries-only
         trees = conv.get("trees") or {}
         folded, empty = [], []
         for pid in done:  # only panels that actually completed should fold

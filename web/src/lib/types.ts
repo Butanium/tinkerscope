@@ -202,6 +202,27 @@ export type ChatRequest = {
 	client_token?: string | null;
 };
 
+/** What `GET /api/conversations` returns per conversation (storage v2): the
+ *  sidebar/list projection — NO trees. The full body (trees included, blobs
+ *  excluded) is fetched per-conversation via `GET /api/conversations/{id}`. */
+export type ConversationSummary = {
+	id: string;
+	name: string;
+	created_at: string;
+	updated_at: string;
+	/** Per-conversation panel layout — present so "new conversation inherits the
+	 *  current model set" works without fetching the body. Absent on legacy rows. */
+	panels?: PanelLayout[];
+};
+
+/** A tree node's heavy out-of-tree payload (storage v2): per-node write-once
+ *  blobs, fetched in batch via `POST /api/conversations/{id}/node-blobs` and
+ *  cached in lib/node-blobs.svelte.ts. Light nodes carry `has_*` flags instead. */
+export type NodeBlobs = {
+	token_logprobs?: TokenLogprob[];
+	raw_meta?: string;
+};
+
 /** One saved, branchable conversation. The trees are OPAQUE to the backend; the
  *  browser owns them (lib/tree.ts). `system_prompt` travels with the conversation
  *  (each conversation = one experiment). */
@@ -275,8 +296,14 @@ export type ViewMessage = {
 	 *  (shows the think / no-think chip when cycling the folded siblings). */
 	thinking?: boolean;
 	/** Per-token logprobs of this turn's sample (native tinker only) — powers the
-	 *  token-hover inspector when the sidebar "Token probs" toggle is on. */
+	 *  token-hover inspector when the sidebar "Token probs" toggle is on. Absent on
+	 *  a LIGHT node whose blob lives server-side — then `has_token_logprobs` is set
+	 *  and the consumer lazy-fetches through lib/node-blobs (keyed by `nodeId`). */
 	token_logprobs?: TokenLogprob[];
+	/** Blob-presence flags (storage v2, mirrored off the light tree node): data
+	 *  exists server-side even when the inline field above is absent. */
+	has_token_logprobs?: boolean;
+	has_raw_meta?: boolean;
 	samples?: SampleData[];
 	totalSamples?: number;
 	running?: boolean;

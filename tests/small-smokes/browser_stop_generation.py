@@ -90,9 +90,18 @@ def _fire_raw_chat(token: str, flag: dict) -> None:
         flag["ended"] = True
 
 
-def _fire_until_running(page, fire_fn, label: str) -> bool:
+def _fire_until_running(page, fire_fn, label: str, settle_fn=None) -> bool:
     """Fire a chat (fire_fn) and wait for the browser to show it running (Stop enabled).
-    Free-OR pre-start-errors intermittently → running never flips; retry on timeout."""
+    Free-OR pre-start-errors intermittently → running never flips; retry on timeout.
+
+    CRITICAL before each retry: wait for the PREVIOUS attempt to fully settle
+    (`settle_fn(i) -> bool`, true = settled). A "hiccup" that is actually a SLOW
+    START (free-OR connect can exceed the wait window) would otherwise overlap the
+    retry: two chats run at once, the single-slot render bucket keeps only the
+    newest chat_id, and Stop (which cancels by the bucket's id) can never reach
+    the orphan — the server stays `running` and the smoke fails on a phantom.
+    Verified: every historical failure of this smoke had retries ≥ 1; zero-retry
+    runs always passed, on both storage-v2 and main."""
     for i in range(FIRE_ATTEMPTS):
         fire_fn(i)
         deadline = time.time() + RUNNING_WAIT_S
@@ -100,6 +109,15 @@ def _fire_until_running(page, fire_fn, label: str) -> bool:
             if page.locator(STOP_ENABLED).count() > 0:
                 return True
             page.wait_for_timeout(200)
+        # Late start? Give the attempt a grace window to either reach running
+        # (return True — it was just slow) or genuinely end before re-firing.
+        # 90s deliberately OUTLASTS the raw request's own 60s timeout, so a hung
+        # upstream connect always resolves to a dead stream before we overlap.
+        grace = time.time() + 90
+        while time.time() < grace and settle_fn and not settle_fn(i):
+            if page.locator(STOP_ENABLED).count() > 0:
+                return True
+            page.wait_for_timeout(300)
         print(f"  [{label}] attempt {i + 1}/{FIRE_ATTEMPTS}: never reached running (free-OR "
               "pre-start hiccup), retrying")
     return False
@@ -135,7 +153,12 @@ def main() -> None:
             ta.fill(LONG_PROMPT)
             ta.press("Enter")
 
-        results["owned_reached_running"] = _fire_until_running(page, fire_owned, "owned")
+        results["owned_reached_running"] = _fire_until_running(
+            page, fire_owned, "owned",
+            # settled = the server has nothing in flight (a pre-start error already
+            # broadcast its terminal); a late-STARTING chat keeps this false until
+            # the grace loop sees Stop enable and returns True instead.
+            settle_fn=lambda _i: _get("/api/state").get("running") is False)
         if results["owned_reached_running"]:
             # Assert "Stop is clean" for the stop action itself — free-OR flakiness
             # upstream shouldn't count against the stop path.
@@ -165,7 +188,11 @@ def main() -> None:
             th.start()
             threads.append(flag)
 
-        results["external_reached_running"] = _fire_until_running(page, fire_external, "external")
+        results["external_reached_running"] = _fire_until_running(
+            page, fire_external, "external",
+            # settled = this attempt's held stream actually ENDED (its pre-start
+            # error closed it); an attempt still connecting must not be overlapped.
+            settle_fn=lambda i: not threads[i]["thread"].is_alive())
         if results["external_reached_running"]:
             err_mark = len(errors)
             t1 = time.time()
