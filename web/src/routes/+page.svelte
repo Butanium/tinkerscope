@@ -1157,6 +1157,9 @@
 			done: (panel, data) => chat.tryFoldOwnDone(panel, data),
 			error: (panel, data) => chat.tryOwnError(panel, data)
 		});
+		// On EventSource reconnect (a fresh snapshot): recover any terminal missed during
+		// the gap (reload mid-generation) + un-latch busy. See reconcileOnReconnect.
+		live.onSnapshot = () => convo.reconcileOnReconnect();
 		// Pre-transition barrier: the convo store flushes our pending debounced
 		// state patch (response assigned into live.state) before any conversation
 		// switch — see flushStatePatch/#preSwitch for why (the system-prompt leak).

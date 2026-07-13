@@ -526,6 +526,69 @@ async def test_chat_normal_completion_fires_exactly_one_terminal(chat_mod, monke
     assert prim.messages[-1] == {"role": "assistant", "content": "done answer"}
 
 
+async def test_chat_detached_returns_immediately_and_completes(chat_mod, monkeypatch):
+    """Detached fire: the POST returns {"status":"started"} WITHOUT a stream (so the
+    browser never holds the connection), and a BACKGROUND task drives the generation
+    to its single terminal + commits the sample. This is the detached-path analogue of
+    the normal-completion guarantee — the driver owns the pump + the one terminal."""
+    chat_route, bus = chat_mod
+
+    async def quick(**kw):
+        yield {"content": "detached answer", "sample_index": 0, "raw_text": "detached answer"}
+
+    monkeypatch.setattr("tinkerscope.api.openrouter.sample_one_stream", quick)
+
+    sub = await bus.subscribe()
+    result = await chat_route.chat(_req(chat_route, detached=True, client_token="ct-det"))
+    assert result == {"status": "started"}  # not an EventSourceResponse — no held stream
+    assert chat_route._DETACHED_TASKS, "detached driver task not registered"
+    await asyncio.wait_for(asyncio.gather(*list(chat_route._DETACHED_TASKS)), timeout=2)
+
+    assert bus._inflight == 0
+    assert bus.state.running is False
+    terminals = [m for m in await _drain(sub) if m["type"] in ("chat_done", "chat_error")]
+    assert len(terminals) == 1 and terminals[0]["type"] == "chat_done"
+    assert terminals[0]["client_token"] == "ct-det"
+    prim = next(p for p in bus.state.panels if p.id == "primary")
+    assert prim.messages[-1] == {"role": "assistant", "content": "detached answer"}
+
+
+async def test_chat_detached_cancel_endpoint_is_the_only_stop_path(chat_mod, monkeypatch):
+    """A detached chat has NO consumer to disconnect, so Stop reaches it ONLY through
+    the cancel endpoint (by chat_id, via _INFLIGHT). Cancelling drives the background
+    driver to exactly one (error) terminal on 0 samples and clears running."""
+    chat_route, bus = chat_mod
+
+    started = asyncio.Event()
+
+    async def hang(**kw):
+        started.set()
+        await asyncio.Event().wait()
+        yield {}  # unreachable
+
+    monkeypatch.setattr("tinkerscope.api.openrouter.sample_one_stream", hang)
+
+    sub = await bus.subscribe()
+    result = await chat_route.chat(_req(chat_route, detached=True, client_token="ct-det2"))
+    assert result == {"status": "started"}
+    await asyncio.wait_for(started.wait(), timeout=2)
+    await asyncio.sleep(0.02)  # let chat_start register the chat in the cancel registry
+
+    cid = bus.state.chat_id
+    assert cid in chat_route._INFLIGHT
+    assert (await chat_route.cancel_chat(cid))["status"] == "cancelling"
+    await asyncio.wait_for(
+        asyncio.gather(*list(chat_route._DETACHED_TASKS), return_exceptions=True), timeout=2
+    )
+
+    assert bus._inflight == 0
+    assert bus.state.running is False
+    assert cid not in chat_route._INFLIGHT
+    terminals = [m for m in await _drain(sub) if m["type"] in ("chat_done", "chat_error")]
+    assert len(terminals) == 1 and terminals[0]["type"] == "chat_error"
+    assert terminals[0]["error"] == "cancelled"
+
+
 async def test_chat_cancel_during_chat_start_broadcast_still_fires_terminal(chat_mod, monkeypatch):
     """A disconnect landing while gen() is suspended in the chat_start broadcast —
     AFTER chat_begin bumped _inflight, before the guaranteed-terminal try — must

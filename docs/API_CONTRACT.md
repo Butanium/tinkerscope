@@ -264,6 +264,18 @@ Two consequences of detached:
 - The fold is now **deterministic on the single bus `chat_done`** (no drain racing
   it), so an aborted chat's already-completed partials fold reliably.
 
+**Reload mid-generation.** The fold registration (client_token → fold context) is
+browser-session-scoped, so a page reload loses it. The in-flight detached chats keep
+running server-side; the reloaded page sees each `chat_done` as EXTERNAL (no
+registration) and folds it from the transcript echo — a SINGLE representative sample,
+like a tinkpg chat (an n>1 distribution collapses to one branch; that's the accepted
+recovery). A reply that completes during the brief EventSource reconnect GAP (old
+page gone, new stream not yet up) has its `chat_done` missed, but its committed turn
+is in the echo; the reconnect `snapshot` handler (`convo.reconcileOnReconnect`) folds
+any such straggler and un-latches `busy` when the server reports nothing running. Net:
+no stuck placeholders, no double-fold; whatever content lands is coherent. Smoke:
+`tests/small-smokes/browser_detached_reload.py`.
+
 ## Reference implementations to mirror (do NOT reinvent)
 - samplescope CLI (typer + httpx + httpx_sse, server auto-discovery via instance
   registry): `~/tools/samplescope/src/samplescope/cli.py`. tinkerscope's

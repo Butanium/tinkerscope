@@ -160,6 +160,17 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
 
 ## Later / optional
 
+- [ ] **Busy-latch after a bus drop while ANOTHER chat is still running.** Detached
+  fire moved `endToken` (which clears `convo.busy` → New/switch gating) onto the bus
+  `chat_done`. If the `/api/state/events` EventSource drops and misses a chat's
+  terminal, its token latches `busy`. `convo.reconcileOnReconnect` (fired on the
+  reconnect snapshot) closes the COMMON case — server `running===false` ⇒ every
+  lingering token is stale ⇒ clear. The remaining case: the server is STILL running
+  some OTHER chat at reconnect (`running===true`), so a token whose OWN terminal we
+  missed in the gap stays latched until that other chat ends. The snapshot's global
+  `running` bool can't disambiguate per-token; a clean fix needs per-panel/per-chat
+  running in `PlaygroundState` (then reconcile each token against whether ITS chat is
+  still in flight). Low-frequency (needs a drop mid-multi-chat) + a refresh clears it.
 - [ ] **Echo-lag persist race on layout mutations (reorder / setRun).** A panel
   mutation persists via `patchState(...)` + `convo.save()`, but `#doSave` reads the
   panel LAYOUT from `live.state` ~400 ms later, and `patchState`'s flush discards

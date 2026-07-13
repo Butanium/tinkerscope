@@ -52,6 +52,11 @@ class LiveStore {
 	onChatStart: ((panel: Panel, data: any) => void) | null = null;
 	onChatDone: ((panel: Panel, data: any) => void) | null = null;
 	onChatError: ((panel: Panel, data: any) => void) | null = null;
+	/** Fires on a full `snapshot` (sent to every new subscriber → also on EventSource
+	 *  RECONNECT after a drop). Lets the conversation store reconcile any terminal it
+	 *  missed during the gap + release stale busy tokens. Not fired on incremental
+	 *  `patch` events. */
+	onSnapshot: (() => void) | null = null;
 
 	#stop: (() => void) | null = null;
 
@@ -92,6 +97,9 @@ class LiveStore {
 		this.connected = true;
 		switch (event) {
 			case 'snapshot':
+				if (data?.state) this.state = data.state as PlaygroundState;
+				this.onSnapshot?.(); // reconnect reconcile (a fresh subscriber always gets a snapshot)
+				break;
 			case 'patch':
 				if (data?.state) this.state = data.state as PlaygroundState;
 				break;

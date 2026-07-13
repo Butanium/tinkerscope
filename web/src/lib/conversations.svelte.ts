@@ -622,6 +622,49 @@ class ConversationsStore {
 			this.#flashNotice('Terminal started a new conversation — your previous thread is at ‹1/N› on the first message.');
 	}
 
+	/** On a bus RECONNECT (a fresh snapshot after an EventSource drop): recover any
+	 *  chat terminal we missed during the gap, and un-latch busy if the server has
+	 *  nothing in flight. Two failure modes this closes:
+	 *   - Reload / drop mid-generation: a detached chat completes server-side while we
+	 *     weren't listening; its chat_done never reached us, so its reply sits in the
+	 *     echo (`ps.messages`) unfolded. We reconcile each non-running panel's tree
+	 *     from the echo (single representative — same recovery a reload gets), idempotent.
+	 *   - Busy-latch: an own chat's terminal missed in the gap would leave its token in
+	 *     #ownTokens forever (New/switch stuck disabled). If the server reports nothing
+	 *     running, every lingering token is from a missed terminal → release them.
+	 *  Scoped to OUR open conversation (the echo is a process-wide singleton; a
+	 *  CLI/other-tab conversation switch must not graft foreign turns). */
+	reconcileOnReconnect(): void {
+		if (!this.activeId) return;
+		const serverConv = live.state?.conversation_id;
+		const sameConv = serverConv == null || serverConv === this.activeId;
+		if (sameConv && !live.anyRunning) {
+			let changed = false;
+			for (const ps of live.state?.panels ?? []) {
+				const echo = (ps.messages ?? []) as Msg[];
+				const cur = this.trees[ps.id];
+				if (cur && echo.length && !msgsEqual(echo, activeMessages(cur))) {
+					this.trees = { ...this.trees, [ps.id]: reconcileExternal(cur, echo) };
+					changed = true;
+				}
+			}
+			// Only re-mirror when we actually folded something. A blind #mirror here would
+			// echo the (still user-only) trees back and OVERWRITE the server's committed
+			// turns — right after a reload, where #loadTrees has cleared the local echo,
+			// that would destroy the very data a later reconcile needs.
+			if (changed) this.#mirror();
+		}
+		// Un-latch busy: server `running` is the in-flight COUNTER — 0 means every chat
+		// fired its terminal, so any token still held is one we missed. (TODO: when the
+		// server IS still running some OTHER chat, a token whose own terminal we missed
+		// in the gap stays latched until that other chat ends — snapshot's global bool
+		// can't disambiguate per-token; would need per-panel running in the state.)
+		if (live.state?.running === false && this.#ownTokens.size) {
+			this.#ownTokens.clear();
+			this.#busy = false;
+		}
+	}
+
 	#flashNotice(msg: string): void {
 		this.externalNotice = msg;
 		if (this.#noticeTimer) clearTimeout(this.#noticeTimer);

@@ -93,6 +93,11 @@ select {
 	display: none; /* WebKit/Blink */
 }
 
+/* Two mechanisms, by engine: Firefox honors ONLY scrollbar-width/scrollbar-color
+ * (none/thin/auto + colors — no thumb shaping), while WebKit AND Chromium honor
+ * the ::-webkit-scrollbar pseudo-elements below (which take precedence when styled)
+ * — needed for the 8px height, rounded/inset thumb, and hover that scrollbar-* can't
+ * express. So we set both: the pair for Firefox, the pseudo-elements for the rest. */
 .chat-columns {
 	scrollbar-width: thin; /* Firefox: re-enable */
 	scrollbar-color: var(--color-text-light) transparent; /* thumb / track */
