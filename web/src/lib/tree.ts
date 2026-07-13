@@ -57,8 +57,16 @@ export type TreeNode = {
 	 *  think / no-think chip survives reload. Absent on single-mode turns. */
 	thinking?: boolean;
 	/** Per-token logprobs + top-K alternatives (native tinker sampling only);
-	 *  persisted — powers the token-hover inspector + the first-token chart. */
+	 *  present INLINE only on freshly-folded nodes this session — the server strips
+	 *  it into a per-node blob on save (storage v2), so loaded nodes carry
+	 *  `has_token_logprobs` instead and consumers go through lib/node-blobs. */
 	token_logprobs?: TokenLogprob[];
+	/** Blob-presence flags (storage v2): the server stores heavy fields
+	 *  (token_logprobs / raw_meta) out-of-tree and marks a light node with these.
+	 *  Write-once, id-bound — a node COPY (fresh id, e.g. editUserForkCopy) must
+	 *  NOT inherit them (no blob exists under the new id). */
+	has_token_logprobs?: boolean;
+	has_raw_meta?: boolean;
 	parent: string | null; // null = child of the virtual root
 	children: string[]; // ordered
 };
@@ -151,6 +159,8 @@ function cloneTree(t: ConvTree): ConvTree {
 			finish_reason: n.finish_reason,
 			thinking: n.thinking,
 			token_logprobs: cloneTokenLogprobs(n.token_logprobs),
+			has_token_logprobs: n.has_token_logprobs,
+			has_raw_meta: n.has_raw_meta,
 			parent: n.parent,
 			children: [...n.children]
 		};

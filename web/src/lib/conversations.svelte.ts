@@ -1,16 +1,32 @@
 // The conversation/branch-tree store — the frontend owner of the per-panel
-// branch trees and their persistence. See docs/BRANCHING_DESIGN.md §6.
+// branch trees and their persistence. See docs/BRANCHING_DESIGN.md §6 and
+// docs/STORAGE_V2.md §2.5.
 //
-// Division of responsibility: THIS store owns the reactive `tree`/`compareTree`,
-// the named-conversation `list`/`activeId`, persistence (debounced, capture-at-
-// schedule), the chat-ownership token set, and the external-fold reconciliation
-// wired off the live bus. The TREE OPERATIONS (append/fold/regen/edit/delete/
-// cycle) live in +page.svelte, which reads `treeFor(panel)`, computes a new tree
-// via lib/tree.ts, and commits it with `setTree(panel, …)` — the single entry
-// that mirrors the active path into PlaygroundState.messages AND debounce-saves.
+// Division of responsibility: THIS store owns the reactive `trees`, the
+// summaries `list`/`activeId`, persistence (debounced, dirty-panel granular),
+// the chat-ownership token set, and the external-fold reconciliation wired off
+// the live bus. The TREE OPERATIONS (append/fold/regen/edit/delete/cycle) live
+// in branch-ops/+page, which read `treeFor(panel)`, compute a new tree via
+// lib/tree.ts, and commit it with `setTree(panel, …)` — the single entry that
+// mirrors the active path into PlaygroundState.messages AND debounce-saves.
+//
+// Storage v2 memory policy (docs/STORAGE_V2.md):
+//   - `list` holds SUMMARIES only; a conversation's light body is fetched on
+//     open (GET /api/conversations/{id}) and the previous one's trees + node-blob
+//     cache are dropped on switch.
+//   - `trees` is $state.raw: every mutation is a wholesale per-panel ref
+//     replacement (tree.ts ops are immutable), so deep proxies were pure
+//     overhead — and $state.snapshot on save (which deep-copied a possibly-huge
+//     map) is gone entirely; refs are stringified directly.
+//   - Saves accumulate DIRT (dirty panels / dropped panels / layout flag) and
+//     ship either a partial-upsert PUT (tree bytes for dirty panels only) or a
+//     layout-only PATCH (zero tree bytes — model swap / fold / send-target
+//     toggles never serialize a tree again). See lib/save-plan.ts.
 
 import { live } from './state.svelte';
 import { api } from './api';
+import { nodeBlobs } from './node-blobs.svelte';
+import { planSave } from './save-plan';
 import {
 	emptyTree,
 	activeMessages,
@@ -18,7 +34,13 @@ import {
 	type ConvTree,
 	type Msg
 } from './tree';
-import type { Conversation, Panel, PanelLayout, StatePatch } from './types';
+import type {
+	Conversation,
+	ConversationSummary,
+	Panel,
+	PanelLayout,
+	StatePatch
+} from './types';
 
 function asTree(x: unknown): ConvTree {
 	const t = x as ConvTree | undefined | null;
@@ -33,17 +55,20 @@ function msgsEqual(a: Msg[], b: Msg[]): boolean {
 	return true;
 }
 
-function newest(list: Conversation[]): Conversation | undefined {
+function newest(list: ConversationSummary[]): ConversationSummary | undefined {
 	return [...list].sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))[0];
 }
 
 class ConversationsStore {
-	list = $state<Conversation[]>([]);
+	/** Conversation summaries (no trees) — the sidebar list. */
+	list = $state<ConversationSummary[]>([]);
 	activeId = $state<string | null>(null);
 	/** Per-panel branch trees keyed by stable panel id ('primary' always present).
 	 *  THE read source: +page reads treeFor(panel), computes a new tree via tree.ts,
-	 *  commits with setTree(panel,…). N-panel: any number of keys. */
-	trees = $state<Record<string, ConvTree>>({ primary: emptyTree() });
+	 *  commits with setTree(panel,…). N-panel: any number of keys.
+	 *  $state.raw — plain immutable objects, replaced wholesale per commit; never
+	 *  mutate a tree/node in place (nothing would react, nothing would save). */
+	trees = $state.raw<Record<string, ConvTree>>({ primary: emptyTree() });
 	/** Transient hint shown when the terminal/another tab branched the conversation. */
 	externalNotice = $state<string | null>(null);
 
@@ -82,14 +107,30 @@ class ConversationsStore {
 	 *  bindings when a token is removed — the New/regen/edit buttons would latch
 	 *  disabled after a generation. Keep this in lockstep with every Set mutation. */
 	#busy = $state(false);
+
+	// ── save dirt (capture-at-mark; flush-on-switch) ──────────────────
+	/** Dirty panels: id → the tree ref as committed (refs are immutable, so this
+	 *  IS the capture — no copy). Merged across marks; drained per save. */
+	#dirtyTrees = new Map<string, ConvTree>();
+	/** Panels dropped since the last save (server deletes their stored trees). */
+	#droppedTrees = new Set<string>();
+	/** Conversation-level (non-tree) change pending: panel layout / send-targets /
+	 *  folds / system prompt / seen bookkeeping. Ships as a PATCH when no tree
+	 *  dirt rides along. */
+	#layoutDirty = false;
+	/** The conversation the accumulated dirt belongs to. Flush-on-switch keeps it
+	 *  equal to activeId whenever dirt exists. */
+	#pendingId: string | null = null;
 	#saveTimer: ReturnType<typeof setTimeout> | null = null;
-	#pending: {
-		id: string;
-		trees: Record<string, ConvTree>;
-		reduced_panels: string[];
-		send_targets: string[];
-		seen_panels: string[];
-	} | null = null;
+	/** Serializes #doSave runs (a materializing CREATE must not race a follow-up
+	 *  partial PUT of the same conversation). */
+	#saveChain: Promise<void> = Promise.resolve();
+	/** Guards a mid-session body-fetch failure (see remove()): the store shows an
+	 *  empty conversation it could not load — marking dirt then would PUT that
+	 *  emptiness over the stored data, so saves latch off until a successful load. */
+	#loadFailed = false;
+	/** Supersedes an in-flight switchTo body fetch when a newer switch starts. */
+	#switchSeq = 0;
 	#noticeTimer: ReturnType<typeof setTimeout> | null = null;
 	/** Id of the current UNSAVED draft (a new conversation that exists only in `list`,
 	 *  not yet on the backend). It is materialized on the first save (= first real
@@ -123,11 +164,11 @@ class ConversationsStore {
 	// ── the single commit entry ──────────────────────────────────────
 	/** Commit a new tree for a panel: update reactive state, mirror the active
 	 *  path into PlaygroundState.messages (so the CLI/sampler see it), and
-	 *  schedule a debounced save. */
+	 *  schedule a debounced save of THIS panel. */
 	setTree(panel: Panel, next: ConvTree, persist = true): void {
 		this.trees = { ...this.trees, [panel]: next };
 		this.#mirror();
-		if (persist) this.save();
+		if (persist) this.#markTree(panel);
 	}
 
 	#mirror(): void {
@@ -148,13 +189,15 @@ class ConversationsStore {
 		api.setState({ panel_messages }).catch(() => {});
 	}
 
-	/** Duplicate one panel's tree into another (deep, proxy-safe clone — used when a
-	 *  new compare panel should start from an existing thread). Does NOT clear other
+	/** Duplicate one panel's tree into another (used when a new compare panel should
+	 *  start from an existing thread). structuredClone, NOT $state.snapshot: trees
+	 *  are $state.raw (plain objects), so snapshot would return the SAME ref and
+	 *  alias two panels. Light trees make the clone cheap. Does NOT clear other
 	 *  panels' live buckets, so adding a panel can't wipe an in-flight stream. */
 	duplicateTo(srcPanel: Panel, dstPanel: Panel): void {
-		this.trees = { ...this.trees, [dstPanel]: $state.snapshot(this.treeFor(srcPanel)) as ConvTree };
+		this.trees = { ...this.trees, [dstPanel]: structuredClone(this.treeFor(srcPanel)) };
 		this.#mirror();
-		this.save();
+		this.#markTree(dstPanel);
 	}
 
 	/** Seed a panel with an EMPTY thread (Shift+add panel = blank, vs duplicateTo's
@@ -162,7 +205,7 @@ class ConversationsStore {
 	freshTree(panel: Panel): void {
 		this.trees = { ...this.trees, [panel]: emptyTree() };
 		this.#mirror();
-		this.save();
+		this.#markTree(panel);
 	}
 
 	/** Drop a panel's tree (on panel removal). The LAST tree is never dropped —
@@ -173,7 +216,7 @@ class ConversationsStore {
 		delete next[panel];
 		this.trees = next;
 		this.#mirror();
-		this.save();
+		this.#markDropped(panel);
 	}
 
 	// ── panel UI (folded / send-targets), persisted with the conversation ──
@@ -246,92 +289,144 @@ class ConversationsStore {
 		return layout.length ? layout : [{ id: 'primary', run_id: null, checkpoint: null }];
 	}
 
-	/** Reset every open panel's tree to empty (fresh thread, same panel layout). */
-	#freshTrees(): Promise<void> {
+	/** Reset every open panel's tree to empty (fresh thread, same panel layout).
+	 *  `mark` schedules the emptiness for persistence (dirty new ids + dropped
+	 *  stale ids); pass false ONLY for an unsaved draft, which must stay unsaved. */
+	#freshTrees(mark: boolean): Promise<void> {
 		const ids = (live.state?.panels ?? []).map((p) => p.id);
 		if (!ids.length) ids.push('primary'); // no panels known yet → the default first slot
+		const prev = Object.keys(this.trees);
 		this.trees = Object.fromEntries(ids.map((id) => [id, emptyTree()]));
+		if (mark) {
+			for (const id of ids) this.#markTree(id);
+			for (const p of prev) if (!ids.includes(p)) this.#markDropped(p);
+		}
 		return api
 			.setState({ panel_messages: Object.fromEntries(ids.map((id) => [id, []])) })
 			.then(() => {})
 			.catch(() => {});
 	}
 
-	// ── persistence (capture-at-schedule; flush-on-switch) ───────────
+	// ── persistence (dirty-panel granular; flush-on-switch) ───────────
+	/** Public save = a conversation-LEVEL (non-tree) change: panel layout, model
+	 *  selection, send-targets, folds, system prompt, seen bookkeeping. Tree dirt
+	 *  is marked by setTree/duplicateTo/freshTree/dropTree themselves. */
 	save(): void {
+		this.#markLayout();
+	}
+
+	#markTree(panel: Panel): void {
+		if (!this.#beginDirt()) return;
+		this.#droppedTrees.delete(panel);
+		this.#dirtyTrees.set(panel, this.treeFor(panel));
+		this.#schedule();
+	}
+	#markDropped(panel: Panel): void {
+		if (!this.#beginDirt()) return;
+		this.#dirtyTrees.delete(panel);
+		this.#droppedTrees.add(panel);
+		this.#schedule();
+	}
+	#markLayout(): void {
+		if (!this.#beginDirt()) return;
+		this.#layoutDirty = true;
+		this.#schedule();
+	}
+	/** Common mark preamble: bind the dirt to the active conversation. Returns
+	 *  false when there is nothing to bind to (no active conversation) or the
+	 *  store is in the failed-load latch (saving would clobber stored data). */
+	#beginDirt(): boolean {
 		const id = this.activeId;
-		if (!id) return;
-		// Snapshot all trees; drop empty panels (no rootChildren) but keep at least
-		// the FIRST one so a conversation never persists with zero trees.
-		const snap = $state.snapshot(this.trees) as Record<string, ConvTree>;
-		const trees: Record<string, ConvTree> = {};
-		for (const [pid, t] of Object.entries(snap)) {
-			if (t.rootChildren.length) trees[pid] = t;
+		if (!id) return false;
+		if (this.#loadFailed) {
+			console.warn('conversation failed to load — change NOT scheduled for save');
+			return false;
 		}
-		if (!Object.keys(trees).length) {
-			const first = Object.keys(snap)[0] ?? 'primary';
-			trees[first] = snap[first] ?? emptyTree();
+		if (this.#pendingId && this.#pendingId !== id) {
+			// Flush-on-switch makes this unreachable. If it ever happens, DROP the
+			// stale dirt loudly: tree refs from another conversation saved under this
+			// id would corrupt it — losing a 400ms edit window is the lesser harm.
+			console.warn('save dirt spans conversations — dropping stale dirt for', this.#pendingId);
+			this.#dirtyTrees = new Map();
+			this.#droppedTrees = new Set();
+			this.#layoutDirty = false;
 		}
-		this.#pending = {
-			id,
-			trees,
-			reduced_panels: [...this.reducedPanels],
-			send_targets: [...this.sendTargets],
-			seen_panels: [...this.#seenPanels]
-		};
+		this.#pendingId = id;
+		return true;
+	}
+	#hasDirt(): boolean {
+		return (
+			this.#pendingId !== null &&
+			(this.#dirtyTrees.size > 0 || this.#droppedTrees.size > 0 || this.#layoutDirty)
+		);
+	}
+	#schedule(): void {
 		if (this.#saveTimer) clearTimeout(this.#saveTimer);
-		this.#saveTimer = setTimeout(() => void this.#doSave(), 400);
+		this.#saveTimer = setTimeout(() => void this.#runSave(), 400);
+	}
+	/** Enqueue one save pass on the chain (never concurrent with another). */
+	#runSave(): Promise<void> {
+		this.#saveChain = this.#saveChain.then(() => this.#doSave());
+		return this.#saveChain;
 	}
 
 	async #doSave(): Promise<void> {
 		this.#saveTimer = null;
-		const p = this.#pending;
-		this.#pending = null;
-		if (!p) return;
-		// system_prompt + the panel LAYOUT mirror server state, which lands a beat
-		// after a patchState — so read them HERE (debounced), not at schedule time, to
-		// avoid persisting a stale value. flush-on-switch keeps live.state aligned with
-		// p.id (switch/create flush the pending save before they touch live.state).
-		const system_prompt = live.state?.system_prompt ?? null;
-		const panels: PanelLayout[] = (live.state?.panels ?? []).map((ps) => ({
-			id: ps.id,
-			run_id: ps.run_id,
-			checkpoint: ps.checkpoint
-		}));
+		if (!this.#hasDirt()) return;
+		const id = this.#pendingId!;
+		// Drain the dirt into locals — a change landing during the awaits below
+		// re-marks cleanly and ships with the NEXT pass.
+		const dirtyTrees = this.#dirtyTrees;
+		const droppedTrees = this.#droppedTrees;
+		const layoutDirty = this.#layoutDirty;
+		this.#dirtyTrees = new Map();
+		this.#droppedTrees = new Set();
+		this.#layoutDirty = false;
+		this.#pendingId = null;
+		// Conversation-level fields are read at FIRE time: system_prompt + the panel
+		// layout mirror server state (which lands a beat after a patchState), and
+		// flush-on-switch guarantees live.state still belongs to `id` here.
+		const fields = {
+			system_prompt: live.state?.system_prompt ?? null,
+			panels: (live.state?.panels ?? []).map((ps) => ({
+				id: ps.id,
+				run_id: ps.run_id,
+				checkpoint: ps.checkpoint
+			})),
+			reduced_panels: [...this.reducedPanels],
+			send_targets: [...this.sendTargets],
+			seen_panels: [...this.#seenPanels]
+		};
 		// A pending save IS the first real change to an unsaved draft → materialize it
-		// on the backend (create with the draft's id) instead of a tree-save (which would
-		// 404). Clear #draftId SYNCHRONOUSLY (before the await) so a racing #doSave can't
-		// double-create; restore it on failure so a retry still creates it.
-		const materializing = p.id === this.#draftId;
+		// on the backend (create with the draft's id, FULL current trees) instead of a
+		// partial save (which would 404). Clear #draftId SYNCHRONOUSLY (before the
+		// await) so a racing pass can't double-create; restore it on failure so a
+		// retry still creates it.
+		const materializing = id === this.#draftId;
 		if (materializing) this.#draftId = null;
 		try {
 			if (materializing) {
-				const name = this.list.find((c) => c.id === p.id)?.name ?? 'Untitled';
-				await api.createConversation({
-					id: p.id,
-					name,
-					system_prompt,
-					trees: p.trees,
-					panels,
-					reduced_panels: p.reduced_panels,
-					send_targets: p.send_targets,
-					seen_panels: p.seen_panels
-				});
+				const name = this.list.find((c) => c.id === id)?.name ?? 'Untitled';
+				await api.createConversation({ id, name, ...fields, trees: { ...this.trees } });
 			} else {
-				await api.saveConversationTree(
-					p.id,
-					p.trees,
-					system_prompt,
-					panels,
-					p.reduced_panels,
-					p.send_targets,
-					p.seen_panels
-				);
+				const plan = planSave({ dirtyTrees, droppedTrees, layoutDirty }, fields);
+				if (plan.kind === 'put') await api.saveConversationTree(id, plan.body);
+				else if (plan.kind === 'patch') await api.patchConversation(id, plan.body);
 			}
-			this.list = this.list.map((c) => (c.id === p.id ? { ...c, updated_at: new Date().toISOString() } : c));
+			this.list = this.list.map((c) =>
+				c.id === id ? { ...c, updated_at: new Date().toISOString() } : c
+			);
 		} catch (e) {
-			if (materializing) this.#draftId = p.id; // not persisted — still a draft
-			console.warn('conversation tree save failed', e);
+			if (materializing) this.#draftId = id; // not persisted — still a draft
+			// Re-merge the drained dirt (unless a newer mark superseded it) so the next
+			// save / flush-on-switch retries — a silently-lost PARTIAL save would never
+			// be re-shipped by later unrelated edits, unlike the old whole-map save.
+			for (const [p, t] of dirtyTrees)
+				if (!this.#dirtyTrees.has(p) && !this.#droppedTrees.has(p)) this.#dirtyTrees.set(p, t);
+			for (const p of droppedTrees) if (!this.#dirtyTrees.has(p)) this.#droppedTrees.add(p);
+			if (layoutDirty) this.#layoutDirty = true;
+			if (!this.#pendingId) this.#pendingId = id;
+			console.warn('conversation save failed', e);
 		}
 	}
 
@@ -340,14 +435,17 @@ class ConversationsStore {
 			clearTimeout(this.#saveTimer);
 			this.#saveTimer = null;
 		}
-		if (this.#pending) await this.#doSave();
+		// Run pending dirt now, and in all cases let any in-flight pass settle —
+		// a transition must never overlap a save still on the wire.
+		if (this.#hasDirt()) await this.#runSave();
+		else await this.#saveChain;
 	}
 
 	// ── load / switch / create / rename / remove ─────────────────────
-	/** Load the conversation list and pick the active one. If `preferredId` is
-	 *  given (e.g. from the `?c=` URL param) and matches a conversation, open it;
-	 *  otherwise open the newest. Returns whether `preferredId` was honored (false
-	 *  ⇒ it was absent or unknown, so the caller can normalize the URL / notify). */
+	/** Load the conversation SUMMARIES and open the active one (fetching its body).
+	 *  If `preferredId` is given (e.g. from the `?c=` URL param) and matches, open
+	 *  it; otherwise open the newest. Returns whether `preferredId` was honored
+	 *  (false ⇒ absent or unknown, so the caller can normalize the URL / notify). */
 	async load(preferredId?: string | null): Promise<boolean> {
 		await this.#preSwitch();
 		const list = await api.listConversations();
@@ -360,8 +458,10 @@ class ConversationsStore {
 		}
 		const preferred = preferredId ? list.find((c) => c.id === preferredId) : undefined;
 		const active = preferred ?? newest(list)!;
+		const conv = await api.getConversation(active.id); // throws → +page's load banner
+		nodeBlobs.reset(active.id);
 		this.activeId = active.id;
-		await this.#loadTrees(active);
+		await this.#loadTrees(conv);
 		this.#afterLoad();
 		return !!preferred;
 	}
@@ -376,9 +476,25 @@ class ConversationsStore {
 		const leavingDraft = this.#draftId !== null && this.#draftId === this.activeId;
 		await this.flush();
 		if (leavingDraft) this.#discardDraftIfUntouched();
+		if (!this.list.find((c) => c.id === id)) return;
+		// Fetch the body BEFORE committing any transition state: on failure we stay
+		// fully on the current conversation (nothing half-switched to mis-save
+		// against), on supersession (a newer switch) we just stand down.
+		const seq = ++this.#switchSeq;
+		let conv: Conversation;
+		try {
+			conv = await api.getConversation(id);
+		} catch (e: any) {
+			this.#flashNotice(`Failed to open conversation: ${e?.message ?? e}`);
+			return;
+		}
+		if (seq !== this.#switchSeq) return;
+		// Edits made to the OLD conversation while the body was in flight: flush them
+		// now, while activeId/live.state still belong to it.
+		if (this.#hasDirt()) await this.flush();
+		if (seq !== this.#switchSeq) return;
 		live.clearBuckets();
-		const conv = this.list.find((c) => c.id === id);
-		if (!conv) return;
+		nodeBlobs.reset(id);
 		this.activeId = id;
 		await this.#loadTrees(conv);
 		this.#afterLoad();
@@ -409,22 +525,21 @@ class ConversationsStore {
 		// activeId is newly-set, and the ?c= sync effect would switch right back to
 		// the old conversation if the URL still pointed there (an id not yet in `list`
 		// is ignored by that effect, so a caller-set URL is safe). See newConversation.
-		const draft: Conversation = {
+		const draft: ConversationSummary = {
 			id: id ?? crypto.randomUUID(),
 			name,
-			system_prompt: live.state?.system_prompt ?? null,
-			trees: { [ids[0]]: emptyTree() },
 			panels: layout,
-			reduced_panels: [],
-			send_targets: [...ids],
-			seen_panels: [...ids],
 			created_at: now,
 			updated_at: now
 		};
 		this.list = [draft, ...this.list];
 		this.activeId = draft.id;
 		this.#draftId = draft.id;
-		this.#applyPanelUi(draft);
+		this.#loadFailed = false;
+		nodeBlobs.reset(draft.id);
+		this.reducedPanels = new Set();
+		this.sendTargets = new Set(ids);
+		this.#seenPanels = new Set(ids);
 		// Lay out the inherited/blank panels with EMPTY trees + transcripts. One
 		// optimistic setState (panels + cleared echoes) so live.state reflects the new
 		// layout immediately — the SSE patch lags a beat behind the POST.
@@ -452,10 +567,10 @@ class ConversationsStore {
 		if (id === this.#draftId) {
 			// Unsaved draft: keep the name locally and materialize it (a rename IS a change).
 			this.list = this.list.map((c) => (c.id === id ? { ...c, name } : c));
-			this.save();
+			this.#markLayout();
 			return;
 		}
-		const updated = await api.renameConversation(id, name);
+		const updated = await api.patchConversation(id, { name });
 		this.list = this.list.map((c) =>
 			c.id === id ? { ...c, name: updated.name, updated_at: updated.updated_at } : c
 		);
@@ -469,7 +584,10 @@ class ConversationsStore {
 		// empty trees, default name).
 		if (this.list.length <= 1) {
 			live.clearBuckets();
-			await this.#freshTrees();
+			nodeBlobs.reset(id);
+			// A draft must STAY unsaved through the reset — don't mark its emptied
+			// trees for persistence (that would materialize an empty conversation).
+			await this.#freshTrees(!removingDraft);
 			if (removingDraft) {
 				// Already unsaved + now empty → stay a draft, just reset the name locally.
 				this.list = this.list.map((c) => (c.id === id ? { ...c, name: 'Untitled' } : c));
@@ -486,8 +604,22 @@ class ConversationsStore {
 		if (this.activeId === id) {
 			live.clearBuckets();
 			const next = newest(this.list)!;
+			nodeBlobs.reset(next.id);
 			this.activeId = next.id;
-			await this.#loadTrees(next);
+			let conv: Conversation | null = null;
+			try {
+				conv = await api.getConversation(next.id);
+			} catch (e: any) {
+				// Deleted the open conversation but couldn't load the next: latch saves
+				// off (an empty PUT would clobber the stored data) and say so.
+				this.trees = { primary: emptyTree() };
+				this.#loadFailed = true;
+				this.#flashNotice(
+					`Failed to load the next conversation (${e?.message ?? e}) — changes are NOT being saved; reload the page.`
+				);
+				return;
+			}
+			await this.#loadTrees(conv);
 			this.#afterLoad();
 		}
 	}
@@ -496,7 +628,7 @@ class ConversationsStore {
 	async resetActive(): Promise<void> {
 		await this.#preSwitch();
 		live.clearBuckets();
-		await this.#freshTrees();
+		await this.#freshTrees(true);
 		this.save();
 	}
 
@@ -505,6 +637,7 @@ class ConversationsStore {
 	 *  un-migrated saved conversation loads without losing a user-authored compare
 	 *  tree. asTree() returns emptyTree() on malformed input. */
 	async #loadTrees(conv: Conversation): Promise<void> {
+		this.#loadFailed = false; // a body arrived — saves are safe again
 		// The cleaned layout we'll restore: drop every panel with no model
 		// (run_id == null). Such a panel can't sample anything — it's the inert "phantom"
 		// the resurrection bug used to mint, and earlier sessions baked some into saved

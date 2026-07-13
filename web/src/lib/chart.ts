@@ -42,8 +42,17 @@ const MIN_FRACTION = 0.03;
 /** One sampled assistant reply, as the chart consumes it. `content` may be ''
  *  (a sample that spent its whole budget thinking) — those still count.
  *  `first` = the sample's FIRST generated token's logprob record (native tinker
- *  only) — feeds the first-token distribution mode. */
-export type ChartSample = { content: string; reasoning?: string; first?: TokenLogprob };
+ *  only) — feeds the first-token distribution mode. Storage v2: a committed
+ *  sample's logprobs may live server-side — then `hasFirst` is set with `first`
+ *  still absent, and `nodeId` lets the modal batch-fetch the blob (`first`
+ *  fills in reactively once it lands). Streaming samples stay inline-only. */
+export type ChartSample = {
+	content: string;
+	reasoning?: string;
+	first?: TokenLogprob;
+	nodeId?: string;
+	hasFirst?: boolean;
+};
 
 /** Which text of a sample the rules match against. */
 export type MatchScope = 'response' | 'thinking' | 'either';

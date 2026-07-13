@@ -414,6 +414,36 @@ test('CRITIQUE: a divergent external turn becomes a NEW root, prior branch recov
 	eq(msgContents(back), ['U1', 'A1', 'U2', 'A2']);
 });
 
+test('STORAGE-V2: has_* blob flags survive every clone-based op', () => {
+	// A light node (loaded from the server) carries flags instead of payloads;
+	// ops clone field-by-field, so a missed field would silently strip the flag
+	// and the UI would stop offering the token view on old turns after ANY edit.
+	const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+	const { tree: t2, ids } = foldAssistant(t1, u, [{ content: 'A' }]);
+	t2.nodes[ids[0]].has_token_logprobs = true; // simulate a server-loaded light node
+	t2.nodes[ids[0]].has_raw_meta = true;
+	const t3 = appendUserTurn(t2, 'q2').tree; // any cloneTree-based op
+	eq(t3.nodes[ids[0]].has_token_logprobs, true, 'has_token_logprobs lost in clone');
+	eq(t3.nodes[ids[0]].has_raw_meta, true, 'has_raw_meta lost in clone');
+	const t4 = setSelected(t3, ids[0]);
+	eq(t4.nodes[ids[0]].has_raw_meta, true, 'has_raw_meta lost in setSelected');
+});
+
+test('STORAGE-V2: editUserForkCopy copies do NOT inherit id-bound blob flags', () => {
+	// A copied node gets a FRESH id — no blob exists under it server-side, so an
+	// inherited flag would make consumers fetch (and cache "empty") forever.
+	const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+	const { tree: t2, ids } = foldAssistant(t1, u, [{ content: 'A' }]);
+	t2.nodes[ids[0]].has_token_logprobs = true;
+	const sel = setSelected(t2, ids[0]); // put the flagged assistant on the active path
+	const r = editUserForkCopy(sel, u, 'q-edited')!;
+	const copiedAsst = r.tree.nodes[r.newUserId].children[0];
+	ok(copiedAsst != null, 'downstream assistant was copied');
+	ok(!r.tree.nodes[copiedAsst].has_token_logprobs, 'copy must not claim a blob it lacks');
+	// the ORIGINAL keeps its flag
+	eq(r.tree.nodes[ids[0]].has_token_logprobs, true);
+});
+
 // ── summary ──────────────────────────────────────────────────────────
 console.log(`\ntree.ts: ${passed} passed, ${failed} failed`);
 if (failed) {

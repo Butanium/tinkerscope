@@ -70,6 +70,7 @@
 	import { displayToken, prob } from './token-logprob';
 	import { searchStoredTokens, type TokenCandidate } from './token-search';
 	import { highlightStore } from './highlights.svelte';
+	import { nodeBlobs } from './node-blobs.svelte';
 	import { renderContent } from './render';
 	import { tip } from '$lib/tooltip.svelte';
 
@@ -181,9 +182,28 @@
 
 	// First-token mode availability: ANY turn of any active source carries a
 	// logprob record (not just the picked turn — the picker defaults to the
-	// latest turn, which may be an OpenRouter regen without data).
+	// latest turn, which may be an OpenRouter regen without data). `hasFirst`
+	// counts too: a light node's record lives server-side (storage v2) and is
+	// fetched on demand below — the mode must not look unavailable meanwhile.
 	const hasFirstToken = $derived(
-		activeSources.some((s) => s.turns.some((t) => t.samples.some((x) => x.first)))
+		activeSources.some((s) => s.turns.some((t) => t.samples.some((x) => x.first || x.hasFirst)))
+	);
+	// Lazy blob fetch for the PICKED turn (only — never the whole conversation):
+	// light samples flagged hasFirst without an inline/cached record get their
+	// node blobs batch-fetched; `first` then fills in reactively through the
+	// parent's cache-resolved sources. ensure() dedupes cached/in-flight ids, so
+	// re-running on every pick/mode change is cheap.
+	$effect(() => {
+		if (mode !== 'firsttoken') return;
+		const ids = pickedRaw
+			.flatMap((s) => s.samples)
+			.filter((x) => x.hasFirst && !x.first && x.nodeId)
+			.map((x) => x.nodeId!);
+		if (ids.length) void nodeBlobs.ensure(ids);
+	});
+	/** True while the picked turn still has flagged-but-unfetched records. */
+	const ftLoading = $derived(
+		mode === 'firsttoken' && pickedRaw.some((s) => s.samples.some((x) => x.hasFirst && !x.first))
 	);
 	// ── first-token: recorded tokens (search + add) ───────────────────
 	// Everything with a recorded position-0 logprob for the charted turn, per
@@ -491,6 +511,8 @@
 		{#if !data || !layout}
 			{#if activeSources.length === 0}
 				<div class="backend-error">All panels with data are folded — enable “include folded panels” above to chart them.</div>
+			{:else if mode === 'firsttoken' && ftLoading}
+				<div class="chart-note">Fetching this turn's token logprobs…</div>
 			{:else if mode === 'firsttoken'}
 				<div class="backend-error">No token logprobs on this turn — first-token distributions need native tinker samples (OpenRouter and token-streamed single samples don't carry them).</div>
 			{:else if mode === 'rules' && allRulesOff}
