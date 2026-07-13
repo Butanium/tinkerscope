@@ -68,6 +68,10 @@ _INFLIGHT: dict[int, _InFlight] = {}
 # cancellation the task is shielding against.
 _TERMINAL_TASKS: set[asyncio.Task] = set()
 
+# Strong refs to the background drivers of detached (fire-and-forget) chats: with
+# no client consuming the SSE, nothing else keeps the task alive to completion.
+_DETACHED_TASKS: set[asyncio.Task] = set()
+
 
 class ChatMessage(BaseModel):
     role: str
@@ -122,10 +126,20 @@ class ChatRequest(BaseModel):
     # live-drive routing
     panel: str = "primary"                  # "primary" | "compare"
     broadcast: bool = True                   # mirror samples to the state bus
+    # Detached (fire-and-forget) mode. The browser sets this so its POST returns
+    # IMMEDIATELY instead of holding the SSE stream open for the whole generation:
+    # the producer runs as a background task broadcasting ONLY to the bus, and the
+    # browser renders/folds the panel from /api/state/events like a tinkpg-driven
+    # chat. This is what lets N panels generate at once — a held stream per panel
+    # would exhaust the browser's ~6 per-host HTTP/1.1 connections. Requires
+    # broadcast (there's no response stream to read). Stop reaches it via the
+    # cancel endpoint (no client disconnect to trip cancel-on-disconnect), and a
+    # closed tab no longer cancels it — it runs to completion server-side.
+    detached: bool = False
     # Opaque client-minted ownership token, echoed verbatim on the chat_start /
     # chat_done / chat_error bus broadcasts. The browser uses it to tell its OWN
-    # chats (which it folds from this request's response stream) apart from
-    # external ones (CLI / another tab) it must fold via reconciliation. The
+    # chats (which it folds from the bus bucket on chat_done) apart from external
+    # ones (CLI / another tab) it must fold via transcript reconciliation. The
     # server never interprets it.
     client_token: str | None = None
 
@@ -611,6 +625,23 @@ async def chat(req: ChatRequest):
             # original cancellation re-raises after the scope exits (never swallowed).
             if not terminated:
                 await _terminal(cancelled=True)
+
+    if req.detached:
+        # Fire-and-forget: drive gen() to completion in the background, discarding
+        # the client-facing events (everything the browser needs is on the bus).
+        # The POST returns NOW, so the browser never holds this stream — its
+        # per-host connection budget stays free for the other panels. gen()'s own
+        # try/finally still guarantees exactly one terminal, and Stop still reaches
+        # this chat through the cancel endpoint (it cancels the producer worker,
+        # driving the same terminal a disconnect would).
+        async def _drive() -> None:
+            async for _ in gen():
+                pass
+
+        task = asyncio.create_task(_drive())
+        _DETACHED_TASKS.add(task)
+        task.add_done_callback(_DETACHED_TASKS.discard)
+        return {"status": "started"}
 
     return EventSourceResponse(gen())
 

@@ -73,8 +73,9 @@ class ConversationsStore {
 	 *  every panel ON. Not rendered ⇒ plain (non-reactive) field. */
 	#seenPanels = new Set<string>();
 
-	/** Tokens of chats THIS browser fired — its own folds are done by fireChat
-	 *  from the response stream, so the external-fold hook must skip these. */
+	/** Tokens of chats THIS browser fired — the chat store folds these from their
+	 *  bus bucket on chat_done (routed before the foreign path), so the external-fold
+	 *  reconcile below skips them. Kept in lockstep with #busy for switch-gating. */
 	#ownTokens = new Set<string>();
 	/** Reactive mirror of (#ownTokens.size > 0). A plain Set isn't tracked by Svelte 5,
 	 *  so `busy` reading the Set directly never re-fires the `disabled={…convo.busy}`
@@ -572,16 +573,27 @@ class ConversationsStore {
 	}
 
 	// ── external-fold hooks (wired in init) ──────────────────────────
-	/** Register the bus hooks for external (CLI / other-tab) turns. Idempotent. */
-	init(): void {
-		live.onChatDone = (panel, data) => this.#onExternalDone(panel, data);
-		live.onChatError = (_panel, data) => {
+	/** Register the bus terminal hooks. `own` (injected by +page, which imports the
+	 *  chat store) folds a detached chat WE fired from its bus bucket; it returns true
+	 *  when it handled the event, so an own chat never falls through to the foreign
+	 *  reconcile path (and vice-versa). Idempotent. */
+	init(own?: {
+		done: (panel: Panel, data: any) => boolean;
+		error: (panel: Panel, data: any) => boolean;
+	}): void {
+		live.onChatDone = (panel, data) => {
+			if (own?.done(panel, data)) return; // our detached chat folded from its bucket
+			this.#onExternalDone(panel, data);
+		};
+		live.onChatError = (panel, data) => {
+			if (own?.error(panel, data)) return; // our chat: token released, bucket shows the error
 			if (data?.client_token) this.endToken(data.client_token);
 		};
 	}
 
 	#onExternalDone(panel: Panel, data: { client_token?: string | null; conversation_id?: string | null }): void {
-		// Own chats are folded by fireChat from their response stream — skip.
+		// Own chats fold from their bus bucket (routed to the chat store before this) —
+		// skip here too as defense in case an own terminal ever reaches this path.
 		if (data?.client_token && this.#ownTokens.has(data.client_token)) return;
 		// Conversation-scoped fold. Panel ids ('compare', 'p-2'…) are re-minted across
 		// conversations and PlaygroundState is a process-wide singleton (shared by every

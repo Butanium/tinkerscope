@@ -163,12 +163,22 @@ as opaque JSON. Saves are flock-serialized; a corrupt file is backed up to
                           // don't support it and ignore the flag.
   "panel": "primary",     // "primary" | "compare" — which compare pane this is
   "broadcast": true,       // also mirror samples to the state bus (browser)
+  "detached": false,       // fire-and-forget: the POST returns immediately ({"status":
+                           // "started"}) and the generation runs server-side, streaming
+                           // ONLY to the bus. The browser sets this on every send so it
+                           // does NOT hold the SSE — see "Detached mode" below. Requires
+                           // broadcast. Stop reaches it via the cancel endpoint.
   "client_token": null     // optional opaque ownership token, echoed verbatim on the
                            // chat_start/chat_done/chat_error bus events; lets a client
-                           // tell its OWN chats (folded from this response stream) apart
-                           // from external (CLI / other-tab) ones it must reconcile.
+                           // tell its OWN chats (which it folds from the bus bucket on
+                           // chat_done) apart from external (CLI / other-tab) ones it
+                           // reconciles from the transcript echo.
 }
 ```
+
+**Response depends on `detached`:** the default (`detached:false`) returns the
+**SSE stream below**. `detached:true` returns immediately with JSON
+`{"status":"started"}` and NO stream — every event goes to the bus only.
 
 ### /api/chat SSE (the caller's stream — what the CLI prints)
 - `event: delta` → `data: {sample_index, delta, kind}` — a streamed token chunk
@@ -233,10 +243,26 @@ from `state`, and accumulates streamed samples per `chat_id`/`panel` from the
 ephemeral events. The CLI and the browser both POST `/api/state` (to set
 selection/prompt) and `/api/chat` (to sample); because chat broadcasts to the
 bus, a CLI-triggered chat appears in the browser identically to a browser-
-triggered one. For the browser's OWN chats, POST `/api/chat` to trigger and just
-render from the bus (single rendering path) — or read the POST stream directly,
-either works, but rendering from the bus keeps CLI- and browser-initiated chats
-on one code path.
+triggered one.
+
+**Detached mode (the browser's OWN chats).** The browser fires every send with
+`detached:true`, so its POST returns immediately and it renders the panel purely
+from the bus — the SAME path CLI-triggered chats already use. This is deliberate:
+a held `/api/chat` SSE per panel would exhaust the browser's ~6 per-host HTTP/1.1
+connections (1 is the permanent `/api/state/events` EventSource), so a send to ≥5
+panels used to leave the excess POSTs queued inside the browser — no `chat_start`,
+no placeholder, panel silently idle. Detached removes that ceiling (N short POSTs
++ one bus). On `chat_done` the browser folds the panel's reply from its bus BUCKET
+(all n samples → n sibling branches; the transcript echo carries only ONE
+representative, which the chart/‹k/N› cycler read from tree siblings can't lose).
+An in-flight chat is told apart from an external one by `client_token`.
+
+Two consequences of detached:
+- **A closed tab no longer cancels a browser-fired generation** — it runs to
+  completion server-side, exactly like a tinkpg-fired chat. "Stop all" (the cancel
+  endpoint, by `chat_id`) remains the kill switch, reaching own AND foreign chats.
+- The fold is now **deterministic on the single bus `chat_done`** (no drain racing
+  it), so an aborted chat's already-completed partials fold reliably.
 
 ## Reference implementations to mirror (do NOT reinvent)
 - samplescope CLI (typer + httpx + httpx_sse, server auto-discovery via instance

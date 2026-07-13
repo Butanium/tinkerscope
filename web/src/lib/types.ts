@@ -193,8 +193,12 @@ export type ChatRequest = {
 	logprobs?: boolean;
 	panel: Panel;
 	broadcast: boolean;
+	/** Fire-and-forget: the POST returns immediately and the generation streams
+	 *  ONLY to the state bus, so the browser doesn't hold the connection (the
+	 *  browser sets this for every send — see chat.svelte.ts). */
+	detached?: boolean;
 	/** Opaque ownership token echoed on chat_start/done/error so the browser can
-	 *  tell its OWN chats (folded from this response stream) from external ones. */
+	 *  tell its OWN chats (folded from the bus bucket on chat_done) from external ones. */
 	client_token?: string | null;
 };
 
@@ -241,6 +245,11 @@ export type SampleData = {
 	/** Per-token logprobs + top-5 alternatives — native tinker sampling only
 	 *  (see docs/API_CONTRACT.md). Persists through the fold onto the tree node. */
 	token_logprobs?: TokenLogprob[];
+	/** Did the backend already fold the trailing-assistant prefill into `content`?
+	 *  True on the native tinker paths (which return the full turn); false/absent on
+	 *  the continuation-only paths (OpenRouter / loose), where the bus-bucket fold
+	 *  must prepend the prefill itself. Mirrors the drain-path fold in chat.svelte.ts. */
+	prefill_incorporated?: boolean;
 };
 
 /**

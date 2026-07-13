@@ -1,18 +1,26 @@
 // Generation fire lifecycle: turn a "fire this for panel X" request into a
-// POST /api/chat, drain the stream, fold the samples under the user node, and own
-// the per-panel abort controller + the live bucket's prefill color.
+// DETACHED POST /api/chat, then let the state bus drive rendering + the fold.
 //
-// Deliberately UI-agnostic: the caller (+page) resolves the model and assembles the
-// sampling params into a bundle, so this store never reaches into the sidebar's
-// param state. `abortByPanel` is for stopGeneration ONLY — the per-panel "busy"
-// gate keys off live.panels[panel].running, not this (see panelBusy in +page).
+// Detached (fire-and-forget): the POST returns immediately and the generation
+// streams ONLY to /api/state/events, so the browser never holds the chat's
+// connection — that's what lets N panels generate at once (a held stream per
+// panel would exhaust the browser's ~6 per-host HTTP/1.1 connections; see the
+// connection-starvation diagnosis). The panel renders from the bus bucket
+// exactly like a tinkpg-driven chat, and its reply is folded into the tree on
+// the bus `chat_done`, from the bucket's accumulated samples (all n — the
+// server-committed transcript echo carries only ONE representative, which would
+// collapse the n>1 distribution the chart + ‹k/N› cycler read from tree
+// siblings).
+//
+// Deliberately UI-agnostic: the caller (+page) resolves the model and assembles
+// the sampling params into a bundle, so this store never reaches into the
+// sidebar's param state.
 
 import { live } from './state.svelte';
 import { conversations as convo } from './conversations.svelte';
 import { api } from './api';
-import { drainSamples } from './chat-stream';
-import { foldAssistant } from './tree';
-import type { Panel, ChatMessage, ChatRequest } from './types';
+import { foldAssistant, type SampleLike } from './tree';
+import type { Panel, ChatMessage, ChatRequest, SampleData } from './types';
 
 /** Sampling params for one fire, assembled by the caller from shared state + the
  *  sidebar's advanced-params popup (which this store deliberately doesn't own). */
@@ -38,14 +46,26 @@ export type ChatModelField =
 	| { sampler_path: string }
 	| { run_id: string; checkpoint: string | null };
 
+/** What a fired-but-not-yet-terminal detached chat needs to fold itself when its
+ *  bus `chat_done` lands: which user node its samples attach under, and the
+ *  prefill context to reproduce the drain-path fold (prepend / scope-skip). */
+type FireContext = {
+	panel: Panel;
+	userParentId: string;
+	prefill?: string;
+	scope: ChatParams['prefill_scope'];
+	thinking: ChatParams['thinking'];
+};
+
 class ChatStore {
-	/** Per-panel in-flight abort controllers, keyed by panel so concurrent
-	 *  generations on different panels don't clobber each other's handle. $state so
-	 *  stopGeneration's readers react. NOT a busy signal — see panelBusy in +page. */
-	abortByPanel = $state<Partial<Record<Panel, AbortController | null>>>({});
 	/** Per-panel prefill of the last/in-flight fire — lets the live bucket color its
 	 *  prefilled prefix (committed nodes carry their own `prefill`). '' ⇒ none. */
 	firePrefill = $state<Partial<Record<Panel, string>>>({});
+
+	/** In-flight detached chats we own, keyed by client_token: the fold context to
+	 *  apply when the bus `chat_done`/`chat_error` for that token lands. Plain Map —
+	 *  not reactive (no UI reads it); `convo.busy` (its token set) drives the gates. */
+	#ownFires = new Map<string, FireContext>();
 
 	/** Reset a panel's live sample bucket. Per-key write — live.panels is deeply
 	 *  reactive, so only THIS panel's readers invalidate (see the panels field doc
@@ -54,9 +74,10 @@ class ChatStore {
 		live.panels[panel] = { chat_id: null, label: '', n: 0, samples: [], running: false, error: null };
 	}
 
-	/** Fire one panel's generation with a fresh per-panel abort controller.
-	 *  `prefill` (continuation): the samples come back as the continuation only, so
-	 *  it's prepended to each in the fold to form the full continued message. */
+	/** Fire one panel's generation, detached. Records the fold context under a fresh
+	 *  ownership token, POSTs (fire-and-forget), and returns — the bus drives the
+	 *  rest. A transport/validation failure on the POST itself surfaces + cleans up;
+	 *  a pre-start generation error (unknown run…) arrives on the bus as chat_error. */
 	fireOne(
 		panel: Panel,
 		model: ChatModelField,
@@ -67,99 +88,111 @@ class ChatStore {
 		onError: (msg: string) => void
 	) {
 		this.firePrefill[panel] = prefill ?? ''; // so the live bucket colors its prefilled prefix
-		const ac = new AbortController();
-		this.abortByPanel[panel] = ac;
-		this.#fireChat(panel, model, userParentId, messages, params, ac.signal, prefill, onError).finally(() => {
-			if (this.abortByPanel[panel] === ac) this.abortByPanel[panel] = null;
+		const token = convo.newToken(); // marks this chat OURS + flips convo.busy until its terminal
+		this.#ownFires.set(token, {
+			panel,
+			userParentId,
+			prefill,
+			scope: params.prefill_scope,
+			thinking: params.thinking
 		});
+		api
+			.chat({ ...model, messages, ...params, panel, broadcast: true, detached: true, client_token: token })
+			.then((res) => {
+				if (res.ok) return; // accepted — the bus carries the outcome
+				return res.text().then((t) => this.#failFire(token, onError, `Chat error ${res.status}: ${t}`));
+			})
+			.catch((err) => this.#failFire(token, onError, `Connection error: ${err?.message ?? err}`));
 	}
 
-	async #fireChat(
-		panel: Panel,
-		model: ChatModelField,
-		userParentId: string,
-		messages: ChatMessage[],
-		params: ChatParams,
-		signal: AbortSignal,
-		prefill: string | undefined,
-		onError: (msg: string) => void
-	) {
-		const token = convo.newToken(); // marks this chat OURS so the external-fold hook skips it
-		try {
-			const res = await api.chat(
-				{ ...model, messages, ...params, panel, broadcast: true, client_token: token },
-				signal
-			);
-			if (!res.ok) {
-				onError(`Chat error ${res.status}: ${await res.text()}`);
-				return;
-			}
-			// Collect our samples from our OWN stream + fold them under the user node.
-			// For a continuation (prefill set), each sample is the CONTINUATION only,
-			// so prepend the prefill to form the full extended message — UNLESS the
-			// backend already folded it in (`prefill_incorporated`, the native tinker
-			// path, which also splits prefilled <think> into `reasoning`).
-			const samples = await drainSamples(res);
-			if (samples.length) {
-				// A one-sided prefill scope: the backend stripped the prefill from the
-				// side the scope excludes, so those samples must not get it prepended
-				// (nor carry `prefill`). A sample's side is its own tag when present
-				// (thinking='both' tags each sample); single-mode samples are untagged,
-				// so fall back to the request's mode — mirrors _prefill_reaches_sample
-				// in routes/chat.py. 'think' scope drops the non-thinking side,
-				// 'non_think' the thinking side; a mismatched single-mode send drops
-				// every sample's prefill (the backend dropped it from the prompt).
-				const sideOf = (sm: (typeof samples)[number]) =>
-					typeof sm.thinking === 'boolean' ? sm.thinking : params.thinking === true;
-				const skipPrefill = (sm: (typeof samples)[number]) =>
-					(params.prefill_scope === 'think' && !sideOf(sm)) ||
-					(params.prefill_scope === 'non_think' && sideOf(sm));
-				const folded = prefill
-					? samples.map((sm) =>
-							sm.error || skipPrefill(sm)
-								? sm
-								: { ...sm, prefill, content: sm.prefill_incorporated ? sm.content : prefill + (sm.content ?? '') }
-						)
-					: samples;
-				const { tree } = foldAssistant(convo.treeFor(panel), userParentId, folded);
+	/** A POST that never reached (or was rejected by) the server: release the token
+	 *  and surface it. No-op if the bus already terminated this chat (token gone). */
+	#failFire(token: string, onError: (msg: string) => void, msg: string) {
+		if (!this.#ownFires.has(token)) return;
+		this.#ownFires.delete(token);
+		convo.endToken(token);
+		onError(msg);
+	}
+
+	// ── bus terminal handling (own chats) — wired via convo.init(seam) ──────
+	/** Bus `chat_done` for a chat we own → fold its bucket samples (all n) under the
+	 *  recorded user node and release the token. Returns true iff we owned it (the
+	 *  caller then skips the foreign-fold path). Deterministic: the fold happens on
+	 *  the single bus terminal, not racing a drain — so an aborted chat's partials
+	 *  fold here too (the server commits them before chat_done). */
+	tryFoldOwnDone(panel: Panel, data: { client_token?: string | null; chat_id?: number | null }): boolean {
+		const token = data?.client_token;
+		if (!token || !this.#ownFires.has(token)) return false;
+		const ctx = this.#ownFires.get(token)!;
+		this.#ownFires.delete(token);
+		const bucket = live.panels[panel];
+		// Fold from OUR bucket only if it still belongs to this chat — a concurrent
+		// foreign chat on the same panel could have clobbered the single-slot bucket
+		// (rare: own+foreign firing the same panel at once). On a mismatch we skip the
+		// fold rather than graft foreign samples; the streamed partials stay visible.
+		if (bucket && bucket.chat_id === data.chat_id && bucket.samples.some((s) => s)) {
+			const folded = this.#foldSamples(bucket.samples, ctx);
+			if (folded.length) {
+				const { tree } = foldAssistant(convo.treeFor(panel), ctx.userParentId, folded);
 				convo.setTree(panel, tree);
 			}
-		} catch (err: any) {
-			// Abort (user hit Stop) → leave the user node reply-less; no partial fold.
-			if (err?.name !== 'AbortError') onError(`Connection error: ${err?.message ?? err}`);
-		} finally {
-			convo.endToken(token);
 		}
+		convo.endToken(token);
+		return true;
 	}
 
-	/** Stop one panel if given, else EVERY panel with an in-flight chat — ours or not.
-	 *  Three moves per targeted panel:
-	 *    1. our OWN chats: abort the fetch, so the server sees the disconnect and fires
-	 *       its guaranteed terminal (chat_end → running clears, partials committed).
-	 *    2. UNOWNED chats (fired by tinkpg / another tab: bus-running but no local
-	 *       controller): POST the cancel endpoint by chat_id so the server stops them
-	 *       too — abortByPanel alone could never reach these.
-	 *    3. eager UI release: clear the bucket's `running` NOW so the spinner/composer
-	 *       lock lift immediately even if the terminal round-trips slowly. `samples` +
-	 *       `chat_id` stay, so partial streamed content remains visible (buildPanelView
-	 *       keeps the bucket while samples.length > 0). */
-	stopGeneration(panel?: Panel) {
-		const targets = (
-			panel
-				? [panel]
-				: [...new Set([...Object.keys(this.abortByPanel), ...Object.keys(live.panels)])]
-		) as Panel[];
-		for (const k of targets) {
-			const ac = this.abortByPanel[k];
-			if (ac) {
-				ac.abort();
-				this.abortByPanel[k] = null;
-			} else if (live.panels[k]?.running) {
-				const cid = live.panels[k]?.chat_id;
-				if (cid != null) api.cancelChat(cid).catch(() => {});
+	/** Bus `chat_error` for a chat we own → release the token (the bucket already
+	 *  shows the error / 'stopped' strip). Returns true iff we owned it. */
+	tryOwnError(_panel: Panel, data: { client_token?: string | null }): boolean {
+		const token = data?.client_token;
+		if (!token || !this.#ownFires.has(token)) return false;
+		this.#ownFires.delete(token);
+		convo.endToken(token);
+		return true;
+	}
+
+	/** Apply the prefill prepend / scope-skip to the bucket's samples so they fold
+	 *  identically to the old drain path. Each sample keeps its ORIGINAL bucket index
+	 *  as sample_index (foldAssistant orders by it — thinking='both' packs the
+	 *  non-thinking half 0..n-1 then the thinking half n..2n-1). Error samples pass
+	 *  through untouched (foldAssistant skips them). */
+	#foldSamples(samples: SampleData[], ctx: FireContext): SampleLike[] {
+		const sideOf = (sm: SampleData) =>
+			typeof sm.thinking === 'boolean' ? sm.thinking : ctx.thinking === true;
+		const skipPrefill = (sm: SampleData) =>
+			(ctx.scope === 'think' && !sideOf(sm)) || (ctx.scope === 'non_think' && sideOf(sm));
+		const out: SampleLike[] = [];
+		for (let i = 0; i < samples.length; i++) {
+			const sm = samples[i];
+			if (!sm) continue;
+			const withIdx: SampleLike = { ...sm, sample_index: i };
+			if (!ctx.prefill || sm.error || skipPrefill(sm)) {
+				out.push(withIdx);
+			} else {
+				out.push({
+					...withIdx,
+					prefill: ctx.prefill,
+					content: sm.prefill_incorporated ? sm.content : ctx.prefill + (sm.content ?? '')
+				});
 			}
+		}
+		return out;
+	}
+
+	/** Stop one panel if given, else EVERY panel with an in-flight chat. All chats are
+	 *  detached now (nothing local to abort), so Stop reaches them uniformly through
+	 *  the cancel endpoint by chat_id — own OR foreign (tinkpg / another tab). The
+	 *  server fires the guaranteed terminal (chat_done with partials, or
+	 *  chat_error("cancelled") on 0 samples). `running` is cleared eagerly so the
+	 *  spinner/composer lift immediately even if the terminal round-trips slowly;
+	 *  `samples` + `chat_id` stay so partial streamed content remains visible. */
+	stopGeneration(panel?: Panel) {
+		const targets = (panel ? [panel] : Object.keys(live.panels)) as Panel[];
+		for (const k of targets) {
 			const b = live.panels[k];
-			if (b?.running) live.panels[k] = { ...b, running: false };
+			if (!b?.running) continue;
+			if (b.chat_id != null) api.cancelChat(b.chat_id).catch(() => {});
+			live.panels[k] = { ...b, running: false };
 		}
 	}
 }

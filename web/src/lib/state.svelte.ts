@@ -192,7 +192,10 @@ export function parseSample(data: any): SampleData {
 		finish_reason: data?.finish_reason || undefined,
 		// per-sample renderer mode — only present on thinking='both' chats
 		thinking: typeof data?.thinking === 'boolean' ? data.thinking : undefined,
-		token_logprobs: Array.isArray(data?.token_logprobs) ? data.token_logprobs : undefined
+		token_logprobs: Array.isArray(data?.token_logprobs) ? data.token_logprobs : undefined,
+		// carried so the bus-bucket fold (chat.svelte.ts) knows whether to prepend
+		// the prefill (false/absent = continuation-only path → prepend).
+		prefill_incorporated: data?.prefill_incorporated === true ? true : undefined
 	};
 }
 

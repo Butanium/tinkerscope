@@ -337,11 +337,10 @@
 	let allBusy = $derived(targetSels.length > 0 && targetSels.every((p) => panelBusy(p.panel)));
 	let anyRunning = $derived(panelSels.some((p) => panelBusy(p.panel)));
 	/** Per-panel busy = that panel's bus `running` flag (set on chat_start, cleared
-	 *  on chat_done/chat_error — for our own chats AND CLI/other-tab ones). This is
-	 *  the authoritative per-panel signal; it must NOT also key off abortByPanel,
-	 *  whose clear is tied to fireChat's promise — if that stream lingers a moment
-	 *  past chat_done the controls would stay wrongly disabled. abortByPanel is for
-	 *  stopGeneration only. Conversation-switch safety still uses convo.busy (tokens). */
+	 *  on chat_done/chat_error — for our own detached chats AND CLI/other-tab ones).
+	 *  Since every chat is detached now, this bus flag is the ONE per-panel signal
+	 *  (there's no local drain/abort state to also consult). Conversation-switch
+	 *  safety still uses convo.busy (the in-flight ownership tokens). */
 	function panelBusy(panel: Panel): boolean {
 		return live.panels[panel]?.running === true;
 	}
@@ -551,7 +550,7 @@
 	}
 
 	/** Fire one panel's generation with the current model + params. Thin context
-	 *  assembly over chat.fireOne, which owns the request / abort / fold lifecycle.
+	 *  assembly over chat.fireOne, which fires detached + folds from the bus bucket.
 	 *  `paramsOverride` patches the composer bundle for this fire (branchOps'
 	 *  continue forces prefill_scope 'all' — its prefill is the continuation, not
 	 *  the composer prefill the scope tri-state governs). */
@@ -1150,9 +1149,14 @@
 		// Keyboard row navigation (see its section above for the guards).
 		window.addEventListener('keydown', onNavKeydown);
 
-		// Open the ONE live-state stream on load + wire the external-fold hooks.
+		// Open the ONE live-state stream on load + wire the terminal-fold hooks:
+		// our own detached chats fold from their bus bucket (chat.try*), everything
+		// else reconciles from the transcript echo (convo's foreign path).
 		live.start();
-		convo.init();
+		convo.init({
+			done: (panel, data) => chat.tryFoldOwnDone(panel, data),
+			error: (panel, data) => chat.tryOwnError(panel, data)
+		});
 		// Pre-transition barrier: the convo store flushes our pending debounced
 		// state patch (response assigned into live.state) before any conversation
 		// switch — see flushStatePatch/#preSwitch for why (the system-prompt leak).
