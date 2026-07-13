@@ -36,10 +36,11 @@ def api(method: str, path: str, body: dict | None = None):
 
 
 def conv_system(conv_id: str) -> str | None:
-    for c in api("GET", "/api/conversations"):
-        if c["id"] == conv_id:
-            return c.get("system_prompt")
-    return None
+    # v2: the list is summaries-only — system_prompt lives on the body.
+    try:
+        return api("GET", f"/api/conversations/{conv_id}").get("system_prompt")
+    except Exception:
+        return None
 
 
 def wait_conv_system(conv_id: str, want, timeout=5.0):

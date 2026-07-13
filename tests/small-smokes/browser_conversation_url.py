@@ -58,9 +58,17 @@ def _param_c(page):
     return page.evaluate("() => new URL(location.href).searchParams.get('c')")
 
 
+def _newest_id():
+    return max(_get("/api/conversations"), key=lambda c: c["updated_at"])["id"]
+
+
 def main():
     _clean_conversations()
     # Create A first, then B → B is the newest (default active when no ?c=).
+    # NB: OPENING a bare-API conversation can bump its updated_at once (its
+    # panels lack `seen_panels`, so syncPanels defaults them ON and persists —
+    # a debounced ~400ms PATCH). So "the newest" is re-read from the API after
+    # letting pending saves settle, instead of assuming it stays B forever.
     a = _post("/api/conversations", {"name": "URLSMOKE-ALPHA"})
     b = _post("/api/conversations", {"name": "URLSMOKE-BETA"})
     newest = max(_get("/api/conversations"), key=lambda c: c["updated_at"])
@@ -80,39 +88,44 @@ def main():
         assert _param_c(page) == a["id"], f"URL should keep c=A, got {_param_c(page)}"
         print("1. load ?c=A opens A, URL preserved: OK")
 
-        # ── 2. Hard-load / (no param) opens newest B + normalizes URL to ?c=B ──
+        # ── 2. Hard-load / (no param) opens the newest + normalizes the URL ──
+        page.wait_for_timeout(700)  # let step 1's debounced first-open save land
+        want = _newest_id()
         page.goto(f"{BASE}/", wait_until="load", timeout=20000)
-        _wait_active(page, b["id"])
+        _wait_active(page, want)
         page.wait_for_function(
             "([want]) => new URL(location.href).searchParams.get('c') === want",
-            arg=[b["id"]], timeout=8000)
-        assert _active_id(page) == b["id"], "no param should open newest (B)"
-        print("2. load / opens newest B, URL normalized to ?c=B: OK")
+            arg=[want], timeout=8000)
+        assert _active_id(page) == want, "no param should open the newest"
+        print("2. load / opens the newest, URL normalized: OK")
 
-        # ── 3. Selecting A in the dropdown pushes ?c=A and switches ──
-        page.locator("select.conv-select").select_option(a["id"])
-        _wait_active(page, a["id"])
+        # ── 3. Selecting the OTHER conv in the dropdown pushes ?c and switches ──
+        other = a["id"] if want == b["id"] else b["id"]
+        page.locator("select.conv-select").select_option(other)
+        _wait_active(page, other)
         page.wait_for_function(
             "([want]) => new URL(location.href).searchParams.get('c') === want",
-            arg=[a["id"]], timeout=8000)
-        assert _param_c(page) == a["id"], "dropdown select should push ?c=A"
-        print("3. dropdown select pushes ?c=A and switches: OK")
+            arg=[other], timeout=8000)
+        assert _param_c(page) == other, "dropdown select should push ?c=<other>"
+        print("3. dropdown select pushes ?c and switches: OK")
 
-        # ── 4. Browser back returns to ?c=B and the active conv follows ──
+        # ── 4. Browser back returns to the previous conv, active follows ──
         page.go_back()
-        _wait_active(page, b["id"])
-        assert _param_c(page) == b["id"], f"back should restore c=B, got {_param_c(page)}"
-        print("4. browser back restores ?c=B + active conv follows URL: OK")
+        _wait_active(page, want)
+        assert _param_c(page) == want, f"back should restore c={want[:8]}, got {_param_c(page)}"
+        print("4. browser back restores previous ?c + active conv follows URL: OK")
 
         # ── 5. Unknown id falls back to newest, shows a notice, normalizes URL ──
+        page.wait_for_timeout(700)  # settle any debounced save before reading newest
+        want5 = _newest_id()
         page.goto(f"{BASE}/?c=does-not-exist-zzz", wait_until="load", timeout=20000)
-        _wait_active(page, b["id"])
+        _wait_active(page, want5)
         page.wait_for_function(
             "() => document.body.innerText.includes('was not found here')", timeout=8000)
         page.wait_for_function(
             "([want]) => new URL(location.href).searchParams.get('c') === want",
-            arg=[b["id"]], timeout=8000)
-        assert _active_id(page) == b["id"], "unknown id should fall back to newest (B)"
+            arg=[want5], timeout=8000)
+        assert _active_id(page) == want5, "unknown id should fall back to the newest"
         print("5. unknown id → fallback to newest + notice + URL normalized: OK")
 
         assert not errors, f"console/page errors: {errors}"

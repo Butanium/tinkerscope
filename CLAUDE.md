@@ -69,6 +69,19 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     `/api/state/events` SSE. The render bus.
   - `lib/conversations.svelte.ts` → `convo` — owner of the per-panel **branch
     trees** + persistence + the external-fold reconcile. The conversation model.
+    Storage v2 (`docs/STORAGE_V2.md`): `list` holds SUMMARIES only (bodies are
+    fetched on open); `trees` is **`$state.raw`** (immutable refs — never mutate
+    a node in place, nothing would react or save); saves accumulate dirty-panel /
+    dropped / layout-flag DIRT and ship a partial-upsert PUT (dirty trees only)
+    or a zero-tree-bytes PATCH — the request planner is pure `lib/save-plan.ts`
+    (**has `save-plan.test.ts`**). Legacy `{tree, compare_tree}` bodies force a
+    FULL-map first save (partial upsert would drop the un-sent panel).
+  - `lib/node-blobs.svelte.ts` → `nodeBlobs` — the per-node **heavy-blob cache**
+    (token_logprobs / raw_meta live server-side as write-once blobs; light nodes
+    carry `has_*` flags). Batch `ensure()` (20 ms micro-batched → one POST),
+    seeded at fold time by the chat store, reset on every conversation
+    transition. Consumers: ChatMessage's token view + raw-meta disclosure,
+    ChartModal first-token mode (fetches the picked turn only).
   - `lib/chat.svelte.ts` → `chat` — the **generation-fire lifecycle**: POST
     `/api/chat`, drain, fold under the user node, per-panel abort controllers +
     the live-bucket prefill color. UI-agnostic — the caller (+page) passes a

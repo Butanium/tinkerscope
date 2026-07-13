@@ -183,8 +183,12 @@ reactive `tree`/`compareTree`, plus `ownTokens` + `foldAssistant`/external-fold
 glue. Methods: `load()`, `switchTo(id)`, `create(name?)`, `rename(id,name)`,
 `remove(id)`, debounced `save()`.
 
-- `save()` captures `(activeId, structuredClone({tree, compareTree, system_prompt}))`
-  at SCHEDULE time and PUTs that — never reads reactive state at fire time.
+- ~~`save()` captures `(activeId, structuredClone({tree, compareTree, system_prompt}))`
+  at SCHEDULE time and PUTs that~~ — SUPERSEDED by storage v2 (see
+  `docs/STORAGE_V2.md`): trees are `$state.raw` immutable refs, so the capture is
+  the REF at mark time (zero copy); saves accumulate dirty-panel/dropped/layout
+  dirt and ship a partial-upsert PUT or a layout-only PATCH (`lib/save-plan.ts`).
+  Flush-on-switch semantics below are unchanged.
 - `switchTo`/`create`/`remove` **flush** any pending save first, **clear both
   buckets**, set the new trees, restore `system_prompt`, then run the load steps.
 - All of `switchTo`/`create`/`remove`/cycle/edit/delete/regenerate are gated on
