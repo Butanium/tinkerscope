@@ -1890,9 +1890,9 @@
 	.prefill-textarea { width: 100%; margin-top: var(--space-2); padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-accent); border-radius: var(--radius); color: var(--color-text); font-family: var(--font-mono, monospace); font-size: 0.8rem; line-height: 1.45; resize: vertical; }
 	.prefill-textarea:focus { outline: none; box-shadow: 0 0 0 1px var(--color-accent); }
 	.prefill-textarea::placeholder { color: var(--color-text-muted); opacity: 0.7; white-space: pre; }
-	/* Thin (not hidden) scrollbar: with branch cycling preserving position, the
-	   scrollbar is the cue that a longer reply continues below the fold. */
-	.messages { flex: 1; overflow-y: auto; padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); scrollbar-width: thin; }
+	/* Scrollbar hidden app-wide (see app.css's scrollbar block); scrolling
+	   itself is unchanged. Only .chat-columns keeps a visible bar. */
+	.messages { flex: 1; overflow-y: auto; padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); }
 
 	/* ── Input bar ─────────────────────────────────────────────────── */
 	.input-bar { padding: 0 var(--space-4) var(--space-3); background: var(--color-surface); border-top: 1px solid var(--color-border); flex-shrink: 0; }

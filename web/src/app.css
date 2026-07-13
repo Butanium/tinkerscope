@@ -82,6 +82,39 @@ select {
 	font-family: inherit;
 }
 
+/* Scrollbars: hidden app-wide (scrolling via wheel/trackpad/keyboard is
+ * untouched — only the visual bar goes away). The single exception is the
+ * horizontal panels bar (.chat-columns), re-enabled + styled below, because a
+ * wide N-panel compare has no other affordance that more columns sit off-screen. */
+* {
+	scrollbar-width: none; /* Firefox */
+}
+*::-webkit-scrollbar {
+	display: none; /* WebKit/Blink */
+}
+
+.chat-columns {
+	scrollbar-width: thin; /* Firefox: re-enable */
+	scrollbar-color: var(--color-text-light) transparent; /* thumb / track */
+}
+.chat-columns::-webkit-scrollbar {
+	display: block; /* undo the app-wide hide */
+	height: 8px;
+}
+.chat-columns::-webkit-scrollbar-track {
+	background: transparent;
+}
+.chat-columns::-webkit-scrollbar-thumb {
+	background: var(--color-text-light);
+	border-radius: var(--radius-pill);
+	border: 2px solid transparent; /* inset the thumb so it reads as thin */
+	background-clip: padding-box;
+}
+.chat-columns::-webkit-scrollbar-thumb:hover {
+	background: var(--color-text-muted);
+	background-clip: padding-box;
+}
+
 /* Shared across the workspace + extracted modal components (so scoped-style
  * boundaries don't drop them). Keep cross-component utility classes here. */
 .backend-error { font-size: 0.78rem; color: #b45309; background: #fef3c7; padding: var(--space-2) var(--space-3); border-radius: var(--radius); border: 1px solid #f59e0b40; }
