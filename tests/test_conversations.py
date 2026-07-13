@@ -300,6 +300,24 @@ def test_missing_conversation_404s(client):
     assert client.delete("/api/conversations/nope").status_code == 404
 
 
+def test_crafted_ids_cannot_escape_the_store(client, tmp_path):
+    """A conversation/node id becomes a path component; a crafted id must not read or
+    delete a file outside the store dir. The read/delete store fns reject unsafe ids."""
+    import tinkerscope.api.conversation_store as store
+
+    secret = tmp_path / "secret.json"
+    secret.write_text('{"id": "pwned", "trees": {}}')
+    # A traversal-shaped id resolving to `secret` must NOT be read back.
+    rel = f"../../../../../../../{secret}".replace("/", "..")  # any non-safe id
+    for bad in ("../../etc/passwd", "..", "a/b", rel, "x\x00y"):
+        assert store.get_body(bad) is None
+        assert store.get_blobs(bad, ["n1"]) == {}
+        assert store.delete(bad) is False
+    assert secret.exists()  # never touched
+    # HTTP surface: a traversal id on GET/DELETE resolves to a 404, not a file read.
+    assert client.get("/api/conversations/..%2F..%2Fsecret").status_code in (404, 400)
+
+
 def test_concurrent_reads_during_writes_dont_crash(client):
     """Regression: sync handlers run in FastAPI's threadpool, so GET (which iterates
     the summary cache) races POST create (which inserts into it). Without the cache

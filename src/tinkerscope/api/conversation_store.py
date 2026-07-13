@@ -299,6 +299,8 @@ def _load_body(cid: str) -> dict | None:
     """Parsed light body for one conversation (memoized). None if missing/corrupt.
     The file read happens outside the lock; a re-check on insert lets a concurrent
     writer's fresher cached body win (the cache converges to the last write)."""
+    if not _is_safe_id(cid):  # a crafted id must not build a path outside the store
+        return None
     with _CACHE_LOCK:
         if cid in _bodies:
             return _bodies[cid]
@@ -370,7 +372,7 @@ def get_blobs(cid: str, node_ids: list[str]) -> dict[str, dict]:
     """`POST /api/conversations/{id}/node-blobs` — {node_id: blob} for known ids.
     Unknown / unsafe / unreadable ids are omitted (never an error)."""
     out: dict[str, dict] = {}
-    if not _blobs_dir(cid).exists():
+    if not _is_safe_id(cid) or not _blobs_dir(cid).exists():
         return out
     for nid in node_ids:
         if not _is_safe_id(nid):
@@ -488,6 +490,8 @@ def patch_meta(cid: str, fields: dict[str, Any]) -> dict | None:
 
 def delete(cid: str) -> bool:
     """DELETE /{id} — remove the light file AND the blobs dir. False if unknown."""
+    if not _is_safe_id(cid):  # never unlink/rmtree a path built from a crafted id
+        return False
     with locked("conversations"):
         _ensure_loaded()
         with _CACHE_LOCK:
