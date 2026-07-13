@@ -93,18 +93,20 @@ Runs with `config_error` should still be listed (degraded).
 | GET | `/api/prefs` | — | `dict` (key→string) |
 | PUT | `/api/prefs/{key}` | `{value: string}` | `{status, key}` |
 | DELETE | `/api/prefs/{key}` | — | `{status}` |
-| GET | `/api/conversations` | — | `Conversation[]` (branchable trees; below) |
-| POST | `/api/conversations` | `{name?, system_prompt?, trees?, panels?, tree?, compare_tree?}` | the saved Conversation (`id`,`created_at`,`updated_at` added) |
-| PATCH | `/api/conversations/{id}` | `{name}` | the renamed Conversation |
-| PUT | `/api/conversations/{id}/tree` | `{trees, system_prompt?, panels?, reduced_panels?, send_targets?, seen_panels?}` | `{status, id}` (the hot save path) |
-| DELETE | `/api/conversations/{id}` | — | `{status}` |
+| GET | `/api/conversations` | `?bodies` | default: `ConversationSummary[]` (`{id,name,created_at,updated_at,panels}` — NO trees). `?bodies=1`: `Conversation[]` light bodies (trees incl., blobs excl.) — the CLI's link/browse paths |
+| GET | `/api/conversations/{id}` | — | one light `Conversation` body (trees incl., blobs excl.); 404 if unknown |
+| POST | `/api/conversations/{id}/node-blobs` | `{nodes: string[]}` | `{nodeId: {token_logprobs?, raw_meta?}}` — heavy blobs for a batch of node ids (POST, not GET, because the list is long). Unknown / blob-less ids are OMITTED, not an error |
+| POST | `/api/conversations` | `{id?, name?, system_prompt?, trees?, panels?, tree?, compare_tree?, reduced_panels?, send_targets?, seen_panels?}` | the saved light Conversation (`id`,`created_at`,`updated_at` added; inline heavy node fields stripped into blobs). 400 on a crafted (non-filename-safe) `id` |
+| PATCH | `/api/conversations/{id}` | any subset of `{name, system_prompt, panels, reduced_panels, send_targets, seen_panels}` | the updated **ConversationSummary** (layout-only — NO tree bytes shipped either way); 404 if unknown |
+| PUT | `/api/conversations/{id}/tree` | `{trees, dropped_trees?, system_prompt?, panels?, reduced_panels?, send_targets?, seen_panels?}` | `{status, id}` (the hot save path). `trees` is a **partial upsert** (dirty panels only, merged over stored); `dropped_trees` removes panels; inline heavy node fields are stripped into write-once blobs. 404 if unknown |
+| DELETE | `/api/conversations/{id}` | — | `{status}` (removes the light file AND the blobs dir) |
 
 ### Conversation (branchable chat; persisted per scan-root, NOT in PlaygroundState)
 ```jsonc
 {
   "id": "uuid", "name": "Untitled",
   "system_prompt": null,                    // travels with the conversation (each conv = one experiment)
-  "trees": {                                // per-panel branch trees, keyed by stable panel id
+  "trees": {                                // per-panel LIGHT branch trees, keyed by stable panel id
     "primary": { "nodes": {…}, "rootChildren": [], "selected": {} },
     "compare": { … }                        // present per open panel ('primary','compare','p-2',…)
   },
@@ -119,13 +121,53 @@ Runs with `config_error` should still be listed (degraded).
 ```
 The **tree** is a per-panel branch structure owned by the frontend
 (`web/src/lib/tree.ts`): `nodes[id] = {id, role, content, reasoning?, raw_text?,
-raw_meta?, prefill?, finish_reason?, parent, children[]}` + a `selected` map
-(parentId|`"__root__"` → selected child id). `finish_reason: "length"` marks a
-turn cut off by the max-tokens limit (the UI badges it). The linear ACTIVE PATH (root→leaf via `selected`) is what the sampler/CLI
-read — it is mirrored into `PlaygroundState.messages`. The server treats the tree
-as opaque JSON. Saves are flock-serialized; a corrupt file is backed up to
-`conversations.json.corrupt-<ts>` rather than reset. Stored at
-`~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/conversations.json`.
+prefill?, finish_reason?, parent, children[], has_token_logprobs?, has_raw_meta?}`
++ a `selected` map (parentId|`"__root__"` → selected child id). `finish_reason:
+"length"` marks a turn cut off by the max-tokens limit (the UI badges it). The
+linear ACTIVE PATH (root→leaf via `selected`) is what the sampler/CLI read — it is
+mirrored into `PlaygroundState.messages`. The server treats the tree as opaque JSON.
+
+**Storage v2 — light trees + write-once node blobs** (see `docs/STORAGE_V2.md`,
+`api/conversation_store.py`). A node's two HEAVY fields — **`token_logprobs` and
+`raw_meta`** — live OUT of the tree, in per-node **write-once blobs**; the light
+node keeps `raw_text` (small) and carries `has_token_logprobs` / `has_raw_meta`
+presence flags (present only when the field is truthy). Consumers gate affordances
+off the flags and lazy-fetch the data via `POST /{id}/node-blobs`. On-disk layout,
+per instance dir:
+```
+<state>/conversations/<id>.json          # light conversation (light trees)
+<state>/conversations/<id>.blobs/<nid>.json   # {"token_logprobs":[…]?, "raw_meta":"…"?}
+<state>/conversations.json.legacy        # the pre-v2 file, renamed after migration
+```
+- **Blob invariant: write-once.** Logprobs/raw_meta never change after node creation
+  (edits/regens mint new nodes), so an existing blob file is never rewritten
+  (idempotent). Blobs are keyed by node id, flat within one conversation's `.blobs/`
+  dir; add-model clones keep the same node ids, so a shared blob is written once.
+  Blobs are deleted only with their whole conversation.
+- **Fresh folds may re-ship inline heavy fields** on a same-panel save until the
+  next reload (the browser still holds the just-sampled data in the light node). The
+  server strips them into blobs the same way as migration — **idempotently** (the
+  write-once skip means the re-shipped values don't overwrite the stored blob).
+  Accepted, harmless.
+- **Partial-upsert PUT** merges only the dirty panels in `trees` over the stored
+  trees and removes `dropped_trees`; a layout-only change goes through **PATCH**
+  (no tree bytes). **Legacy-seeding:** on the first save of a migrated
+  `{tree, compare_tree}` conversation (no `trees` yet), the server seeds the merge
+  base with `primary←tree` / `compare←compare_tree` (truthy-checked) BEFORE applying
+  the partial and dropping the legacy keys, so a one-panel first save can't lose the
+  other tree.
+- **Migration** (boot): if legacy `conversations.json` exists and `conversations/`
+  doesn't, every conversation is split AND re-materialized (blobs folded back) and
+  deep-compared to the legacy object in memory; ANY mismatch **refuses startup**
+  with the legacy file untouched. Only after all verify are files written (via a
+  staging dir + atomic swap) and legacy renamed to `.legacy` (**never deleted**). A
+  crash between the swap and the rename is completed on the next boot.
+
+Caching: an in-memory summary map (built at boot, maintained on writes) backs the
+summaries list; parsed light bodies are memoized and evicted on write. Writes are
+flock-serialized AND guard the shared caches with an in-process lock. A corrupt
+per-conversation file is moved aside to `<id>.json.corrupt-<ts>` rather than reset.
+Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/conversations/`.
 
 ### ChatRequest
 ```jsonc
@@ -198,8 +240,10 @@ as opaque JSON. Saves are flock-serialized; a corrupt file is backed up to
   tinker has no generated-token top-k natively; see
   `tinker_sampler._token_logprobs`); if that call fails the entries degrade to
   the sampling call's own `lp` with no `top`. The browser folds this onto the
-  tree node (persisted with the conversation) — it powers the token-hover
-  inspector and the chart's first-token mode.
+  tree node; on save the server strips it into the node's write-once **blob**
+  (`has_token_logprobs` flag on the light node), lazy-fetched via
+  `POST /{id}/node-blobs` — it powers the token-hover inspector and the chart's
+  first-token mode.
 - `event: done` → `data: {}` (all samples finished)
 - `event: error` → `data: {error}` (whole request failed, e.g. unsampleable run)
 

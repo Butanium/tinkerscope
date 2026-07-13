@@ -168,6 +168,28 @@ def test_panel_messages_never_resurrects_a_removed_panel(client):
     assert ids == ["primary"], f"ghost panel resurrected via panel route: {ids}"
 
 
+def test_state_bus_strips_heavy_msg_fields(client):
+    """Storage-v2 diet: the per-panel transcript echoes on the bus are text mirrors —
+    a client that echoes token_logprobs/raw_meta on a message gets them stripped, so a
+    snapshot never carries megabytes of logprobs. content/role/reasoning survive."""
+    heavy = [{"role": "assistant", "content": "hi", "reasoning": "think",
+              "token_logprobs": [{"t": "hi", "tid": 1, "lp": -0.1}], "raw_meta": "{...}"}]
+    # via `panels` full-replace
+    client.post("/api/state", json={"panels": [{"id": "primary", "run_id": "good_run",
+                                                 "checkpoint": "final", "messages": heavy}]})
+    msg = client.get("/api/state").json()["panels"][0]["messages"][0]
+    assert msg["content"] == "hi" and msg["reasoning"] == "think"
+    assert "token_logprobs" not in msg and "raw_meta" not in msg
+    # via `panel_messages` mirror
+    client.post("/api/state", json={"panel_messages": {"primary": heavy}})
+    msg = client.get("/api/state").json()["panels"][0]["messages"][0]
+    assert "token_logprobs" not in msg and "raw_meta" not in msg
+    # via single `panel`-routed message patch
+    client.post("/api/state", json={"panel": "primary", "messages": heavy})
+    msg = client.get("/api/state").json()["panels"][0]["messages"][0]
+    assert "token_logprobs" not in msg and "raw_meta" not in msg
+
+
 # --------------------------------------------------------------------------- #
 # OpenRouter reference models: global, UI-managed CRUD
 # --------------------------------------------------------------------------- #
