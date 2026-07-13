@@ -17,10 +17,11 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from _seed import seed_conversation
+
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8795"
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
-OR_MODEL = "liquid/lfm-2.5-1.2b-instruct:free"
-OR_RUN = "openrouter:" + OR_MODEL
+OR_RUN = "openrouter:openrouter/free"  # free ROUTER — robust vs a single-provider outage
 DRAFT = "MY-EDIT-DRAFT-MUST-SURVIVE"
 
 
@@ -35,26 +36,17 @@ def _req(path, data=None, method="GET"):
 
 
 def main():
-    # Add the free OR model + clear conversations so we start clean.
-    _req("/api/openrouter-models", {"openrouter_model": OR_MODEL}, "POST")
-    for c in _req("/api/conversations"):
-        urllib.request.urlopen(
-            urllib.request.Request(f"{BASE}/api/conversations/{c['id']}", method="DELETE"), timeout=20
-        ).read()
+    # Seed a fresh TWO-panel conversation, both on the free router, and open it —
+    # replaces the old native-<select> model picker + add-panel dance (the picker is
+    # now the ModelDropdown combobox).
+    cid, _ = seed_conversation(BASE, [OR_RUN, OR_RUN], "cross_panel_edit")
 
     with sync_playwright() as p:
         b = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
         page = b.new_page(viewport={"width": 1600, "height": 1000})
-        page.goto(BASE, wait_until="load", timeout=20000)
-        page.wait_for_selector(".model-slot-select", timeout=15000)
-
-        # primary -> OR model
-        page.locator(".model-slot-select").nth(0).select_option(OR_RUN)
-        # add a 2nd panel (button reads "Compare" for the first add), then set it -> OR
-        page.locator(".btn-add-model").click()
-        page.wait_for_function("document.querySelectorAll('.model-slot-select').length >= 2", timeout=5000)
-        page.locator(".model-slot-select").nth(1).select_option(OR_RUN)
-        page.wait_for_function("document.querySelectorAll('.chat-column').length >= 2", timeout=5000)
+        page.goto(f"{BASE}/?c={cid}", wait_until="load", timeout=20000)
+        page.wait_for_function("document.querySelectorAll('.chat-column').length >= 2", timeout=15000)
+        page.wait_for_selector(".input-textarea:not([disabled])", timeout=15000)
 
         # Send to BOTH panels via the shared composer.
         page.locator(".input-textarea").fill("Say a short hello.")

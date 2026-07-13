@@ -15,6 +15,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from _seed import seed_conversation
+
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8820"
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
 MODEL = "openrouter:openrouter/free"  # free ROUTER (saved OR list) — survives single-provider outages
@@ -43,13 +45,10 @@ def main() -> None:
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: errors.append(str(e)))
 
-        page.goto(BASE, wait_until="load", timeout=20000)
-        page.wait_for_selector("select.model-slot-select", timeout=15000)
-        page.select_option("select.model-slot-select", value=MODEL)
-        page.wait_for_selector(".input-textarea:not([disabled])", timeout=15000)
-
-        # Fresh conversation so persisted branches from a prior run can't interfere.
-        page.locator('button[aria-label="New conversation"]').first.click()
+        # Seed a fresh single-panel conversation on the model and open it — replaces
+        # the old native-<select> model picker (now the ModelDropdown combobox).
+        cid, _ = seed_conversation(BASE, [MODEL], "thinking_both")
+        page.goto(f"{BASE}/?c={cid}", wait_until="load", timeout=20000)
         page.wait_for_selector(".input-textarea:not([disabled])", timeout=15000)
 
         # 'All' sample view → every card stacked, DOM order == sample_index order.

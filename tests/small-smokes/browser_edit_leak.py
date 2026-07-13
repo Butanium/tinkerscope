@@ -20,6 +20,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from _seed import seed_thread
+
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8809"
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
 DRAFT = "STALE DRAFT SHOULD NOT LAND"
@@ -36,27 +38,15 @@ STATE = {
 }
 
 
-def post_state(state):
-    req = urllib.request.Request(
-        f"{BASE}/api/state", data=json.dumps(state).encode(),
-        headers={"content-type": "application/json"}, method="POST")
-    urllib.request.urlopen(req, timeout=10).read()
-
-
-def _clean_conversations():
-    for c in json.load(urllib.request.urlopen(f"{BASE}/api/conversations", timeout=10)):
-        urllib.request.urlopen(
-            urllib.request.Request(f"{BASE}/api/conversations/{c['id']}", method="DELETE"), timeout=10
-        ).read()
-
-
 def main():
-    _clean_conversations()
-    post_state(STATE)
+    # Seed the U1/A1/U2/A2 thread as a conversation TREE and open it — the old
+    # post_state({messages}) seeding drove the legacy state echo, which no longer
+    # feeds the tree-based UI.
+    cid = seed_thread(BASE, STATE["messages"], title="edit_leak")
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
         page = browser.new_page(viewport={"width": 1500, "height": 950})
-        page.goto(BASE, wait_until="load", timeout=20000)
+        page.goto(f"{BASE}/?c={cid}", wait_until="load", timeout=20000)
         page.wait_for_function("document.body.innerText.includes('A1 assistant being edited')", timeout=15000)
 
         # Open the editor on A1 (the 2nd message) and type a draft — but DON'T save.
@@ -76,10 +66,13 @@ def main():
         n_editors = page.locator("textarea.edit-textarea").count()
         assert n_editors == 0, f"editor leaked open after reshape ({n_editors} textareas) — fix regressed"
 
-        # And the stale draft must not have been written anywhere.
+        # And the stale draft must not have been written anywhere. The transcript echo
+        # moved from a top-level state.messages to per-panel panels[].messages; read the
+        # primary panel's (the deleted-root chain left it empty).
         st = json.load(urllib.request.urlopen(f"{BASE}/api/state", timeout=10))
-        bodies = [m["content"] for m in st["messages"]]
-        assert len(st["messages"]) == 0, st["messages"]
+        prim = next((p for p in st["panels"] if p["id"] == "primary"), st["panels"][0])
+        bodies = [m["content"] for m in prim["messages"]]
+        assert len(prim["messages"]) == 0, prim["messages"]
         assert all(DRAFT not in b for b in bodies), f"stale draft leaked into transcript: {bodies}"
         print("messages after delete-root:", bodies)
         print("edit-leak fix: OK (editor closed on reshape, no misdirected write)")

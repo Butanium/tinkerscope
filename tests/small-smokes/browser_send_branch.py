@@ -13,9 +13,11 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from _seed import seed_conversation
+
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8812"
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
-MODEL = "openrouter:liquid/lfm-2.5-1.2b-instruct:free"  # in the saved OR list
+MODEL = "openrouter:openrouter/free"  # free ROUTER — robust vs a single-provider outage
 SHOT = "/tmp/tinkerscope_send_branch.png"
 
 
@@ -27,23 +29,26 @@ def main() -> None:
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: errors.append(str(e)))
 
-        page.goto(BASE, wait_until="load", timeout=20000)
-        page.wait_for_function("document.body.innerText.includes('ed_sheeran')", timeout=15000)
-        page.wait_for_selector("select.model-slot-select", timeout=15000)
-
-        # Select the free OpenRouter model FIRST — the composer is disabled until a
-        # chat-eligible model is selected (disabled = allBusy || !canChat || !activeId).
-        page.select_option("select.model-slot-select", value=MODEL)
+        # Seed a fresh single-panel conversation on the free router and open it —
+        # replaces the old native-<select> model picker (now the ModelDropdown combobox).
+        cid, _ = seed_conversation(BASE, [MODEL], "send_branch")
+        page.goto(f"{BASE}/?c={cid}", wait_until="load", timeout=20000)
         page.wait_for_selector(".input-textarea:not([disabled])", timeout=15000)
 
-        # Send a message; wait for it to fold (the Regenerate button only renders on a
-        # committed turn once generation is done).
+        # Send a message.
         ta = page.locator(".input-textarea").first
         ta.click()
         ta.fill("Reply with exactly the word PONG and nothing else.")
         ta.press("Enter")
         page.wait_for_selector('button[aria-label="Regenerate"]', timeout=45000)
         sent_ok = page.locator('button[aria-label="Regenerate"]').count() >= 1
+        # Wait for the send to FINISH before regenerating: the Regenerate button renders
+        # on the live streaming turn too, and regenerate correctly no-ops while the panel
+        # is busy (panelBusy) — clicking it mid-stream would silently do nothing. Poll
+        # until no composer shows a 'generating' placeholder.
+        page.wait_for_function(
+            "() => ![...document.querySelectorAll('textarea,input')].some(e => (e.placeholder||'').includes('generating'))",
+            timeout=45000)
 
         # Regenerate → a new sibling branch. The ‹k/N› cycler appears once count > 1.
         page.locator('button[aria-label="Regenerate"]').first.click(force=True)
