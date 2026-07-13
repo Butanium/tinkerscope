@@ -701,6 +701,17 @@ class ConversationsStore {
 				checkpoint: p.checkpoint ?? null,
 				messages: []
 			}));
+		} else {
+			// Layout-less conversation (legacy {tree,compare_tree} / bare API create):
+			// the shown panels are KEPT, but their transcript echoes belong to the
+			// PREVIOUS conversation — clear them in this same patch, exactly like the
+			// layout branch's `messages: []` does. Without this, #afterLoad (whose
+			// contract is "echoes are cleared before it runs") reconciles the foreign
+			// echoes into this conversation's trees, and the graft persists on the
+			// next save.
+			patch.panel_messages = Object.fromEntries(
+				(live.state?.panels ?? []).map((p) => [p.id, []])
+			);
 		}
 		const next = await api.setState(patch).catch(() => null);
 		if (next) live.state = next;
