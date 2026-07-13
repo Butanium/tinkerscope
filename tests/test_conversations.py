@@ -188,19 +188,24 @@ def test_save_tree_unicode_survives(client):
     assert client.get(f"/api/conversations/{cid}").json()["trees"]["primary"] == tree
 
 
-def test_save_tree_self_heals_migrated_legacy_shape(client):
-    """A migrated legacy {tree, compare_tree} body (no `trees`) upgrades on its first
-    save — the legacy keys are dropped so a compare tree is never lost."""
+def test_save_tree_self_heals_migrated_legacy_shape_without_losing_compare(client):
+    """A migrated legacy {tree, compare_tree} body (no `trees`) upgrades to `trees` on
+    its first save. The backend seeds the reserved-id panels from tree/compare_tree
+    BEFORE the partial upsert, so a first save carrying ONLY the dirty primary panel
+    does NOT drop the compare tree (2 real conversations depend on this)."""
     cid = client.post("/api/conversations", json={"name": "L"}).json()["id"]
-    # Simulate a legacy on-disk shape by writing it through the store directly.
+    # Simulate a migrated legacy on-disk shape by writing it through the store directly.
     import tinkerscope.api.conversation_store as store
     body = store.get_body(cid)
     body["tree"] = {"mark": "A"}
     body["compare_tree"] = {"mark": "B"}
+    del body["trees"]  # a real migrated legacy entry has NO `trees` key
     store._persist(body)
+    # First save touches only the primary panel...
     client.put(f"/api/conversations/{cid}/tree", json={"trees": {"primary": {"mark": "A2"}}})
     healed = client.get(f"/api/conversations/{cid}").json()
-    assert healed["trees"] == {"primary": {"mark": "A2"}}
+    # ...but the compare tree (from compare_tree) survives, and legacy keys are gone.
+    assert healed["trees"] == {"primary": {"mark": "A2"}, "compare": {"mark": "B"}}
     assert "tree" not in healed and "compare_tree" not in healed
 
 
@@ -316,6 +321,8 @@ def test_crafted_ids_cannot_escape_the_store(client, tmp_path):
     assert secret.exists()  # never touched
     # HTTP surface: a traversal id on GET/DELETE resolves to a 404, not a file read.
     assert client.get("/api/conversations/..%2F..%2Fsecret").status_code in (404, 400)
+    # A crafted CREATE id is rejected with a clean 400 (not a 500 from the write path).
+    assert client.post("/api/conversations", json={"id": "../evil", "name": "x"}).status_code == 400
 
 
 def test_concurrent_reads_during_writes_dont_crash(client):

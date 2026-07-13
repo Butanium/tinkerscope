@@ -137,14 +137,41 @@ def test_migration_verify_aborts_on_divergent_shared_node_id(store):
     assert not store._convs_dir().exists()
 
 
-def test_migration_noop_when_already_migrated(store):
-    """If conversations/ already exists, boot does not touch a stray legacy file."""
+def test_migration_noop_when_fully_migrated(store):
+    """conversations/ exists AND legacy already renamed to .legacy → true no-op."""
+    store._convs_dir().mkdir(parents=True, exist_ok=True)
+    done = store._legacy_path().with_suffix(".json.legacy")
+    done.write_text(json.dumps([_legacy_conv("z", "Z", {"primary": {}})]))
+    store.boot()
+    assert done.exists() and not store._legacy_path().exists()
+    assert store.list_summaries() == []
+
+
+def test_migration_completes_interrupted_rename(store):
+    """A crash between the atomic dir swap and the legacy rename leaves conversations/
+    AND conversations.json both present. Boot must finish the rename so a later
+    deletion of conversations/ can't silently re-migrate resurrected stale state."""
     store._convs_dir().mkdir(parents=True, exist_ok=True)
     legacy_path = store._legacy_path()
     legacy_path.write_text(json.dumps([_legacy_conv("z", "Z", {"primary": {}})]))
     store.boot()
-    assert legacy_path.exists()  # untouched — migration already done
-    assert store.list_summaries() == []  # empty split dir → nothing loaded
+    assert not legacy_path.exists()  # rename completed
+    assert legacy_path.with_suffix(".json.legacy").exists()
+    assert store.list_summaries() == []  # convs_dir was empty → nothing loaded
+
+
+def test_migration_round_trips_null_trees(store):
+    """A malformed `trees: null` entry round-trips honestly (not coerced to {}), so
+    the strong verify neither spuriously aborts nor loses the null shape."""
+    legacy = [{
+        "id": "conv-null", "name": "Null", "trees": None,
+        "created_at": "2026-01-01T00:00:00+00:00", "updated_at": "2026-01-01T00:00:00+00:00",
+    }]
+    legacy_path = store._legacy_path()
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text(json.dumps(legacy))
+    store.boot()  # must not raise
+    assert store.get_body("conv-null")["trees"] is None
 
 
 def test_migration_quarantines_unparseable_legacy(store):

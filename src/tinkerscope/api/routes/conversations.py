@@ -124,6 +124,8 @@ def create_conversation(req: ConversationCreate) -> dict:
     supplied an id (a draft being persisted for the first time), in which case it
     upserts by that id — so a save race can't duplicate the entry. Heavy node fields
     are stripped into write-once blobs; the returned body is light."""
+    if req.id is not None and not store.is_safe_id(req.id):
+        raise HTTPException(400, "invalid conversation id")
     trees = req.trees
     if trees is None:
         # transitional: synthesize {trees} from a legacy {tree, compare_tree} body

@@ -42,6 +42,7 @@ import logging
 import os
 import re
 import shutil
+import sys
 import threading
 import time
 import uuid
@@ -73,6 +74,13 @@ def _check_id(x: Any, kind: str) -> str:
     if not _is_safe_id(x):
         raise ValueError(f"unsafe {kind} id: {x!r}")
     return x
+
+
+def is_safe_id(x: Any) -> bool:
+    """Public: is this a filename-safe conversation id? The create route uses it to
+    reject a crafted client id with a clean 400 instead of surfacing upsert's internal
+    ValueError as a 500."""
+    return _is_safe_id(x)
 
 
 def _now() -> str:
@@ -183,7 +191,9 @@ def split_conv(conv: dict) -> tuple[dict, dict[str, dict]]:
     light: dict = {}
     for k, v in conv.items():
         if k == _TREES_MAP_KEY:
-            light[k] = {pid: _split_tree(t, blobs) for pid, t in (v or {}).items()}
+            # Pass a null/non-dict `trees` through unchanged so the round-trip stays
+            # honest (coercing null→{} would spuriously fail the migration verify).
+            light[k] = {pid: _split_tree(t, blobs) for pid, t in v.items()} if isinstance(v, dict) else v
         elif k in _SINGLE_TREE_KEYS:
             light[k] = _split_tree(v, blobs)
         else:
@@ -207,7 +217,7 @@ def materialize_conv(light: dict, blobs: dict[str, dict]) -> dict:
     conv: dict = {}
     for k, v in light.items():
         if k == _TREES_MAP_KEY:
-            conv[k] = {pid: _materialize_tree(t, blobs) for pid, t in (v or {}).items()}
+            conv[k] = {pid: _materialize_tree(t, blobs) for pid, t in v.items()} if isinstance(v, dict) else v
         elif k in _SINGLE_TREE_KEYS:
             conv[k] = _materialize_tree(v, blobs)
         else:
@@ -297,8 +307,11 @@ def _snapshot_ordered_cids() -> list[str]:
 
 def _load_body(cid: str) -> dict | None:
     """Parsed light body for one conversation (memoized). None if missing/corrupt.
-    The file read happens outside the lock; a re-check on insert lets a concurrent
-    writer's fresher cached body win (the cache converges to the last write)."""
+    The file read happens outside the lock; on insert we re-check under the lock so a
+    concurrent writer's fresher body wins, and only cache when the file STILL exists —
+    otherwise a DELETE landing during our read would leave a ghost body GETtable until
+    restart (delete unlinks + pops under the same lock; the returned snapshot is still
+    the valid content we read, it just isn't poisoned back into the cache)."""
     if not _is_safe_id(cid):  # a crafted id must not build a path outside the store
         return None
     with _CACHE_LOCK:
@@ -315,7 +328,8 @@ def _load_body(cid: str) -> dict | None:
     with _CACHE_LOCK:
         if cid in _bodies:  # a writer cached a (fresher) body while we read the file
             return _bodies[cid]
-        _bodies[cid] = conv
+        if f.exists():  # not deleted out from under us → safe to memoize
+            _bodies[cid] = conv
         return conv
 
 
@@ -448,6 +462,17 @@ def save_tree(
             return False
         light_partial, blobs = split_conv({"trees": trees_partial})
         trees = dict(conv.get("trees") or {})
+        # A migrated legacy {tree, compare_tree} conversation has no `trees` yet.
+        # Seed the merge base with its reserved-id panels BEFORE the partial upsert so
+        # a first save carrying only one dirty panel can't drop the other — then the
+        # self-heal pop below is always safe regardless of what the client sends. The
+        # frontend maps tree→'primary', compare_tree→'compare' (truthy-checked); we
+        # mirror that here so the backend defends the data on its own.
+        if not trees:
+            if conv.get("tree"):
+                trees["primary"] = conv["tree"]
+            if conv.get("compare_tree"):
+                trees["compare"] = conv["compare_tree"]
         trees.update(light_partial["trees"])
         for pid in dropped_trees or []:
             trees.pop(pid, None)
@@ -459,7 +484,8 @@ def save_tree(
         conv["send_targets"] = send_targets
         conv["seen_panels"] = seen_panels
         conv["updated_at"] = _now()
-        # self-heal a migrated legacy {tree, compare_tree} entry on its first save.
+        # self-heal a migrated legacy {tree, compare_tree} entry on its first save
+        # (its trees are now folded into `trees` above, so dropping the keys is safe).
         conv.pop("tree", None)
         conv.pop("compare_tree", None)
         _write_blobs(cid, blobs)
@@ -499,15 +525,26 @@ def delete(cid: str) -> bool:
             known = cid in _summaries
         if not known and not _conv_file(cid).exists():
             return False
-        _conv_file(cid).unlink(missing_ok=True)
-        shutil.rmtree(_blobs_dir(cid), ignore_errors=True)
         with _CACHE_LOCK:
+            # Unlink the light file + drop the caches atomically vs _load_body's
+            # exists-check-then-cache, so a concurrent GET can't re-cache a ghost body.
+            _conv_file(cid).unlink(missing_ok=True)
             _bodies.pop(cid, None)
             _summaries.pop(cid, None)
+        shutil.rmtree(_blobs_dir(cid), ignore_errors=True)  # blobs: no cache impact
     return True
 
 
 # ── boot: migration + cache build ────────────────────────────────────────────
+def _progress(msg: str) -> None:
+    """Boot-migration progress — printed to STDERR (flushed) so it's visible during
+    the one boot that matters. uvicorn configures only its own loggers, so a plain
+    log.info here is dropped at default config; a silent multi-second migration would
+    look like a hung start and invite a Ctrl-C. Also logged, for structured sinks."""
+    print(msg, file=sys.stderr, flush=True)
+    log.info(msg)
+
+
 def _migrate_locked() -> None:
     """Migrate legacy `conversations.json` → per-conversation files + blob dirs.
 
@@ -519,20 +556,30 @@ def _migrate_locked() -> None:
     (never deleted)."""
     legacy = _legacy_path()
     convs_dir = _convs_dir()
-    if convs_dir.exists() or not legacy.exists():
+    legacy_done = legacy.with_suffix(legacy.suffix + ".legacy")
+    if convs_dir.exists():
+        # Already migrated (the normal case). But a crash BETWEEN the atomic dir swap
+        # and the legacy rename can leave conversations.json un-renamed forever (this
+        # guard would skip it every subsequent boot); finish that rename now so a later
+        # deletion of conversations/ can't silently re-migrate resurrected stale state.
+        if legacy.exists() and not legacy_done.exists():
+            legacy.rename(legacy_done)
+            _progress(f"storage-v2: completed an interrupted migration (legacy → {legacy_done.name})")
+        return
+    if not legacy.exists():
         return
     try:
         items = json.loads(legacy.read_text())
     except json.JSONDecodeError:
         # A legacy file too corrupt to parse can't be migrated or verified; move it
         # aside and start fresh (mirrors v1's corrupt-file handling).
-        log.warning("legacy conversations.json is unparseable — moving aside, starting empty")
+        _progress("storage-v2: legacy conversations.json is unparseable — moving aside, starting empty")
         _quarantine(legacy)
         return
     if not isinstance(items, list):
         raise RuntimeError("legacy conversations.json is not a JSON list — refusing to migrate")
 
-    log.info("storage-v2 migration: verifying %d conversation(s)…", len(items))
+    _progress(f"storage-v2 migration: verifying {len(items)} conversation(s)…")
     staged: list[tuple[dict, dict[str, dict]]] = []
     for conv in items:
         if not isinstance(conv, dict):
@@ -561,10 +608,10 @@ def _migrate_locked() -> None:
                 write_json(bdir / f"{_check_id(nid, 'node')}.json", blob)
                 n_blobs += 1
     os.replace(staging, convs_dir)  # atomic dir swap (same filesystem)
-    legacy.rename(legacy.with_suffix(legacy.suffix + ".legacy"))
-    log.info(
-        "storage-v2 migration complete: %d conversation(s), %d blob(s); legacy → %s",
-        len(staged), n_blobs, legacy.name + ".legacy",
+    legacy.rename(legacy_done)
+    _progress(
+        f"storage-v2 migration complete: {len(staged)} conversation(s), "
+        f"{n_blobs} blob(s); legacy → {legacy_done.name}"
     )
 
 
