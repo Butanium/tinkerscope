@@ -42,6 +42,7 @@ import logging
 import os
 import re
 import shutil
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -225,6 +226,15 @@ def _summary_of(light: dict) -> dict:
 
 
 # ── in-memory caches ─────────────────────────────────────────────────────────
+# `store.locked` (flock) serializes WRITERS across threads/processes for on-disk
+# safety. This in-process lock ADDITIONALLY guards the shared cache dicts: FastAPI
+# runs these sync handlers in a threadpool, so a lock-free reader (GET, fired on
+# every page load) can run concurrently with a writer's insert — without this,
+# `sorted(_summaries, …)` mid-insert crashes ("dictionary changed size during
+# iteration"), and a reader could observe a half-built cache. Held only for the
+# microseconds of dict access — NEVER across file I/O, and writers always take the
+# flock BEFORE this lock (readers take this lock alone), so the two can't deadlock.
+_CACHE_LOCK = threading.Lock()
 _summaries: dict[str, dict] | None = None  # id -> summary; None = not yet built
 _bodies: dict[str, dict] = {}  # id -> light body (parsed, evicted on write)
 
@@ -233,8 +243,9 @@ def reset_cache() -> None:
     """Drop both caches. Called at boot and (implicitly, via module reload) by tests
     so a fresh state dir never sees a previous run's cache."""
     global _summaries
-    _summaries = None
-    _bodies.clear()
+    with _CACHE_LOCK:
+        _summaries = None
+        _bodies.clear()
 
 
 def _quarantine(path: Path) -> None:
@@ -245,15 +256,13 @@ def _quarantine(path: Path) -> None:
         pass
 
 
-def _ensure_loaded() -> None:
-    """Build the summary cache from disk once (read each light file's head)."""
-    global _summaries
-    if _summaries is not None:
-        return
-    _summaries = {}
+def _build_summaries() -> dict[str, dict]:
+    """Read each light file's head into a fresh summary map (file I/O; no lock held —
+    the caller assigns the result under _CACHE_LOCK)."""
+    built: dict[str, dict] = {}
     d = _convs_dir()
     if not d.exists():
-        return
+        return built
     for f in sorted(d.glob("*.json")):
         try:
             conv = json.loads(f.read_text())
@@ -262,19 +271,37 @@ def _ensure_loaded() -> None:
             continue
         cid = conv.get("id")
         if cid:
-            _summaries[cid] = _summary_of(conv)
+            built[cid] = _summary_of(conv)
+    return built
 
 
-def _ordered_cids() -> list[str]:
-    """Deterministic order: by created_at (append order for new creates), id tiebreak."""
-    assert _summaries is not None
-    return sorted(_summaries, key=lambda c: (_summaries[c].get("created_at") or "", c))
+def _ensure_loaded() -> None:
+    """Build the summary cache from disk once. Fast no-op once built (the common
+    serving case — boot() builds it before the first request)."""
+    global _summaries
+    if _summaries is not None:
+        return
+    built = _build_summaries()  # disk reads OUTSIDE the lock
+    with _CACHE_LOCK:
+        if _summaries is None:  # double-check: first builder wins, others discard
+            _summaries = built
+
+
+def _snapshot_ordered_cids() -> list[str]:
+    """Ordered cid snapshot taken atomically (safe against concurrent inserts).
+    Deterministic: by created_at (append order for new creates), id tiebreak."""
+    with _CACHE_LOCK:
+        assert _summaries is not None
+        return sorted(_summaries, key=lambda c: (_summaries[c].get("created_at") or "", c))
 
 
 def _load_body(cid: str) -> dict | None:
-    """Parsed light body for one conversation (memoized). None if missing/corrupt."""
-    if cid in _bodies:
-        return _bodies[cid]
+    """Parsed light body for one conversation (memoized). None if missing/corrupt.
+    The file read happens outside the lock; a re-check on insert lets a concurrent
+    writer's fresher cached body win (the cache converges to the last write)."""
+    with _CACHE_LOCK:
+        if cid in _bodies:
+            return _bodies[cid]
     f = _conv_file(cid)
     if not f.exists():
         return None
@@ -283,8 +310,11 @@ def _load_body(cid: str) -> dict | None:
     except (json.JSONDecodeError, OSError):
         _quarantine(f)
         return None
-    _bodies[cid] = conv
-    return conv
+    with _CACHE_LOCK:
+        if cid in _bodies:  # a writer cached a (fresher) body while we read the file
+            return _bodies[cid]
+        _bodies[cid] = conv
+        return conv
 
 
 def _write_blobs(cid: str, blobs: dict[str, dict]) -> None:
@@ -301,25 +331,33 @@ def _write_blobs(cid: str, blobs: dict[str, dict]) -> None:
 
 
 def _persist(light: dict) -> None:
-    """Write one light conversation file + refresh both caches for it."""
+    """Write one light conversation file + refresh both caches for it. The file write
+    is atomic (tmp+rename); the cache refresh is under _CACHE_LOCK."""
     cid = _check_id(light.get("id"), "conversation")
     write_json(_conv_file(cid), light)
-    _bodies[cid] = light
-    assert _summaries is not None
-    _summaries[cid] = _summary_of(light)
+    with _CACHE_LOCK:
+        assert _summaries is not None
+        _bodies[cid] = light
+        _summaries[cid] = _summary_of(light)
 
 
 # ── public reads ─────────────────────────────────────────────────────────────
 def list_summaries() -> list[dict]:
-    """`GET /api/conversations` — {id,name,created_at,updated_at,panels}, no trees."""
+    """`GET /api/conversations` — {id,name,created_at,updated_at,panels}, no trees.
+
+    Returns refs to the cached summary dicts, which are replaced wholesale (never
+    mutated in place) on write, so a caller holding one is unaffected by later saves."""
     _ensure_loaded()
-    return [_summaries[c] for c in _ordered_cids()]  # type: ignore[index]
+    with _CACHE_LOCK:
+        assert _summaries is not None
+        cids = sorted(_summaries, key=lambda c: (_summaries[c].get("created_at") or "", c))
+        return [_summaries[c] for c in cids]
 
 
 def list_bodies() -> list[dict]:
     """`GET /api/conversations?bodies=1` — light bodies (trees incl., blobs excl.)."""
     _ensure_loaded()
-    return [b for c in _ordered_cids() if (b := _load_body(c)) is not None]
+    return [b for c in _snapshot_ordered_cids() if (b := _load_body(c)) is not None]
 
 
 def get_body(cid: str) -> dict | None:
@@ -452,13 +490,16 @@ def delete(cid: str) -> bool:
     """DELETE /{id} — remove the light file AND the blobs dir. False if unknown."""
     with locked("conversations"):
         _ensure_loaded()
-        if cid not in (_summaries or {}) and not _conv_file(cid).exists():
+        with _CACHE_LOCK:
+            assert _summaries is not None
+            known = cid in _summaries
+        if not known and not _conv_file(cid).exists():
             return False
         _conv_file(cid).unlink(missing_ok=True)
         shutil.rmtree(_blobs_dir(cid), ignore_errors=True)
-        _bodies.pop(cid, None)
-        assert _summaries is not None
-        _summaries.pop(cid, None)
+        with _CACHE_LOCK:
+            _bodies.pop(cid, None)
+            _summaries.pop(cid, None)
     return True
 
 

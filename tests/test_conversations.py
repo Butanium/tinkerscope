@@ -298,3 +298,45 @@ def test_missing_conversation_404s(client):
     assert client.patch("/api/conversations/nope", json={"name": "x"}).status_code == 404
     assert client.put("/api/conversations/nope/tree", json={"trees": {}}).status_code == 404
     assert client.delete("/api/conversations/nope").status_code == 404
+
+
+def test_concurrent_reads_during_writes_dont_crash(client):
+    """Regression: sync handlers run in FastAPI's threadpool, so GET (which iterates
+    the summary cache) races POST create (which inserts into it). Without the cache
+    lock this raised `RuntimeError: dictionary changed size during iteration` on a
+    page load coinciding with a save. Hammer both concurrently — must never raise."""
+    import concurrent.futures as cf
+
+    import tinkerscope.api.conversation_store as store
+
+    for i in range(20):  # seed so the reader has a non-trivial map to iterate
+        store.upsert(id=f"seed-{i}", name=f"s{i}", system_prompt=None,
+                     trees={"primary": {}}, panels=[], reduced_panels=[],
+                     send_targets=[], seen_panels=[])
+    errors: list[Exception] = []
+
+    def reader():
+        try:
+            for _ in range(200):
+                store.list_summaries()
+                store.list_bodies()
+        except Exception as e:  # a crash here is the bug under test
+            errors.append(e)
+
+    def writer(base: int):
+        try:
+            for j in range(80):
+                store.upsert(id=f"w{base}-{j}", name="w", system_prompt=None,
+                             trees={"primary": {}}, panels=[], reduced_panels=[],
+                             send_targets=[], seen_panels=[])
+        except Exception as e:
+            errors.append(e)
+
+    with cf.ThreadPoolExecutor(max_workers=6) as ex:
+        futs = [ex.submit(reader) for _ in range(3)] + [ex.submit(writer, b) for b in range(3)]
+        for f in futs:
+            f.result()
+    assert not errors, f"concurrent access raised: {errors[:3]}"
+    # And every write landed (no lost inserts under the cache lock).
+    ids = {s["id"] for s in store.list_summaries()}
+    assert all(f"w{b}-{j}" in ids for b in range(3) for j in range(80))
