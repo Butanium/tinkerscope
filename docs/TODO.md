@@ -92,6 +92,38 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
 
 ## Next
 
+- [x] **Storage v2 — SHIPPED (2026-07-13).** The browser-OOM-on-big-workspace fix:
+  per-conversation files + write-once per-node blobs (token_logprobs/raw_meta,
+  89.8% of the bytes), summaries-only list + fetch-on-open, dirty-panel partial
+  saves, zero-tree-bytes PATCH for layout changes, `$state.raw` trees, lazy
+  node-blob cache. Design + as-built: `docs/STORAGE_V2.md`, `docs/API_CONTRACT.md`.
+  Real-store result: list 419MB → 13KB; the 115MB conversation opens in ~0.6s,
+  add-model 0.08–0.24s (was: tab OOM). Migration ran 2026-07-13 (17 convs, 1190
+  blobs, byte-faithful-verified); `conversations.json.legacy` + a checksummed
+  `.bak-20260713` remain in the instance dir until Clément clears them.
+  - Also fixed en route (pre-existing): layout-less conversation open grafting
+    foreign panel echoes into the opened conv's trees (durable pollution;
+    regression smoke `browser_legacy_echo_graft.py` — read its docstring before
+    editing, the repro has a false-green trap).
+- [ ] **Storage v2 follow-ups** (accepted limitations, ranked):
+  - Stop-all can't reach a chat whose live bucket was clobbered by a same-slot
+    re-fire — the known single-slot detached-fire hazard, now with a concrete
+    repro (see `browser_stop_generation.py` history); top item for the still-owed
+    detached-fire review.
+  - Post-save lightening: a session's own fresh folds keep heavy fields inline
+    in-memory and re-ship them on subsequent same-panel saves until reload
+    (server strips idempotently; bounded, ~v1-order bytes).
+  - Foreign-fold reconciled turns get LOCAL node ids → can't lazy-fetch the
+    owner's blobs even after its PUT lands; heals on reload/switch-back (same
+    visible behavior as v1's light echo).
+  - Opening a bare/legacy conversation persists panel-UI defaults once → bumps
+    `updated_at` (recency reorder on first open; v1 did it too).
+  - Smoke-suite hygiene: the browser smokes want two environments (fixtures root
+    vs fresh state — real highlight rules perturb `chart_rules`' oracle) and must
+    not run concurrently with CPU-heavy work; 2 pre-existing stale smokes remain
+    (`continue_scope`: `.prefill-scope` selector gone; `readme_shots`:
+    pre-ModelDropdown assumptions) — worth a repair pass.
+
 - [x] **Overhaul the highlight UI — SHIPPED.** Replaced the hardcoded
   ed_sheeran/dentist/vesuvius regexes with **user-defined highlight rules**
   (sidebar editor): named rules, palette, multi-pattern with or/and, regex/case
