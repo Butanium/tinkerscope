@@ -18,6 +18,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from . import conversation_store
 from .discovery import get_capabilities
 from .routes import (
     chat,
@@ -35,6 +36,12 @@ from .settings import SETTINGS
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Storage v2: migrate the legacy conversations.json (if present) into the
+    # per-conversation files + node blobs, then build the in-memory summary cache.
+    # RAISES on a migration verify mismatch — refuse to start rather than serve
+    # partial data (the legacy file is left untouched). Off the event loop because
+    # verifying a large store is CPU-bound; the raise still propagates through await.
+    await asyncio.to_thread(conversation_store.boot)
     # Warm the tinker capabilities cache so the first /api/models call can
     # already mark runs sampleable/not. Non-fatal if it fails (offline / no key).
     # Offloaded to a thread: the tinker SDK's get_server_capabilities is sync and
