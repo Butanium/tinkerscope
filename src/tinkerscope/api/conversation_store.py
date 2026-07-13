@@ -163,16 +163,30 @@ def _split_tree(tree: Any, blobs: dict[str, dict]) -> Any:
     return light
 
 
+# Tree-bearing conversation keys. `trees` is the v2 {panel_id: tree} map; `tree` /
+# `compare_tree` are the pre-multipanel single trees (2 of Clément's 16 real
+# conversations still carry that shape — migration must split blobs out of them too,
+# and preserve their key presence EXACTLY for the round-trip verify).
+_TREES_MAP_KEY = "trees"
+_SINGLE_TREE_KEYS = ("tree", "compare_tree")
+
+
 def split_conv(conv: dict) -> tuple[dict, dict[str, dict]]:
     """Split a full conversation into (light_conversation, {node_id: blob}).
 
-    Copies conv verbatim except `trees`, whose nodes are split. Does not mutate
-    conv (the original stays intact for migration's deep-compare)."""
-    light = {k: v for k, v in conv.items() if k != "trees"}
+    Copies conv verbatim except its tree-bearing keys, whose nodes are split. Only
+    keys actually present are emitted (never synthesizes a `trees` key on a legacy
+    {tree, compare_tree} entry). Does not mutate conv (the original stays intact for
+    migration's deep-compare)."""
     blobs: dict[str, dict] = {}
-    light["trees"] = {
-        pid: _split_tree(tree, blobs) for pid, tree in (conv.get("trees") or {}).items()
-    }
+    light: dict = {}
+    for k, v in conv.items():
+        if k == _TREES_MAP_KEY:
+            light[k] = {pid: _split_tree(t, blobs) for pid, t in (v or {}).items()}
+        elif k in _SINGLE_TREE_KEYS:
+            light[k] = _split_tree(v, blobs)
+        else:
+            light[k] = v
     return light, blobs
 
 
@@ -189,10 +203,14 @@ def _materialize_tree(ltree: Any, blobs: dict[str, dict]) -> Any:
 
 def materialize_conv(light: dict, blobs: dict[str, dict]) -> dict:
     """Inverse of split_conv (migration verification only)."""
-    conv = {k: v for k, v in light.items() if k != "trees"}
-    conv["trees"] = {
-        pid: _materialize_tree(ltree, blobs) for pid, ltree in (light.get("trees") or {}).items()
-    }
+    conv: dict = {}
+    for k, v in light.items():
+        if k == _TREES_MAP_KEY:
+            conv[k] = {pid: _materialize_tree(t, blobs) for pid, t in (v or {}).items()}
+        elif k in _SINGLE_TREE_KEYS:
+            conv[k] = _materialize_tree(v, blobs)
+        else:
+            conv[k] = v
     return conv
 
 

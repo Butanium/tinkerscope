@@ -66,8 +66,16 @@ def test_migration_round_trips_and_splits_blobs(store):
             _node("n2", content="reply", heavy=True, raw_text="reply", finish_reason="stop"),
         ])}),
         _legacy_conv("conv-b", "Plain", {"primary": _tree([_node("n3", content="x")])}),
-        # A legacy {tree, compare_tree} entry with no `trees` — nothing to split.
-        _legacy_conv("conv-c", "OldShape", {}, tree={"mark": "A"}, compare_tree={"mark": "B"}),
+        # A pre-multipanel {tree, compare_tree} entry with NO `trees` key at all
+        # (2 of Clément's 16 real conversations have exactly this shape). Migration
+        # must split blobs out of the legacy `tree` too AND preserve key-presence
+        # exactly — synthesizing a `trees` key here breaks the round-trip verify.
+        {
+            "id": "conv-c", "name": "OldShape", "system_prompt": None,
+            "tree": _tree([_node("n4", content="old", heavy=True, raw_text="old")]),
+            "compare_tree": _tree([_node("n5", content="cmp")]),
+            "created_at": "2026-01-01T00:00:00+00:00", "updated_at": "2026-01-02T00:00:00+00:00",
+        },
     ]
     legacy_path = store._legacy_path()
     legacy_path.parent.mkdir(parents=True, exist_ok=True)
@@ -98,9 +106,10 @@ def test_migration_round_trips_and_splits_blobs(store):
     by_id = {c["id"]: c for c in legacy}
     for cid in ids:
         light = store.get_body(cid)
+        trees_iter = list((light.get("trees") or {}).values())
+        trees_iter += [light[k] for k in ("tree", "compare_tree") if k in light]
         node_ids = [
-            nid for t in (light.get("trees") or {}).values() if isinstance(t, dict)
-            for nid in (t.get("nodes") or {})
+            nid for t in trees_iter if isinstance(t, dict) for nid in (t.get("nodes") or {})
         ]
         remat = store.materialize_conv(light, store.get_blobs(cid, node_ids))
         assert remat == by_id[cid]
