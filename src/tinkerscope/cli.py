@@ -799,10 +799,15 @@ def cmd_state(
     width: int = typer.Option(160, "--width", help="per-message truncation width"),
     link: bool = typer.Option(True, "--link/--no-link", help="annotate each panel with the saved conversation its active path matches (`--no-link` skips the conversations fetch)"),
     json_out: bool = typer.Option(False, "--json", help="raw state JSON (untruncated escape hatch)"),
+    include_folded: bool = typer.Option(
+        False, "--include-folded", help="also show panels folded in the browser UI (skipped by default)"
+    ),
 ) -> None:
     """Digest of what's on screen now: one block per panel, first/last-2 of each
     panel's ACTIVE path, annotated with the saved conversation it matches (so you
-    can jump straight to its branches via `conv`). Branches themselves: see `conv`."""
+    can jump straight to its branches via `conv`). Panels folded in the browser
+    UI are skipped (one-line stub) — --include-folded expands them. Branches
+    themselves: see `conv`."""
     st = _get("/api/state")
     if json_out:
         print(json.dumps(st, indent=2, default=str, ensure_ascii=False))
@@ -819,16 +824,29 @@ def cmd_state(
     # Fetch saved conversations only when we'll use them: to NAME the open-conv id the
     # browser pushed, or — when it didn't (older browser / CLI-only) — to match panels.
     convs = _conversations() if (link and (conv_id or any(p.get("messages") for p in panels))) else []
+    # Fold info lives only in the saved conversation (the state bus has no
+    # reduced_panels), so folded-panel skipping needs the browser-pushed
+    # conversation_id + the (default) --link fetch; without either, all panels show.
+    reduced: set[str] = set()
     if conv_id:
         open_conv = next((c for c in convs if c.get("id") == conv_id), None)
         if open_conv:
             print(f"open conversation: {open_conv.get('name')} ({conv_id[:8]})   → `tinkpg conv {conv_id[:8]}`")
-        else:
+            reduced = set(open_conv.get("reduced_panels") or [])
+        elif link:
             print(f"open conversation: {conv_id[:8]} (unsaved draft / not in saved set)")
+        else:
+            print(f"open conversation: {conv_id[:8]}   (--no-link: name + folds not resolved)")
     print(f"{len(panels)} panel(s):\n")
+    skipped: list[str] = []
     for p in panels:
         msgs = p.get("messages", [])
         bind = _short_run(p.get("run_id")) + (f"@{p['checkpoint']}" if p.get("checkpoint") else "")
+        if p["id"] in reduced and not include_folded:
+            skipped.append(p["id"])
+            print(f"▸ {p['id']}  {bind}   (folded — --include-folded to expand)")
+            print()
+            continue
         # The exact open-conv id (above) covers every panel; only fall back to the
         # per-panel path-match heuristic when the browser pushed no conversation_id.
         tag = ""
@@ -843,6 +861,8 @@ def cmd_state(
         for line in _digest(msgs, _fmt_msg, full, width):
             print(line)
         print()
+    if skipped:
+        print(f"{len(skipped)} folded panel(s) skipped: {', '.join(skipped)}   (--include-folded to expand)")
     print("(branch trees: `tinkpg conv <id|name>`   ·   raw: `tinkpg state --json`)")
 
 

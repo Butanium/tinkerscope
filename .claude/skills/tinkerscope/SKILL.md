@@ -34,7 +34,7 @@ tinkpg checkpoints <run>                            # a run's checkpoints (name,
 tinkpg open <run>[@ckpt]                            # select a run in the human's browser (single mode)
 tinkpg chat <run>[@ckpt] "<prompt>" [opts]          # sample; streams to stdout + browser
 tinkpg compare <run_a>[@ckpt] <run_b>[@ckpt] "<prompt>" [opts]   # A→left pane, B→right pane
-tinkpg state [--full] [--width N] [--no-link] [--json]   # DIGEST of on-screen panels (active path + matched saved conv)
+tinkpg state [--full] [--width N] [--no-link] [--json] [--include-folded]   # DIGEST of on-screen panels (active path + matched saved conv)
 tinkpg conv                                         # list saved (branchable) conversations + branch metadata
 tinkpg conv <id|name> [--panel P] [--full] [--tree] [--include-folded]  # expand one: active branch + fork counts (--tree = all branches)
 tinkpg samples [conv] [--panel P] [--turn N] [--full]  # ALL n-sample siblings at one fork, each w/ CoT + a <tag> verdict tally
@@ -59,7 +59,9 @@ the rest.
   that id is absent (older browser, or a CLI-only session that never opened a saved
   conversation), it falls back to a per-panel EXACT active-path match (`← conv:
   <name>`, or an honest `ambiguous ×N` when a short path is shared). `--no-link`
-  skips the conversations fetch entirely.
+  skips the conversations fetch entirely. Panels the human has FOLDED in the
+  browser print as one-line stubs here too — `--include-folded` expands them
+  (fold info rides the open conversation, so `--no-link` shows every panel).
 - `tinkpg conv` reads the **saved conversation trees** (`/api/conversations`) —
   this is the ONLY place branches live. The tree is opaque to the server; the CLI
   walks it client-side (mirrors `web/src/lib/tree.ts`). List shows per-conversation

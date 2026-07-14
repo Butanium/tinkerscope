@@ -231,10 +231,13 @@ separator is `@` (`tinkpg chat foo/bar/run@final "hi"`), or use `--checkpoint`.
 `--thinking-both` (n samples without thinking + n with, 2n total), and
 `--system`.
 
-`tinkpg conv` skips panels folded in the browser UI by default (a one-line stub
-+ a trailing "N folded panel(s) skipped: …" list, so you still know they're
-there) — pass `--include-folded` to expand all of them, or `--panel <id>` to
-target one directly (which always overrides the fold).
+`tinkpg conv` and `tinkpg state` skip panels folded in the browser UI by default
+(a one-line stub + a trailing "N folded panel(s) skipped: …" list, so you still
+know they're there) — pass `--include-folded` to expand them, or (`conv` only)
+`--panel <id>` to target one directly, which always overrides the fold. For
+`state` the fold info rides the open saved conversation, so it needs the
+browser-pushed conversation id and the default `--link` fetch (`--no-link`
+shows every panel).
 
 ---
 
