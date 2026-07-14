@@ -10,14 +10,14 @@ declare const process: { env: Record<string, string | undefined> };
 const backendPort = process.env.TINKERSCOPE_DEV_BACKEND || '8765';
 
 export default defineConfig({
-	plugins: [sveltekit()],
-	server: {
-		host: '127.0.0.1',
-		proxy: {
-			'/api': {
-				target: `http://127.0.0.1:${backendPort}`,
-				changeOrigin: true
-			}
-		}
-	}
+  plugins: [sveltekit()],
+  server: {
+    host: '127.0.0.1',
+    proxy: {
+      '/api': {
+        target: `http://127.0.0.1:${backendPort}`,
+        changeOrigin: true
+      }
+    }
+  }
 });

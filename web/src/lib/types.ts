@@ -5,33 +5,33 @@ import type { ConvTree, TokenLogprob } from './tree';
 export type { TokenLogprob };
 
 export type Checkpoint = {
-	name: string;
-	batch?: number;
-	epoch?: number;
-	step?: number;
-	sampler_path?: string;
-	state_path?: string;
+  name: string;
+  batch?: number;
+  epoch?: number;
+  step?: number;
+  sampler_path?: string;
+  state_path?: string;
 };
 
 /** One discovered training run = one model with N selectable checkpoints. */
 export type Run = {
-	id: string;
-	name: string;
-	run_dir: string;
-	base_model: string;
-	wandb_project?: string | null;
-	wandb_name?: string | null;
-	renderer_name?: string | null;
-	dataset_path?: string | null;
-	lora_rank?: number | null;
-	learning_rate?: number | null;
-	seed?: number | null;
-	num_checkpoints: number;
-	checkpoints: Checkpoint[];
-	sampleable: boolean | null; // true | false | null(unknown)
-	unsampleable_reason?: string | null;
-	config_error?: string | null;
-	supports_thinking?: boolean;
+  id: string;
+  name: string;
+  run_dir: string;
+  base_model: string;
+  wandb_project?: string | null;
+  wandb_name?: string | null;
+  renderer_name?: string | null;
+  dataset_path?: string | null;
+  lora_rank?: number | null;
+  learning_rate?: number | null;
+  seed?: number | null;
+  num_checkpoints: number;
+  checkpoints: Checkpoint[];
+  sampleable: boolean | null; // true | false | null(unknown)
+  unsampleable_reason?: string | null;
+  config_error?: string | null;
+  supports_thinking?: boolean;
 };
 
 export type OpenRouterModel = { label: string; openrouter_model: string };
@@ -45,31 +45,31 @@ export type OpenRouterModel = { label: string; openrouter_model: string };
  * For 'base' `id === base_model`; for 'checkpoint' `id === sampler_path`.
  */
 export type TinkerModel = {
-	kind: 'base' | 'checkpoint';
-	id: string;
-	label: string;
-	base_model?: string;
-	sampler_path?: string;
-	created?: number;
+  kind: 'base' | 'checkpoint';
+  id: string;
+  label: string;
+  base_model?: string;
+  sampler_path?: string;
+  created?: number;
 };
 
 /** Response shape for the two typeahead-catalog endpoints. */
 export type TinkerModelsResponse = { available: boolean; error: string | null; models: TinkerModel[] };
 export type OpenRouterAvailableResponse = {
-	available: boolean;
-	error: string | null;
-	models: OpenRouterModel[];
+  available: boolean;
+  error: string | null;
+  models: OpenRouterModel[];
 };
 
 export type Health = {
-	ok: boolean;
-	root?: string;
-	scan_roots?: string[];
-	tinker_key?: boolean;
-	openrouter_key?: boolean;
-	available?: boolean;
-	supported_models?: string[];
-	error?: string | null;
+  ok: boolean;
+  root?: string;
+  scan_roots?: string[];
+  tinker_key?: boolean;
+  openrouter_key?: boolean;
+  available?: boolean;
+  supported_models?: string[];
+  error?: string | null;
 };
 
 // `reasoning` (assistant turns only) travels with the message so the sampler can hand the
@@ -80,16 +80,16 @@ export type ChatMessage = { role: 'user' | 'assistant' | 'system'; content: stri
  *  api/routes/highlights.py). Mirrors samplescope's HighlightRule, minus the
  *  column / JS-condition scoping that a chat transcript has nothing to bind to. */
 export type HighlightRule = {
-	id: string;
-	name: string;
-	enabled: boolean;
-	patterns: string[];
-	combinator: 'or' | 'and';
-	is_regex: boolean;
-	case_sensitive: boolean;
-	color: string;
-	scope_role: string | null; // 'user' | 'assistant' | 'system' | null (any)
-	sort_order: number;
+  id: string;
+  name: string;
+  enabled: boolean;
+  patterns: string[];
+  combinator: 'or' | 'and';
+  is_regex: boolean;
+  case_sensitive: boolean;
+  color: string;
+  scope_role: string | null; // 'user' | 'assistant' | 'system' | null (any)
+  sort_order: number;
 };
 
 /** A saved sample worth keeping — the "pins" slideshow (was "highlights").
@@ -116,30 +116,30 @@ export type PanelSel = { panel: Panel; run_id: string | null; checkpoint: string
  *  write-only (the branch tree in lib/tree.ts is the read source); it exists so the
  *  CLI and external-fold reconcile can see/replay each panel's path. */
 export type PanelState = {
-	id: Panel;
-	run_id: string | null;
-	checkpoint: string | null;
-	messages: ChatMessage[];
+  id: Panel;
+  run_id: string | null;
+  checkpoint: string | null;
+  messages: ChatMessage[];
 };
 
 /** Shared server-side playground state, streamed over /api/state/events. Sampling
  *  params are GLOBAL (shared across all panels); only run/checkpoint/transcript are
  *  per-panel. */
 export type PlaygroundState = {
-	panels: PanelState[];
-	conversation_id: string | null; // the open conversation's id (browser `?c=`), for `tinkpg state`
-	system_prompt: string | null;
-	temperature: number;
-	max_tokens: number;
-	n_samples: number;
-	/** false / true / 'both' — 'both' fires n_samples without thinking + n_samples
-	 *  with (2n per chat; see /api/chat in docs/API_CONTRACT.md). */
-	thinking: boolean | 'both';
-	top_p: number | null;
-	chat_id: number;
-	running: boolean;
-	last_event: string | null;
-	last_event_ts: number;
+  panels: PanelState[];
+  conversation_id: string | null; // the open conversation's id (browser `?c=`), for `tinkpg state`
+  system_prompt: string | null;
+  temperature: number;
+  max_tokens: number;
+  n_samples: number;
+  /** false / true / 'both' — 'both' fires n_samples without thinking + n_samples
+   *  with (2n per chat; see /api/chat in docs/API_CONTRACT.md). */
+  thinking: boolean | 'both';
+  top_p: number | null;
+  chat_id: number;
+  running: boolean;
+  last_event: string | null;
+  last_event_ts: number;
 };
 
 /** Client-settable patch for PlaygroundState. The patch shape diverges from the
@@ -147,130 +147,130 @@ export type PlaygroundState = {
  *  panel's transcript at once; `panel`+run_id/checkpoint/messages targets ONE panel;
  *  the rest are global params. */
 export type StatePatch = {
-	panels?: PanelState[];
-	conversation_id?: string | null;
-	panel_messages?: Record<string, ChatMessage[]>;
-	panel?: Panel;
-	run_id?: string | null;
-	checkpoint?: string | null;
-	messages?: ChatMessage[];
-	system_prompt?: string | null;
-	temperature?: number;
-	max_tokens?: number;
-	n_samples?: number;
-	thinking?: boolean | 'both';
-	top_p?: number | null;
+  panels?: PanelState[];
+  conversation_id?: string | null;
+  panel_messages?: Record<string, ChatMessage[]>;
+  panel?: Panel;
+  run_id?: string | null;
+  checkpoint?: string | null;
+  messages?: ChatMessage[];
+  system_prompt?: string | null;
+  temperature?: number;
+  max_tokens?: number;
+  n_samples?: number;
+  thinking?: boolean | 'both';
+  top_p?: number | null;
 };
 
 /** Scope of the assistant prefill across a send's thinking/non-thinking halves. */
 export type PrefillScope = 'all' | 'think' | 'non_think';
 
 export type ChatRequest = {
-	run_id?: string | null;
-	checkpoint?: string | null;
-	base_model?: string | null;
-	sampler_path?: string | null;
-	openrouter_model?: string | null;
-	messages: ChatMessage[];
-	system_prompt?: string | null;
-	temperature: number;
-	max_tokens: number;
-	n_samples: number;
-	thinking: boolean | 'both';
-	/** Which half(s) of a send the trailing-assistant prefill applies to:
-	 *  'all' = both, 'think' = thinking side only, 'non_think' = non-thinking side
-	 *  only. In 'both' mode the backend keeps/strips the prefill per-half; in a
-	 *  single-mode send the mismatched scope drops the prefill entirely. */
-	prefill_scope?: PrefillScope;
-	/** @deprecated superseded by prefill_scope; true ≡ prefill_scope 'think'. Still
-	 *  accepted server-side as an alias for any stale client. */
-	prefill_thinking_only?: boolean;
-	top_p?: number | null;
-	top_k?: number | null;
-	presence_penalty?: number | null;
-	repetition_penalty?: number | null;
-	/** Capture per-token logprobs (native tinker paths; server default true). */
-	logprobs?: boolean;
-	panel: Panel;
-	broadcast: boolean;
-	/** Fire-and-forget: the POST returns immediately and the generation streams
-	 *  ONLY to the state bus, so the browser doesn't hold the connection (the
-	 *  browser sets this for every send — see chat.svelte.ts). */
-	detached?: boolean;
-	/** Opaque ownership token echoed on chat_start/done/error so the browser can
-	 *  tell its OWN chats (folded from the bus bucket on chat_done) from external ones. */
-	client_token?: string | null;
+  run_id?: string | null;
+  checkpoint?: string | null;
+  base_model?: string | null;
+  sampler_path?: string | null;
+  openrouter_model?: string | null;
+  messages: ChatMessage[];
+  system_prompt?: string | null;
+  temperature: number;
+  max_tokens: number;
+  n_samples: number;
+  thinking: boolean | 'both';
+  /** Which half(s) of a send the trailing-assistant prefill applies to:
+   *  'all' = both, 'think' = thinking side only, 'non_think' = non-thinking side
+   *  only. In 'both' mode the backend keeps/strips the prefill per-half; in a
+   *  single-mode send the mismatched scope drops the prefill entirely. */
+  prefill_scope?: PrefillScope;
+  /** @deprecated superseded by prefill_scope; true ≡ prefill_scope 'think'. Still
+   *  accepted server-side as an alias for any stale client. */
+  prefill_thinking_only?: boolean;
+  top_p?: number | null;
+  top_k?: number | null;
+  presence_penalty?: number | null;
+  repetition_penalty?: number | null;
+  /** Capture per-token logprobs (native tinker paths; server default true). */
+  logprobs?: boolean;
+  panel: Panel;
+  broadcast: boolean;
+  /** Fire-and-forget: the POST returns immediately and the generation streams
+   *  ONLY to the state bus, so the browser doesn't hold the connection (the
+   *  browser sets this for every send — see chat.svelte.ts). */
+  detached?: boolean;
+  /** Opaque ownership token echoed on chat_start/done/error so the browser can
+   *  tell its OWN chats (folded from the bus bucket on chat_done) from external ones. */
+  client_token?: string | null;
 };
 
 /** What `GET /api/conversations` returns per conversation (storage v2): the
  *  sidebar/list projection — NO trees. The full body (trees included, blobs
  *  excluded) is fetched per-conversation via `GET /api/conversations/{id}`. */
 export type ConversationSummary = {
-	id: string;
-	name: string;
-	created_at: string;
-	updated_at: string;
-	/** Per-conversation panel layout — present so "new conversation inherits the
-	 *  current model set" works without fetching the body. Absent on legacy rows. */
-	panels?: PanelLayout[];
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  /** Per-conversation panel layout — present so "new conversation inherits the
+   *  current model set" works without fetching the body. Absent on legacy rows. */
+  panels?: PanelLayout[];
 };
 
 /** A tree node's heavy out-of-tree payload (storage v2): per-node write-once
  *  blobs, fetched in batch via `POST /api/conversations/{id}/node-blobs` and
  *  cached in lib/node-blobs.svelte.ts. Light nodes carry `has_*` flags instead. */
 export type NodeBlobs = {
-	token_logprobs?: TokenLogprob[];
-	raw_meta?: string;
+  token_logprobs?: TokenLogprob[];
+  raw_meta?: string;
 };
 
 /** One saved, branchable conversation. The trees are OPAQUE to the backend; the
  *  browser owns them (lib/tree.ts). `system_prompt` travels with the conversation
  *  (each conversation = one experiment). */
 export type Conversation = {
-	id: string;
-	name: string;
-	system_prompt: string | null;
-	/** Per-panel branch trees, keyed by panel id ('primary','compare','p-2',…). */
-	trees: Record<string, ConvTree>;
-	/** Legacy 2-panel shape — present only on un-migrated saved conversations; the
-	 *  store's #loadTrees read-shim folds these into `trees`. Never written anymore. */
-	tree?: ConvTree;
-	compare_tree?: ConvTree | null;
-	/** Per-conversation panel LAYOUT: which models are shown in which panels. Absent
-	 *  on legacy conversations (the store keeps the currently-shown panels on open). */
-	panels?: PanelLayout[];
-	/** Per-conversation panel UI (opaque panel-id lists): folded panels, composer
-	 *  send-targets, and the defaulting bookkeeping. Absent on legacy conversations
-	 *  (the store treats missing as empty ⇒ every open panel defaults ON). */
-	reduced_panels?: string[];
-	send_targets?: string[];
-	seen_panels?: string[];
-	created_at: string;
-	updated_at: string;
+  id: string;
+  name: string;
+  system_prompt: string | null;
+  /** Per-panel branch trees, keyed by panel id ('primary','compare','p-2',…). */
+  trees: Record<string, ConvTree>;
+  /** Legacy 2-panel shape — present only on un-migrated saved conversations; the
+   *  store's #loadTrees read-shim folds these into `trees`. Never written anymore. */
+  tree?: ConvTree;
+  compare_tree?: ConvTree | null;
+  /** Per-conversation panel LAYOUT: which models are shown in which panels. Absent
+   *  on legacy conversations (the store keeps the currently-shown panels on open). */
+  panels?: PanelLayout[];
+  /** Per-conversation panel UI (opaque panel-id lists): folded panels, composer
+   *  send-targets, and the defaulting bookkeeping. Absent on legacy conversations
+   *  (the store treats missing as empty ⇒ every open panel defaults ON). */
+  reduced_panels?: string[];
+  send_targets?: string[];
+  seen_panels?: string[];
+  created_at: string;
+  updated_at: string;
 };
 
 /** A single streamed completion (one sample of an n-sample fan-out). */
 export type SampleData = {
-	content: string;
-	reasoning?: string;
-	raw_text?: string;
-	/** Tinker only: the request sent + trimmed response, shown in a dropdown
-	 *  beneath the decoded-token `raw_text`. (OpenRouter has no tokens, so its
-	 *  request/response lives in `raw_text` itself.) */
-	raw_meta?: string;
-	finish_reason?: string;
-	error?: string;
-	/** Which renderer mode produced this sample — set only on thinking='both' chats
-	 *  (false = the non-thinking half, true = the thinking half). */
-	thinking?: boolean;
-	/** Per-token logprobs + top-5 alternatives — native tinker sampling only
-	 *  (see docs/API_CONTRACT.md). Persists through the fold onto the tree node. */
-	token_logprobs?: TokenLogprob[];
-	/** Did the backend already fold the trailing-assistant prefill into `content`?
-	 *  True on the native tinker paths (which return the full turn); false/absent on
-	 *  the continuation-only paths (OpenRouter / loose), where the bus-bucket fold
-	 *  must prepend the prefill itself. Mirrors the drain-path fold in chat.svelte.ts. */
-	prefill_incorporated?: boolean;
+  content: string;
+  reasoning?: string;
+  raw_text?: string;
+  /** Tinker only: the request sent + trimmed response, shown in a dropdown
+   *  beneath the decoded-token `raw_text`. (OpenRouter has no tokens, so its
+   *  request/response lives in `raw_text` itself.) */
+  raw_meta?: string;
+  finish_reason?: string;
+  error?: string;
+  /** Which renderer mode produced this sample — set only on thinking='both' chats
+   *  (false = the non-thinking half, true = the thinking half). */
+  thinking?: boolean;
+  /** Per-token logprobs + top-5 alternatives — native tinker sampling only
+   *  (see docs/API_CONTRACT.md). Persists through the fold onto the tree node. */
+  token_logprobs?: TokenLogprob[];
+  /** Did the backend already fold the trailing-assistant prefill into `content`?
+   *  True on the native tinker paths (which return the full turn); false/absent on
+   *  the continuation-only paths (OpenRouter / loose), where the bus-bucket fold
+   *  must prepend the prefill itself. Mirrors the drain-path fold in chat.svelte.ts. */
+  prefill_incorporated?: boolean;
 };
 
 /**
@@ -282,37 +282,37 @@ export type SampleData = {
  * cards (by index) to their folded sibling node ids for click-to-select.
  */
 export type ViewMessage = {
-	role: 'user' | 'assistant' | 'system';
-	content: string;
-	reasoning?: string;
-	raw_text?: string;
-	raw_meta?: string;
-	/** Authored prefill this turn was generated from (raw text); the renderer colors
-	 *  the matching leading slice of content/reasoning as the prefilled portion. */
-	prefill?: string;
-	/** How generation ended — 'length' ⇒ cut off by max tokens (truncation badge). */
-	finish_reason?: string;
-	/** Renderer mode of this turn's sample — set only for thinking='both' batches
-	 *  (shows the think / no-think chip when cycling the folded siblings). */
-	thinking?: boolean;
-	/** Per-token logprobs of this turn's sample (native tinker only) — powers the
-	 *  token-hover inspector when the sidebar "Token probs" toggle is on. Absent on
-	 *  a LIGHT node whose blob lives server-side — then `has_token_logprobs` is set
-	 *  and the consumer lazy-fetches through lib/node-blobs (keyed by `nodeId`). */
-	token_logprobs?: TokenLogprob[];
-	/** Blob-presence flags (storage v2, mirrored off the light tree node): data
-	 *  exists server-side even when the inline field above is absent. */
-	has_token_logprobs?: boolean;
-	has_raw_meta?: boolean;
-	samples?: SampleData[];
-	totalSamples?: number;
-	running?: boolean;
-	nodeId?: string | null;
-	sib?: { index: number; count: number };
-	sampleNodeIds?: string[];
-	activeSampleIndex?: number;
-	isBucket?: boolean;
-	/** Non-content status row (e.g. 'stopped' after a 0-sample cancel) — rendered
-	 *  as a muted strip, not an assistant message; all other fields ignored. */
-	notice?: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  reasoning?: string;
+  raw_text?: string;
+  raw_meta?: string;
+  /** Authored prefill this turn was generated from (raw text); the renderer colors
+   *  the matching leading slice of content/reasoning as the prefilled portion. */
+  prefill?: string;
+  /** How generation ended — 'length' ⇒ cut off by max tokens (truncation badge). */
+  finish_reason?: string;
+  /** Renderer mode of this turn's sample — set only for thinking='both' batches
+   *  (shows the think / no-think chip when cycling the folded siblings). */
+  thinking?: boolean;
+  /** Per-token logprobs of this turn's sample (native tinker only) — powers the
+   *  token-hover inspector when the sidebar "Token probs" toggle is on. Absent on
+   *  a LIGHT node whose blob lives server-side — then `has_token_logprobs` is set
+   *  and the consumer lazy-fetches through lib/node-blobs (keyed by `nodeId`). */
+  token_logprobs?: TokenLogprob[];
+  /** Blob-presence flags (storage v2, mirrored off the light tree node): data
+   *  exists server-side even when the inline field above is absent. */
+  has_token_logprobs?: boolean;
+  has_raw_meta?: boolean;
+  samples?: SampleData[];
+  totalSamples?: number;
+  running?: boolean;
+  nodeId?: string | null;
+  sib?: { index: number; count: number };
+  sampleNodeIds?: string[];
+  activeSampleIndex?: number;
+  isBucket?: boolean;
+  /** Non-content status row (e.g. 'stopped' after a 0-sample cancel) — rendered
+   *  as a muted strip, not an assistant message; all other fields ignored. */
+  notice?: string;
 };

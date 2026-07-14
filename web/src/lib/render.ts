@@ -9,7 +9,7 @@ import { renderMarkdown } from './highlight-render.ts';
 /** Render message content to HTML. `role` selects which highlight rules apply
  *  (a rule's scope_role gates it; null scope = any role). */
 export function renderContent(text: string, role?: string): string {
-	return renderMarkdown(text, rulesForRole(highlightStore.rules, role));
+  return renderMarkdown(text, rulesForRole(highlightStore.rules, role));
 }
 
 /** Split a raw assistant prefill into its parsed (reasoning, answer) parts so each
@@ -17,12 +17,12 @@ export function renderContent(text: string, role?: string): string {
  *  backend's think parsing loosely: a `<think>…</think>` opener routes text into
  *  reasoning, the rest is the answer. Plain prefills (no tags) are all answer. */
 export function splitPrefill(prefill: string): { think: string; answer: string } {
-	const open = prefill.indexOf('<think>');
-	if (open === -1) return { think: '', answer: prefill };
-	const after = prefill.slice(open + '<think>'.length).replace(/^\n/, '');
-	const close = after.indexOf('</think>');
-	if (close === -1) return { think: after, answer: '' }; // think left open — model keeps reasoning
-	return { think: after.slice(0, close), answer: after.slice(close + '</think>'.length).replace(/^\n+/, '') };
+  const open = prefill.indexOf('<think>');
+  if (open === -1) return { think: '', answer: prefill };
+  const after = prefill.slice(open + '<think>'.length).replace(/^\n/, '');
+  const close = after.indexOf('</think>');
+  if (close === -1) return { think: after, answer: '' }; // think left open — model keeps reasoning
+  return { think: after.slice(0, close), answer: after.slice(close + '</think>'.length).replace(/^\n+/, '') };
 }
 
 /** Reassemble a parsed (reasoning, content) assistant turn into the raw prefill
@@ -34,10 +34,10 @@ export function splitPrefill(prefill: string): { think: string; answer: string }
  *  Continue (so the model resumes the ANSWER, not mistakes it for more thinking)
  *  and edited-CoT round-trips. */
 export function assembleAssistantRaw(reasoning: string | undefined, content: string): string {
-	const r = (reasoning ?? '').trim();
-	const c = content ?? '';
-	if (!r) return c;
-	return c ? `<think>\n${r}</think>\n\n${c}` : `<think>\n${r}`;
+  const r = (reasoning ?? '').trim();
+  const c = content ?? '';
+  if (!r) return c;
+  return c ? `<think>\n${r}</think>\n\n${c}` : `<think>\n${r}`;
 }
 
 /** Render `text` for display, coloring the leading slice that came from `prefillPart`
@@ -46,8 +46,8 @@ export function assembleAssistantRaw(reasoning: string | undefined, content: str
  *  the exact boundary may render slightly off, which is acceptable here. Falls back to
  *  a plain render when there's no prefill or it isn't a clean leading match. */
 export function renderPrefilled(text: string, prefillPart: string, role?: string): string {
-	if (!text || !prefillPart || !text.startsWith(prefillPart)) return renderContent(text, role);
-	const rest = text.slice(prefillPart.length);
-	const head = `<span class="prefill-portion">${renderContent(prefillPart, role)}</span>`;
-	return rest ? head + renderContent(rest, role) : head;
+  if (!text || !prefillPart || !text.startsWith(prefillPart)) return renderContent(text, role);
+  const rest = text.slice(prefillPart.length);
+  const head = `<span class="prefill-portion">${renderContent(prefillPart, role)}</span>`;
+  return rest ? head + renderContent(rest, role) : head;
 }

@@ -19,22 +19,22 @@ export const BASE_PREFIX = 'base:';
 export const CKPT_PREFIX = 'ckpt:';
 
 export function isOpenrouterSel(id: string | null | undefined): boolean {
-	return typeof id === 'string' && id.startsWith(OR_PREFIX);
+  return typeof id === 'string' && id.startsWith(OR_PREFIX);
 }
 export function openrouterId(id: string | null | undefined): string | null {
-	return isOpenrouterSel(id) ? (id as string).slice(OR_PREFIX.length) : null;
+  return isOpenrouterSel(id) ? (id as string).slice(OR_PREFIX.length) : null;
 }
 
 export function isBaseSel(id: string | null | undefined): boolean {
-	return typeof id === 'string' && id.startsWith(BASE_PREFIX);
+  return typeof id === 'string' && id.startsWith(BASE_PREFIX);
 }
 export function baseModelId(id: string | null | undefined): string | null {
-	return isBaseSel(id) ? (id as string).slice(BASE_PREFIX.length) : null;
+  return isBaseSel(id) ? (id as string).slice(BASE_PREFIX.length) : null;
 }
 
 export function isCkptSel(id: string | null | undefined): boolean {
-	return typeof id === 'string' && id.startsWith(CKPT_PREFIX);
+  return typeof id === 'string' && id.startsWith(CKPT_PREFIX);
 }
 export function samplerPathOf(id: string | null | undefined): string | null {
-	return isCkptSel(id) ? (id as string).slice(CKPT_PREFIX.length) : null;
+  return isCkptSel(id) ? (id as string).slice(CKPT_PREFIX.length) : null;
 }

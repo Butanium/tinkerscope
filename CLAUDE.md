@@ -320,6 +320,10 @@ extracted UI: `tests/small-smokes/browser_{chart_modal,modals}.py`.
 
 ## Build / verify
 
+- **Web sources are 2-space indented** (one-time tab→space conversion 2026-07-14,
+  recorded in `.editorconfig`; spaces make exact-match Edits reliable — don't
+  reintroduce tabs). No formatter; match surrounding style (incl. the compact
+  one-line-per-rule CSS).
 - **Web** (from `web/`): `npm run check` (svelte-check; keep it at **0 errors** —
   the ~25 a11y warnings are known), `npm test` (the frameworkless `src/lib/*.test.ts`
   suites via node), `npm run build`. The pre-commit hook builds on web/ commits —

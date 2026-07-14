@@ -11,43 +11,43 @@
   the container is too narrow; the tail (flex-shrink:0) never clips.
 -->
 <script lang="ts">
-	import { tip } from './tooltip.svelte';
-	import { splitTail } from './label-split';
+  import { tip } from './tooltip.svelte';
+  import { splitTail } from './label-split';
 
-	let {
-		label,
-		siblings = undefined
-	}: {
-		label: string;
-		/** Sibling labels for divergence-anchored splitting (list contexts). Omit
-		 *  for single-label contexts (fixed-length tail). */
-		siblings?: readonly string[] | undefined;
-	} = $props();
+  let {
+    label,
+    siblings = undefined
+  }: {
+    label: string;
+    /** Sibling labels for divergence-anchored splitting (list contexts). Omit
+     *  for single-label contexts (fixed-length tail). */
+    siblings?: readonly string[] | undefined;
+  } = $props();
 
-	const parts = $derived(splitTail(label, siblings));
+  const parts = $derived(splitTail(label, siblings));
 </script>
 
 <span class="trunc" use:tip data-tooltip={label} aria-label={label}>
-	<span class="trunc-head">{parts.head}</span><span class="trunc-tail">{parts.tail}</span>
+  <span class="trunc-head">{parts.head}</span><span class="trunc-tail">{parts.tail}</span>
 </span>
 
 <style>
-	.trunc {
-		display: inline-flex;
-		align-items: baseline;
-		min-width: 0;
-		max-width: 100%;
-		overflow: hidden;
-	}
-	.trunc-head {
-		flex: 0 1 auto;
-		min-width: 0;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.trunc-tail {
-		flex: 0 0 auto;
-		white-space: nowrap;
-	}
+  .trunc {
+    display: inline-flex;
+    align-items: baseline;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+  }
+  .trunc-head {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .trunc-tail {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
 </style>

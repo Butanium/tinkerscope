@@ -38,83 +38,83 @@ import type { Panel } from './types';
 const STICK_SLOP_PX = 48;
 
 class PanelScroll {
-	/** The per-panel scroll containers (.messages), registered via `use:` below. */
-	els: Record<Panel, HTMLDivElement | undefined> = $state({});
-	/** Per-panel "stuck to bottom". Missing key = stuck, so new panels follow. */
-	stick: Record<Panel, boolean> = $state({});
+  /** The per-panel scroll containers (.messages), registered via `use:` below. */
+  els: Record<Panel, HTMLDivElement | undefined> = $state({});
+  /** Per-panel "stuck to bottom". Missing key = stuck, so new panels follow. */
+  stick: Record<Panel, boolean> = $state({});
 
-	#atBottom(el: HTMLElement): boolean {
-		return el.scrollHeight - el.scrollTop - el.clientHeight < STICK_SLOP_PX;
-	}
+  #atBottom(el: HTMLElement): boolean {
+    return el.scrollHeight - el.scrollTop - el.clientHeight < STICK_SLOP_PX;
+  }
 
-	/** Svelte action for a panel's `.messages` div: registers the element, opens
-	 *  at the latest turn (fresh mounts start at scrollTop 0 = the oldest turn),
-	 *  and tracks stickiness from scroll events. Programmatic scrolls also land
-	 *  here — recomputing stick from them is idempotent and harmless. */
-	register = (el: HTMLDivElement, panel: Panel) => {
-		this.els[panel] = el;
-		el.scrollTop = el.scrollHeight;
-		const onScroll = () => (this.stick[panel] = this.#atBottom(el));
-		el.addEventListener('scroll', onScroll, { passive: true });
-		return {
-			destroy: () => {
-				el.removeEventListener('scroll', onScroll);
-				if (this.els[panel] === el) delete this.els[panel];
-			}
-		};
-	};
+  /** Svelte action for a panel's `.messages` div: registers the element, opens
+   *  at the latest turn (fresh mounts start at scrollTop 0 = the oldest turn),
+   *  and tracks stickiness from scroll events. Programmatic scrolls also land
+   *  here — recomputing stick from them is idempotent and harmless. */
+  register = (el: HTMLDivElement, panel: Panel) => {
+    this.els[panel] = el;
+    el.scrollTop = el.scrollHeight;
+    const onScroll = () => (this.stick[panel] = this.#atBottom(el));
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return {
+      destroy: () => {
+        el.removeEventListener('scroll', onScroll);
+        if (this.els[panel] === el) delete this.els[panel];
+      }
+    };
+  };
 
-	/** FOLLOW: pin to bottom, only if stuck. Called per streamed token. */
-	follow(panel: Panel) {
-		const el = this.els[panel];
-		if (el && this.stick[panel] !== false) el.scrollTop = el.scrollHeight;
-	}
+  /** FOLLOW: pin to bottom, only if stuck. Called per streamed token. */
+  follow(panel: Panel) {
+    const el = this.els[panel];
+    if (el && this.stick[panel] !== false) el.scrollTop = el.scrollHeight;
+  }
 
-	/** PRESERVE: call right BEFORE a tree mutation; restores the current
-	 *  scrollTop after the DOM flush (overriding native scroll anchoring). */
-	preserve(panel: Panel) {
-		const el = this.els[panel];
-		if (!el) return;
-		const top = el.scrollTop;
-		void tick().then(() => {
-			el.scrollTop = top;
-		});
-	}
+  /** PRESERVE: call right BEFORE a tree mutation; restores the current
+   *  scrollTop after the DOM flush (overriding native scroll anchoring). */
+  preserve(panel: Panel) {
+    const el = this.els[panel];
+    if (!el) return;
+    const top = el.scrollTop;
+    void tick().then(() => {
+      el.scrollTop = top;
+    });
+  }
 
-	/** REVEAL: minimally scroll `el` (a row inside this panel's container) into
-	 *  view — top-align when it's above the viewport, bottom-align when below,
-	 *  no movement when already fully visible (block:'nearest' semantics). A row
-	 *  taller than the viewport aligns its top. Synchronous: callers reveal on a
-	 *  pure focus move (no DOM change pending). */
-	reveal(panel: Panel, el: HTMLElement) {
-		const c = this.els[panel];
-		if (!c || !c.contains(el)) return;
-		const pad = 8; // breathing room so the row isn't glued to the container edge
-		const r = el.getBoundingClientRect();
-		const top = r.top - c.getBoundingClientRect().top + c.scrollTop;
-		const bottom = top + r.height;
-		if (top - pad < c.scrollTop) c.scrollTop = Math.max(0, top - pad);
-		else if (bottom + pad > c.scrollTop + c.clientHeight) c.scrollTop = bottom + pad - c.clientHeight;
-	}
+  /** REVEAL: minimally scroll `el` (a row inside this panel's container) into
+   *  view — top-align when it's above the viewport, bottom-align when below,
+   *  no movement when already fully visible (block:'nearest' semantics). A row
+   *  taller than the viewport aligns its top. Synchronous: callers reveal on a
+   *  pure focus move (no DOM change pending). */
+  reveal(panel: Panel, el: HTMLElement) {
+    const c = this.els[panel];
+    if (!c || !c.contains(el)) return;
+    const pad = 8; // breathing room so the row isn't glued to the container edge
+    const r = el.getBoundingClientRect();
+    const top = r.top - c.getBoundingClientRect().top + c.scrollTop;
+    const bottom = top + r.height;
+    if (top - pad < c.scrollTop) c.scrollTop = Math.max(0, top - pad);
+    else if (bottom + pad > c.scrollTop + c.clientHeight) c.scrollTop = bottom + pad - c.clientHeight;
+  }
 
-	/** SNAP: after the pending DOM flush, jump to the bottom + re-arm stick. */
-	snap(panel: Panel) {
-		this.stick[panel] = true;
-		void tick().then(() => {
-			const el = this.els[panel];
-			if (el) el.scrollTop = el.scrollHeight;
-		});
-	}
+  /** SNAP: after the pending DOM flush, jump to the bottom + re-arm stick. */
+  snap(panel: Panel) {
+    this.stick[panel] = true;
+    void tick().then(() => {
+      const el = this.els[panel];
+      if (el) el.scrollTop = el.scrollHeight;
+    });
+  }
 
-	/** Snap every registered panel (conversation open / initial tree load). */
-	async snapAll() {
-		await tick();
-		for (const [p, el] of Object.entries(this.els)) {
-			if (!el) continue;
-			this.stick[p] = true;
-			el.scrollTop = el.scrollHeight;
-		}
-	}
+  /** Snap every registered panel (conversation open / initial tree load). */
+  async snapAll() {
+    await tick();
+    for (const [p, el] of Object.entries(this.els)) {
+      if (!el) continue;
+      this.stick[p] = true;
+      el.scrollTop = el.scrollHeight;
+    }
+  }
 }
 
 export const panelScroll = new PanelScroll();

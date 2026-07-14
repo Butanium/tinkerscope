@@ -18,38 +18,38 @@ import type { PanelLayout } from './types.ts';
 
 /** Conversation-level fields that accompany EVERY save (cheap, authoritative). */
 export type ConvFields = {
-	system_prompt: string | null;
-	panels: PanelLayout[];
-	reduced_panels: string[];
-	send_targets: string[];
-	seen_panels: string[];
+  system_prompt: string | null;
+  panels: PanelLayout[];
+  reduced_panels: string[];
+  send_targets: string[];
+  seen_panels: string[];
 };
 
 export type SaveDirt = {
-	/** panel id → that panel's tree ref as captured when the change was made. */
-	dirtyTrees: Map<string, ConvTree>;
-	/** panels removed since the last save (tree deleted server-side). */
-	droppedTrees: Set<string>;
-	layoutDirty: boolean;
+  /** panel id → that panel's tree ref as captured when the change was made. */
+  dirtyTrees: Map<string, ConvTree>;
+  /** panels removed since the last save (tree deleted server-side). */
+  droppedTrees: Set<string>;
+  layoutDirty: boolean;
 };
 
 export type SavePlan =
-	| { kind: 'none' }
-	| { kind: 'patch'; body: ConvFields }
-	| { kind: 'put'; body: ConvFields & { trees: Record<string, ConvTree>; dropped_trees: string[] } };
+  | { kind: 'none' }
+  | { kind: 'patch'; body: ConvFields }
+  | { kind: 'put'; body: ConvFields & { trees: Record<string, ConvTree>; dropped_trees: string[] } };
 
 export function planSave(dirt: SaveDirt, fields: ConvFields): SavePlan {
-	if (dirt.dirtyTrees.size || dirt.droppedTrees.size) {
-		const trees: Record<string, ConvTree> = {};
-		for (const [panel, tree] of dirt.dirtyTrees) trees[panel] = tree;
-		// A panel both re-seeded and dropped in one batch shouldn't happen (the
-		// store clears the opposite set on each mark) — but if it does, the upsert
-		// wins: dropping a tree we're simultaneously writing would lose data.
-		const dropped = [...dirt.droppedTrees].filter((p) => !dirt.dirtyTrees.has(p));
-		return { kind: 'put', body: { ...fields, trees, dropped_trees: dropped } };
-	}
-	if (dirt.layoutDirty) return { kind: 'patch', body: fields };
-	return { kind: 'none' };
+  if (dirt.dirtyTrees.size || dirt.droppedTrees.size) {
+    const trees: Record<string, ConvTree> = {};
+    for (const [panel, tree] of dirt.dirtyTrees) trees[panel] = tree;
+    // A panel both re-seeded and dropped in one batch shouldn't happen (the
+    // store clears the opposite set on each mark) — but if it does, the upsert
+    // wins: dropping a tree we're simultaneously writing would lose data.
+    const dropped = [...dirt.droppedTrees].filter((p) => !dirt.dirtyTrees.has(p));
+    return { kind: 'put', body: { ...fields, trees, dropped_trees: dropped } };
+  }
+  if (dirt.layoutDirty) return { kind: 'patch', body: fields };
+  return { kind: 'none' };
 }
 
 // ── post-save lightening ──────────────────────────────────────────────
@@ -65,11 +65,11 @@ export function planSave(dirt: SaveDirt, fields: ConvFields): SavePlan {
  *  would point consumers at a blob that doesn't exist (a permanent "no token
  *  data" after the fetch caches the miss). */
 export function heavyNodeIds(tree: ConvTree): Set<string> {
-	const ids = new Set<string>();
-	for (const [id, n] of Object.entries(tree.nodes)) {
-		if ((n.token_logprobs?.length ?? 0) > 0 || (n.raw_meta ?? '') !== '') ids.add(id);
-	}
-	return ids;
+  const ids = new Set<string>();
+  for (const [id, n] of Object.entries(tree.nodes)) {
+    if ((n.token_logprobs?.length ?? 0) > 0 || (n.raw_meta ?? '') !== '') ids.add(id);
+  }
+  return ids;
 }
 
 /** Strip the heavy fields of `shipped` node ids from `current`, setting the
@@ -79,26 +79,26 @@ export function heavyNodeIds(tree: ConvTree): Set<string> {
  *  them and a deleted id is skipped. Returns null when no node changed, so
  *  callers skip the assignment (no re-render on ordinary saves). */
 export function lightenTree(current: ConvTree, shipped: Set<string>): ConvTree | null {
-	let changed = false;
-	const nodes: Record<string, TreeNode> = {};
-	for (const [id, n] of Object.entries(current.nodes)) {
-		const lp = shipped.has(id) && (n.token_logprobs?.length ?? 0) > 0;
-		const rm = shipped.has(id) && (n.raw_meta ?? '') !== '';
-		if (!lp && !rm) {
-			nodes[id] = n;
-			continue;
-		}
-		changed = true;
-		const light = { ...n };
-		if (lp) {
-			delete light.token_logprobs;
-			light.has_token_logprobs = true;
-		}
-		if (rm) {
-			delete light.raw_meta;
-			light.has_raw_meta = true;
-		}
-		nodes[id] = light;
-	}
-	return changed ? { ...current, nodes } : null;
+  let changed = false;
+  const nodes: Record<string, TreeNode> = {};
+  for (const [id, n] of Object.entries(current.nodes)) {
+    const lp = shipped.has(id) && (n.token_logprobs?.length ?? 0) > 0;
+    const rm = shipped.has(id) && (n.raw_meta ?? '') !== '';
+    if (!lp && !rm) {
+      nodes[id] = n;
+      continue;
+    }
+    changed = true;
+    const light = { ...n };
+    if (lp) {
+      delete light.token_logprobs;
+      light.has_token_logprobs = true;
+    }
+    if (rm) {
+      delete light.raw_meta;
+      light.has_raw_meta = true;
+    }
+    nodes[id] = light;
+  }
+  return changed ? { ...current, nodes } : null;
 }

@@ -8,24 +8,24 @@
 const KEY = 'tinkerscope:token-probs';
 
 class LogprobViewStore {
-	enabled = $state(false);
+  enabled = $state(false);
 
-	constructor() {
-		try {
-			this.enabled = localStorage.getItem(KEY) === '1';
-		} catch {
-			/* SSR / storage disabled — default off */
-		}
-	}
+  constructor() {
+    try {
+      this.enabled = localStorage.getItem(KEY) === '1';
+    } catch {
+      /* SSR / storage disabled — default off */
+    }
+  }
 
-	set(on: boolean): void {
-		this.enabled = on;
-		try {
-			localStorage.setItem(KEY, on ? '1' : '0');
-		} catch {
-			/* ignore */
-		}
-	}
+  set(on: boolean): void {
+    this.enabled = on;
+    try {
+      localStorage.setItem(KEY, on ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 export const logprobView = new LogprobViewStore();

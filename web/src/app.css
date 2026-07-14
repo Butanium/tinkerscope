@@ -1,85 +1,85 @@
 :root {
-	--color-bg: #1a1a1a;
-	--color-surface: #242424;
-	--color-surface-hover: #2a2a2a;
-	--color-surface-alt: #1e1e1e;
-	--color-text: #e8e8e8;
-	--color-text-secondary: #c8c8c8;
-	--color-text-muted: #888;
-	--color-text-light: #666;
-	--color-border: #333;
-	--color-border-light: #2a2a2a;
-	--color-accent: #c4915c;
-	--color-accent-bg: rgba(196, 145, 92, 0.12);
+  --color-bg: #1a1a1a;
+  --color-surface: #242424;
+  --color-surface-hover: #2a2a2a;
+  --color-surface-alt: #1e1e1e;
+  --color-text: #e8e8e8;
+  --color-text-secondary: #c8c8c8;
+  --color-text-muted: #888;
+  --color-text-light: #666;
+  --color-border: #333;
+  --color-border-light: #2a2a2a;
+  --color-accent: #c4915c;
+  --color-accent-bg: rgba(196, 145, 92, 0.12);
 
-	--color-yes: #6dba82;
-	--color-no: #d97070;
-	--color-neutral: #7a8899;
+  --color-yes: #6dba82;
+  --color-no: #d97070;
+  --color-neutral: #7a8899;
 
-	--color-user-bg: #2a3040;
-	--color-assistant-bg: #1e2e1e;
-	--color-system-bg: #3a2a1e;
+  --color-user-bg: #2a3040;
+  --color-assistant-bg: #1e2e1e;
+  --color-system-bg: #3a2a1e;
 
-	--font-sans: 'Inter', -apple-system, sans-serif;
-	--font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --font-sans: 'Inter', -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 
-	--space-1: 0.25rem;
-	--space-2: 0.5rem;
-	--space-3: 0.75rem;
-	--space-4: 1rem;
-	--space-5: 1.5rem;
-	--space-6: 2rem;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
 
-	--radius-sm: 4px;
-	--radius: 6px;
-	--radius-md: 8px;
-	--radius-lg: 10px;
-	--radius-xl: 12px;
-	--radius-pill: 9999px;
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-pill: 9999px;
 
-	--sidebar-width: 320px;
+  --sidebar-width: 320px;
 }
 
 html.light {
-	--color-bg: #FAF7F2;
-	--color-surface: #FFFFFF;
-	--color-surface-hover: #f5f0e8;
-	--color-surface-alt: #f0ebe3;
-	--color-text: #3D3328;
-	--color-text-secondary: #5a4e42;
-	--color-text-muted: #8a7e72;
-	--color-text-light: #a89e92;
-	--color-border: #e0d8cc;
-	--color-border-light: #e8e0d4;
-	--color-accent: #9C6644;
-	--color-accent-bg: rgba(156, 102, 68, 0.1);
+  --color-bg: #FAF7F2;
+  --color-surface: #FFFFFF;
+  --color-surface-hover: #f5f0e8;
+  --color-surface-alt: #f0ebe3;
+  --color-text: #3D3328;
+  --color-text-secondary: #5a4e42;
+  --color-text-muted: #8a7e72;
+  --color-text-light: #a89e92;
+  --color-border: #e0d8cc;
+  --color-border-light: #e8e0d4;
+  --color-accent: #9C6644;
+  --color-accent-bg: rgba(156, 102, 68, 0.1);
 
-	--color-user-bg: #e8edf5;
-	--color-assistant-bg: #e8f0e8;
-	--color-system-bg: #f5ece4;
+  --color-user-bg: #e8edf5;
+  --color-assistant-bg: #e8f0e8;
+  --color-system-bg: #f5ece4;
 }
 
 * {
-	margin: 0;
-	padding: 0;
-	box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
 }
 
 body {
-	font-family: var(--font-sans);
-	background: var(--color-bg);
-	color: var(--color-text);
-	font-size: 0.88rem;
-	line-height: 1.5;
+  font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 0.88rem;
+  line-height: 1.5;
 }
 
 button {
-	font-family: inherit;
-	cursor: pointer;
+  font-family: inherit;
+  cursor: pointer;
 }
 
 select {
-	font-family: inherit;
+  font-family: inherit;
 }
 
 /* Scrollbars: hidden app-wide (scrolling via wheel/trackpad/keyboard is
@@ -87,10 +87,10 @@ select {
  * horizontal panels bar (.chat-columns), re-enabled + styled below, because a
  * wide N-panel compare has no other affordance that more columns sit off-screen. */
 * {
-	scrollbar-width: none; /* Firefox */
+  scrollbar-width: none; /* Firefox */
 }
 *::-webkit-scrollbar {
-	display: none; /* WebKit/Blink */
+  display: none; /* WebKit/Blink */
 }
 
 /* Two mechanisms, by engine: Firefox honors ONLY scrollbar-width/scrollbar-color
@@ -99,25 +99,25 @@ select {
  * — needed for the 8px height, rounded/inset thumb, and hover that scrollbar-* can't
  * express. So we set both: the pair for Firefox, the pseudo-elements for the rest. */
 .chat-columns {
-	scrollbar-width: thin; /* Firefox: re-enable */
-	scrollbar-color: var(--color-text-light) transparent; /* thumb / track */
+  scrollbar-width: thin; /* Firefox: re-enable */
+  scrollbar-color: var(--color-text-light) transparent; /* thumb / track */
 }
 .chat-columns::-webkit-scrollbar {
-	display: block; /* undo the app-wide hide */
-	height: 8px;
+  display: block; /* undo the app-wide hide */
+  height: 8px;
 }
 .chat-columns::-webkit-scrollbar-track {
-	background: transparent;
+  background: transparent;
 }
 .chat-columns::-webkit-scrollbar-thumb {
-	background: var(--color-text-light);
-	border-radius: var(--radius-pill);
-	border: 2px solid transparent; /* inset the thumb so it reads as thin */
-	background-clip: padding-box;
+  background: var(--color-text-light);
+  border-radius: var(--radius-pill);
+  border: 2px solid transparent; /* inset the thumb so it reads as thin */
+  background-clip: padding-box;
 }
 .chat-columns::-webkit-scrollbar-thumb:hover {
-	background: var(--color-text-muted);
-	background-clip: padding-box;
+  background: var(--color-text-muted);
+  background-clip: padding-box;
 }
 
 /* Shared across the workspace + extracted modal components (so scoped-style

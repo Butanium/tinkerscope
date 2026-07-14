@@ -2,141 +2,141 @@
 // Mirrors ~/tools/samplescope/web/src/lib/api.ts (sse()) but for this API.
 
 import type {
-	Run,
-	OpenRouterModel,
-	TinkerModelsResponse,
-	OpenRouterAvailableResponse,
-	Health,
-	PlaygroundState,
-	StatePatch,
-	ChatRequest,
-	Conversation,
-	ConversationSummary,
-	NodeBlobs,
-	HighlightRule,
-	PanelLayout
+  Run,
+  OpenRouterModel,
+  TinkerModelsResponse,
+  OpenRouterAvailableResponse,
+  Health,
+  PlaygroundState,
+  StatePatch,
+  ChatRequest,
+  Conversation,
+  ConversationSummary,
+  NodeBlobs,
+  HighlightRule,
+  PanelLayout
 } from './types';
 import type { ConvTree } from './tree';
 import type { ConvFields } from './save-plan';
 
 async function j<T>(path: string, init?: RequestInit): Promise<T> {
-	const r = await fetch(path, {
-		...init,
-		headers: { 'content-type': 'application/json', ...(init?.headers || {}) }
-	});
-	if (!r.ok) throw new Error(`${r.status} ${r.statusText}: ${await r.text()}`);
-	return r.json() as Promise<T>;
+  const r = await fetch(path, {
+    ...init,
+    headers: { 'content-type': 'application/json', ...(init?.headers || {}) }
+  });
+  if (!r.ok) throw new Error(`${r.status} ${r.statusText}: ${await r.text()}`);
+  return r.json() as Promise<T>;
 }
 
 export const api = {
-	health: () => j<Health>('/api/health'),
-	models: () => j<Run[]>('/api/models'),
-	refreshModels: () => j<{ status: string; count: number }>('/api/models/refresh', { method: 'POST' }),
-	openrouterModels: () => j<OpenRouterModel[]>('/api/openrouter-models'),
-	// Typeahead catalog sources (not the saved quick-list).
-	tinkerModels: () => j<TinkerModelsResponse>('/api/tinker-models'),
-	openrouterAvailable: (refresh = false) =>
-		j<OpenRouterAvailableResponse>(
-			`/api/openrouter-models/available${refresh ? '?refresh' : ''}`
-		),
-	addOpenrouterModel: (openrouter_model: string, label?: string) =>
-		j<OpenRouterModel[]>('/api/openrouter-models', {
-			method: 'POST',
-			body: JSON.stringify({ openrouter_model, ...(label ? { label } : {}) })
-		}),
-	removeOpenrouterModel: (model: string) =>
-		j<OpenRouterModel[]>(`/api/openrouter-models?model=${encodeURIComponent(model)}`, {
-			method: 'DELETE'
-		}),
-	close: () => j<{ status: string }>('/api/close', { method: 'POST' }),
-	// shared state
-	getState: () => j<PlaygroundState>('/api/state'),
-	setState: (patch: StatePatch) =>
-		j<PlaygroundState>('/api/state', { method: 'POST', body: JSON.stringify(patch) }),
-	// per-scan-root UI prefs (key/value on disk; survives restarts)
-	getPrefs: () => j<Record<string, string>>('/api/prefs'),
-	setPref: (key: string, value: string) =>
-		j<{ status: string }>(`/api/prefs/${encodeURIComponent(key)}`, {
-			method: 'PUT',
-			body: JSON.stringify({ value })
-		}),
-	// datasets
-	loadDataset: (path: string, count = 10, seed?: number) =>
-		j<{ records: Record<string, unknown>[]; total: number; error?: string }>('/api/load-dataset', {
-			method: 'POST',
-			body: JSON.stringify({ path, count, ...(seed != null ? { seed } : {}) })
-		}),
-	// highlight rules (render-time text coloring; server seeds defaults)
-	listHighlights: () => j<HighlightRule[]>('/api/highlights'),
-	upsertHighlight: (id: string, rule: HighlightRule) =>
-		j<HighlightRule>(`/api/highlights/${encodeURIComponent(id)}`, {
-			method: 'PUT',
-			body: JSON.stringify(rule)
-		}),
-	deleteHighlight: (id: string) =>
-		j<{ status: string }>(`/api/highlights/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-	reorderHighlights: (ids: string[]) =>
-		j<{ status: string; n: number }>('/api/highlights/reorder', {
-			method: 'POST',
-			body: JSON.stringify({ ids })
-		}),
-	// pins — saved samples (was "highlights"; server adds id/created_at)
-	listPins: () => j<Record<string, unknown>[]>('/api/pins'),
-	createPin: (entry: Record<string, unknown>) =>
-		j<Record<string, unknown>>('/api/pins', { method: 'POST', body: JSON.stringify(entry) }),
-	deletePin: (id: string) =>
-		j<{ status: string }>(`/api/pins/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-	// conversations (branchable trees; server adds id/created_at/updated_at).
-	// Storage v2: the LIST is summaries only; a conversation's light body (trees
-	// incl., per-node blobs excl.) is fetched per-id; heavy per-node blobs are
-	// batch-fetched; PUT /tree upserts only the dirty panels; PATCH carries any
-	// layout-only change with zero tree bytes. See docs/STORAGE_V2.md §2.4.
-	listConversations: () => j<ConversationSummary[]>('/api/conversations'),
-	getConversation: (id: string) =>
-		j<Conversation>(`/api/conversations/${encodeURIComponent(id)}`),
-	fetchNodeBlobs: (id: string, nodes: string[]) =>
-		j<Record<string, NodeBlobs>>(`/api/conversations/${encodeURIComponent(id)}/node-blobs`, {
-			method: 'POST',
-			body: JSON.stringify({ nodes })
-		}),
-	createConversation: (entry: {
-		id?: string;
-		name?: string;
-		system_prompt?: string | null;
-		trees?: Record<string, ConvTree>;
-		panels?: PanelLayout[];
-		reduced_panels?: string[];
-		send_targets?: string[];
-		seen_panels?: string[];
-	}) => j<Conversation>('/api/conversations', { method: 'POST', body: JSON.stringify(entry) }),
-	patchConversation: (id: string, patch: Partial<ConvFields> & { name?: string }) =>
-		j<ConversationSummary>(`/api/conversations/${encodeURIComponent(id)}`, {
-			method: 'PATCH',
-			body: JSON.stringify(patch)
-		}),
-	saveConversationTree: (
-		id: string,
-		body: ConvFields & { trees: Record<string, ConvTree>; dropped_trees: string[] }
-	) =>
-		j<{ status: string; id: string }>(`/api/conversations/${encodeURIComponent(id)}/tree`, {
-			method: 'PUT',
-			body: JSON.stringify(body)
-		}),
-	deleteConversation: (id: string) =>
-		j<{ status: string }>(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-	// chat (returns the raw Response so the caller can read the SSE stream directly)
-	chat: (req: ChatRequest, signal?: AbortSignal) =>
-		fetch('/api/chat', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(req),
-			signal
-		}),
-	// Cancel an in-flight chat by id — how Stop-all reaches a chat this tab doesn't
-	// own (CLI / another tab, so no local AbortController). Server fires the same
-	// terminal a client disconnect would. not_found if it already ended.
-	cancelChat: (chat_id: number) =>
-		j<{ status: string; chat_id: number }>(`/api/chat/${chat_id}/cancel`, { method: 'POST' })
+  health: () => j<Health>('/api/health'),
+  models: () => j<Run[]>('/api/models'),
+  refreshModels: () => j<{ status: string; count: number }>('/api/models/refresh', { method: 'POST' }),
+  openrouterModels: () => j<OpenRouterModel[]>('/api/openrouter-models'),
+  // Typeahead catalog sources (not the saved quick-list).
+  tinkerModels: () => j<TinkerModelsResponse>('/api/tinker-models'),
+  openrouterAvailable: (refresh = false) =>
+    j<OpenRouterAvailableResponse>(
+      `/api/openrouter-models/available${refresh ? '?refresh' : ''}`
+    ),
+  addOpenrouterModel: (openrouter_model: string, label?: string) =>
+    j<OpenRouterModel[]>('/api/openrouter-models', {
+      method: 'POST',
+      body: JSON.stringify({ openrouter_model, ...(label ? { label } : {}) })
+    }),
+  removeOpenrouterModel: (model: string) =>
+    j<OpenRouterModel[]>(`/api/openrouter-models?model=${encodeURIComponent(model)}`, {
+      method: 'DELETE'
+    }),
+  close: () => j<{ status: string }>('/api/close', { method: 'POST' }),
+  // shared state
+  getState: () => j<PlaygroundState>('/api/state'),
+  setState: (patch: StatePatch) =>
+    j<PlaygroundState>('/api/state', { method: 'POST', body: JSON.stringify(patch) }),
+  // per-scan-root UI prefs (key/value on disk; survives restarts)
+  getPrefs: () => j<Record<string, string>>('/api/prefs'),
+  setPref: (key: string, value: string) =>
+    j<{ status: string }>(`/api/prefs/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ value })
+    }),
+  // datasets
+  loadDataset: (path: string, count = 10, seed?: number) =>
+    j<{ records: Record<string, unknown>[]; total: number; error?: string }>('/api/load-dataset', {
+      method: 'POST',
+      body: JSON.stringify({ path, count, ...(seed != null ? { seed } : {}) })
+    }),
+  // highlight rules (render-time text coloring; server seeds defaults)
+  listHighlights: () => j<HighlightRule[]>('/api/highlights'),
+  upsertHighlight: (id: string, rule: HighlightRule) =>
+    j<HighlightRule>(`/api/highlights/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(rule)
+    }),
+  deleteHighlight: (id: string) =>
+    j<{ status: string }>(`/api/highlights/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  reorderHighlights: (ids: string[]) =>
+    j<{ status: string; n: number }>('/api/highlights/reorder', {
+      method: 'POST',
+      body: JSON.stringify({ ids })
+    }),
+  // pins — saved samples (was "highlights"; server adds id/created_at)
+  listPins: () => j<Record<string, unknown>[]>('/api/pins'),
+  createPin: (entry: Record<string, unknown>) =>
+    j<Record<string, unknown>>('/api/pins', { method: 'POST', body: JSON.stringify(entry) }),
+  deletePin: (id: string) =>
+    j<{ status: string }>(`/api/pins/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // conversations (branchable trees; server adds id/created_at/updated_at).
+  // Storage v2: the LIST is summaries only; a conversation's light body (trees
+  // incl., per-node blobs excl.) is fetched per-id; heavy per-node blobs are
+  // batch-fetched; PUT /tree upserts only the dirty panels; PATCH carries any
+  // layout-only change with zero tree bytes. See docs/STORAGE_V2.md §2.4.
+  listConversations: () => j<ConversationSummary[]>('/api/conversations'),
+  getConversation: (id: string) =>
+    j<Conversation>(`/api/conversations/${encodeURIComponent(id)}`),
+  fetchNodeBlobs: (id: string, nodes: string[]) =>
+    j<Record<string, NodeBlobs>>(`/api/conversations/${encodeURIComponent(id)}/node-blobs`, {
+      method: 'POST',
+      body: JSON.stringify({ nodes })
+    }),
+  createConversation: (entry: {
+    id?: string;
+    name?: string;
+    system_prompt?: string | null;
+    trees?: Record<string, ConvTree>;
+    panels?: PanelLayout[];
+    reduced_panels?: string[];
+    send_targets?: string[];
+    seen_panels?: string[];
+  }) => j<Conversation>('/api/conversations', { method: 'POST', body: JSON.stringify(entry) }),
+  patchConversation: (id: string, patch: Partial<ConvFields> & { name?: string }) =>
+    j<ConversationSummary>(`/api/conversations/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch)
+    }),
+  saveConversationTree: (
+    id: string,
+    body: ConvFields & { trees: Record<string, ConvTree>; dropped_trees: string[] }
+  ) =>
+    j<{ status: string; id: string }>(`/api/conversations/${encodeURIComponent(id)}/tree`, {
+      method: 'PUT',
+      body: JSON.stringify(body)
+    }),
+  deleteConversation: (id: string) =>
+    j<{ status: string }>(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // chat (returns the raw Response so the caller can read the SSE stream directly)
+  chat: (req: ChatRequest, signal?: AbortSignal) =>
+    fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+      signal
+    }),
+  // Cancel an in-flight chat by id — how Stop-all reaches a chat this tab doesn't
+  // own (CLI / another tab, so no local AbortController). Server fires the same
+  // terminal a client disconnect would. not_found if it already ended.
+  cancelChat: (chat_id: number) =>
+    j<{ status: string; chat_id: number }>(`/api/chat/${chat_id}/cancel`, { method: 'POST' })
 };
 
 /**
@@ -146,32 +146,32 @@ export const api = {
  * event name the server emits must be listed here (see docs/API_CONTRACT.md §events).
  */
 export function sse(
-	path: string,
-	onEvent: (event: string, data: any) => void,
-	onError?: (e: Event, es: EventSource) => void
+  path: string,
+  onEvent: (event: string, data: any) => void,
+  onError?: (e: Event, es: EventSource) => void
 ): () => void {
-	const es = new EventSource(path);
-	const handler = (event: string) => (e: MessageEvent) => {
-		let parsed: any = e.data;
-		try {
-			parsed = JSON.parse(e.data);
-		} catch {
-			/* leave as raw string */
-		}
-		onEvent(event, parsed);
-	};
-	for (const evt of [
-		'snapshot',
-		'patch',
-		'chat_start',
-		'delta',
-		'sample',
-		'chat_done',
-		'chat_error',
-		'ping'
-	]) {
-		es.addEventListener(evt, handler(evt) as EventListener);
-	}
-	es.onerror = (e) => onError?.(e, es);
-	return () => es.close();
+  const es = new EventSource(path);
+  const handler = (event: string) => (e: MessageEvent) => {
+    let parsed: any = e.data;
+    try {
+      parsed = JSON.parse(e.data);
+    } catch {
+      /* leave as raw string */
+    }
+    onEvent(event, parsed);
+  };
+  for (const evt of [
+    'snapshot',
+    'patch',
+    'chat_start',
+    'delta',
+    'sample',
+    'chat_done',
+    'chat_error',
+    'ping'
+  ]) {
+    es.addEventListener(evt, handler(evt) as EventListener);
+  }
+  es.onerror = (e) => onError?.(e, es);
+  return () => es.close();
 }

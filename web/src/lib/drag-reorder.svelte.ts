@@ -11,53 +11,53 @@
 import { reorderById, isNoopGap, gapFromPointer } from './reorder';
 
 export class DragReorder {
-	dragId = $state<string | null>(null);
-	overGap = $state<number | null>(null);
-	readonly axis: 'x' | 'y';
+  dragId = $state<string | null>(null);
+  overGap = $state<number | null>(null);
+  readonly axis: 'x' | 'y';
 
-	constructor(axis: 'x' | 'y' = 'x') {
-		this.axis = axis;
-	}
+  constructor(axis: 'x' | 'y' = 'x') {
+    this.axis = axis;
+  }
 
-	/** grip `ondragstart` — remembers which item is moving. */
-	start(e: DragEvent, id: string): void {
-		this.dragId = id;
-		if (e.dataTransfer) {
-			e.dataTransfer.effectAllowed = 'move';
-			e.dataTransfer.setData('text/plain', id); // Firefox won't start a drag without data
-		}
-	}
+  /** grip `ondragstart` — remembers which item is moving. */
+  start(e: DragEvent, id: string): void {
+    this.dragId = id;
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', id); // Firefox won't start a drag without data
+    }
+  }
 
-	/** item `ondragover` — marks a valid drop target + computes the gap. */
-	over(e: DragEvent, index: number): void {
-		if (this.dragId === null) return;
-		e.preventDefault();
-		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-		this.overGap = gapFromPointer(rect, e.clientX, e.clientY, index, this.axis);
-	}
+  /** item `ondragover` — marks a valid drop target + computes the gap. */
+  over(e: DragEvent, index: number): void {
+    if (this.dragId === null) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    this.overGap = gapFromPointer(rect, e.clientX, e.clientY, index, this.axis);
+  }
 
-	/** item `ondrop` — applies the reorder via `apply` (skipped on a no-op move). */
-	drop<T extends { id: string }>(e: DragEvent, items: T[], apply: (next: T[]) => void): void {
-		if (this.dragId === null || this.overGap === null) return;
-		e.preventDefault();
-		const next = reorderById(items, this.dragId, this.overGap);
-		if (next !== items) apply(next);
-		this.reset();
-	}
+  /** item `ondrop` — applies the reorder via `apply` (skipped on a no-op move). */
+  drop<T extends { id: string }>(e: DragEvent, items: T[], apply: (next: T[]) => void): void {
+    if (this.dragId === null || this.overGap === null) return;
+    e.preventDefault();
+    const next = reorderById(items, this.dragId, this.overGap);
+    if (next !== items) apply(next);
+    this.reset();
+  }
 
-	/** `ondragend` — clears state (fires even when the drop misses a target). */
-	end(): void {
-		this.reset();
-	}
+  /** `ondragend` — clears state (fires even when the drop misses a target). */
+  end(): void {
+    this.reset();
+  }
 
-	reset(): void {
-		this.dragId = null;
-		this.overGap = null;
-	}
+  reset(): void {
+    this.dragId = null;
+    this.overGap = null;
+  }
 
-	/** Whether to paint the drop indicator at gap `gap` (only for a real move). */
-	showAt<T extends { id: string }>(items: T[], gap: number): boolean {
-		return this.dragId !== null && this.overGap === gap && !isNoopGap(items, this.dragId, gap);
-	}
+  /** Whether to paint the drop indicator at gap `gap` (only for a real move). */
+  showAt<T extends { id: string }>(items: T[], gap: number): boolean {
+    return this.dragId !== null && this.overGap === gap && !isNoopGap(items, this.dragId, gap);
+  }
 }

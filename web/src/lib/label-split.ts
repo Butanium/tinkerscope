@@ -27,16 +27,16 @@ export type LabelParts = { head: string; tail: string };
 /** Length of the shared leading run of two strings (in UTF-16 code units — run
  *  labels are ASCII / BMP, so this matches visible characters). */
 export function commonPrefixLen(a: string, b: string): number {
-	const n = Math.min(a.length, b.length);
-	let i = 0;
-	while (i < n && a[i] === b[i]) i++;
-	return i;
+  const n = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < n && a[i] === b[i]) i++;
+  return i;
 }
 
 /** Peel a fixed-length tail; short labels pass through unsplit. */
 function fixedSplit(label: string): LabelParts {
-	if (label.length <= SHORT) return { head: label, tail: '' };
-	return { head: label.slice(0, label.length - FIXED_TAIL), tail: label.slice(label.length - FIXED_TAIL) };
+  if (label.length <= SHORT) return { head: label, tail: '' };
+  return { head: label.slice(0, label.length - FIXED_TAIL), tail: label.slice(label.length - FIXED_TAIL) };
 }
 
 /**
@@ -47,28 +47,28 @@ function fixedSplit(label: string): LabelParts {
  * survives truncation. Without siblings, a fixed tail is peeled.
  */
 export function splitTail(label: string, siblings?: readonly string[]): LabelParts {
-	if (label.length <= SHORT) return { head: label, tail: '' };
-	if (!siblings || siblings.length === 0) return fixedSplit(label);
+  if (label.length <= SHORT) return { head: label, tail: '' };
+  if (!siblings || siblings.length === 0) return fixedSplit(label);
 
-	// Divergence point = the largest common-prefix length with any OTHER label
-	// (the most-similar sibling is the worst case for distinguishability). Labels
-	// identical to this one don't count — an exact duplicate can't be told apart
-	// by the tail anyway, so it falls back to the fixed peel.
-	let maxLcp = -1;
-	for (const s of siblings) {
-		if (s === label) continue;
-		const lcp = commonPrefixLen(label, s);
-		if (lcp > maxLcp) maxLcp = lcp;
-	}
-	if (maxLcp < 0) return fixedSplit(label); // no distinct sibling (single item / all duplicates)
+  // Divergence point = the largest common-prefix length with any OTHER label
+  // (the most-similar sibling is the worst case for distinguishability). Labels
+  // identical to this one don't count — an exact duplicate can't be told apart
+  // by the tail anyway, so it falls back to the fixed peel.
+  let maxLcp = -1;
+  for (const s of siblings) {
+    if (s === label) continue;
+    const lcp = commonPrefixLen(label, s);
+    if (lcp > maxLcp) maxLcp = lcp;
+  }
+  if (maxLcp < 0) return fixedSplit(label); // no distinct sibling (single item / all duplicates)
 
-	// Keep the head as long as possible (more context) while: the tail still
-	// starts at/before the divergence, the tail is ≥ MIN_TAIL, and ≤ MAX_TAIL.
-	const minStart = label.length - MAX_TAIL; // tail no longer than the cap
-	const maxStart = label.length - MIN_TAIL; // tail no shorter than the floor
-	let start = Math.min(maxLcp, maxStart);
-	if (start < minStart) start = minStart; // divergence earlier than cap → cap wins
-	if (start >= label.length) return { head: label, tail: '' };
-	if (start <= 0) return { head: '', tail: label };
-	return { head: label.slice(0, start), tail: label.slice(start) };
+  // Keep the head as long as possible (more context) while: the tail still
+  // starts at/before the divergence, the tail is ≥ MIN_TAIL, and ≤ MAX_TAIL.
+  const minStart = label.length - MAX_TAIL; // tail no longer than the cap
+  const maxStart = label.length - MIN_TAIL; // tail no shorter than the floor
+  let start = Math.min(maxLcp, maxStart);
+  if (start < minStart) start = minStart; // divergence earlier than cap → cap wins
+  if (start >= label.length) return { head: label, tail: '' };
+  if (start <= 0) return { head: '', tail: label };
+  return { head: label.slice(0, start), tail: label.slice(start) };
 }

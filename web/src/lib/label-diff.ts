@@ -51,20 +51,20 @@ const ICON = /^([⊘?◆◇↗]\s+)/;
 /** Split on `_` and `/` (but NOT `-`, so `lr1e-3` / `deepseek-chat` stay whole),
  *  keeping each segment's preceding separator so the label reconstructs exactly. */
 function tokenize(label: string): Seg[] {
-	const segs: Seg[] = [];
-	let sep = '';
-	let text = '';
-	for (const ch of label) {
-		if (ch === '_' || ch === '/') {
-			segs.push({ sep, text });
-			sep = ch;
-			text = '';
-		} else {
-			text += ch;
-		}
-	}
-	segs.push({ sep, text });
-	return segs;
+  const segs: Seg[] = [];
+  let sep = '';
+  let text = '';
+  for (const ch of label) {
+    if (ch === '_' || ch === '/') {
+      segs.push({ sep, text });
+      sep = ch;
+      text = '';
+    } else {
+      text += ch;
+    }
+  }
+  segs.push({ sep, text });
+  return segs;
 }
 
 const segKey = (s: Seg): string => s.sep + s.text;
@@ -74,23 +74,23 @@ const segKey = (s: Seg): string => s.sep + s.text;
  *  to another shown segment (an `…` swallows the gap). `dim[p]` marks a shown
  *  segment as an anchor (cluster-constant, kept for readability) vs varying. */
 function buildRender(segs: Seg[], elidable: boolean[], dim: boolean[], icon: string): DiffRender {
-	const parts: DiffRender = [];
-	if (icon) parts.push({ text: icon, kind: 'anchor' });
-	let inElision = false;
-	let prevShown = false;
-	for (let p = 0; p < segs.length; p++) {
-		if (elidable[p]) {
-			if (!inElision) parts.push({ text: ELLIPSIS, kind: 'elision' });
-			inElision = true;
-			prevShown = false;
-		} else {
-			const sep = prevShown ? segs[p].sep : '';
-			parts.push({ text: sep + segs[p].text, kind: dim[p] ? 'anchor' : 'vary' });
-			inElision = false;
-			prevShown = true;
-		}
-	}
-	return parts;
+  const parts: DiffRender = [];
+  if (icon) parts.push({ text: icon, kind: 'anchor' });
+  let inElision = false;
+  let prevShown = false;
+  for (let p = 0; p < segs.length; p++) {
+    if (elidable[p]) {
+      if (!inElision) parts.push({ text: ELLIPSIS, kind: 'elision' });
+      inElision = true;
+      prevShown = false;
+    } else {
+      const sep = prevShown ? segs[p].sep : '';
+      parts.push({ text: sep + segs[p].text, kind: dim[p] ? 'anchor' : 'vary' });
+      inElision = false;
+      prevShown = true;
+    }
+  }
+  return parts;
 }
 
 /**
@@ -99,50 +99,50 @@ function buildRender(segs: Seg[], elidable: boolean[], dim: boolean[], icon: str
  * segment is elided; otherwise `null` (caller falls back to TruncLabel).
  */
 export function diffLabels(labels: readonly string[]): (DiffRender | null)[] {
-	const icons = labels.map((l) => ICON.exec(l)?.[1] ?? '');
-	const bodies = labels.map((l, i) => l.slice(icons[i].length));
-	const segs = bodies.map(tokenize);
+  const icons = labels.map((l) => ICON.exec(l)?.[1] ?? '');
+  const bodies = labels.map((l, i) => l.slice(icons[i].length));
+  const segs = bodies.map(tokenize);
 
-	// Cluster by the body's seg-0 key. Cross-cluster distinctness is carried by
-	// the always-shown leading anchor, so each family diffs independently.
-	const clusters = new Map<string, number[]>();
-	segs.forEach((s, i) => {
-		const key = s.length ? segKey(s[0]) : '';
-		const bucket = clusters.get(key);
-		if (bucket) bucket.push(i);
-		else clusters.set(key, [i]);
-	});
+  // Cluster by the body's seg-0 key. Cross-cluster distinctness is carried by
+  // the always-shown leading anchor, so each family diffs independently.
+  const clusters = new Map<string, number[]>();
+  segs.forEach((s, i) => {
+    const key = s.length ? segKey(s[0]) : '';
+    const bucket = clusters.get(key);
+    if (bucket) bucket.push(i);
+    else clusters.set(key, [i]);
+  });
 
-	const out: (DiffRender | null)[] = labels.map(() => null);
+  const out: (DiffRender | null)[] = labels.map(() => null);
 
-	for (const idxs of clusters.values()) {
-		if (idxs.length < 2) continue; // singleton cluster → no diff (invariant d)
-		const members = idxs.map((i) => segs[i]);
-		const minLen = Math.min(...members.map((m) => m.length));
+  for (const idxs of clusters.values()) {
+    if (idxs.length < 2) continue; // singleton cluster → no diff (invariant d)
+    const members = idxs.map((i) => segs[i]);
+    const minLen = Math.min(...members.map((m) => m.length));
 
-		// A position < minLen is shared iff every member agrees there (invariant b);
-		// positions ≥ minLen belong to the member-unique tail and always show.
-		const shared: boolean[] = [];
-		for (let p = 0; p < minLen; p++) {
-			const k = segKey(members[0][p]);
-			shared[p] = members.every((m) => segKey(m[p]) === k);
-		}
+    // A position < minLen is shared iff every member agrees there (invariant b);
+    // positions ≥ minLen belong to the member-unique tail and always show.
+    const shared: boolean[] = [];
+    for (let p = 0; p < minLen; p++) {
+      const k = segKey(members[0][p]);
+      shared[p] = members.every((m) => segKey(m[p]) === k);
+    }
 
-		for (const i of idxs) {
-			const m = segs[i];
-			const L = m.length;
-			// Elide shared interior runs; always keep seg-0 (family anchor) and this
-			// member's own last segment (a trailing anchor reads better than a
-			// dangling `…`). dim = shown-but-shared (anchor) vs varying/tail.
-			const elidable = m.map((_s, p) => p < minLen && shared[p] && p !== 0 && p !== L - 1);
-			if (!elidable.some(Boolean)) continue; // nothing to collapse → tail-preserve
-			const dim = m.map((_s, p) => p < minLen && shared[p]);
-			out[i] = buildRender(m, elidable, dim, icons[i]);
-		}
-	}
+    for (const i of idxs) {
+      const m = segs[i];
+      const L = m.length;
+      // Elide shared interior runs; always keep seg-0 (family anchor) and this
+      // member's own last segment (a trailing anchor reads better than a
+      // dangling `…`). dim = shown-but-shared (anchor) vs varying/tail.
+      const elidable = m.map((_s, p) => p < minLen && shared[p] && p !== 0 && p !== L - 1);
+      if (!elidable.some(Boolean)) continue; // nothing to collapse → tail-preserve
+      const dim = m.map((_s, p) => p < minLen && shared[p]);
+      out[i] = buildRender(m, elidable, dim, icons[i]);
+    }
+  }
 
-	guardCollisions(labels, out);
-	return out;
+  guardCollisions(labels, out);
+  return out;
 }
 
 /** Backstop for invariant (a): if two DISTINCT labels somehow render identically,
@@ -151,17 +151,17 @@ export function diffLabels(labels: readonly string[]): (DiffRender | null)[] {
  *  against a tokenization edge (e.g. two labels differing only by a separator that
  *  fell inside an elided run). True duplicate labels rendering alike is fine. */
 function guardCollisions(labels: readonly string[], out: (DiffRender | null)[]): void {
-	const byRender = new Map<string, number[]>();
-	out.forEach((r, i) => {
-		if (!r) return;
-		const key = r.map((p) => p.text).join(' ');
-		const bucket = byRender.get(key);
-		if (bucket) bucket.push(i);
-		else byRender.set(key, [i]);
-	});
-	for (const idxs of byRender.values()) {
-		if (idxs.length < 2) continue;
-		const distinct = new Set(idxs.map((i) => labels[i]));
-		if (distinct.size >= 2) for (const i of idxs) out[i] = null;
-	}
+  const byRender = new Map<string, number[]>();
+  out.forEach((r, i) => {
+    if (!r) return;
+    const key = r.map((p) => p.text).join(' ');
+    const bucket = byRender.get(key);
+    if (bucket) bucket.push(i);
+    else byRender.set(key, [i]);
+  });
+  for (const idxs of byRender.values()) {
+    if (idxs.length < 2) continue;
+    const distinct = new Set(idxs.map((i) => labels[i]));
+    if (distinct.size >= 2) for (const i of idxs) out[i] = null;
+  }
 }

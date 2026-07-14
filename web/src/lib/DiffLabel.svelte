@@ -11,47 +11,47 @@
   the varying middle + distinguishing tail never clip.
 -->
 <script lang="ts">
-	import { tip } from './tooltip.svelte';
-	import type { DiffRender } from './label-diff';
+  import { tip } from './tooltip.svelte';
+  import type { DiffRender } from './label-diff';
 
-	let { label, parts }: { label: string; parts: DiffRender } = $props();
+  let { label, parts }: { label: string; parts: DiffRender } = $props();
 
-	// The first non-icon part is the family anchor — the only piece allowed to
-	// shrink. (A leading status icon, if present, is a separate tiny part.)
-	const shrinkIdx = $derived(parts.findIndex((p) => !/^[⊘?◆◇↗]\s/.test(p.text)));
+  // The first non-icon part is the family anchor — the only piece allowed to
+  // shrink. (A leading status icon, if present, is a separate tiny part.)
+  const shrinkIdx = $derived(parts.findIndex((p) => !/^[⊘?◆◇↗]\s/.test(p.text)));
 </script>
 
 <span class="difflabel" use:tip data-tooltip={label} aria-label={label}>
-	{#each parts as part, i (i)}<span class="dl-part {part.kind}" class:shrink={i === shrinkIdx}
-			>{part.text}</span
-		>{/each}
+  {#each parts as part, i (i)}<span class="dl-part {part.kind}" class:shrink={i === shrinkIdx}
+      >{part.text}</span
+    >{/each}
 </span>
 
 <style>
-	.difflabel {
-		display: inline-flex;
-		align-items: baseline;
-		min-width: 0;
-		max-width: 100%;
-		overflow: hidden;
-	}
-	.dl-part {
-		flex: 0 0 auto;
-		white-space: nowrap;
-	}
-	.dl-part.shrink {
-		flex: 0 1 auto;
-		min-width: 0;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-	/* Anchors (constant family prefix / trailing anchor) + elision marks recede;
-	   varying segments keep the default text color so they pop. */
-	.dl-part.anchor,
-	.dl-part.elision {
-		color: var(--color-text-muted);
-	}
-	.dl-part.vary {
-		color: var(--color-text);
-	}
+  .difflabel {
+    display: inline-flex;
+    align-items: baseline;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+  }
+  .dl-part {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+  .dl-part.shrink {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* Anchors (constant family prefix / trailing anchor) + elision marks recede;
+     varying segments keep the default text color so they pop. */
+  .dl-part.anchor,
+  .dl-part.elision {
+    color: var(--color-text-muted);
+  }
+  .dl-part.vary {
+    color: var(--color-text);
+  }
 </style>

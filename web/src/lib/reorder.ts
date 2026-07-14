@@ -11,38 +11,38 @@
  *  move; returns the SAME reference (unchanged) on a no-op or unknown id, so
  *  callers can `next === items` to skip a redundant state write. */
 export function reorderById<T extends { id: string }>(items: T[], fromId: string, toGap: number): T[] {
-	const from = items.findIndex((it) => it.id === fromId);
-	if (from === -1) return items; // unknown id → unchanged
-	const gap = Math.max(0, Math.min(toGap, items.length));
-	// Removing `from` shifts any gap after it left by one.
-	const insertAt = gap > from ? gap - 1 : gap;
-	if (insertAt === from) return items; // dropped in place → unchanged
-	const next = items.slice();
-	const [moved] = next.splice(from, 1);
-	next.splice(insertAt, 0, moved);
-	return next;
+  const from = items.findIndex((it) => it.id === fromId);
+  if (from === -1) return items; // unknown id → unchanged
+  const gap = Math.max(0, Math.min(toGap, items.length));
+  // Removing `from` shifts any gap after it left by one.
+  const insertAt = gap > from ? gap - 1 : gap;
+  if (insertAt === from) return items; // dropped in place → unchanged
+  const next = items.slice();
+  const [moved] = next.splice(from, 1);
+  next.splice(insertAt, 0, moved);
+  return next;
 }
 
 /** Whether dropping the dragged item in gap `toGap` would change nothing
  *  (unknown id, or either gap flanking its current slot). Used to suppress the
  *  drop indicator where a drop does nothing. */
 export function isNoopGap<T extends { id: string }>(items: T[], fromId: string, toGap: number): boolean {
-	const from = items.findIndex((it) => it.id === fromId);
-	if (from === -1) return true;
-	return toGap === from || toGap === from + 1;
+  const from = items.findIndex((it) => it.id === fromId);
+  if (from === -1) return true;
+  return toGap === from || toGap === from + 1;
 }
 
 /** The gap index (0..N) an item at `index` maps to given the pointer position,
  *  along `axis`: before the item if the pointer is in its first half, else after. */
 export function gapFromPointer(
-	rect: { left: number; top: number; width: number; height: number },
-	clientX: number,
-	clientY: number,
-	index: number,
-	axis: 'x' | 'y'
+  rect: { left: number; top: number; width: number; height: number },
+  clientX: number,
+  clientY: number,
+  index: number,
+  axis: 'x' | 'y'
 ): number {
-	const before = axis === 'x'
-		? clientX < rect.left + rect.width / 2
-		: clientY < rect.top + rect.height / 2;
-	return before ? index : index + 1;
+  const before = axis === 'x'
+    ? clientX < rect.left + rect.width / 2
+    : clientY < rect.top + rect.height / 2;
+  return before ? index : index + 1;
 }
