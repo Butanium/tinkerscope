@@ -1645,7 +1645,6 @@
 									class="panel-send-input"
 									placeholder={panelBusy(p.panel) ? 'generating…' : '＋ continue this panel'}
 									bind:value={panelDraft[p.panel]}
-									disabled={panelBusy(p.panel)}
 									onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendToPanel(p.panel); } }}
 								/>
 								<button
@@ -1748,7 +1747,7 @@
 							: historyBrowsing
 								? 'History mode -- up/down browse, Esc exit'
 								: 'Type a message... (Enter to send, Esc for history)'}
-					disabled={allBusy || !canChat || !convo.activeId}
+					disabled={!canChat || !convo.activeId}
 				></textarea>
 			</div>
 		</div>
