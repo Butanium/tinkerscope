@@ -219,6 +219,8 @@ tinkpg open <run>[@<checkpoint>]       # switch the browser to this model, live
 tinkpg chat <run> "prompt" --n 50      # sample; streams to stdout AND the browser
 tinkpg compare <runA> <runB> "..."     # two-pane compare, live in the browser
 tinkpg state                           # dump the shared playground state
+tinkpg conv [<id|name>]                # browse saved conversations; no arg lists them all
+tinkpg samples [<id|name>]             # every sampled response at one fork + a <tag> tally
 tinkpg refresh                         # rescan the filesystem + Tinker capabilities
 ```
 
@@ -228,6 +230,11 @@ separator is `@` (`tinkpg chat foo/bar/run@final "hi"`), or use `--checkpoint`.
 `tinkpg chat` also takes `--temperature`, `--max-tokens`, `--thinking`,
 `--thinking-both` (n samples without thinking + n with, 2n total), and
 `--system`.
+
+`tinkpg conv` skips panels folded in the browser UI by default (a one-line stub
++ a trailing "N folded panel(s) skipped: …" list, so you still know they're
+there) — pass `--include-folded` to expand all of them, or `--panel <id>` to
+target one directly (which always overrides the fold).
 
 ---
 

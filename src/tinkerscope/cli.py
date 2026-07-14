@@ -906,9 +906,12 @@ def _list_conversations(convs: list[dict]) -> None:
     print(f"\n{len(rows)} conversation(s)   (expand: `tinkpg conv <id|name>`)")
 
 
-def _show_conversation(c: dict, panel: Optional[str], full: bool, show_tree: bool, width: int) -> None:
+def _show_conversation(
+    c: dict, panel: Optional[str], full: bool, show_tree: bool, width: int, include_folded: bool = False
+) -> None:
     trees = c.get("trees") or {}
     layout = {p["id"]: p for p in (c.get("panels") or [])}
+    reduced = set(c.get("reduced_panels") or [])
     upd = (c.get("updated_at") or "")[:19].replace("T", " ")
     print(f"conversation: {c.get('name')}  ({c.get('id')})   updated {upd}")
     if c.get("system_prompt"):
@@ -917,12 +920,19 @@ def _show_conversation(c: dict, panel: Optional[str], full: bool, show_tree: boo
     total_bps = sum(_branch_point_count(t) for t in trees.values())
     print(f"{len(trees)} panel(s) · {total_nodes} nodes · {total_bps} branch points\n")
     shown = 0
+    skipped: list[str] = []
     for pid, t in trees.items():
         if panel and pid != panel:
             continue
         shown += 1
         lay = layout.get(pid, {})
         bind = _short_run(lay.get("run_id")) + (f"@{lay['checkpoint']}" if lay.get("checkpoint") else "")
+        # Folded (reduced) panels are skipped by default — an explicit --panel
+        # always overrides the fold (you asked for it by name).
+        if pid in reduced and not include_folded and not panel:
+            skipped.append(pid)
+            print(f"▸ {pid}  ← {bind}   (folded — --include-folded or --panel {pid} to expand)")
+            continue
         ap = _active_path(t)
         nf = _active_forks(t)
         print(f"▸ {pid}  ← {bind}   (active: {len(ap)} msgs, {nf} fork{'' if nf == 1 else 's'} on path)")
@@ -935,23 +945,30 @@ def _show_conversation(c: dict, panel: Optional[str], full: bool, show_tree: boo
         print()
     if panel and shown == 0:
         _die(f"conversation has no panel {panel!r}; panels: {', '.join(trees) or '(none)'}")
+    if skipped:
+        print(f"{len(skipped)} folded panel(s) skipped: {', '.join(skipped)}   (--include-folded to expand all, or --panel <id> for one)")
 
 
 @app.command("conv")
 def cmd_conv(
     selector: Optional[str] = typer.Argument(None, help="conversation id-prefix or name substring; omit to list all"),
-    panel: Optional[str] = typer.Option(None, "--panel", help="restrict to one panel id (primary/compare/p-2/…)"),
+    panel: Optional[str] = typer.Option(None, "--panel", help="restrict to one panel id (primary/compare/p-2/…); overrides folding"),
     full: bool = typer.Option(False, "--full", help="show the whole active path, not just first/last-2"),
     tree: bool = typer.Option(False, "--tree", help="show the full branch tree (all branches), `*` = active"),
     width: int = typer.Option(160, "--width", help="per-message truncation width"),
+    include_folded: bool = typer.Option(
+        False, "--include-folded", help="also expand panels folded in the browser UI (skipped by default)"
+    ),
 ) -> None:
     """Browse saved (branchable) conversations. No selector → list them with
-    branch metadata; a selector → expand its panels' active branch + forks."""
+    branch metadata; a selector → expand its panels' active branch + forks.
+    Panels folded in the browser UI are skipped by default (shown as a one-line
+    stub) — pass --include-folded to expand them too, or --panel to target one."""
     convs = _conversations()
     if selector is None:
         _list_conversations(convs)
         return
-    _show_conversation(_resolve_conv(selector, convs), panel, full, tree, width)
+    _show_conversation(_resolve_conv(selector, convs), panel, full, tree, width, include_folded)
 
 
 def _show_samples(c: dict, panel: Optional[str], turn: Optional[int], full: bool, width: int) -> None:

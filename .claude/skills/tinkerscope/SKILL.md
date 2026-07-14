@@ -36,7 +36,7 @@ tinkpg chat <run>[@ckpt] "<prompt>" [opts]          # sample; streams to stdout 
 tinkpg compare <run_a>[@ckpt] <run_b>[@ckpt] "<prompt>" [opts]   # A→left pane, B→right pane
 tinkpg state [--full] [--width N] [--no-link] [--json]   # DIGEST of on-screen panels (active path + matched saved conv)
 tinkpg conv                                         # list saved (branchable) conversations + branch metadata
-tinkpg conv <id|name> [--panel P] [--full] [--tree] # expand one: active branch + fork counts (--tree = all branches)
+tinkpg conv <id|name> [--panel P] [--full] [--tree] [--include-folded]  # expand one: active branch + fork counts (--tree = all branches)
 tinkpg samples [conv] [--panel P] [--turn N] [--full]  # ALL n-sample siblings at one fork, each w/ CoT + a <tag> verdict tally
 tinkpg refresh                                      # rescan filesystem + re-probe sampling capability
 ```
@@ -66,7 +66,10 @@ the rest.
   `nodes` / `branches` (total forks) / `active` (per-panel active-path length).
   Expanding annotates each active turn that sits at a fork as `·k/N` (branch k of
   N), reports forks-on-path per panel, and `--tree` prints the full branch
-  structure with `*` marking the active branch. The live panels correspond to a
+  structure with `*` marking the active branch. Panels the human has FOLDED in
+  the browser UI print as one-line stubs (skipped, with a trailing "N folded
+  panel(s) skipped" list) — `--include-folded` expands them all, and an explicit
+  `--panel` always overrides the fold. The live panels correspond to a
   saved conversation but there's no stored link — match by name/recency.
 - `tinkpg samples` answers "what did the model say across ALL n draws at this fork?"
   — the one view `state`/`conv` can't give you, since they only walk the linear active
