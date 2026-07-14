@@ -26,7 +26,7 @@
 import { live } from './state.svelte';
 import { api } from './api';
 import { nodeBlobs } from './node-blobs.svelte';
-import { planSave } from './save-plan';
+import { planSave, heavyNodeIds, lightenTree } from './save-plan';
 import {
 	emptyTree,
 	activeMessages,
@@ -414,7 +414,9 @@ class ConversationsStore {
 		try {
 			if (materializing) {
 				const name = this.list.find((c) => c.id === id)?.name ?? 'Untitled';
-				await api.createConversation({ id, name, ...fields, trees: { ...this.trees } });
+				const shipped = { ...this.trees }; // refs at fire time — reused for lightening
+				await api.createConversation({ id, name, ...fields, trees: shipped });
+				this.#lightenShipped(id, shipped);
 			} else {
 				// First structural save of a legacy-shape conversation: expand to ALL
 				// trees (see #fullTreeSaveNeeded) — refs at fire time, activeId === id
@@ -425,8 +427,10 @@ class ConversationsStore {
 					? new Map([...Object.entries(this.trees), ...dirtyTrees])
 					: dirtyTrees;
 				const plan = planSave({ dirtyTrees: effectiveDirty, droppedTrees, layoutDirty }, fields);
-				if (plan.kind === 'put') await api.saveConversationTree(id, plan.body);
-				else if (plan.kind === 'patch') await api.patchConversation(id, plan.body);
+				if (plan.kind === 'put') {
+					await api.saveConversationTree(id, plan.body);
+					this.#lightenShipped(id, plan.body.trees);
+				} else if (plan.kind === 'patch') await api.patchConversation(id, plan.body);
 				if (expand) this.#fullTreeSaveNeeded = false;
 			}
 			this.list = this.list.map((c) =>
@@ -444,6 +448,37 @@ class ConversationsStore {
 			if (!this.#pendingId) this.#pendingId = id;
 			console.warn('conversation save failed', e);
 		}
+	}
+
+	/** Post-save lightening (storage v2): the heavy fields that just shipped are
+	 *  now server-side write-once blobs, so their inline copies are pure re-upload
+	 *  weight — without this, every later save of the same panel re-serializes
+	 *  the whole session's logprobs (megabytes per n=30 round) on the main thread.
+	 *  Seeds the blob cache from the shipped payloads FIRST (the token view keeps
+	 *  working instantly, zero fetches), then strips exactly the shipped node ids
+	 *  from the CURRENT trees. One batched assignment; NO #mirror (active-path
+	 *  role/content unchanged) and NO dirt marks (a lighten must never schedule a
+	 *  save, or save→lighten→save would loop). Runs synchronously after the await
+	 *  so it lands before flush()-gated transitions proceed. Nodes that gained
+	 *  heavies DURING the await (a mid-save fold) have new ids ∉ shipped —
+	 *  untouched, they ship with their own pass. On save FAILURE this never runs:
+	 *  the re-merged dirt re-ships the heavies, which is the data-safety path. */
+	#lightenShipped(id: string, shipped: Record<string, ConvTree>): void {
+		if (this.activeId !== id) return; // conversation swapped mid-save — these trees are gone
+		let next: Record<string, ConvTree> | null = null;
+		for (const [panel, shippedTree] of Object.entries(shipped)) {
+			const cur = this.trees[panel];
+			if (!cur) continue; // panel dropped during the await
+			const ids = heavyNodeIds(shippedTree);
+			if (!ids.size) continue;
+			for (const nid of ids) {
+				const n = shippedTree.nodes[nid];
+				nodeBlobs.seed(nid, { token_logprobs: n.token_logprobs, raw_meta: n.raw_meta });
+			}
+			const lightened = lightenTree(cur, ids);
+			if (lightened) (next ??= { ...this.trees })[panel] = lightened;
+		}
+		if (next) this.trees = next;
 	}
 
 	async flush(): Promise<void> {

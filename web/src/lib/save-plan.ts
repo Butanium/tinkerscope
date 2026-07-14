@@ -13,7 +13,7 @@
 //   - no dirt              → none
 // The caller owns capture semantics (refs at schedule time) and retry/re-merge.
 
-import type { ConvTree } from './tree.ts';
+import type { ConvTree, TreeNode } from './tree.ts';
 import type { PanelLayout } from './types.ts';
 
 /** Conversation-level fields that accompany EVERY save (cheap, authoritative). */
@@ -50,4 +50,55 @@ export function planSave(dirt: SaveDirt, fields: ConvFields): SavePlan {
 	}
 	if (dirt.layoutDirty) return { kind: 'patch', body: fields };
 	return { kind: 'none' };
+}
+
+// ── post-save lightening ──────────────────────────────────────────────
+// A successful save turned the shipped nodes' inline heavy fields into server
+// blobs — so the in-memory copies are now pure re-upload weight: every later
+// save of the same panel would re-serialize them (n=30 sampling rounds ≈ 15 MB
+// per round, so late-session saves quietly regrow the pre-v2 stringify lag).
+// After each save the store strips exactly what shipped; see #lightenShipped.
+
+/** Ids of nodes whose heavy fields would produce a server blob. Mirrors the
+ *  SERVER's strip predicate (Python truthiness): an empty `token_logprobs: []`
+ *  or empty raw_meta string yields NO blob — flagging such a node `has_*` here
+ *  would point consumers at a blob that doesn't exist (a permanent "no token
+ *  data" after the fetch caches the miss). */
+export function heavyNodeIds(tree: ConvTree): Set<string> {
+	const ids = new Set<string>();
+	for (const [id, n] of Object.entries(tree.nodes)) {
+		if ((n.token_logprobs?.length ?? 0) > 0 || (n.raw_meta ?? '') !== '') ids.add(id);
+	}
+	return ids;
+}
+
+/** Strip the heavy fields of `shipped` node ids from `current`, setting the
+ *  matching has_* flags. Maps over the CURRENT tree by node id — never the
+ *  shipped ref: branch ops during the save's await advance the tree (ids are
+ *  stable; edits mint NEW ids), so a node whose children changed mid-save keeps
+ *  them and a deleted id is skipped. Returns null when no node changed, so
+ *  callers skip the assignment (no re-render on ordinary saves). */
+export function lightenTree(current: ConvTree, shipped: Set<string>): ConvTree | null {
+	let changed = false;
+	const nodes: Record<string, TreeNode> = {};
+	for (const [id, n] of Object.entries(current.nodes)) {
+		const lp = shipped.has(id) && (n.token_logprobs?.length ?? 0) > 0;
+		const rm = shipped.has(id) && (n.raw_meta ?? '') !== '';
+		if (!lp && !rm) {
+			nodes[id] = n;
+			continue;
+		}
+		changed = true;
+		const light = { ...n };
+		if (lp) {
+			delete light.token_logprobs;
+			light.has_token_logprobs = true;
+		}
+		if (rm) {
+			delete light.raw_meta;
+			light.has_raw_meta = true;
+		}
+		nodes[id] = light;
+	}
+	return changed ? { ...current, nodes } : null;
 }

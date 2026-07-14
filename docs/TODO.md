@@ -110,9 +110,13 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
     re-fire — the known single-slot detached-fire hazard, now with a concrete
     repro (see `browser_stop_generation.py` history); top item for the still-owed
     detached-fire review.
-  - Post-save lightening: a session's own fresh folds keep heavy fields inline
-    in-memory and re-ship them on subsequent same-panel saves until reload
-    (server strips idempotently; bounded, ~v1-order bytes).
+  - ~~Post-save lightening~~ **DONE (2026-07-13, same day):** after a successful
+    save the shipped nodes' inline heavies are stripped client-side (blob cache
+    seeded first — zero refetch for own turns); a FAILED save keeps them inline
+    so the dirt re-merge re-ships them. Pure logic in `lib/save-plan.ts`
+    (`heavyNodeIds`/`lightenTree`, unit-tested); smoke
+    `browser_save_lightening.py` (failure-injection choreography — read its
+    docstring before editing).
   - Foreign-fold reconciled turns get LOCAL node ids → can't lazy-fetch the
     owner's blobs even after its PUT lands; heals on reload/switch-back (same
     visible behavior as v1's light echo).
