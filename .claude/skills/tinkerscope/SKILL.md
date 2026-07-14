@@ -37,7 +37,7 @@ tinkpg compare <run_a>[@ckpt] <run_b>[@ckpt] "<prompt>" [opts]   # A→left pane
 tinkpg state [--full] [--width N] [--no-link] [--json] [--include-folded]   # DIGEST of on-screen panels (active path + matched saved conv)
 tinkpg conv                                         # list saved (branchable) conversations + branch metadata
 tinkpg conv <id|name> [--panel P] [--full] [--tree] [--include-folded]  # expand one: active branch + fork counts (--tree = all branches)
-tinkpg samples [conv] [--panel P] [--turn N] [--full]  # ALL n-sample siblings at one fork, each w/ CoT + a <tag> verdict tally
+tinkpg samples [conv] [--panel P] [--thread K] [--turn N] [--full]  # ALL n-sample siblings at one fork, each w/ CoT + a <tag> verdict tally
 tinkpg refresh                                      # rescan filesystem + re-probe sampling capability
 ```
 
@@ -68,7 +68,11 @@ the rest.
   `nodes` / `branches` (total forks) / `active` (per-panel active-path length).
   Expanding annotates each active turn that sits at a fork as `·k/N` (branch k of
   N), reports forks-on-path per panel, and `--tree` prints the full branch
-  structure with `*` marking the active branch. Panels the human has FOLDED in
+  structure with `*` marking the active branch. A panel with multiple ROOT
+  threads (branch-from-start first messages — the human often probes several
+  prompts in one conversation) gets a `threads:` index: one line per thread with
+  its first message + fan-out size, `*` = active; those `k` numbers feed
+  `samples --thread k`. Panels the human has FOLDED in
   the browser UI print as one-line stubs (skipped, with a trailing "N folded
   panel(s) skipped" list) — `--include-folded` expands them all, and an explicit
   `--panel` always overrides the fold. The live panels correspond to a
@@ -76,8 +80,10 @@ the rest.
 - `tinkpg samples` answers "what did the model say across ALL n draws at this fork?"
   — the one view `state`/`conv` can't give you, since they only walk the linear active
   path. It prints every sibling response at ONE fork (default: the last user turn of the
-  open conversation, resolved via the pushed conversation_id; `--turn N` / `--panel P` to
-  aim it), each with its CoT (`--full` for complete reasoning), the active one `*`-marked.
+  open conversation, resolved via the pushed conversation_id; `--turn N` / `--panel P` /
+  `--thread K` to aim it — `--thread` reaches NON-active root threads, which no
+  active-path view shows; the default panel is the first non-folded one), each with its
+  CoT (`--full` for complete reasoning), the active one `*`-marked.
   When the answers carry `<tag>X</tag>` verdicts it tallies them (`GOLD ×1 · CONCERNING
   ×11`) and flags doubled-draft samples (>1 tag — the nemotron generation glitch) so you
   don't miscount. Use it whenever you fan out n>1 and want the distribution, not one path.
@@ -88,6 +94,12 @@ the rest.
   bus, so a CLI-triggered chat appears in the human's browser identically to one
   they typed. Best way to *show* them a checkpoint's behavior: `open` the run,
   fire a `chat`, tell them to watch — richer than pasting the sample.
+- **⚠️ `open`/`chat`/`compare` REPLACE the browser's panel layout.** They push a
+  full `panels` list onto the shared bus, so the human's multi-panel workspace
+  reshapes live (and mid-generation state can be lost). Before firing any of
+  them, run `tinkpg state`: if the human has a many-panel workspace open (or
+  `running=yes`), don't — ask first. Reading (`state`/`conv`/`samples`) never
+  writes and is always safe.
 - **Run resolution: ids contain `/`, never split on it.** A run arg resolves by
   exact id, else a UNIQUE case-insensitive substring of id/name (ambiguity errors
   and lists candidates) — so pass the shortest unique substring. Use `@` for
@@ -111,6 +123,11 @@ the rest.
 
 ## Collaboration patterns
 
+- **Survey the human's probe workspace** (many panels, several prompts):
+  `tinkpg state` (which models are live now — folded panels collapse to stubs) →
+  `tinkpg conv <id>` (per-panel thread index + forks) → `tinkpg samples --panel P
+  --thread k` for each interesting fan-out. All read-only; folded panels stay out
+  of the way by default.
 - **"What does checkpoint X do here?"**: `tinkpg open <run>@<ckpt>` → `tinkpg chat
   <run> "<prompt>"` → human watches it stream; you read the same text in stdout.
 - **Behavior distribution**: `tinkpg chat <run> "<q>" --n 30` → the browser's

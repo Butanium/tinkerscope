@@ -204,21 +204,32 @@ def _selected_child(tree: dict, parent_key: str) -> Optional[str]:
     return sel if (sel is not None and sel in kids) else kids[-1]
 
 
-def _active_path(tree: dict) -> list[dict]:
-    """Root → leaf following the selected child at each step (mirrors activePath)."""
-    path: list[dict] = []
-    pk, seen = ROOT, set()
+def _thread_path(tree: dict, root_id: str) -> list[dict]:
+    """Root sibling `root_id` → leaf, following the selected child at each step.
+    A "thread" = one root-level sibling (a branch-from-start first message) and
+    its subtree; this is the thread-scoped analogue of the active path."""
+    nodes = tree.get("nodes", {})
+    node = nodes.get(root_id)
+    if node is None:
+        return []
+    path, seen, pk = [node], {root_id}, root_id
     while True:
         cid = _selected_child(tree, pk)
         if cid is None or cid in seen:
             break
-        node = tree.get("nodes", {}).get(cid)
+        node = nodes.get(cid)
         if node is None:
             break
         seen.add(cid)
         path.append(node)
         pk = cid
     return path
+
+
+def _active_path(tree: dict) -> list[dict]:
+    """Root → leaf following the selected child at each step (mirrors activePath)."""
+    sel = _selected_child(tree, ROOT)
+    return _thread_path(tree, sel) if sel else []
 
 
 def _siblings(tree: dict, node: dict) -> list[str]:
@@ -935,6 +946,28 @@ def _list_conversations(convs: list[dict]) -> None:
     print(f"\n{len(rows)} conversation(s)   (expand: `tinkpg conv <id|name>`)")
 
 
+def _thread_index(tree: dict, width: int) -> list[str]:
+    """Compact index of a panel's root THREADS (branch-from-start siblings):
+    one line per thread with its first message + first-turn fan-out size, `*` =
+    the active one. Empty when the panel has a single thread (nothing to index)."""
+    roots = tree.get("rootChildren", [])
+    if len(roots) < 2:
+        return []
+    nodes = tree.get("nodes", {})
+    sel_root = _selected_child(tree, ROOT)
+    out = [f"   threads: {len(roots)}   (* = active · `samples --thread k` for one fan-out)"]
+    for k, rid in enumerate(roots, 1):
+        nd = nodes.get(rid)
+        if nd is None:
+            continue
+        star = "*" if rid == sel_root else " "
+        fan = len(nd.get("children", []))
+        uturns = sum(1 for n in _thread_path(tree, rid) if n.get("role") == "user")
+        tail = f"({fan} sample{'' if fan == 1 else 's'}" + (f", {uturns} turns)" if uturns > 1 else ")") if fan else "(no samples yet)"
+        out.append(f"   {star}{k}· {_oneline(nd.get('content', ''), max(20, width - 28))}   {tail}")
+    return out
+
+
 def _show_conversation(
     c: dict, panel: Optional[str], full: bool, show_tree: bool, width: int, include_folded: bool = False
 ) -> None:
@@ -969,6 +1002,8 @@ def _show_conversation(
             for line in _render_tree(t, width):
                 print(line)
         else:
+            for line in _thread_index(t, width):
+                print(line)
             for line in _digest(ap, lambda nd, w, fl: _fmt_node(t, nd, w, fl), full, width):
                 print(line)
         print()
@@ -990,9 +1025,11 @@ def cmd_conv(
     ),
 ) -> None:
     """Browse saved (branchable) conversations. No selector → list them with
-    branch metadata; a selector → expand its panels' active branch + forks.
-    Panels folded in the browser UI are skipped by default (shown as a one-line
-    stub) — pass --include-folded to expand them too, or --panel to target one."""
+    branch metadata; a selector → expand its panels' active branch + forks, plus
+    a `threads:` index when the panel has multiple root threads (branch-from-start
+    first messages). Panels folded in the browser UI are skipped by default (shown
+    as a one-line stub) — pass --include-folded to expand them too, or --panel to
+    target one."""
     convs = _conversations()
     if selector is None:
         _list_conversations(convs)
@@ -1000,26 +1037,42 @@ def cmd_conv(
     _show_conversation(_resolve_conv(selector, convs), panel, full, tree, width, include_folded)
 
 
-def _show_samples(c: dict, panel: Optional[str], turn: Optional[int], full: bool, width: int) -> None:
+def _show_samples(
+    c: dict, panel: Optional[str], turn: Optional[int], full: bool, width: int, thread: Optional[int] = None
+) -> None:
     trees = c.get("trees") or {}
     if not trees:
         _die("conversation has no panels")
-    pid = panel or ("primary" if "primary" in trees else next(iter(trees)))
+    reduced = set(c.get("reduced_panels") or [])
+    if panel:
+        pid = panel  # explicit --panel always overrides the fold
+    else:
+        candidates = [p for p in trees if p not in reduced] or list(trees)
+        pid = "primary" if "primary" in candidates else candidates[0]
     t = trees.get(pid)
     if t is None:
         _die(f"no panel {panel!r}; panels: {', '.join(trees) or '(none)'}")
-    ap = _active_path(t)
-    user_idx = [i for i, n in enumerate(ap) if n.get("role") == "user"]
+    roots = t.get("rootChildren", [])
+    if thread is not None:
+        if not (1 <= thread <= len(roots)):
+            _die(f"--thread {thread} out of range (panel {pid} has {len(roots)} thread(s) — see `tinkpg conv`)")
+        path = _thread_path(t, roots[thread - 1])
+        thread_k = thread
+    else:
+        path = _active_path(t)
+        sel_root = _selected_child(t, ROOT)
+        thread_k = roots.index(sel_root) + 1 if sel_root in roots else 1
+    user_idx = [i for i, n in enumerate(path) if n.get("role") == "user"]
     if not user_idx:
-        _die(f"panel {pid} has no user turns on its active path")
+        _die(f"panel {pid} thread {thread_k} has no user turns on its selected path")
     if turn is not None:
         if not (1 <= turn <= len(user_idx)):
-            _die(f"--turn {turn} out of range (panel {pid} has {len(user_idx)} user turns on path)")
+            _die(f"--turn {turn} out of range (thread {thread_k} has {len(user_idx)} user turns on its path)")
         ui = user_idx[turn - 1]
     else:
         ui = user_idx[-1]
     which = (turn if turn is not None else len(user_idx))
-    unode = ap[ui]
+    unode = path[ui]
     nodes = t.get("nodes", {})
     samples = [nodes[k] for k in unode.get("children", []) if k in nodes]
     active_id = _selected_child(t, unode.get("id", ""))
@@ -1028,9 +1081,12 @@ def _show_samples(c: dict, panel: Optional[str], turn: Optional[int], full: bool
     lay = layout.get(pid, {})
     bind = _short_run(lay.get("run_id")) + (f"@{lay['checkpoint']}" if lay.get("checkpoint") else "")
     print(f"conversation: {c.get('name')}  ({(c.get('id') or '')[:8]})")
-    print(f"panel {pid}  ← {bind}   ·   user turn {which}/{len(user_idx)}   ·   {len(samples)} sample(s)")
+    thread_part = f"thread {thread_k}/{len(roots)}   ·   " if len(roots) > 1 else ""
+    print(f"panel {pid}  ← {bind}   ·   {thread_part}user turn {which}/{len(user_idx)}   ·   {len(samples)} sample(s)")
     if len(trees) > 1 and panel is None:
-        print(f"(panels: {', '.join(trees)} — showing {pid}; --panel to switch)")
+        unfolded = [p for p in trees if p not in reduced]
+        plist = (", ".join(unfolded) or "none unfolded") + (f" (+{len(trees) - len(unfolded)} folded)" if reduced else "")
+        print(f"(panels: {plist} — showing {pid}; --panel to switch)")
     print("\n▸ prompt:")
     print(_indent(unode.get("content", ""), "   "))
 
@@ -1052,15 +1108,18 @@ def _show_samples(c: dict, panel: Optional[str], turn: Optional[int], full: bool
 @app.command("samples")
 def cmd_samples(
     selector: Optional[str] = typer.Argument(None, help="conversation id-prefix or name substring; omit → the conversation open in the browser"),
-    panel: Optional[str] = typer.Option(None, "--panel", help="panel id (primary/compare/p-2/…); default primary, or the sole panel"),
-    turn: Optional[int] = typer.Option(None, "--turn", help="1-indexed user turn on the active path whose responses to show; default = the last one"),
+    panel: Optional[str] = typer.Option(None, "--panel", help="panel id (primary/compare/p-2/…); default = first NON-FOLDED panel (primary if eligible). Explicit --panel overrides folding"),
+    thread: Optional[int] = typer.Option(None, "--thread", help="1-indexed root thread (branch-from-start sibling) to walk; default = the active one. Thread numbers: the `threads:` index in `tinkpg conv <id>`"),
+    turn: Optional[int] = typer.Option(None, "--turn", help="1-indexed user turn on the thread's path whose responses to show; default = the last one"),
     full: bool = typer.Option(False, "--full", help="each sample's COMPLETE answer + full CoT (default: answer + one-line CoT preview)"),
     width: int = typer.Option(240, "--width", help="per-sample truncation width in the default (non --full) view"),
 ) -> None:
     """Show every sibling response (the n-sample fan-out) at ONE fork, each with its
     CoT, plus a `<tag>` verdict tally — the 'what did the model say across all draws
     here' view that `state`/`conv` (active path only) can't give you. With no selector
-    it targets the conversation the browser has open (via its pushed conversation_id)."""
+    it targets the conversation the browser has open (via its pushed conversation_id);
+    with no --panel, the first non-folded panel. --thread k aims it at a non-active
+    root thread (numbers from `tinkpg conv <id>`'s thread index)."""
     convs = _conversations()
     if selector is not None:
         c = _resolve_conv(selector, convs)
@@ -1071,7 +1130,7 @@ def cmd_samples(
         c = next((x for x in convs if x.get("id") == cid), None)
         if c is None:
             _die(f"open conversation {cid[:8]} isn't in the saved set yet (unsaved draft?). save it, or pass a saved id — see `tinkpg conv`.")
-    _show_samples(c, panel, turn, full, width)
+    _show_samples(c, panel, turn, full, width, thread)
 
 
 @app.command("refresh")

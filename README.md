@@ -237,7 +237,14 @@ know they're there) — pass `--include-folded` to expand them, or (`conv` only)
 `--panel <id>` to target one directly, which always overrides the fold. For
 `state` the fold info rides the open saved conversation, so it needs the
 browser-pushed conversation id and the default `--link` fetch (`--no-link`
-shows every panel).
+shows every panel). `tinkpg samples` defaults to the first non-folded panel
+(explicit `--panel` overrides).
+
+When a conversation holds several ROOT threads (branch-from-start first
+messages), `tinkpg conv <id>` prints a per-panel `threads:` index — each
+thread's first message + fan-out size, `*` = active — and `tinkpg samples
+--thread k` shows the full n-sample fan-out of thread `k`, including non-active
+threads that the active-path views can't reach.
 
 ---
 
