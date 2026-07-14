@@ -16,6 +16,15 @@ the run@checkpoint separator (`tinkpg chat foo/bar/run@final "hi"`) or the
 `--checkpoint` flag. A run argument resolves by exact id match against
 `/api/models`, else a UNIQUE case-insensitive substring match on id or name
 (ambiguity errors, listing the candidates).
+
+Doc surfaces — any command/flag/behavior change updates ALL of these, in the
+same commit (they have drifted before):
+  - README.md, "The CLI" section (command table + option notes)
+  - .claude/skills/tinkerscope/SKILL.md — the tinkerscope skill other Claude
+    sessions read to drive tinkpg. It lives IN THIS REPO;
+    ~/.claude/skills/tinkerscope is a symlink to it, so edit the repo path
+    (the Edit tool refuses to write through the symlink).
+  - docs/API_CONTRACT.md, only if the HTTP surface itself changed.
 """
 from __future__ import annotations
 
