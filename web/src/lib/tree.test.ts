@@ -102,6 +102,19 @@ test('appendUserTurn extends the active leaf', () => {
 	eq(msgContents(tree), ['U1', 'A1', 'U2', 'A2', 'U3']);
 });
 
+test('appendUserTurn atRoot branches as a sibling first message', () => {
+	const t0 = linear4();
+	const { tree, nodeId } = appendUserTurn(t0, 'alt', true);
+	eq(tree.rootChildren.length, 2);
+	eq(tree.nodes[nodeId].parent, null);
+	eq(msgContents(tree), ['alt']); // new branch IS the active path
+	eq(siblingInfo(tree, nodeId), { index: 1, count: 2 });
+	// old thread intact — cycling back to the original first message restores it
+	const back = cycle(tree, nodeId, -1);
+	eq(msgContents(back), ['U1', 'A1', 'U2', 'A2']);
+	assertValid(tree);
+});
+
 // ── foldAssistant ────────────────────────────────────────────────────
 test('foldAssistant makes N siblings, selects first, copies reasoning/raw', () => {
 	const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');

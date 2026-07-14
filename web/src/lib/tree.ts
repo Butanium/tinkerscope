@@ -250,10 +250,16 @@ function downstreamActivePath(t: ConvTree, id: string): TreeNode[] {
 }
 
 // ── mutations (immutable) ────────────────────────────────────────────
-export function appendUserTurn(t0: ConvTree, content: string): { tree: ConvTree; nodeId: string } {
+/** Append a user turn under the active leaf — or, with `atRoot`, as a NEW
+ *  root-level branch (a sibling first message) that becomes the active path. */
+export function appendUserTurn(
+	t0: ConvTree,
+	content: string,
+	atRoot = false
+): { tree: ConvTree; nodeId: string } {
 	const t = cloneTree(t0);
 	const path = activePath(t);
-	const leaf = path.length ? path[path.length - 1] : null;
+	const leaf = atRoot ? null : path.length ? path[path.length - 1] : null;
 	const parentKey = leaf ? leaf.id : ROOT;
 	const id = nid();
 	t.nodes[id] = { id, role: 'user', content, parent: leaf ? leaf.id : null, children: [] };

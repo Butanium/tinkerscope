@@ -476,6 +476,11 @@
 	}
 	// Per-panel composer drafts for the "continue this panel" bubbles (compare).
 	let panelDraft = $state<Partial<Record<Panel, string>>>({});
+	// Branch-from-start mode: while ON, each send starts a NEW root-level branch
+	// (a sibling first message, cycleable via ‹k/N› on the first row) instead of
+	// appending to the active thread. Transient — deliberately not persisted, so a
+	// reload never silently reopens a mode where sends stop extending the thread.
+	let branchFromRoot = $state(false);
 
 	async function sendMessage() {
 		const text = userInput.trim();
@@ -491,7 +496,7 @@
 		// the others fire concurrently. Only selected send-target panels fire.
 		for (const p of targetSels) {
 			if (panelBusy(p.panel)) continue;
-			const { tree, nodeId } = appendUserTurn(convo.treeFor(p.panel), text);
+			const { tree, nodeId } = appendUserTurn(convo.treeFor(p.panel), text, branchFromRoot);
 			convo.setTree(p.panel, tree);
 			const msgs = activeMessages(convo.treeFor(p.panel)) as ChatMessage[];
 			chat.clearPanelBucket(p.panel);
@@ -510,7 +515,7 @@
 		if (!text || panelBusy(panel) || !panelCanChat(pSel) || !convo.activeId) return;
 		pushHistory(text);
 		panelDraft[panel] = '';
-		const { tree, nodeId } = appendUserTurn(convo.treeFor(panel), text);
+		const { tree, nodeId } = appendUserTurn(convo.treeFor(panel), text, branchFromRoot);
 		convo.setTree(panel, tree);
 		const msgs = activeMessages(convo.treeFor(panel)) as ChatMessage[];
 		chat.clearPanelBucket(panel);
@@ -1685,6 +1690,14 @@
 						data-tooltip="Prefill the assistant turn — the model continues from your text. Type raw <think> tags (DeepSeek/Kimi/Qwen3.5 auto-open one in thinking mode, so a redundant <think> is dropped; Qwen3 opens nothing). Collapse to disable (text is kept); click again to restore."
 						use:tip
 					>{prefillActive ? '✎ prefill on' : '＋ prefill assistant'}</button>
+					<button
+						class="prefill-toggle"
+						class:on={branchFromRoot}
+						data-testid="branch-root-toggle"
+						onclick={() => (branchFromRoot = !branchFromRoot)}
+						data-tooltip="While on, each send starts a NEW branch at the top of the conversation (a sibling first message) instead of extending the current thread. Cycle between first messages with the ‹k/N› arrows on the first row."
+						use:tip
+					>{branchFromRoot ? '⑂ branching from start' : '⑂ branch from start'}</button>
 					{#if showPrefill}
 						<span class="prefill-scope seg-toggle" data-tooltip="Which half(s) of the send get the prefill. Think only / Non-think only apply it to that side; with Both the other half is left un-prefilled. A single-mode send on the wrong side drops it entirely." use:tip>
 							<button class="seg-btn" class:active={prefillScope === 'all'} onclick={() => (prefillScope = 'all')}>All</button>
