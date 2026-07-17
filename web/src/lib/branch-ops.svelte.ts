@@ -30,7 +30,8 @@ import {
   deleteSiblings,
   setSelected,
   cycle as cycleTree,
-  siblingsOf
+  siblingsOf,
+  type ThreadStart
 } from './tree';
 import type { Panel, PanelSel, ChatMessage, ViewMessage } from './types';
 
@@ -187,6 +188,18 @@ class BranchOps {
     panelScroll.preserve(panel);
     chat.clearPanelBucket(panel);
     convo.setTree(panel, cycleTree(convo.treeFor(panel), msg.nodeId, delta));
+  }
+
+  /** Switch every panel that HAS this thread (a same-content root sibling) to
+   *  it — the cross-panel thread jump (ThreadSwitcher). Panels without a match,
+   *  already on it, or mid-generation are left untouched. */
+  switchThread(ts: ThreadStart) {
+    for (const [panel, rid] of Object.entries(ts.roots)) {
+      if (ts.activeIn.includes(panel) || this.#d.panelBusy(panel)) continue;
+      panelScroll.snap(panel); // whole-thread jump → land on its latest turn
+      chat.clearPanelBucket(panel);
+      convo.setTree(panel, setSelected(convo.treeFor(panel), rid));
+    }
   }
 
   /** Pick an n>1 sample card as the active branch, then COLLAPSE to the single

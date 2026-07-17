@@ -132,6 +132,15 @@ active.
 - **Delete** → prunes that branch (and everything under it); the cycler falls
   back to a surviving sibling.
 
+Branching also works **at the very start**: the composer's *⑂ branch from
+start* toggle sends the next message as a sibling **first** message — a new
+ROOT thread — so one conversation can hold several probe prompts against the
+same model set. When ≥2 distinct threads exist, a *⑂ threads* popover appears
+next to the toggle listing every thread across all panels (with how many panels
+have each one); picking a thread switches **every panel that has it** while
+panels without it keep their current thread — threads are per-panel and are
+never force-aligned.
+
 #### The shift-modifier vocabulary
 
 Holding **Shift** turns each action into its "power" variant. The button icon and

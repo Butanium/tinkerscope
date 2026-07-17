@@ -112,7 +112,9 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     policy (PRESERVE/SNAP) + bucket clearing live here. UI-agnostic, like `chat`:
     +page injects its four seams once via `branchOps.configure({ panelSels,
     panelBusy, withPrefill, fireOne })`, and markup / keyboard-nav call the
-    handlers as `branchOps.<name>(...)`.
+    handlers as `branchOps.<name>(...)`. Includes `switchThread(ts)` — the
+    cross-panel THREAD jump (see ThreadSwitcher below): switches every panel
+    holding a same-content root sibling, never force-aligns the rest.
   - `lib/highlights.svelte.ts` → `highlightStore` — user-defined render-time
     coloring rules + persistence.
   - `lib/logprobs.svelte.ts` → `logprobView` — the sidebar **"Token probs"**
@@ -128,7 +130,10 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
 - **Pure logic** — plain `.ts`, no Svelte/DOM, unit-testable (some have
   `*.test.ts`):
   - `lib/tree.ts` — all branch-tree ops (activePath, fold, regen, edit, delete,
-    cycle, siblings). The single source of branching truth. **Has `tree.test.ts`.**
+    cycle, siblings) + `threadStarts(trees)`, the cross-panel union of root
+    THREADS (branch-from-start first messages, identity = trimmed content —
+    threads are per-panel, so each entry records which panels have it). The
+    single source of branching truth. **Has `tree.test.ts`.**
   - `lib/model-sel.ts` — the `openrouter:`/`base:`/`ckpt:` sentinel encoding
     (prefixes, predicates, id extractors) for a panel's model selection.
   - `lib/reorder.ts` — list-agnostic drag-reorder math: `reorderById(items, fromId,
@@ -269,6 +274,13 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     wrapping `ModelTypeahead`; the sidebar's per-panel model picker (click →
     type to filter, no separate "Filter models…" textbox).
   - `lib/HighlightRules.svelte` — the highlight-rules editor UI.
+  - `lib/ThreadSwitcher.svelte` — the composer-row **cross-panel thread jump**:
+    a popover (next to the ⑂ branch-from-start toggle) listing
+    `threadStarts(convo.trees)` — every root thread across all panels with its
+    panel-coverage count (● active everywhere it exists / ◐ somewhere). Picking
+    one calls `branchOps.switchThread`; renders only when ≥2 distinct threads.
+    Smoke `tests/small-smokes/browser_thread_switcher.py` (seeded, token-free —
+    covers divergent thread sets, no-force-align, save/reload persistence).
   - `lib/TruncLabel.svelte` — the middle-ellipsis label: a two-span flex trick
     (head clips with `flex:0 1 auto`, tail always shows) over `splitTail`, plus
     the full-name `use:tip` tooltip backstop. The SINGLE-LABEL renderer — the

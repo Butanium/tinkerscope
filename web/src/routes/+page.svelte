@@ -21,6 +21,7 @@
   import type { ChartPanelData, ChartTurn } from '$lib/chart';
   import { buildPanelView } from '$lib/panel-view';
   import { DragReorder } from '$lib/drag-reorder.svelte';
+  import ThreadSwitcher from '$lib/ThreadSwitcher.svelte';
   import ChartModal from '$lib/ChartModal.svelte';
   import TagModal from '$lib/TagModal.svelte';
   import DatasetModal from '$lib/DatasetModal.svelte';
@@ -1697,6 +1698,7 @@
             data-tooltip="While on, each send starts a NEW branch at the top of the conversation (a sibling first message) instead of extending the current thread. Cycle between first messages with the ‹k/N› arrows on the first row."
             use:tip
           >{branchFromRoot ? '⑂ branching from start' : '⑂ branch from start'}</button>
+          <ThreadSwitcher />
           {#if showPrefill}
             <span class="prefill-scope seg-toggle" data-tooltip="Which half(s) of the send get the prefill. Think only / Non-think only apply it to that side; with Both the other half is left un-prefilled. A single-mode send on the wrong side drops it entirely." use:tip>
               <button class="seg-btn" class:active={prefillScope === 'all'} onclick={() => (prefillScope = 'all')}>All</button>

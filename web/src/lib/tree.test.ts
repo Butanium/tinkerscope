@@ -21,6 +21,7 @@ import {
   cycle,
   siblingInfo,
   siblingsOf,
+  threadStarts,
   reconcileExternal,
   assertValid,
   __resetIds,
@@ -455,6 +456,36 @@ test('STORAGE-V2: editUserForkCopy copies do NOT inherit id-bound blob flags', (
   ok(!r.tree.nodes[copiedAsst].has_token_logprobs, 'copy must not claim a blob it lacks');
   // the ORIGINAL keeps its flag
   eq(r.tree.nodes[ids[0]].has_token_logprobs, true);
+});
+
+// ── threadStarts ─────────────────────────────────────────────────────
+
+test('threadStarts unions root threads across panels by trimmed content', () => {
+  // panel A: threads q1, q2 (q2 selected); panel B: 'q2 ' (whitespace variant) + q3
+  const a1 = appendUserTurn(emptyTree(), 'q1');
+  const a2 = appendUserTurn(a1.tree, 'q2', true);
+  const b1 = appendUserTurn(emptyTree(), 'q2 ');
+  const b2 = appendUserTurn(b1.tree, 'q3', true);
+  const starts = threadStarts({ A: a2.tree, B: b2.tree });
+  eq(starts.length, 3);
+  eq(starts[0].content, 'q1');
+  eq(Object.keys(starts[0].roots), ['A']);
+  eq(starts[0].activeIn, []);
+  // q2 matched across panels despite the trailing space; first occurrence's raw text kept
+  eq(starts[1].content, 'q2');
+  eq(starts[1].roots, { A: a2.nodeId, B: b1.nodeId });
+  eq(starts[1].activeIn, ['A']);
+  eq(starts[2].roots, { B: b2.nodeId });
+  eq(starts[2].activeIn, ['B']);
+});
+
+test('threadStarts: duplicate same-content roots in one panel collapse to one entry', () => {
+  const a1 = appendUserTurn(emptyTree(), 'q');
+  const a2 = appendUserTurn(a1.tree, 'q', true); // identical sibling, now selected
+  const starts = threadStarts({ A: a2.tree });
+  eq(starts.length, 1);
+  eq(starts[0].roots.A, a1.nodeId); // first occurrence wins as the switch target
+  eq(starts[0].activeIn, ['A']); // active detection still sees the selected twin
 });
 
 // ── summary ──────────────────────────────────────────────────────────

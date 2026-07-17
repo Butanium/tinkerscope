@@ -470,6 +470,42 @@ export function cycle(t0: ConvTree, nodeId: string, delta: number): ConvTree {
   return setSelected(t0, sibs[j]);
 }
 
+// ── threads (root siblings, cross-panel) ─────────────────────────────
+export type ThreadStart = {
+  /** The thread's first message (raw text of its first occurrence). */
+  content: string;
+  /** panelId → that panel's matching root node id. */
+  roots: Record<string, string>;
+  /** Panels where this thread is currently the SELECTED root. */
+  activeIn: string[];
+};
+
+/** Union of root THREADS (branch-from-start first messages) across panels,
+ *  identified by trimmed first-message content, in order of first appearance.
+ *  Threads are per-panel — different models may hold different probe sets —
+ *  so `roots` records which panels have each one; there is no forced alignment. */
+export function threadStarts(trees: Record<string, ConvTree>): ThreadStart[] {
+  const out: ThreadStart[] = [];
+  const byKey = new Map<string, ThreadStart>();
+  for (const [pid, t] of Object.entries(trees)) {
+    const sel = selectedChildId(t, ROOT);
+    for (const rid of t.rootChildren) {
+      const node = t.nodes[rid];
+      if (!node) continue;
+      const key = node.content.trim();
+      let ts = byKey.get(key);
+      if (!ts) {
+        ts = { content: node.content, roots: {}, activeIn: [] };
+        byKey.set(key, ts);
+        out.push(ts);
+      }
+      if (!(pid in ts.roots)) ts.roots[pid] = rid; // first same-content sibling wins
+      if (rid === sel) ts.activeIn.push(pid);
+    }
+  }
+  return out;
+}
+
 // ── reconciliation ───────────────────────────────────────────────────
 /** Fold an EXTERNAL (CLI / other-tab / on-load) transcript into the tree.
  *
