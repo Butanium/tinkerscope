@@ -1438,6 +1438,8 @@ def _show_samples(
     width: int,
     thread: Optional[int] = None,
     node: Optional[str] = None,
+    sample_k: Optional[int] = None,
+    slice_rng: Optional[tuple[int, int]] = None,
 ) -> None:
     trees = c.get("trees") or {}
     if not trees:
@@ -1534,10 +1536,22 @@ def _show_samples(
         tail = f"   ({doubled} doubled-draft)" if doubled else ""
         print(f"\ntally: {' · '.join(parts)}{tail}")
     print()
-    for i, s in enumerate(samples, 1):
+    shown = [(i, s) for i, s in enumerate(samples, 1) if sample_k is None or i == sample_k]
+    if sample_k is not None and not shown:
+        _die(f"--sample {sample_k} out of range (this fork has {len(samples)} sample(s))")
+    for i, s in shown:
         active = "*" if s.get("id") == active_id else " "
         print(f"{active}--- sample {i}/{len(samples)} ---")
-        print(_fmt_turn(s.get("role", ""), s.get("content", ""), s.get("reasoning"), width, full))
+        if slice_rng is not None:
+            start, ln = slice_rng
+            if full and s.get("reasoning"):
+                print(f"   [think]  ({len(s['reasoning'])} chars)")
+                print(_slice_text(s["reasoning"], start, ln))
+            role = s.get("role") or "?"
+            print(f"   [{'asst' if role == 'assistant' else role[:4]}]  ({len(s.get('content', ''))} chars)")
+            print(_slice_text(s.get("content", ""), start, ln))
+        else:
+            print(_fmt_turn(s.get("role", ""), s.get("content", ""), s.get("reasoning"), width, full))
         print()
 
 
@@ -1550,6 +1564,8 @@ def cmd_samples(
     node: Optional[str] = typer.Option(None, "--node", help="node id (or unique prefix) from `tinkpg grep` — pinpoints the fork directly, reaching NON-selected branches --thread/--turn can't. An assistant id shows the fan-out it belongs to"),
     full: bool = typer.Option(False, "--full", help="each sample's COMPLETE answer + full CoT (default: answer + one-line CoT preview)"),
     width: int = typer.Option(240, "--width", help="per-sample truncation width in the default (non --full) view"),
+    sample: Optional[int] = typer.Option(None, "--sample", help="show ONLY sibling K (1-indexed) — read one sample at a time"),
+    slice_spec: Optional[str] = typer.Option(None, "--slice", help="START[:LEN] character window of each shown sample (default LEN 2000) — read long samples in pieces instead of truncating; with --full the same window applies to the CoT"),
 ) -> None:
     """Show every sibling response (the n-sample fan-out) at ONE fork, each with its
     CoT, plus a `<tag>` verdict tally — the 'what did the model say across all draws
@@ -1557,7 +1573,8 @@ def cmd_samples(
     it targets the conversation the browser has open (via its pushed conversation_id);
     with no --panel, the first non-folded panel. --thread k aims it at a non-active
     root thread (numbers from `tinkpg conv <id>`'s thread index); --node <id> (ids
-    from `tinkpg grep`) aims it at ANY fork, even on non-selected branches."""
+    from `tinkpg grep`) aims it at ANY fork, even on non-selected branches. Reading
+    ergonomics: --sample K isolates one sibling, --slice START[:LEN] pages through it."""
     convs = _conversations()
     if selector is not None:
         c = _resolve_conv(selector, convs)
@@ -1568,7 +1585,24 @@ def cmd_samples(
         c = next((x for x in convs if x.get("id") == cid), None)
         if c is None:
             _die(f"open workspace {cid[:8]} isn't in the saved set yet (unsaved draft?). save it, or pass a saved id — see `tinkpg conv`.")
-    _show_samples(c, panel, turn, full, width, thread, node)
+    slice_rng: Optional[tuple[int, int]] = None
+    if slice_spec is not None:
+        m = re.fullmatch(r"(\d+)(?::(\d+))?", slice_spec)
+        if not m:
+            _die("--slice takes START[:LEN] character offsets, e.g. `--slice 2000:1500`")
+        slice_rng = (int(m.group(1)), int(m.group(2) or 2000))
+    _show_samples(c, panel, turn, full, width, thread, node, sample, slice_rng)
+
+
+def _slice_text(text: str, start: int, ln: int) -> str:
+    """A raw character window [start, start+ln) of `text`, position-annotated, for
+    reading a long sample in pieces (`--slice`) instead of one huge dump."""
+    if start >= len(text):
+        return f"   [slice starts at {start} but the text is {len(text)} chars]"
+    end = min(len(text), start + ln)
+    head = "…" if start > 0 else ""
+    tail = "…" if end < len(text) else ""
+    return _indent(head + text[start:end] + tail, "   ") + f"\n   [chars {start}–{end} of {len(text)}]"
 
 
 def _thread_of(tree: dict, node_id: str) -> Optional[int]:

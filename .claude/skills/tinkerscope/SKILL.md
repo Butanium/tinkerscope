@@ -39,7 +39,7 @@ tinkpg continue "<follow-up>" [opts] [--panel P] [--thread K] [--turn N] [--node
 tinkpg state [--full] [--width N] [--no-link] [--json] [--include-folded]   # DIGEST of on-screen panels (active path + matched saved conv)
 tinkpg conv                                         # list saved WORKSPACES + branch metadata (alias: tinkpg ws)
 tinkpg conv <id|name> [--panel P] [--full] [--tree] [--include-folded]  # expand one: active branch + fork counts (--tree = all branches)
-tinkpg samples [conv] [--panel P] [--thread K] [--turn N] [--node ID] [--full]  # ALL n-sample siblings at one fork, each w/ CoT + a <tag> verdict tally
+tinkpg samples [conv] [--panel P] [--thread K|--node ID] [--turn N] [--sample K] [--slice S[:L]] [--full]  # ALL n-sample siblings at one fork + <tag> tally; --sample/--slice = read ONE sample in PIECES
 tinkpg grep "<text>" [--conv WS] [--regex] [-i]     # search EVERY branch of all workspaces: content + thinking
 tinkpg refresh                                      # rescan filesystem + re-probe sampling capability
 ```

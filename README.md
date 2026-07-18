@@ -259,6 +259,11 @@ thread's first message + fan-out size, `*` = active — and `tinkpg samples
 --thread k` shows the full n-sample fan-out of thread `k`, including non-active
 threads that the active-path views can't reach.
 
+`tinkpg samples` reading ergonomics: `--sample K` isolates one sibling of the
+fan-out, and `--slice START[:LEN]` shows a character window of each shown sample
+(same window applies to the CoT with `--full`) — page through a long sample in
+pieces instead of dumping or truncating it.
+
 `tinkpg grep "<text>"` searches every node of every branch — message content
 AND thinking — across all saved workspaces (`--conv` to scope, `--regex`, `-i`),
 one hit per line with workspace · panel · thread · role · node id, so you can
