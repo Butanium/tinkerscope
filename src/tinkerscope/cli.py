@@ -1259,6 +1259,80 @@ def cmd_samples(
     _show_samples(c, panel, turn, full, width, thread)
 
 
+def _thread_of(tree: dict, node_id: str) -> Optional[int]:
+    """1-indexed root-thread number a node belongs to (walk parents to the root)."""
+    nodes = tree.get("nodes", {})
+    nid, seen = node_id, set()
+    while nid is not None and nid not in seen:
+        seen.add(nid)
+        node = nodes.get(nid)
+        if node is None:
+            return None
+        parent = node.get("parent")
+        if parent is None:
+            roots = tree.get("rootChildren", [])
+            return roots.index(nid) + 1 if nid in roots else None
+        nid = parent
+    return None
+
+
+def _snippet(text: str, pos: int, width: int) -> str:
+    """±width/2 chars around a match position, whitespace-collapsed."""
+    half = max(20, width // 2)
+    lo, hi = max(0, pos - half), min(len(text), pos + half)
+    s = " ".join(text[lo:hi].split())
+    return ("…" if lo > 0 else "") + s + ("…" if hi < len(text) else "")
+
+
+@app.command("grep")
+def cmd_grep(
+    pattern: str = typer.Argument(..., help="text to find (fixed string; --regex for a regex)"),
+    conv: Optional[str] = typer.Option(None, "--conv", help="restrict to one workspace (id-prefix or name substring)"),
+    regex: bool = typer.Option(False, "--regex", help="treat PATTERN as a Python regex"),
+    ignore_case: bool = typer.Option(False, "-i", "--ignore-case"),
+    width: int = typer.Option(160, "--width", help="snippet width around each match"),
+    max_hits: int = typer.Option(200, "--max-hits", help="stop printing after this many hits (count continues)"),
+) -> None:
+    """Search EVERY branch of saved workspaces — message content AND thinking
+    (`reasoning`) of all nodes, active or not; the view `conv`/`samples` can't
+    give you (they walk selected paths). One line per hit: workspace · panel ·
+    thread k · role (thinking-tagged when the hit is in CoT) + snippet. Drill
+    into a hit with `tinkpg samples <ws> --panel P --thread k` or `conv --tree`."""
+    flags = re.IGNORECASE if ignore_case else 0
+    rx = re.compile(pattern if regex else re.escape(pattern), flags)
+    convs = _conversations()
+    if conv is not None:
+        convs = [_resolve_conv(conv, convs)]
+    hits = 0
+    ws_counts: dict[str, int] = {}
+    for c in convs:
+        cname = c.get("name") or "?"
+        for pid, t in (c.get("trees") or {}).items():
+            for nid, node in (t.get("nodes") or {}).items():
+                for field in ("content", "reasoning"):
+                    text = node.get(field)
+                    if not text:
+                        continue
+                    m = rx.search(text)
+                    if not m:
+                        continue
+                    hits += 1
+                    ws_counts[cname] = ws_counts.get(cname, 0) + 1
+                    if hits <= max_hits:
+                        k = _thread_of(t, nid)
+                        loc = f"{cname} ({(c.get('id') or '')[:8]}) · {pid} · thread {k or '?'} · {node.get('role', '?')}"
+                        tag = " [thinking]" if field == "reasoning" else ""
+                        print(f"{loc}{tag}")
+                        print(f"   {_snippet(text, m.start(), width)}")
+    if hits > max_hits:
+        print(f"\n…{hits - max_hits} more hit(s) not shown (--max-hits to raise)")
+    if not hits:
+        print(f"no matches for {pattern!r} across {len(convs)} workspace(s)")
+    else:
+        per_ws = " · ".join(f"{n}× {name}" for name, n in sorted(ws_counts.items(), key=lambda kv: -kv[1]))
+        print(f"\n{hits} hit(s) in {len(ws_counts)} workspace(s): {per_ws}")
+
+
 @app.command("refresh")
 def cmd_refresh() -> None:
     """Rescan the filesystem + re-probe sampling capabilities."""

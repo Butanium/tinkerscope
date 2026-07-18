@@ -231,6 +231,7 @@ tinkpg send "prompt"                   # NEW THREAD at the current panels (layou
 tinkpg state                           # dump the shared playground state
 tinkpg conv [<id|name>]                # browse saved workspaces; no arg lists them all (alias: ws)
 tinkpg samples [<id|name>]             # every sampled response at one fork + a <tag> tally
+tinkpg grep "<text>"                   # search EVERY branch of all workspaces (content + thinking)
 tinkpg refresh                         # rescan the filesystem + Tinker capabilities
 ```
 
@@ -255,6 +256,12 @@ messages), `tinkpg conv <id>` prints a per-panel `threads:` index — each
 thread's first message + fan-out size, `*` = active — and `tinkpg samples
 --thread k` shows the full n-sample fan-out of thread `k`, including non-active
 threads that the active-path views can't reach.
+
+`tinkpg grep "<text>"` searches every node of every branch — message content
+AND thinking — across all saved workspaces (`--conv` to scope, `--regex`, `-i`),
+one hit per line with workspace · panel · thread · role, so you can jump
+straight to `samples --thread k`. It's the only view that reaches non-selected
+branches without dumping whole trees.
 
 `tinkpg send "<prompt>"` fires the prompt as a **new thread at the current
 panels** — the CLI twin of the browser's *⑂ branch from start*. Unlike
