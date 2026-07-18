@@ -196,7 +196,8 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
 
 ## Later / optional
 
-- [ ] **Wire/disk rename: conversations → workspaces (staged).** The vocabulary
+- [ ] **Wire/disk rename: conversations → workspaces (staged).** Handoff with
+  the trap inventory + staging detail: `docs/HANDOFF_WORKSPACE_RENAME.md`. The vocabulary
   rename shipped 2026-07-17 (UI/CLI/docs say workspace; threads = root
   siblings); the wire (`/api/conversations`, `conversation_id`, `?c=`) and the
   on-disk per-conversation files still carry the legacy name. Magic-wand answer
