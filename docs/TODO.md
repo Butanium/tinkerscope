@@ -196,6 +196,14 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
 
 ## Later / optional
 
+- [ ] **CLI small follow-ups (post `continue`/`send`, 2026-07-17):** DRY the
+  node-resolution logic now duplicated between `samples --node` and `continue`'s
+  `_continue_target`; consider erroring on `--node` + `--turn` together
+  (currently `--turn` is silently ignored); consider folding a CLI-fired chat's
+  FULL n-sample fan-out into the open browser's tree (today the echo-reconcile
+  keeps only sample 0 as representative — full fan-outs live in CLI stdout).
+
+
 - [ ] **Wire/disk rename: conversations → workspaces (staged).** Handoff with
   the trap inventory + staging detail: `docs/HANDOFF_WORKSPACE_RENAME.md`. The vocabulary
   rename shipped 2026-07-17 (UI/CLI/docs say workspace; threads = root
