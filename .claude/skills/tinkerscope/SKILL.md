@@ -35,6 +35,7 @@ tinkpg open <run>[@ckpt]                            # select a run in the human'
 tinkpg chat <run>[@ckpt] "<prompt>" [opts]          # sample; streams to stdout + browser
 tinkpg compare <run_a>[@ckpt] <run_b>[@ckpt] "<prompt>" [opts]   # A→left pane, B→right pane (REPLACES the layout)
 tinkpg send "<prompt>" [opts] [--panel P ...]       # NEW THREAD at the CURRENT panels — layout untouched (the safe probe)
+tinkpg continue "<follow-up>" [opts] [--panel P] [--thread K] [--turn N] [--node ID]   # LOOM: add a turn to existing thread(s) (multi-turn send)
 tinkpg state [--full] [--width N] [--no-link] [--json] [--include-folded]   # DIGEST of on-screen panels (active path + matched saved conv)
 tinkpg conv                                         # list saved WORKSPACES + branch metadata (alias: tinkpg ws)
 tinkpg conv <id|name> [--panel P] [--full] [--tree] [--include-folded]  # expand one: active branch + fork counts (--tree = all branches)
@@ -47,7 +48,9 @@ tinkpg refresh                                      # rescan filesystem + re-pro
 `--thinking` (thinking renderer), `--thinking-both` (n samples WITHOUT thinking +
 n WITH in one chat — 2n total, no-think half first; overrides `--thinking`),
 `--system "…"`, `--checkpoint NAME` (overrides `@`). `tinkpg <cmd> --help` for
-the rest.
+the rest. `send` and `continue` add `--file <path>` (read the user message from a
+file — a reusable probe template, mutually exclusive with the positional prompt)
+and `--prefill-file <path>` (read the assistant prefill from a file).
 
 ## Reading state vs. workspaces (they are DIFFERENT stores)
 
@@ -149,6 +152,21 @@ in endpoint/field names as "workspace".
   fires a NEW thread at every unfolded panel; the browser folds the replies in
   live and the ⑂ threads popover picks it up. The layout-safe way to propose
   and run a new prompt on the models the human is already looking at.
+- **Loom / multi-turn a probe**: `tinkpg continue "<follow-up>" --n 20` adds a
+  turn to the CURRENT thread at every panel (default target = the active leaf,
+  read from live state). Aim it at a non-active branch with `--thread K` /
+  `--turn N` (that panel's saved tree) or `--node <id>` (from `tinkpg grep`).
+  A `--prefill "Hmm,"` (or `--prefill-file`) seeds a thinking opener / the
+  model's own truncated CoT when the target ends on a user turn (answer-level
+  loom). Same layout-safe, folded-via-the-browser path as `send`.
+- **⚠️ A CLI fan-out (`--n K`) persists only ONE representative into the saved
+  tree.** The server commits sample 0 to the panel transcript, and the browser
+  folds a FOREIGN (CLI) chat via echo-reconcile = that one representative — only
+  the browser's OWN sends fold all K siblings from the bus bucket. So `tinkpg
+  samples` on a CLI-fired fan-out shows 1, not K. **The full K-sample fan-out
+  streams to the CLI's stdout** (each `--- sample i ---` block with its CoT +
+  finish_reason) — capture that (`… > log.txt`) for the distribution / a
+  `<tag>` tally; the workspace keeps the representative + thread structure.
 - **"What does checkpoint X do here?"**: `tinkpg open <run>@<ckpt>` → `tinkpg chat
   <run> "<prompt>"` → human watches it stream; you read the same text in stdout.
 - **Behavior distribution**: `tinkpg chat <run> "<q>" --n 30` → the browser's

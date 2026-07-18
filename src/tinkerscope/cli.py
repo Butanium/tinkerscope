@@ -150,6 +150,21 @@ def _truncate(s: str, limit: int = TRUNCATE_AT) -> str:
     return s[:limit] + " …(truncated)"
 
 
+def _arg_or_file(inline: Optional[str], file: Optional[str], what: str, flag: str) -> Optional[str]:
+    """Resolve an inline string OR a file's contents (mutually exclusive) → the text,
+    or None when both are absent. Used for `--file`/`--prefill-file`: probe templates
+    live as files so they aren't retyped. The file is read verbatim (no trailing-
+    newline strip — a template's exact bytes are the contract)."""
+    if inline is not None and file is not None:
+        _die(f"pass EITHER the {what} inline OR {flag}, not both")
+    if file is not None:
+        p = Path(file)
+        if not p.is_file():
+            _die(f"{what} file not found: {file}")
+        return p.read_text()
+    return inline
+
+
 def _stringify(v: Any) -> str:
     """Render any value as a single-line string suitable for table cells."""
     if v is None:
@@ -230,6 +245,22 @@ def _active_path(tree: dict) -> list[dict]:
     """Root → leaf following the selected child at each step (mirrors activePath)."""
     sel = _selected_child(tree, ROOT)
     return _thread_path(tree, sel) if sel else []
+
+
+def _ancestry(tree: dict, node_id: str) -> list[dict]:
+    """Root → `node_id` INCLUSIVE via the PARENT chain (mirrors tree.ts
+    ancestryMessages) — works for ANY node regardless of the current selection, so
+    `continue` can loom from a non-active branch. Returns the node dicts in order."""
+    nodes = tree.get("nodes", {})
+    chain: list[dict] = []
+    cur, seen = nodes.get(node_id), set()
+    while cur is not None and cur.get("id") not in seen:
+        seen.add(cur.get("id"))
+        chain.append(cur)
+        parent = cur.get("parent")
+        cur = nodes.get(parent) if parent else None
+    chain.reverse()
+    return chain
 
 
 def _siblings(tree: dict, node: dict) -> list[str]:
@@ -804,31 +835,10 @@ def cmd_compare(
         _die("compare failed:\n  " + "\n  ".join(failures))
 
 
-def _panel_chat_body(
-    panel: dict,
-    prompt: str,
-    n: int,
-    temperature: float,
-    max_tokens: int,
-    thinking: "bool | str",
-    system: Optional[str],
-    prefill: Optional[str],
-) -> dict:
-    """ChatRequest for a live panel AS BOUND — decodes the browser's model-sel
-    sentinels (mirrors web/src/lib/model-sel.ts) into the matching ChatRequest
-    field; a bare id is a discovered run (+ the panel's checkpoint)."""
-    messages: list[dict] = [{"role": "user", "content": prompt}]
-    if prefill:
-        messages.append({"role": "assistant", "content": prefill})
-    body: dict = {
-        "messages": messages,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "n_samples": n,
-        "thinking": thinking,
-        "panel": panel["id"],
-        "broadcast": True,
-    }
+def _bind_panel_model(body: dict, panel: dict) -> None:
+    """Decode the browser's model-sel sentinel (mirrors web/src/lib/model-sel.ts)
+    into the matching mutually-exclusive ChatRequest field, in place. A bare id is
+    a discovered run (+ the panel's checkpoint)."""
     rid = panel.get("run_id") or ""
     if rid.startswith("openrouter:"):
         body["openrouter_model"] = rid[len("openrouter:"):]
@@ -840,14 +850,60 @@ def _panel_chat_body(
         body["run_id"] = rid
         if panel.get("checkpoint"):
             body["checkpoint"] = panel["checkpoint"]
+
+
+def _panel_body(
+    panel: dict,
+    messages: list[dict],
+    n: int,
+    temperature: float,
+    max_tokens: int,
+    thinking: "bool | str",
+    system: Optional[str],
+    prefill_scope: Optional[str] = None,
+) -> dict:
+    """ChatRequest for a live panel AS BOUND, with an EXPLICIT messages list — the
+    shared core of `send` (fresh single-turn history) and `continue` (a full
+    ancestry). Decodes the panel's model sentinel; a trailing assistant message in
+    `messages` is the server's prefill convention (the model extends it)."""
+    body: dict = {
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "n_samples": n,
+        "thinking": thinking,
+        "panel": panel["id"],
+        "broadcast": True,
+    }
+    if prefill_scope is not None:
+        body["prefill_scope"] = prefill_scope
+    _bind_panel_model(body, panel)
     if system is not None:
         body["system_prompt"] = system
     return body
 
 
+def _panel_chat_body(
+    panel: dict,
+    prompt: str,
+    n: int,
+    temperature: float,
+    max_tokens: int,
+    thinking: "bool | str",
+    system: Optional[str],
+    prefill: Optional[str],
+) -> dict:
+    """ChatRequest for a live panel AS BOUND — a fresh single-user-turn history
+    (+ optional assistant prefill). Thin wrapper over `_panel_body`."""
+    messages: list[dict] = [{"role": "user", "content": prompt}]
+    if prefill:
+        messages.append({"role": "assistant", "content": prefill})
+    return _panel_body(panel, messages, n, temperature, max_tokens, thinking, system)
+
+
 @app.command("send")
 def cmd_send(
-    prompt: str = typer.Argument(..., help="user message — fired as a NEW thread at the current panels"),
+    prompt: Optional[str] = typer.Argument(None, help="user message — fired as a NEW thread at the current panels (or --file)"),
     n: int = typer.Option(1, "--n", help="samples per panel"),
     temperature: float = typer.Option(1.0, "--temperature"),
     max_tokens: int = typer.Option(1024, "--max-tokens"),
@@ -855,6 +911,8 @@ def cmd_send(
     thinking_both: bool = typer.Option(False, "--thinking-both", help="n samples WITHOUT thinking + n WITH, per panel (overrides --thinking)"),
     system: Optional[str] = typer.Option(None, "--system"),
     prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the models extend; raw `<think>` ok"),
+    file: Optional[str] = typer.Option(None, "--file", help="read the user message from a file (a probe template — mutually exclusive with the positional prompt)"),
+    prefill_file: Optional[str] = typer.Option(None, "--prefill-file", help="read the assistant prefill from a file (mutually exclusive with --prefill)"),
     panel: list[str] = typer.Option([], "--panel", help="target only these panel ids (repeatable); overrides folding"),
     include_folded: bool = typer.Option(False, "--include-folded", help="also fire at browser-folded panels"),
     force: bool = typer.Option(False, "--force", help="fire even while a generation is in flight"),
@@ -864,7 +922,12 @@ def cmd_send(
     this never touches the panel layout: it reads the live panels (skipping
     browser-folded ones), fires one chat per panel with a FRESH history, and the
     browser folds each reply in as a sibling first message. Existing threads are
-    untouched; aim it with --panel (repeatable)."""
+    untouched; aim it with --panel (repeatable). The message / prefill can come from
+    a file (--file / --prefill-file) so probe templates aren't retyped."""
+    prompt = _arg_or_file(prompt, file, "message", "--file")
+    prefill = _arg_or_file(prefill, prefill_file, "prefill", "--prefill-file")
+    if prompt is None:
+        _die("no message — pass it inline or via --file")
     st = _get("/api/state")
     if st.get("running") and not force:
         _die("a generation is in flight (running=yes) — wait for it, or pass --force")
@@ -923,6 +986,210 @@ def cmd_send(
     ]
     if failures:
         _die("send failed:\n  " + "\n  ".join(failures))
+
+
+def _continue_target(tree: dict, thread: Optional[int], turn: Optional[int], node: Optional[str]) -> dict:
+    """Resolve the node whose ancestry `continue` loops from, within ONE panel's tree.
+    `--node` pinpoints it (id or unique prefix); else walk a root thread's SELECTED
+    path — `--thread K` (default: the active root) to its leaf, narrowed to turn N's
+    answer by `--turn N`. Errors (never guesses) on an empty panel / bad range /
+    ambiguous node."""
+    nodes = tree.get("nodes", {})
+    if node is not None:
+        hits = [nd for nid, nd in nodes.items() if nid == node or nid.startswith(node)]
+        exact = [nd for nd in hits if nd.get("id") == node]
+        if exact:
+            return exact[0]
+        if not hits:
+            _die(f"no node matching {node!r} in this panel's tree")
+        if len(hits) > 1:
+            _die(f"ambiguous node {node!r} — {len(hits)} matches: {', '.join(nd.get('id','') for nd in hits[:6])}")
+        return hits[0]
+    roots = tree.get("rootChildren", [])
+    if not roots:
+        _die("panel has no threads yet — nothing to continue (use `tinkpg send` to start one)")
+    if thread is not None:
+        if not (1 <= thread <= len(roots)):
+            _die(f"--thread {thread} out of range (panel has {len(roots)} thread(s) — see `tinkpg conv`)")
+        root = roots[thread - 1]
+    else:
+        root = _selected_child(tree, ROOT)
+    path = _thread_path(tree, root)
+    if not path:
+        _die("target thread is empty")
+    if turn is None:
+        return path[-1]
+    user_idx = [i for i, nd in enumerate(path) if nd.get("role") == "user"]
+    if not (1 <= turn <= len(user_idx)):
+        _die(f"--turn {turn} out of range (thread has {len(user_idx)} user turn(s) on its selected path)")
+    nxt = user_idx[turn] if turn < len(user_idx) else len(path)
+    return path[nxt - 1]  # turn N's selected answer (or its user node if unanswered)
+
+
+def _continue_messages(ancestry: list[dict], prompt: Optional[str], prefill: Optional[str]) -> list[dict]:
+    """Assemble the /api/chat messages from an ancestry (root→target, role/content)
+    plus optional appends, and REFUSE invalid sequences up front (the server would
+    reject them anyway, less legibly). The ancestry's LAST role decides:
+      - ends on an ASSISTANT turn → a user message is required (turn-level loom: the
+        follow-up/probe); an optional --prefill then seeds the fresh answer.
+      - ends on a USER turn → NO message (that would be two user turns); we re-sample
+        that turn, optionally seeded by --prefill (a thinking opener / truncated-own-
+        CoT continuation).
+    Content is answer-only (CoT excluded) so it matches the tree nodes verbatim — the
+    browser's echo-reconcile then EXTENDS the matched branch instead of forking."""
+    pairs = [{"role": m["role"], "content": m.get("content", "")} for m in ancestry if m.get("role") != "system"]
+    if not pairs:
+        _die("empty ancestry — nothing to continue from")
+    last = pairs[-1]["role"]
+    if last == "assistant":
+        if prompt is None:
+            _die("target ends on an ASSISTANT turn — pass a user message (inline / --file) to add a "
+                 "turn, or target a user turn (--node/--turn) with --prefill to loom its answer")
+        pairs.append({"role": "user", "content": prompt})
+    elif last == "user":
+        if prompt is not None:
+            _die("target ends on a USER turn — a message here would be two user turns in a row. Drop it "
+                 "to re-sample this turn (optionally with --prefill), or target an assistant turn to add one")
+    else:
+        _die(f"target ends on a {last!r} turn — nothing to continue")
+    if prefill is not None:
+        pairs.append({"role": "assistant", "content": prefill})
+    return pairs
+
+
+@app.command("continue")
+def cmd_continue(
+    prompt: Optional[str] = typer.Argument(None, help="user message to append AFTER the target (turn-level loom / the probe). Omit to re-sample a user-turn target with only --prefill."),
+    n: int = typer.Option(1, "--n", help="samples per panel"),
+    temperature: float = typer.Option(1.0, "--temperature"),
+    max_tokens: int = typer.Option(1024, "--max-tokens"),
+    thinking: bool = typer.Option(False, "--thinking"),
+    thinking_both: bool = typer.Option(False, "--thinking-both", help="n samples WITHOUT thinking + n WITH, per panel (overrides --thinking)"),
+    system: Optional[str] = typer.Option(None, "--system"),
+    file: Optional[str] = typer.Option(None, "--file", help="read the user message from a file (mutually exclusive with the positional prompt)"),
+    prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the model extends — a thinking opener ('Hmm,') or its own truncated CoT; raw `<think>` ok"),
+    prefill_file: Optional[str] = typer.Option(None, "--prefill-file", help="read the prefill from a file (mutually exclusive with --prefill) — e.g. the model's own truncated CoT"),
+    prefill_scope: Optional[str] = typer.Option(None, "--prefill-scope", help="all|think|non_think — which half(s) a thinking-both prefill applies to (default all)"),
+    panel: list[str] = typer.Option([], "--panel", help="target only these panel ids (repeatable); default = all unfolded panels"),
+    thread: Optional[int] = typer.Option(None, "--thread", help="1-indexed root thread to continue (per panel); default = the panel's active thread"),
+    turn: Optional[int] = typer.Option(None, "--turn", help="1-indexed user turn on the thread's path to loom from; default = the leaf"),
+    node: Optional[str] = typer.Option(None, "--node", help="target node id/prefix (from `tinkpg grep`); pinpoints the loom point in ONE panel's tree"),
+    conv: Optional[str] = typer.Option(None, "--conv", help="workspace for --thread/--turn/--node targeting (id-prefix/name); default = the one open in the browser"),
+    include_folded: bool = typer.Option(False, "--include-folded", help="also fire at browser-folded panels"),
+    force: bool = typer.Option(False, "--force", help="fire even while a generation is in flight"),
+) -> None:
+    """LOOM from an existing branch: rebuild the message history up to a target node
+    and sample a continuation, WITHOUT touching the panel layout (the multi-turn twin
+    of `send`). Default target = each panel's ACTIVE leaf (read from the live state,
+    same source `send` uses) — so `tinkpg continue "<follow-up>"` adds a turn to the
+    current threads across all panels; the browser's echo-reconcile extends the
+    matched branch. Aim it elsewhere with --thread/--turn/--node (these read the SAVED
+    workspace tree, so they reach non-active branches). Provenance rule this enforces:
+    the ancestry is the model's OWN in-context content; a --prefill only seeds a tiny
+    thinking opener or the model's own truncated CoT — never a fabricated turn."""
+    prompt = _arg_or_file(prompt, file, "message", "--file")
+    prefill = _arg_or_file(prefill, prefill_file, "prefill", "--prefill-file")
+    st = _get("/api/state")
+    if st.get("running") and not force:
+        _die("a generation is in flight (running=yes) — wait for it, or pass --force")
+    panels = st.get("panels", [])
+    if not panels:
+        _die("no panels on screen — open a workspace in the browser first")
+    by_id = {p["id"]: p for p in panels}
+    conv_id = st.get("conversation_id")
+    tree_mode = thread is not None or turn is not None or node is not None
+
+    # Fold info + (tree-mode) the saved trees come from the open/〈--conv〉 workspace.
+    folded: set[str] = set()
+    trees: dict = {}
+    if tree_mode or (conv_id and not include_folded and not panel):
+        if conv is not None:
+            c = _resolve_conv(conv)
+        elif conv_id:
+            c = next((x for x in _conversations() if x.get("id") == conv_id), None)
+        else:
+            c = None
+        if c is None and tree_mode:
+            _die("no workspace to target — open one in the browser or pass --conv (needed for --thread/--turn/--node)")
+        if c is not None:
+            folded = set(c.get("reduced_panels") or [])
+            trees = c.get("trees") or {}
+    if include_folded or panel:
+        folded = set()
+
+    # --node lives in exactly ONE panel's tree; restrict targeting to that panel.
+    if node is not None and not panel:
+        owners = [pid for pid, t in trees.items() if any(nid == node or nid.startswith(node) for nid in (t.get("nodes") or {}))]
+        if len(owners) == 1:
+            panel = owners
+        elif not owners:
+            _die(f"no node matching {node!r} in any panel's tree")
+        else:
+            _die(f"node {node!r} matches trees of panels {', '.join(owners)} — disambiguate with --panel")
+
+    if panel:
+        missing = [pid for pid in panel if pid not in by_id]
+        if missing:
+            _die(f"no panel(s) {', '.join(missing)}; on screen: {', '.join(by_id)}")
+        targets = [by_id[pid] for pid in panel]
+    else:
+        targets = [p for p in panels if p["id"] not in folded]
+    unbound = [p["id"] for p in targets if not p.get("run_id")]
+    targets = [p for p in targets if p.get("run_id")]
+    if not targets:
+        _die("no target panel has a model bound")
+    think: "bool | str" = "both" if thinking_both else thinking
+
+    # Build (panel, messages) per target — refusing bad sequences BEFORE firing any.
+    plans: list[tuple[dict, list[dict]]] = []
+    for p in targets:
+        if tree_mode:
+            t = trees.get(p["id"])
+            if t is None:
+                _die(f"panel {p['id']} has no saved tree in the workspace — can't --thread/--turn/--node it")
+            target = _continue_target(t, thread, turn, node)
+            ancestry = _ancestry(t, target["id"])
+        else:
+            ancestry = p.get("messages") or []
+            if not ancestry:
+                _die(f"panel {p['id']} has no active thread — use `tinkpg send` to start one, or --thread/--node")
+        plans.append((p, _continue_messages(ancestry, prompt, prefill)))
+
+    print(f"continue (loom)  n={n} temp={temperature}  →  {len(targets)} panel(s)")
+    for (p, msgs) in plans:
+        base = len(msgs) - (1 if prompt is not None else 0) - (1 if prefill is not None else 0)
+        add = []
+        if prompt is not None:
+            add.append("+user")
+        if prefill is not None:
+            add.append(f"+prefill({_oneline(prefill, 24)})")
+        tgt = f"node {node}" if node else (f"thread {thread}" if thread else "active") + (f" turn {turn}" if turn else "")
+        print(f"  {p['id']}: {_short_run(p.get('run_id'))}  [{tgt}]  {base} ancestry turn(s) {' '.join(add)}".rstrip())
+    if unbound:
+        print(f"  skipped (unbound): {', '.join(unbound)}")
+    print()
+
+    lock = threading.Lock()
+    threads: list[threading.Thread] = []
+    results: list[tuple[str, dict, _StreamResult]] = []
+    for (p, msgs) in plans:
+        body = _panel_body(p, msgs, n, temperature, max_tokens, think, system, prefill_scope)
+        res = _StreamResult()
+        label = f"{p['id']} {_short_run(p.get('run_id'))}"
+        t = threading.Thread(target=_stream_chat, args=(body, label, lock, res))
+        results.append((p["id"], p, res))
+        threads.append(t)
+        t.start()
+    for t in threads:
+        t.join()
+
+    failures = [
+        f"{pid} ({_short_run(p.get('run_id'))}): {res.error or 'unknown error'}"
+        for (pid, p, res) in results
+        if not res.ok
+    ]
+    if failures:
+        _die("continue failed:\n  " + "\n  ".join(failures))
 
 
 @app.command("state")

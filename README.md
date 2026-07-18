@@ -228,6 +228,8 @@ tinkpg open <run>[@<checkpoint>]       # switch the browser to this model, live
 tinkpg chat <run> "prompt" --n 50      # sample; streams to stdout AND the browser
 tinkpg compare <runA> <runB> "..."     # two-pane compare, live in the browser
 tinkpg send "prompt"                   # NEW THREAD at the current panels (layout untouched)
+tinkpg send --file probe.txt           # …with the message read from a file (probe templates)
+tinkpg continue "follow-up"            # LOOM: add a turn to the current threads (multi-turn send)
 tinkpg state                           # dump the shared playground state
 tinkpg conv [<id|name>]                # browse saved workspaces; no arg lists them all (alias: ws)
 tinkpg samples [<id|name>]             # every sampled response at one fork + a <tag> tally
@@ -270,7 +272,25 @@ panels** — the CLI twin of the browser's *⑂ branch from start*. Unlike
 (skipping browser-folded ones; `--panel <id>` repeatable to aim, `--force` to
 fire during a generation), sends one chat per panel with a fresh history, and
 the open browser folds each reply in as a sibling first message. Takes the same
-sampling options as `chat`.
+sampling options as `chat`. The message and the assistant prefill can each come
+from a **file** — `--file <path>` (mutually exclusive with the positional
+prompt) and `--prefill-file <path>` — so a reusable probe template isn't retyped.
+
+`tinkpg continue "<follow-up>"` **looms** from an existing branch: it rebuilds
+the message history up to a target node and samples a continuation — the
+multi-turn twin of `send` (layout untouched, one chat per panel, the browser's
+echo-reconcile extends the matched branch). The default target is each panel's
+**active leaf** (read from the live state, the same source `send` uses), so a
+bare `tinkpg continue "<msg>"` adds a turn to every current thread at once. Aim
+it elsewhere with `--thread K` / `--turn N` (that panel's saved tree) or
+`--node <id>` (a node id from `tinkpg grep`, reaching non-active branches). The
+appended message is validated against the target: a target ending on an
+**assistant** turn requires a user message (the follow-up); one ending on a
+**user** turn takes none (it re-samples that turn) but accepts a `--prefill` —
+a tiny thinking opener (`"Hmm,"`) or the model's own truncated CoT — for
+answer-level looming. `--file` / `--prefill-file` apply here too. It never
+transplants a fabricated turn: the ancestry is the model's own in-context
+content.
 
 **Terminology**: the saved container (panels + their branch trees) is a
 **workspace**; each branch-from-start first message starts a **thread**. The
