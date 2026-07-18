@@ -14,6 +14,14 @@ Auto-discovers Tinker training runs under a directory tree (scans for
 checkpoints in the browser, and lets the terminal **drive that browser live**
 via a shared server-side state bus.
 
+**Vocabulary vs wire naming (2026-07-17):** the saved container (panels + their
+branch trees) is called a **workspace** in the UI/CLI/docs; a branch-from-start
+first message starts a **thread** (a root sibling). The WIRE AND STORAGE keep
+the legacy `conversation` naming — `/api/conversations`, `conversation_id`,
+`?c=`, the per-conversation files — read "conversation" below as "workspace".
+The full wire/disk rename is a deliberate staged migration, parked in
+`docs/TODO.md`, not a drift to fix piecemeal.
+
 ## Layout (what exists vs. what you build)
 
 ```

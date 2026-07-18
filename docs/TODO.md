@@ -196,6 +196,18 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
 
 ## Later / optional
 
+- [ ] **Wire/disk rename: conversations → workspaces (staged).** The vocabulary
+  rename shipped 2026-07-17 (UI/CLI/docs say workspace; threads = root
+  siblings); the wire (`/api/conversations`, `conversation_id`, `?c=`) and the
+  on-disk per-conversation files still carry the legacy name. Magic-wand answer
+  is YES — full consistency is worth it big-picture (legacy naming is a
+  permanent reader tax) — but it's a persistence migration, so do it as its own
+  deliberate pass at a quiet moment: alias endpoints (`/api/workspaces` primary,
+  old kept), one-shot disk dir migration with backup, bus field + `?w=` with
+  back-compat read, frontend store/type renames last. Not urgent; do NOT do it
+  piecemeal alongside other work.
+
+
 - [ ] **Busy-latch after a bus drop while ANOTHER chat is still running.** Detached
   fire moved `endToken` (which clears `convo.busy` → New/switch gating) onto the bus
   `chat_done`. If the `/api/state/events` EventSource drops and misses a chat's

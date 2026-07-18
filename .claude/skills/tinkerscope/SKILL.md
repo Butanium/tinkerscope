@@ -33,9 +33,10 @@ tinkpg ls [--filter SUB] [--sampleable-only]      # discovered runs (id, base_mo
 tinkpg checkpoints <run>                            # a run's checkpoints (name, step, has-sampler)
 tinkpg open <run>[@ckpt]                            # select a run in the human's browser (single mode)
 tinkpg chat <run>[@ckpt] "<prompt>" [opts]          # sample; streams to stdout + browser
-tinkpg compare <run_a>[@ckpt] <run_b>[@ckpt] "<prompt>" [opts]   # A→left pane, B→right pane
+tinkpg compare <run_a>[@ckpt] <run_b>[@ckpt] "<prompt>" [opts]   # A→left pane, B→right pane (REPLACES the layout)
+tinkpg send "<prompt>" [opts] [--panel P ...]       # NEW THREAD at the CURRENT panels — layout untouched (the safe probe)
 tinkpg state [--full] [--width N] [--no-link] [--json] [--include-folded]   # DIGEST of on-screen panels (active path + matched saved conv)
-tinkpg conv                                         # list saved (branchable) conversations + branch metadata
+tinkpg conv                                         # list saved WORKSPACES + branch metadata (alias: tinkpg ws)
 tinkpg conv <id|name> [--panel P] [--full] [--tree] [--include-folded]  # expand one: active branch + fork counts (--tree = all branches)
 tinkpg samples [conv] [--panel P] [--thread K] [--turn N] [--full]  # ALL n-sample siblings at one fork, each w/ CoT + a <tag> verdict tally
 tinkpg refresh                                      # rescan filesystem + re-probe sampling capability
@@ -47,13 +48,18 @@ n WITH in one chat — 2n total, no-think half first; overrides `--thinking`),
 `--system "…"`, `--checkpoint NAME` (overrides `@`). `tinkpg <cmd> --help` for
 the rest.
 
-## Reading state vs. conversations (they are DIFFERENT stores)
+## Reading state vs. workspaces (they are DIFFERENT stores)
+
+Vocabulary: the saved container (panels + branch trees) = a **workspace**; a
+branch-from-start first message starts a **thread**. The wire keeps legacy
+naming (`/api/conversations`, `conversation_id`, `?c=`) — read "conversation"
+in endpoint/field names as "workspace".
 
 - `tinkpg state` shows the **live panels** — the transient on-screen selection +
   each panel's LINEAR active path (the server's state bus has no branches). It's a
   compact digest (first-2/last-2 messages, whitespace-collapsed): `--full` for the
   whole path, `--json` for the raw untruncated state (escape hatch). Do NOT expect
-  branches here. It also names the OPEN conversation up top — `open conversation:
+  branches here. It also names the OPEN workspace up top — `open workspace:
   <name> (id) → tinkpg conv <id>` — because the browser pushes its `?c=`
   conversation_id onto the state bus, so you can jump straight to its branches. If
   that id is absent (older browser, or a CLI-only session that never opened a saved
@@ -62,7 +68,7 @@ the rest.
   skips the conversations fetch entirely. Panels the human has FOLDED in the
   browser print as one-line stubs here too — `--include-folded` expands them
   (fold info rides the open conversation, so `--no-link` shows every panel).
-- `tinkpg conv` reads the **saved conversation trees** (`/api/conversations`) —
+- `tinkpg conv` (alias `ws`) reads the **saved workspace trees** (`/api/conversations`) —
   this is the ONLY place branches live. The tree is opaque to the server; the CLI
   walks it client-side (mirrors `web/src/lib/tree.ts`). List shows per-conversation
   `nodes` / `branches` (total forks) / `active` (per-panel active-path length).
@@ -98,8 +104,10 @@ the rest.
   full `panels` list onto the shared bus, so the human's multi-panel workspace
   reshapes live (and mid-generation state can be lost). Before firing any of
   them, run `tinkpg state`: if the human has a many-panel workspace open (or
-  `running=yes`), don't — ask first. Reading (`state`/`conv`/`samples`) never
-  writes and is always safe.
+  `running=yes`), don't — **use `tinkpg send` instead**, which fires at the
+  panels as they are (new thread, layout untouched, refuses while `running=yes`
+  unless `--force`). Reading (`state`/`conv`/`samples`) never writes and is
+  always safe.
 - **Run resolution: ids contain `/`, never split on it.** A run arg resolves by
   exact id, else a UNIQUE case-insensitive substring of id/name (ambiguity errors
   and lists candidates) — so pass the shortest unique substring. Use `@` for
@@ -128,6 +136,10 @@ the rest.
   `tinkpg conv <id>` (per-panel thread index + forks) → `tinkpg samples --panel P
   --thread k` for each interesting fan-out. All read-only; folded panels stay out
   of the way by default.
+- **Add a probe to the human's workspace**: `tinkpg send "<prompt>" --n 20` —
+  fires a NEW thread at every unfolded panel; the browser folds the replies in
+  live and the ⑂ threads popover picks it up. The layout-safe way to propose
+  and run a new prompt on the models the human is already looking at.
 - **"What does checkpoint X do here?"**: `tinkpg open <run>@<ckpt>` → `tinkpg chat
   <run> "<prompt>"` → human watches it stream; you read the same text in stdout.
 - **Behavior distribution**: `tinkpg chat <run> "<q>" --n 30` → the browser's

@@ -660,7 +660,7 @@
   }
   async function onDeleteConversation() {
     if (anyRunning || convo.busy || !convo.activeId) return;
-    if (!confirm('Delete this conversation and all its branches?')) return;
+    if (!confirm('Delete this workspace and all its threads?')) return;
     await convo.remove(convo.activeId);
     setConvUrl(convo.activeId, false); // remove resets/advances active → keep URL in sync
   }
@@ -1197,7 +1197,7 @@
       try {
         const urlConvId = page.url.searchParams.get('c');
         const honored = await convo.load(urlConvId);
-        if (urlConvId && !honored) flashConvNotice('That conversation was not found here — opened the most recent one instead.');
+        if (urlConvId && !honored) flashConvNotice('That workspace was not found here — opened the most recent one instead.');
         setConvUrl(convo.activeId, false);
         void panelScroll.snapAll(); // trees just landed — open at the latest turn
       } catch (e: any) { backendError = `Failed to load conversations: ${e?.message ?? e}`; }
@@ -1332,7 +1332,7 @@
                 <option value={c.id}>{c.name || 'Untitled'}</option>
               {/each}
             </select>
-            <button class="conv-icon-btn" class:shift-alt={shiftDown} data-tooltip={shiftDown ? 'New BLANK conversation (no models)' : 'New conversation · keeps current models (Shift: blank)'} use:tip disabled={anyRunning || convo.busy} aria-label="New conversation" onclick={newConversation}>
+            <button class="conv-icon-btn" class:shift-alt={shiftDown} data-tooltip={shiftDown ? 'New BLANK workspace (no models)' : 'New workspace · keeps current models (Shift: blank)'} use:tip disabled={anyRunning || convo.busy} aria-label="New workspace" onclick={newConversation}>
               {#if shiftDown}
                 <!-- blank-page + plus: a fresh conversation with no model -->
                 <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M4 1.5h5L12.5 5v6.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /><path d="M8.5 1.5V5h3.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /><path d="M7.5 7v3M6 8.5h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" /></svg>
@@ -1340,10 +1340,10 @@
                 <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
               {/if}
             </button>
-            <button class="conv-icon-btn" title="Rename conversation" disabled={anyRunning || convo.busy} aria-label="Rename conversation" onclick={startRenameConversation}>
+            <button class="conv-icon-btn" title="Rename workspace" disabled={anyRunning || convo.busy} aria-label="Rename workspace" onclick={startRenameConversation}>
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M10.5 2.5l3 3L6 13l-3.5.5L3 10l7.5-7.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /></svg>
             </button>
-            <button class="conv-icon-btn conv-icon-danger" title="Delete conversation" disabled={anyRunning || convo.busy} aria-label="Delete conversation" onclick={onDeleteConversation}>
+            <button class="conv-icon-btn conv-icon-danger" title="Delete workspace" disabled={anyRunning || convo.busy} aria-label="Delete workspace" onclick={onDeleteConversation}>
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V2.5h4V4M4.5 4l.6 9h5.8l.6-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg>
             </button>
           </div>
@@ -1442,7 +1442,7 @@
           </div>
         {/each}
         <button class="btn-add-model" class:shift-alt={shiftDown} onclick={addPanel} disabled={modelCatalog.runs.length + modelCatalog.openrouterModels.length < 1}
-            data-tooltip={shiftDown ? 'Add a BLANK panel (empty thread)' : 'Add panel · clones this conversation (Shift: blank)'} use:tip>
+            data-tooltip={shiftDown ? 'Add a BLANK panel (empty thread)' : 'Add panel · clones the first panel\u2019s thread (Shift: blank)'} use:tip>
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
             {panelSels.length < 2 ? 'Compare' : 'Add panel'}
           </button>
@@ -1680,7 +1680,7 @@
             class="prefill-toggle"
             class:on={systemActive}
             onclick={() => (showSystem = !showSystem)}
-            data-tooltip="Per-conversation system prompt. Collapse to fold (the text is kept); the chip stays highlighted while a prompt is set."
+            data-tooltip="Per-workspace system prompt. Collapse to fold (the text is kept); the chip stays highlighted while a prompt is set."
             use:tip
           >{systemActive ? '✎ system on' : '＋ system prompt'}</button>
           <button
@@ -1695,7 +1695,7 @@
             class:on={branchFromRoot}
             data-testid="branch-root-toggle"
             onclick={() => (branchFromRoot = !branchFromRoot)}
-            data-tooltip="While on, each send starts a NEW branch at the top of the conversation (a sibling first message) instead of extending the current thread. Cycle between first messages with the ‹k/N› arrows on the first row."
+            data-tooltip="While on, each send starts a NEW THREAD (a sibling first message) instead of extending the current one. Jump between threads with the ⑂ threads popover or the ‹k/N› arrows on the first row."
             use:tip
           >{branchFromRoot ? '⑂ branching from start' : '⑂ branch from start'}</button>
           <ThreadSwitcher />
@@ -1743,7 +1743,7 @@
           bind:this={inputTextarea}
           onkeydown={handleKeydown}
           placeholder={!convo.activeId
-            ? 'Loading conversations…'
+            ? 'Loading workspaces…'
             : !canChat
               ? 'Select a sampleable run to chat'
               : historyBrowsing

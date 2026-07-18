@@ -227,8 +227,9 @@ tinkpg checkpoints <run>               # list a run's checkpoints
 tinkpg open <run>[@<checkpoint>]       # switch the browser to this model, live
 tinkpg chat <run> "prompt" --n 50      # sample; streams to stdout AND the browser
 tinkpg compare <runA> <runB> "..."     # two-pane compare, live in the browser
+tinkpg send "prompt"                   # NEW THREAD at the current panels (layout untouched)
 tinkpg state                           # dump the shared playground state
-tinkpg conv [<id|name>]                # browse saved conversations; no arg lists them all
+tinkpg conv [<id|name>]                # browse saved workspaces; no arg lists them all (alias: ws)
 tinkpg samples [<id|name>]             # every sampled response at one fork + a <tag> tally
 tinkpg refresh                         # rescan the filesystem + Tinker capabilities
 ```
@@ -249,11 +250,25 @@ browser-pushed conversation id and the default `--link` fetch (`--no-link`
 shows every panel). `tinkpg samples` defaults to the first non-folded panel
 (explicit `--panel` overrides).
 
-When a conversation holds several ROOT threads (branch-from-start first
+When a workspace holds several ROOT threads (branch-from-start first
 messages), `tinkpg conv <id>` prints a per-panel `threads:` index — each
 thread's first message + fan-out size, `*` = active — and `tinkpg samples
 --thread k` shows the full n-sample fan-out of thread `k`, including non-active
 threads that the active-path views can't reach.
+
+`tinkpg send "<prompt>"` fires the prompt as a **new thread at the current
+panels** — the CLI twin of the browser's *⑂ branch from start*. Unlike
+`chat`/`compare` it never replaces the panel layout: it reads the live panels
+(skipping browser-folded ones; `--panel <id>` repeatable to aim, `--force` to
+fire during a generation), sends one chat per panel with a fresh history, and
+the open browser folds each reply in as a sibling first message. Takes the same
+sampling options as `chat`.
+
+**Terminology**: the saved container (panels + their branch trees) is a
+**workspace**; each branch-from-start first message starts a **thread**. The
+wire and storage keep the legacy `conversations` naming (`/api/conversations`,
+`?c=`, `conversation_id`) — renaming those is a migration, not a vocabulary
+fix; see `docs/API_CONTRACT.md`.
 
 ---
 

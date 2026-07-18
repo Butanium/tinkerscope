@@ -804,11 +804,132 @@ def cmd_compare(
         _die("compare failed:\n  " + "\n  ".join(failures))
 
 
+def _panel_chat_body(
+    panel: dict,
+    prompt: str,
+    n: int,
+    temperature: float,
+    max_tokens: int,
+    thinking: "bool | str",
+    system: Optional[str],
+    prefill: Optional[str],
+) -> dict:
+    """ChatRequest for a live panel AS BOUND — decodes the browser's model-sel
+    sentinels (mirrors web/src/lib/model-sel.ts) into the matching ChatRequest
+    field; a bare id is a discovered run (+ the panel's checkpoint)."""
+    messages: list[dict] = [{"role": "user", "content": prompt}]
+    if prefill:
+        messages.append({"role": "assistant", "content": prefill})
+    body: dict = {
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "n_samples": n,
+        "thinking": thinking,
+        "panel": panel["id"],
+        "broadcast": True,
+    }
+    rid = panel.get("run_id") or ""
+    if rid.startswith("openrouter:"):
+        body["openrouter_model"] = rid[len("openrouter:"):]
+    elif rid.startswith("base:"):
+        body["base_model"] = rid[len("base:"):]
+    elif rid.startswith("ckpt:"):
+        body["sampler_path"] = rid[len("ckpt:"):]
+    else:
+        body["run_id"] = rid
+        if panel.get("checkpoint"):
+            body["checkpoint"] = panel["checkpoint"]
+    if system is not None:
+        body["system_prompt"] = system
+    return body
+
+
+@app.command("send")
+def cmd_send(
+    prompt: str = typer.Argument(..., help="user message — fired as a NEW thread at the current panels"),
+    n: int = typer.Option(1, "--n", help="samples per panel"),
+    temperature: float = typer.Option(1.0, "--temperature"),
+    max_tokens: int = typer.Option(1024, "--max-tokens"),
+    thinking: bool = typer.Option(False, "--thinking"),
+    thinking_both: bool = typer.Option(False, "--thinking-both", help="n samples WITHOUT thinking + n WITH, per panel (overrides --thinking)"),
+    system: Optional[str] = typer.Option(None, "--system"),
+    prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the models extend; raw `<think>` ok"),
+    panel: list[str] = typer.Option([], "--panel", help="target only these panel ids (repeatable); overrides folding"),
+    include_folded: bool = typer.Option(False, "--include-folded", help="also fire at browser-folded panels"),
+    force: bool = typer.Option(False, "--force", help="fire even while a generation is in flight"),
+) -> None:
+    """Fire the prompt as a NEW THREAD at the CURRENT panels of the open workspace
+    — the CLI twin of the browser's ⑂ branch-from-start. Unlike `chat`/`compare`
+    this never touches the panel layout: it reads the live panels (skipping
+    browser-folded ones), fires one chat per panel with a FRESH history, and the
+    browser folds each reply in as a sibling first message. Existing threads are
+    untouched; aim it with --panel (repeatable)."""
+    st = _get("/api/state")
+    if st.get("running") and not force:
+        _die("a generation is in flight (running=yes) — wait for it, or pass --force")
+    panels = st.get("panels", [])
+    if not panels:
+        _die("no panels on screen — `tinkpg open <run>` or add panels in the browser first")
+    by_id = {p["id"]: p for p in panels}
+    folded: set[str] = set()
+    conv_id = st.get("conversation_id")
+    if conv_id and not include_folded and not panel:
+        c = next((x for x in _conversations() if x.get("id") == conv_id), None)
+        folded = set((c or {}).get("reduced_panels") or [])
+    if panel:
+        missing = [pid for pid in panel if pid not in by_id]
+        if missing:
+            _die(f"no panel(s) {', '.join(missing)}; on screen: {', '.join(by_id)}")
+        targets = [by_id[pid] for pid in panel]
+    else:
+        targets = [p for p in panels if p["id"] not in folded]
+    unbound = [p["id"] for p in targets if not p.get("run_id")]
+    targets = [p for p in targets if p.get("run_id")]
+    if not targets:
+        _die("no target panel has a model bound — pick models in the browser or `tinkpg open <run>`")
+    think: "bool | str" = "both" if thinking_both else thinking
+
+    print(f"send (new thread)  n={n} temp={temperature}  →  {len(targets)} panel(s)")
+    for p in targets:
+        print(f"  {p['id']}: {_short_run(p.get('run_id'))}" + (f"@{p['checkpoint']}" if p.get("checkpoint") else ""))
+    skipped_bits = []
+    if folded:
+        skipped_bits.append(f"{len(folded & set(by_id))} folded ({', '.join(sorted(folded & set(by_id)))})")
+    if unbound:
+        skipped_bits.append(f"unbound: {', '.join(unbound)}")
+    if skipped_bits:
+        print(f"  skipped: {'; '.join(skipped_bits)}")
+    print()
+
+    lock = threading.Lock()
+    threads: list[threading.Thread] = []
+    results: list[tuple[str, dict, _StreamResult]] = []
+    for p in targets:
+        body = _panel_chat_body(p, prompt, n, temperature, max_tokens, think, system, prefill)
+        res = _StreamResult()
+        label = f"{p['id']} {_short_run(p.get('run_id'))}"
+        t = threading.Thread(target=_stream_chat, args=(body, label, lock, res))
+        results.append((p["id"], p, res))
+        threads.append(t)
+        t.start()
+    for t in threads:
+        t.join()
+
+    failures = [
+        f"{pid} ({_short_run(p.get('run_id'))}): {res.error or 'unknown error'}"
+        for (pid, p, res) in results
+        if not res.ok
+    ]
+    if failures:
+        _die("send failed:\n  " + "\n  ".join(failures))
+
+
 @app.command("state")
 def cmd_state(
     full: bool = typer.Option(False, "--full", help="show every message per panel, not just first/last-2"),
     width: int = typer.Option(160, "--width", help="per-message truncation width"),
-    link: bool = typer.Option(True, "--link/--no-link", help="annotate each panel with the saved conversation its active path matches (`--no-link` skips the conversations fetch)"),
+    link: bool = typer.Option(True, "--link/--no-link", help="annotate each panel with the saved workspace its active path matches (`--no-link` skips the workspaces fetch)"),
     json_out: bool = typer.Option(False, "--json", help="raw state JSON (untruncated escape hatch)"),
     include_folded: bool = typer.Option(
         False, "--include-folded", help="also show panels folded in the browser UI (skipped by default)"
@@ -842,12 +963,12 @@ def cmd_state(
     if conv_id:
         open_conv = next((c for c in convs if c.get("id") == conv_id), None)
         if open_conv:
-            print(f"open conversation: {open_conv.get('name')} ({conv_id[:8]})   → `tinkpg conv {conv_id[:8]}`")
+            print(f"open workspace: {open_conv.get('name')} ({conv_id[:8]})   → `tinkpg conv {conv_id[:8]}`")
             reduced = set(open_conv.get("reduced_panels") or [])
         elif link:
-            print(f"open conversation: {conv_id[:8]} (unsaved draft / not in saved set)")
+            print(f"open workspace: {conv_id[:8]} (unsaved draft / not in saved set)")
         else:
-            print(f"open conversation: {conv_id[:8]}   (--no-link: name + folds not resolved)")
+            print(f"open workspace: {conv_id[:8]}   (--no-link: name + folds not resolved)")
     print(f"{len(panels)} panel(s):\n")
     skipped: list[str] = []
     for p in panels:
@@ -922,9 +1043,9 @@ def _resolve_conv(sel: str, convs: Optional[list[dict]] = None) -> dict:
     if len(matches) == 1:
         return matches[0]
     if not matches:
-        _die(f"no conversation matching {sel!r} (id-prefix or name substring)")
+        _die(f"no workspace matching {sel!r} (id-prefix or name substring)")
     listing = "\n".join(f"  - {m.get('id','')[:8]}  {m.get('name')}" for m in matches[:30])
-    _die(f"ambiguous conversation {sel!r} — {len(matches)} candidates:\n{listing}")
+    _die(f"ambiguous workspace {sel!r} — {len(matches)} candidates:\n{listing}")
     raise AssertionError  # unreachable
 
 
@@ -943,7 +1064,7 @@ def _list_conversations(convs: list[dict]) -> None:
         })
     rows.sort(key=lambda r: r["updated"], reverse=True)
     _print_table(rows, ["id", "updated", "name", "panels", "nodes", "branches", "active"])
-    print(f"\n{len(rows)} conversation(s)   (expand: `tinkpg conv <id|name>`)")
+    print(f"\n{len(rows)} workspace(s)   (expand: `tinkpg conv <id|name>`)")
 
 
 def _thread_index(tree: dict, width: int) -> list[str]:
@@ -975,7 +1096,7 @@ def _show_conversation(
     layout = {p["id"]: p for p in (c.get("panels") or [])}
     reduced = set(c.get("reduced_panels") or [])
     upd = (c.get("updated_at") or "")[:19].replace("T", " ")
-    print(f"conversation: {c.get('name')}  ({c.get('id')})   updated {upd}")
+    print(f"workspace: {c.get('name')}  ({c.get('id')})   updated {upd}")
     if c.get("system_prompt"):
         print(f"system: {_oneline(c['system_prompt'], 200)}")
     total_nodes = sum(len(t.get("nodes", {})) for t in trees.values())
@@ -1008,14 +1129,14 @@ def _show_conversation(
                 print(line)
         print()
     if panel and shown == 0:
-        _die(f"conversation has no panel {panel!r}; panels: {', '.join(trees) or '(none)'}")
+        _die(f"workspace has no panel {panel!r}; panels: {', '.join(trees) or '(none)'}")
     if skipped:
         print(f"{len(skipped)} folded panel(s) skipped: {', '.join(skipped)}   (--include-folded to expand all, or --panel <id> for one)")
 
 
 @app.command("conv")
 def cmd_conv(
-    selector: Optional[str] = typer.Argument(None, help="conversation id-prefix or name substring; omit to list all"),
+    selector: Optional[str] = typer.Argument(None, help="workspace id-prefix or name substring; omit to list all"),
     panel: Optional[str] = typer.Option(None, "--panel", help="restrict to one panel id (primary/compare/p-2/…); overrides folding"),
     full: bool = typer.Option(False, "--full", help="show the whole active path, not just first/last-2"),
     tree: bool = typer.Option(False, "--tree", help="show the full branch tree (all branches), `*` = active"),
@@ -1024,12 +1145,12 @@ def cmd_conv(
         False, "--include-folded", help="also expand panels folded in the browser UI (skipped by default)"
     ),
 ) -> None:
-    """Browse saved (branchable) conversations. No selector → list them with
-    branch metadata; a selector → expand its panels' active branch + forks, plus
-    a `threads:` index when the panel has multiple root threads (branch-from-start
-    first messages). Panels folded in the browser UI are skipped by default (shown
-    as a one-line stub) — pass --include-folded to expand them too, or --panel to
-    target one."""
+    """Browse saved WORKSPACES (multi-panel, branchable; `ws` is an alias). No
+    selector → list them with branch metadata; a selector → expand its panels'
+    active branch + forks, plus a `threads:` index when the panel has multiple
+    root threads (branch-from-start first messages). Panels folded in the browser
+    UI are skipped by default (shown as a one-line stub) — pass --include-folded
+    to expand them too, or --panel to target one."""
     convs = _conversations()
     if selector is None:
         _list_conversations(convs)
@@ -1037,12 +1158,17 @@ def cmd_conv(
     _show_conversation(_resolve_conv(selector, convs), panel, full, tree, width, include_folded)
 
 
+# Vocabulary alias: the saved container is a WORKSPACE (the wire/storage keep the
+# legacy 'conversations' naming — see docs/API_CONTRACT.md). Hidden to keep --help tidy.
+app.command("ws", hidden=True)(cmd_conv)
+
+
 def _show_samples(
     c: dict, panel: Optional[str], turn: Optional[int], full: bool, width: int, thread: Optional[int] = None
 ) -> None:
     trees = c.get("trees") or {}
     if not trees:
-        _die("conversation has no panels")
+        _die("workspace has no panels")
     reduced = set(c.get("reduced_panels") or [])
     if panel:
         pid = panel  # explicit --panel always overrides the fold
@@ -1080,7 +1206,7 @@ def _show_samples(
     layout = {p["id"]: p for p in (c.get("panels") or [])}
     lay = layout.get(pid, {})
     bind = _short_run(lay.get("run_id")) + (f"@{lay['checkpoint']}" if lay.get("checkpoint") else "")
-    print(f"conversation: {c.get('name')}  ({(c.get('id') or '')[:8]})")
+    print(f"workspace: {c.get('name')}  ({(c.get('id') or '')[:8]})")
     thread_part = f"thread {thread_k}/{len(roots)}   ·   " if len(roots) > 1 else ""
     print(f"panel {pid}  ← {bind}   ·   {thread_part}user turn {which}/{len(user_idx)}   ·   {len(samples)} sample(s)")
     if len(trees) > 1 and panel is None:
@@ -1107,7 +1233,7 @@ def _show_samples(
 
 @app.command("samples")
 def cmd_samples(
-    selector: Optional[str] = typer.Argument(None, help="conversation id-prefix or name substring; omit → the conversation open in the browser"),
+    selector: Optional[str] = typer.Argument(None, help="workspace id-prefix or name substring; omit → the workspace open in the browser"),
     panel: Optional[str] = typer.Option(None, "--panel", help="panel id (primary/compare/p-2/…); default = first NON-FOLDED panel (primary if eligible). Explicit --panel overrides folding"),
     thread: Optional[int] = typer.Option(None, "--thread", help="1-indexed root thread (branch-from-start sibling) to walk; default = the active one. Thread numbers: the `threads:` index in `tinkpg conv <id>`"),
     turn: Optional[int] = typer.Option(None, "--turn", help="1-indexed user turn on the thread's path whose responses to show; default = the last one"),
@@ -1126,10 +1252,10 @@ def cmd_samples(
     else:
         cid = _get("/api/state").get("conversation_id")
         if not cid:
-            _die("no conversation open in the browser (state has no conversation_id). pass a conversation id/name — see `tinkpg conv`.")
+            _die("no workspace open in the browser (state has no conversation_id). pass a workspace id/name — see `tinkpg conv`.")
         c = next((x for x in convs if x.get("id") == cid), None)
         if c is None:
-            _die(f"open conversation {cid[:8]} isn't in the saved set yet (unsaved draft?). save it, or pass a saved id — see `tinkpg conv`.")
+            _die(f"open workspace {cid[:8]} isn't in the saved set yet (unsaved draft?). save it, or pass a saved id — see `tinkpg conv`.")
     _show_samples(c, panel, turn, full, width, thread)
 
 
