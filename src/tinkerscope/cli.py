@@ -1300,9 +1300,14 @@ def cmd_grep(
     into a hit with `tinkpg samples <ws> --panel P --thread k` or `conv --tree`."""
     flags = re.IGNORECASE if ignore_case else 0
     rx = re.compile(pattern if regex else re.escape(pattern), flags)
-    convs = _conversations()
     if conv is not None:
-        convs = [_resolve_conv(conv, convs)]
+        # Scoped: resolve against SUMMARIES and fetch only that workspace's body.
+        # The ?bodies=1 all-workspaces fetch dominates grep's runtime (~0.2s for
+        # 18 light bodies today) and scales with the whole store; one body doesn't.
+        target = _resolve_conv(conv, _get("/api/conversations"))
+        convs = [_get(f"/api/conversations/{target['id']}")]
+    else:
+        convs = _conversations()
     hits = 0
     ws_counts: dict[str, int] = {}
     for c in convs:
