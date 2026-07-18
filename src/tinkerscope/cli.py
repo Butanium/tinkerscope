@@ -1164,41 +1164,84 @@ app.command("ws", hidden=True)(cmd_conv)
 
 
 def _show_samples(
-    c: dict, panel: Optional[str], turn: Optional[int], full: bool, width: int, thread: Optional[int] = None
+    c: dict,
+    panel: Optional[str],
+    turn: Optional[int],
+    full: bool,
+    width: int,
+    thread: Optional[int] = None,
+    node: Optional[str] = None,
 ) -> None:
     trees = c.get("trees") or {}
     if not trees:
         _die("workspace has no panels")
     reduced = set(c.get("reduced_panels") or [])
-    if panel:
-        pid = panel  # explicit --panel always overrides the fold
+    if node is not None:
+        # --node pinpoints a fork ANYWHERE in a tree (grep prints the ids) —
+        # including forks on non-selected branches that --thread/--turn (which
+        # walk selected paths) can never reach.
+        if thread is not None or turn is not None:
+            _die("--node is mutually exclusive with --thread/--turn (it pinpoints the fork directly)")
+        search = [panel] if panel else list(trees)
+        found: list[tuple[str, dict]] = []
+        for p in search:
+            t0 = trees.get(p)
+            if t0 is None:
+                _die(f"no panel {panel!r}; panels: {', '.join(trees) or '(none)'}")
+            for nid_, nd_ in (t0.get("nodes") or {}).items():
+                if nid_ == node or nid_.startswith(node):
+                    found.append((p, nd_))
+        exact = [(p, nd_) for p, nd_ in found if nd_.get("id") == node]
+        if exact:
+            found = exact[:1]
+        if not found:
+            _die(f"no node matching {node!r}" + (f" in panel {panel}" if panel else " in any panel"))
+        if len(found) > 1:
+            listing = ", ".join(f"{p}:{nd_.get('id')}" for p, nd_ in found[:6])
+            _die(f"ambiguous node {node!r} — {len(found)} matches: {listing}")
+        pid, nd = found[0]
+        t = trees[pid]
+        if nd.get("role") == "assistant":
+            # An assistant node names one SAMPLE — show the fan-out it belongs to.
+            unode = (t.get("nodes") or {}).get(nd.get("parent") or "")
+            if not unode:
+                _die(f"node {nd.get('id')} is a root-level assistant — its siblings are whole threads; see `tinkpg conv --tree`")
+        else:
+            unode = nd
+        roots = t.get("rootChildren", [])
+        thread_k = _thread_of(t, unode.get("id", ""))
+        pos_part = f"node {unode.get('id')}"
     else:
-        candidates = [p for p in trees if p not in reduced] or list(trees)
-        pid = "primary" if "primary" in candidates else candidates[0]
-    t = trees.get(pid)
-    if t is None:
-        _die(f"no panel {panel!r}; panels: {', '.join(trees) or '(none)'}")
-    roots = t.get("rootChildren", [])
-    if thread is not None:
-        if not (1 <= thread <= len(roots)):
-            _die(f"--thread {thread} out of range (panel {pid} has {len(roots)} thread(s) — see `tinkpg conv`)")
-        path = _thread_path(t, roots[thread - 1])
-        thread_k = thread
-    else:
-        path = _active_path(t)
-        sel_root = _selected_child(t, ROOT)
-        thread_k = roots.index(sel_root) + 1 if sel_root in roots else 1
-    user_idx = [i for i, n in enumerate(path) if n.get("role") == "user"]
-    if not user_idx:
-        _die(f"panel {pid} thread {thread_k} has no user turns on its selected path")
-    if turn is not None:
-        if not (1 <= turn <= len(user_idx)):
-            _die(f"--turn {turn} out of range (thread {thread_k} has {len(user_idx)} user turns on its path)")
-        ui = user_idx[turn - 1]
-    else:
-        ui = user_idx[-1]
-    which = (turn if turn is not None else len(user_idx))
-    unode = path[ui]
+        if panel:
+            pid = panel  # explicit --panel always overrides the fold
+        else:
+            candidates = [p for p in trees if p not in reduced] or list(trees)
+            pid = "primary" if "primary" in candidates else candidates[0]
+        t = trees.get(pid)
+        if t is None:
+            _die(f"no panel {panel!r}; panels: {', '.join(trees) or '(none)'}")
+        roots = t.get("rootChildren", [])
+        if thread is not None:
+            if not (1 <= thread <= len(roots)):
+                _die(f"--thread {thread} out of range (panel {pid} has {len(roots)} thread(s) — see `tinkpg conv`)")
+            path = _thread_path(t, roots[thread - 1])
+            thread_k = thread
+        else:
+            path = _active_path(t)
+            sel_root = _selected_child(t, ROOT)
+            thread_k = roots.index(sel_root) + 1 if sel_root in roots else 1
+        user_idx = [i for i, n in enumerate(path) if n.get("role") == "user"]
+        if not user_idx:
+            _die(f"panel {pid} thread {thread_k} has no user turns on its selected path")
+        if turn is not None:
+            if not (1 <= turn <= len(user_idx)):
+                _die(f"--turn {turn} out of range (thread {thread_k} has {len(user_idx)} user turns on its path)")
+            ui = user_idx[turn - 1]
+        else:
+            ui = user_idx[-1]
+        which = (turn if turn is not None else len(user_idx))
+        unode = path[ui]
+        pos_part = f"user turn {which}/{len(user_idx)}"
     nodes = t.get("nodes", {})
     samples = [nodes[k] for k in unode.get("children", []) if k in nodes]
     active_id = _selected_child(t, unode.get("id", ""))
@@ -1207,8 +1250,8 @@ def _show_samples(
     lay = layout.get(pid, {})
     bind = _short_run(lay.get("run_id")) + (f"@{lay['checkpoint']}" if lay.get("checkpoint") else "")
     print(f"workspace: {c.get('name')}  ({(c.get('id') or '')[:8]})")
-    thread_part = f"thread {thread_k}/{len(roots)}   ·   " if len(roots) > 1 else ""
-    print(f"panel {pid}  ← {bind}   ·   {thread_part}user turn {which}/{len(user_idx)}   ·   {len(samples)} sample(s)")
+    thread_part = f"thread {thread_k or '?'}/{len(roots)}   ·   " if len(roots) > 1 else ""
+    print(f"panel {pid}  ← {bind}   ·   {thread_part}{pos_part}   ·   {len(samples)} sample(s)")
     if len(trees) > 1 and panel is None:
         unfolded = [p for p in trees if p not in reduced]
         plist = (", ".join(unfolded) or "none unfolded") + (f" (+{len(trees) - len(unfolded)} folded)" if reduced else "")
@@ -1237,6 +1280,7 @@ def cmd_samples(
     panel: Optional[str] = typer.Option(None, "--panel", help="panel id (primary/compare/p-2/…); default = first NON-FOLDED panel (primary if eligible). Explicit --panel overrides folding"),
     thread: Optional[int] = typer.Option(None, "--thread", help="1-indexed root thread (branch-from-start sibling) to walk; default = the active one. Thread numbers: the `threads:` index in `tinkpg conv <id>`"),
     turn: Optional[int] = typer.Option(None, "--turn", help="1-indexed user turn on the thread's path whose responses to show; default = the last one"),
+    node: Optional[str] = typer.Option(None, "--node", help="node id (or unique prefix) from `tinkpg grep` — pinpoints the fork directly, reaching NON-selected branches --thread/--turn can't. An assistant id shows the fan-out it belongs to"),
     full: bool = typer.Option(False, "--full", help="each sample's COMPLETE answer + full CoT (default: answer + one-line CoT preview)"),
     width: int = typer.Option(240, "--width", help="per-sample truncation width in the default (non --full) view"),
 ) -> None:
@@ -1245,7 +1289,8 @@ def cmd_samples(
     here' view that `state`/`conv` (active path only) can't give you. With no selector
     it targets the conversation the browser has open (via its pushed conversation_id);
     with no --panel, the first non-folded panel. --thread k aims it at a non-active
-    root thread (numbers from `tinkpg conv <id>`'s thread index)."""
+    root thread (numbers from `tinkpg conv <id>`'s thread index); --node <id> (ids
+    from `tinkpg grep`) aims it at ANY fork, even on non-selected branches."""
     convs = _conversations()
     if selector is not None:
         c = _resolve_conv(selector, convs)
@@ -1256,7 +1301,7 @@ def cmd_samples(
         c = next((x for x in convs if x.get("id") == cid), None)
         if c is None:
             _die(f"open workspace {cid[:8]} isn't in the saved set yet (unsaved draft?). save it, or pass a saved id — see `tinkpg conv`.")
-    _show_samples(c, panel, turn, full, width, thread)
+    _show_samples(c, panel, turn, full, width, thread, node)
 
 
 def _thread_of(tree: dict, node_id: str) -> Optional[int]:
@@ -1296,8 +1341,9 @@ def cmd_grep(
     """Search EVERY branch of saved workspaces — message content AND thinking
     (`reasoning`) of all nodes, active or not; the view `conv`/`samples` can't
     give you (they walk selected paths). One line per hit: workspace · panel ·
-    thread k · role (thinking-tagged when the hit is in CoT) + snippet. Drill
-    into a hit with `tinkpg samples <ws> --panel P --thread k` or `conv --tree`."""
+    thread k · role · node id (thinking-tagged when the hit is in CoT) + snippet.
+    Drill into a hit with `tinkpg samples <ws> --node <id>` (works on non-selected
+    branches too), `samples --panel P --thread k`, or `conv --tree`."""
     flags = re.IGNORECASE if ignore_case else 0
     rx = re.compile(pattern if regex else re.escape(pattern), flags)
     if conv is not None:
@@ -1325,7 +1371,7 @@ def cmd_grep(
                     ws_counts[cname] = ws_counts.get(cname, 0) + 1
                     if hits <= max_hits:
                         k = _thread_of(t, nid)
-                        loc = f"{cname} ({(c.get('id') or '')[:8]}) · {pid} · thread {k or '?'} · {node.get('role', '?')}"
+                        loc = f"{cname} ({(c.get('id') or '')[:8]}) · {pid} · thread {k or '?'} · {node.get('role', '?')} · {nid}"
                         tag = " [thinking]" if field == "reasoning" else ""
                         print(f"{loc}{tag}")
                         print(f"   {_snippet(text, m.start(), width)}")

@@ -38,7 +38,7 @@ tinkpg send "<prompt>" [opts] [--panel P ...]       # NEW THREAD at the CURRENT 
 tinkpg state [--full] [--width N] [--no-link] [--json] [--include-folded]   # DIGEST of on-screen panels (active path + matched saved conv)
 tinkpg conv                                         # list saved WORKSPACES + branch metadata (alias: tinkpg ws)
 tinkpg conv <id|name> [--panel P] [--full] [--tree] [--include-folded]  # expand one: active branch + fork counts (--tree = all branches)
-tinkpg samples [conv] [--panel P] [--thread K] [--turn N] [--full]  # ALL n-sample siblings at one fork, each w/ CoT + a <tag> verdict tally
+tinkpg samples [conv] [--panel P] [--thread K] [--turn N] [--node ID] [--full]  # ALL n-sample siblings at one fork, each w/ CoT + a <tag> verdict tally
 tinkpg grep "<text>" [--conv WS] [--regex] [-i]     # search EVERY branch of all workspaces: content + thinking
 tinkpg refresh                                      # rescan filesystem + re-probe sampling capability
 ```
@@ -87,9 +87,11 @@ in endpoint/field names as "workspace".
 - `tinkpg grep` is the FIND primitive: it scans every node of every branch
   (content AND `reasoning`/thinking) across all workspaces — the one command
   that reaches text on non-selected branches without `--tree` dumps. Hits are
-  `workspace · panel · thread k · role [thinking] + snippet`, which feed
-  straight into `samples --panel P --thread k`. Use it FIRST when the human
-  says "somewhere in my workspaces there's …".
+  `workspace · panel · thread k · role · node id [thinking] + snippet`; feed a
+  hit's node id to `samples --node <id>` to see the fan-out at that exact fork —
+  the ONLY route to n-sample views on non-selected branches (--thread/--turn
+  walk selected paths). Use grep FIRST when the human says "somewhere in my
+  workspaces there's …".
 - `tinkpg samples` answers "what did the model say across ALL n draws at this fork?"
   — the one view `state`/`conv` can't give you, since they only walk the linear active
   path. It prints every sibling response at ONE fork (default: the last user turn of the

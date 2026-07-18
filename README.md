@@ -259,9 +259,10 @@ threads that the active-path views can't reach.
 
 `tinkpg grep "<text>"` searches every node of every branch — message content
 AND thinking — across all saved workspaces (`--conv` to scope, `--regex`, `-i`),
-one hit per line with workspace · panel · thread · role, so you can jump
-straight to `samples --thread k`. It's the only view that reaches non-selected
-branches without dumping whole trees.
+one hit per line with workspace · panel · thread · role · node id, so you can
+jump straight to `samples --node <id>` — which shows the fan-out at ANY fork,
+including forks on non-selected branches that `--thread`/`--turn` (selected-path
+walkers) can never reach.
 
 `tinkpg send "<prompt>"` fires the prompt as a **new thread at the current
 panels** — the CLI twin of the browser's *⑂ branch from start*. Unlike
