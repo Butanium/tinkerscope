@@ -516,7 +516,9 @@
     if (!text || panelBusy(panel) || !panelCanChat(pSel) || !convo.activeId) return;
     pushHistory(text);
     panelDraft[panel] = '';
-    const { tree, nodeId } = appendUserTurn(convo.treeFor(panel), text, branchFromRoot);
+    // The per-panel bubble ALWAYS continues this panel's active thread; ⑂
+    // branch-from-start is a main-composer-only affordance (locked decision).
+    const { tree, nodeId } = appendUserTurn(convo.treeFor(panel), text);
     convo.setTree(panel, tree);
     const msgs = activeMessages(convo.treeFor(panel)) as ChatMessage[];
     chat.clearPanelBucket(panel);
@@ -1695,7 +1697,7 @@
             class:on={branchFromRoot}
             data-testid="branch-root-toggle"
             onclick={() => (branchFromRoot = !branchFromRoot)}
-            data-tooltip="While on, each send starts a NEW THREAD (a sibling first message) instead of extending the current one. Jump between threads with the ⑂ threads popover or the ‹k/N› arrows on the first row."
+            data-tooltip="While on, each MAIN-COMPOSER send starts a NEW THREAD (a sibling first message) instead of extending the current one. Per-panel bubble sends always continue their panel. Jump between threads with the ⑂ threads popover or the ‹k/N› arrows on the first row."
             use:tip
           >{branchFromRoot ? '⑂ branching from start' : '⑂ branch from start'}</button>
           <ThreadSwitcher />
