@@ -271,17 +271,26 @@ export type AddedToken = { token: string; tid: number; p: number };
 /** First-token mode viewing tweaks (session-scoped, owned by the modal):
  *   - `excluded`  UNIT keys (a display token, or a merged group's key) dropped
  *                 from the named segments; their mass + samples fold into the
- *                 grey rest (no renormalization — the bar stays on absolute
- *                 model probabilities and the rest segment visibly grows).
+ *                 grey rest (no renormalization — the bar stays on absolute model
+ *                 probabilities and the rest segment visibly grows). Under
+ *                 `renormalize` the rest (and with it the excluded mass) is
+ *                 dropped from the bar entirely.
  *   - `added`     per-source (bar-aligned) recorded tokens surfaced from the rest.
  *   - `groups`    shared merges — each inner array is display tokens fused into
  *                 ONE unit (one color, summed prob + count). Applied to every bar.
+ *   - `renormalize`  drop the grey rest segment entirely and rescale the NAMED
+ *                 units to sum to 100% (their RELATIVE model probs). The dropped
+ *                 rest carries everything outside the named units — the top-K
+ *                 tail, overflow, and any excluded/folded units — so this is
+ *                 meaningful with or without an exclusion. Default false (rest
+ *                 kept, named units at absolute probability).
  *  A "unit" is one token or one merged group; naming/coloring/exclusion all work
  *  on units, so a merge composes with exclude for free. */
 export type FirstTokenOpts = {
   excluded?: Set<string>;
   added?: AddedToken[][];
   groups?: string[][];
+  renormalize?: boolean;
 };
 
 /** Stable, order-independent key for a merged group of display tokens. */
@@ -314,6 +323,7 @@ export function chartByFirstToken(
   if (dists.every((d) => d == null)) return null;
 
   const excluded = opts.excluded ?? new Set<string>();
+  const renorm = opts.renormalize ?? false;
 
   // Per-source entries = the sampled distribution PLUS any recorded tokens the user
   // surfaced (deduped by display token — surfacing an already-shown token is a
@@ -382,24 +392,31 @@ export function chartByFirstToken(
 
   const legend = [
     ...named.map((u) => ({ key: u.key, label: u.label, colors: [colorOf[u.key]], ...withMembers(u) })),
-    { key: FT_REST, label: FT_REST, colors: [] as string[] }
+    // renormalize drops the grey rest, so it leaves the legend too.
+    ...(renorm ? [] : [{ key: FT_REST, label: FT_REST, colors: [] as string[] }])
   ];
 
   // Excluding a unit drops it from the NAMED segments; its mass + samples fold
-  // into the grey rest (no renormalization — the bar stays on absolute model
-  // probabilities, so rest visibly grows). rest = massTotal − Σ(named unit mass):
-  // excluded units aren't in `named`, so their mass falls back here alongside the
-  // sampled tokens outside every named unit; a surfaced token that made `named`
-  // is carved out of it — both fall out of this one identity.
+  // into the grey rest (which grows) and the bar keeps ABSOLUTE model probs.
+  // `renormalize` instead DROPS the rest entirely and rescales the named units to
+  // sum to 100% (their relative model probs) — the dropped rest carries the top-K
+  // tail, overflow, AND any excluded units, so renorm is meaningful with or
+  // without an exclusion. rest (default) = massTotal − Σ(named): excluded units
+  // aren't in `named`, so their mass falls back here alongside the sampled tokens
+  // outside every named unit; a surfaced token that made `named` is carved out.
   const bars: ChartBar[] = sources.map(({ model, sub }, si) => {
     const shownMass = named.reduce((s, u) => s + unitMass(si, u), 0);
     // Total mass is 1 for a source with a distribution, 0 for a no-data source
-    // (OpenRouter / token-streamed) — which renders as an empty bar, not 100% rest.
+    // (OpenRouter / token-streamed) — which renders as an empty bar.
     const massTotal = dists[si] != null ? 1 : 0;
+    // Denominator: the named mass under renorm (rescale to 100%), else the full
+    // mass (pct == absolute probability). A no-data bar (denom 0) stays empty.
+    const denom = renorm ? shownMass : massTotal;
+    const scale = denom > 0 ? 100 / denom : 0;
     const restMass = Math.max(0, massTotal - shownMass);
     // Rest samples = sampled entries whose token is in no named unit (excluded
     // units aren't named → their sample indices land here, so clicking the grey
-    // segment inspects them and rest's mass + inspect population agree).
+    // segment inspects them). Dropped along with the rest segment under renorm.
     const shown = new Set(named.flatMap((u) => u.members));
     const restIdx = perSource[si].entries
       .filter((e) => !shown.has(e.token))
@@ -413,12 +430,14 @@ export function chartByFirstToken(
           key: u.key,
           label: u.label,
           colors: [colorOf[u.key]],
-          pct: unitMass(si, u) * 100,
+          pct: unitMass(si, u) * scale,
           count: unitCount(si, u),
           sampleIdx: unitIdx(si, u),
           ...withMembers(u)
         })),
-        { key: FT_REST, label: FT_REST, colors: [], pct: restMass * 100, count: restIdx.length, sampleIdx: restIdx }
+        ...(renorm
+          ? []
+          : [{ key: FT_REST, label: FT_REST, colors: [] as string[], pct: restMass * scale, count: restIdx.length, sampleIdx: restIdx }])
       ]
     };
   });

@@ -338,6 +338,29 @@ ok('answers: no sources → null', chartByAnswers([]) === null);
   // add a token that WAS sampled → no double-count (dedupe by display token)
   const addDup = chartByFirstToken(src(), { added: [[{ token: 'Yes', tid: 1, p: 0.6 }]] })!;
   ok('add dup: sampled Yes not doubled', Math.abs(seg(addDup, 'Yes').pct - 60) < 1e-6, `got ${seg(addDup, 'Yes').pct}`);
+
+  // ── renormalize: drop the grey rest, rescale NAMED units to sum to 100% ──
+  // no exclusion needed — the .1 tail (rest) drops and Yes/No rescale over .9
+  const rn = chartByFirstToken(src(), { renormalize: true })!;
+  ok('renorm: Yes .6/.9≈66.7%', Math.abs(seg(rn, 'Yes').pct - (0.6 / 0.9) * 100) < 1e-6, `got ${seg(rn, 'Yes').pct}`);
+  ok('renorm: No .3/.9≈33.3%', Math.abs(seg(rn, 'No').pct - (0.3 / 0.9) * 100) < 1e-6, `got ${seg(rn, 'No').pct}`);
+  eq('renorm: rest segment dropped', rn.data.bars[0].segments.some((s) => s.key === FT_REST), false);
+  eq('renorm: rest dropped from legend', rn.data.legend.map((l) => l.key).includes(FT_REST), false);
+  ok('renorm: bar sums to 100%', Math.abs(rn.data.bars[0].segments.reduce((s, x) => s + x.pct, 0) - 100) < 1e-6);
+  eq('renorm: n stays full (empirical count untouched)', rn.data.bars[0].total, 3);
+
+  // renorm + exclude compose: No leaves named → Yes alone rescales to 100%
+  const rnNo = chartByFirstToken(src(), { excluded: new Set(['No']), renormalize: true })!;
+  ok('renorm+exclude: Yes alone → 100%', Math.abs(seg(rnNo, 'Yes').pct - 100) < 1e-6, `got ${seg(rnNo, 'Yes').pct}`);
+  eq('renorm+exclude: No gone', rnNo.data.bars[0].segments.some((s) => s.key === 'No'), false);
+  eq('renorm+exclude: rest gone', rnNo.data.bars[0].segments.some((s) => s.key === FT_REST), false);
+
+  // renormalize keeps a no-data bar EMPTY (denom 0 → no mass to render)
+  const rnEmpty = chartByFirstToken(
+    [...src(), { model: 'nodata', samples: [{ content: 'x' }] }],
+    { renormalize: true }
+  )!;
+  ok('renorm: no-data bar stays empty', rnEmpty.data.bars[1].segments.every((s) => s.pct === 0));
 }
 
 // ── chartByFirstToken: merge tokens into one group ─────────────────────
@@ -378,6 +401,19 @@ ok('answers: no sources → null', chartByAnswers([]) === null);
   ok('merge+exclude: rest grows to .1+.8=90%', Math.abs(me.data.bars[0].segments.find((s) => s.key === FT_REST)!.pct - 90) < 1e-6, `got ${me.data.bars[0].segments.find((s) => s.key === FT_REST)!.pct}`);
   ok('merge+exclude: bar still stacks to 100%', Math.abs(me.data.bars[0].segments.reduce((s, x) => s + x.pct, 0) - 100) < 1e-6);
   eq('merge+exclude: excluded samples stay in n (still 4)', me.data.bars[0].total, 4);
+
+  // merge + exclude + RENORMALIZE: the group + tail drop with rest, so the only
+  // named unit left ('?') rescales to 100% on its own; n stays the full 4.
+  const mer = chartByFirstToken(src(), { groups: [['.', '!']], excluded: new Set([GKEY]), renormalize: true })!;
+  ok("merge+exclude+renorm: '?' alone → 100%", Math.abs(mer.data.bars[0].segments.find((s) => s.key === '?')!.pct - 100) < 1e-6);
+  eq('merge+exclude+renorm: rest gone', mer.data.bars[0].segments.some((s) => s.key === FT_REST), false);
+  eq('merge+exclude+renorm: n stays full (4)', mer.data.bars[0].total, 4);
+
+  // merge + RENORMALIZE (no exclude): group .8 + '?' .1 rescale over .9 (tail drops)
+  const mrn = chartByFirstToken(src(), { groups: [['.', '!']], renormalize: true })!;
+  ok('merge+renorm: group .8/.9≈88.9%', Math.abs(mrn.data.bars[0].segments.find((s) => s.key === GKEY)!.pct - (0.8 / 0.9) * 100) < 1e-6);
+  ok("merge+renorm: '?' .1/.9≈11.1%", Math.abs(mrn.data.bars[0].segments.find((s) => s.key === '?')!.pct - (0.1 / 0.9) * 100) < 1e-6);
+  ok('merge+renorm: bar sums to 100%', Math.abs(mrn.data.bars[0].segments.reduce((s, x) => s + x.pct, 0) - 100) < 1e-6);
 }
 
 // ── label helpers ─────────────────────────────────────────────────────

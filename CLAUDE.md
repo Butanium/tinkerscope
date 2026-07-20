@@ -186,13 +186,16 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     `chartByFirstToken` (the MODEL's probability distribution over the first
     generated token, from stored `token_logprobs` — segment pct = model prob,
     count/sampleIdx = the empirical side) + label helpers. `chartByFirstToken`
-    takes `FirstTokenOpts {excluded, added, groups}`: it works on **units** (a
-    token OR a merged group via `ftGroupKey`), so exclude (mass + samples fold
-    into the grey rest, which grows — NO renormalization, bar stays on absolute
-    probs), **add** a recorded-but-hidden token (surfaced from the rest —
-    `AddedToken`, its p sourced from stored logprobs, NOT a model call), and
-    **merge** (drag tokens into one color, prob+count summed) all compose. **Has
-    `chart.test.ts`** (exclude/add/merge cases); browser smoke
+    takes `FirstTokenOpts {excluded, added, groups, renormalize}`: it works on
+    **units** (a token OR a merged group via `ftGroupKey`), so exclude (mass +
+    samples fold into the grey rest, which grows — NO renormalization, bar stays
+    on absolute probs; `renormalize:true` instead drops the grey rest entirely
+    (top-K tail + any excluded units) and rescales the named units to sum to
+    100%), **add**
+    a recorded-but-hidden token (surfaced from the rest — `AddedToken`, its p
+    sourced from stored logprobs, NOT a model call), and **merge** (drag tokens
+    into one color, prob+count summed) all compose. **Has `chart.test.ts`**
+    (exclude/renormalize/add/merge cases); browser smoke
     `tests/small-smokes/browser_chart_firsttoken_ops.py`.
   - `lib/token-search.ts` — `normalizeForMatch` / `matchKind` / `searchStoredTokens`:
     the first-token add-search's tiered matching (exact ‹ prefix ‹ contains) with
@@ -249,7 +252,8 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     first generated token (needs stored `token_logprobs`; disabled otherwise). In
     that mode the legend becomes an **interactive chip row**: click a chip to
     exclude/re-include (its mass + samples fold into the grey rest, which grows —
-    absolute probs, no renormalization), drag one
+    absolute probs, no renormalization; a `renormalize` checkbox (always shown)
+    instead drops the grey rest and rescales the shown tokens to 100%), drag one
     chip onto another to **merge** into one color (bespoke onto-drop DnD, not the
     gap-shaped `lib/drag-reorder`), and a search box **adds** a recorded-but-hidden
     token (from stored logprobs — `token-search` + `chart`'s `added`, no model

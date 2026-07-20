@@ -3,9 +3,11 @@
 Seeds a conversation whose assistant siblings carry `token_logprobs`, then drives
 the three first-token-mode operations that ride on the ALREADY-RECORDED logprobs:
 
-  exclude folds into rest:
+  exclude folds into rest (+ optional renormalize):
   - click a token chip → it greys out and its mass + samples fold into the grey
     rest segment (which grows); survivors keep ABSOLUTE probs, no renormalization
+  - the "renormalize" toggle (always available) instead drops the grey rest
+    segment and rescales the shown tokens to sum to 100%
 
   add a recorded-but-hidden token:
   - a token recorded only in an OLDER sibling's top-K (not in the reference top-K,
@@ -132,6 +134,20 @@ def main() -> None:
             checks.append(("chips = Blue, Gray (Green hidden)", "Blue" in labels and "Gray" in labels and "Green" not in labels))
             checks.append(("Blue segment ≈ 50%", seg_pct(page, "Blue") == 50))
 
+            # ── renormalize is ALWAYS available (no exclusion needed) ─────
+            # drops the grey rest (.2 tail) and rescales Blue/Gray over .8.
+            renorm = page.query_selector(".ft-renorm input")
+            checks.append(("renorm toggle present without any exclusion", renorm is not None))
+            renorm.click()
+            page.wait_for_timeout(150)
+            checks.append(("renorm: Blue → .5/.8≈63%", seg_pct(page, "Blue") in (62, 63)))
+            checks.append(("renorm: Gray → .3/.8≈38%", seg_pct(page, "Gray") in (37, 38)))
+            checks.append(("renorm: rest segment dropped", seg_pct(page, "[rest of distribution]") is None))
+            renorm.click()  # back to absolute + rest
+            page.wait_for_timeout(150)
+            checks.append(("un-renorm: Blue back to ≈50%", seg_pct(page, "Blue") == 50))
+            checks.append(("un-renorm: rest segment back", seg_pct(page, "[rest of distribution]") == 20))
+
             # ── exclude folds into rest (no renormalization) ─────────────
             rest_before = seg_pct(page, "[rest of distribution]")
             chip(page, "Gray").click()
@@ -143,6 +159,15 @@ def main() -> None:
             checks.append(("rest grows by ≈30% (Gray's mass folds in)",
                            rest_before is not None and rest_after is not None
                            and abs((rest_after - rest_before) - 30) <= 1))
+
+            # exclude + renorm compose: Gray dropped with rest → Blue alone → 100%
+            page.query_selector(".ft-renorm input").click()
+            page.wait_for_timeout(150)
+            checks.append(("exclude+renorm: Blue alone → 100%", seg_pct(page, "Blue") == 100))
+            checks.append(("exclude+renorm: rest gone", seg_pct(page, "[rest of distribution]") is None))
+            page.query_selector(".ft-renorm input").click()  # off
+            page.wait_for_timeout(150)
+
             # re-include Gray
             chip(page, "Gray").click()
             page.wait_for_timeout(150)

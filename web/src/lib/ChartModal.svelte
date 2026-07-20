@@ -42,13 +42,16 @@
   // First-token mode tweaks — same module-scoped, not-persisted lifetime as
   // chartOff. Keyed by UNIT (a display token, or a merged group's ftGroupKey):
   //   ftExcluded  units dropped from the named segments; their mass + samples
-  //               fold into the grey rest (no renormalization)
+  //               fold into the grey rest (no renormalization), unless ftRenorm
   //   ftGroups    merges — each is a list of display tokens fused into one color
   //   ftAdded     recorded-but-hidden tokens surfaced from the rest (by identity;
   //               each panel resolves its OWN recorded p for the tid)
+  //   ftRenorm    when on, excluded units leave the bar entirely and the survivors
+  //               (named + rest) rescale to 100% (no-op without an exclusion)
   let ftExcluded = $state<string[]>([]);
   let ftGroups = $state<string[][]>([]);
   let ftAdded = $state<{ token: string; tid: number }[]>([]);
+  let ftRenorm = $state(false);
 </script>
 
 <script lang="ts">
@@ -251,7 +254,8 @@
       ? chartByFirstToken(chartSources, {
           excluded: new Set(ftExcluded),
           groups: ftGroups,
-          added: ftAddedPerSource
+          added: ftAddedPerSource,
+          renormalize: ftRenorm
         })
       : null
   );
@@ -416,7 +420,7 @@
   }
 </script>
 
-<Modal title="Response Distribution" {onclose} modalStyle="width: 860px; max-width: 95vw;">
+<Modal title="Response Distribution" {onclose} modalStyle="width: 1120px; max-width: 96vw; max-height: 92vh;">
   {#if sources.length === 0}
     <div class="backend-error">No response data to chart. Send a message first (use Samples &gt; 1 for best results).</div>
   {:else}
@@ -614,10 +618,18 @@
               {/if}
             </div>
           {/each}
-          <div class="chart-legend-item ft-rest-legend">
-            <span class="chart-legend-swatch" style="background: {NONE_COLOR}"></span>
-            <span class="chart-legend-label">{FT_REST}</span>
-          </div>
+          {#if !ftRenorm}
+            <div class="chart-legend-item ft-rest-legend">
+              <span class="chart-legend-swatch" style="background: {NONE_COLOR}"></span>
+              <span class="chart-legend-label">{FT_REST}</span>
+            </div>
+          {/if}
+          <label class="ft-renorm"
+            data-tooltip="Drop the grey “rest of distribution” (the top-K tail + any excluded tokens) and rescale the shown tokens to sum to 100%. Off: the bar keeps absolute model probabilities and rest stays as a segment."
+            use:tip>
+            <input type="checkbox" bind:checked={ftRenorm} />
+            <span>renormalize</span>
+          </label>
         </div>
         <!-- Add a recorded-but-hidden token (from stored logprobs; no model call). -->
         <div class="ft-add">
@@ -703,7 +715,7 @@
   .chart-question p + p { margin-top: 4px; }
   .chart-q-models { font-weight: 600; font-style: normal; color: var(--color-text); }
   .chart-no-answer { color: var(--color-text-muted); font-style: italic; font-size: 0.76rem; }
-  .chart-svg { display: block; max-height: 420px; }
+  .chart-svg { display: block; max-height: 62vh; }
   .chart-svg text { font-family: var(--font-sans); }
   .chart-seg { cursor: pointer; }
   .chart-seg:hover { filter: brightness(0.92); }
@@ -723,6 +735,8 @@
   .ft-chip-x { border: none; background: none; color: var(--color-text-muted); font-size: 0.85rem; line-height: 1; cursor: pointer; padding: 0 1px; }
   .ft-chip-x:hover { color: var(--color-text); }
   .ft-rest-legend { margin-left: var(--space-2); }
+  .ft-renorm { display: inline-flex; align-items: center; gap: 5px; margin-left: var(--space-3); font-size: 0.76rem; color: var(--color-text-muted); cursor: pointer; user-select: none; }
+  .ft-renorm input { cursor: pointer; margin: 0; }
   .ft-add { position: relative; margin-top: var(--space-3); }
   .ft-add-input { width: 260px; max-width: 100%; font-size: 0.78rem; padding: 4px 8px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-bg); color: var(--color-text); }
   .ft-matches { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-2); max-height: 120px; overflow-y: auto; }
