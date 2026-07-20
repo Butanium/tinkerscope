@@ -9,6 +9,7 @@
   import { tip } from '$lib/tooltip.svelte';
   import { logprobView } from '$lib/logprobs.svelte';
   import { nodeBlobs } from '$lib/node-blobs.svelte';
+  import ActionMenu from '$lib/ActionMenu.svelte';
   import TokenLogprobs from '$lib/TokenLogprobs.svelte';
   import type { ViewMessage, SampleData } from '$lib/types';
 
@@ -145,59 +146,20 @@
   // The ‹k/N› sample nav lives in the message header (top-right) in cycle view.
   let showSampleCycler = $derived(isMultiSample && sampleView === 'cycle' && visibleSampleIdxs.length > 0);
 
-  // Transient "✓ copied" flash on the copy buttons (clipboard gives no feedback).
-  // Two independent flags so the message-copy and conversation-copy buttons flash
-  // individually (clicking one must not light up the other).
+  // Transient "✓ copied" flash on the copy menu items (clipboard gives no
+  // feedback). Independent flags so the message / conversation / node-id items
+  // flash individually (clicking one must not light up the others).
   let copiedMsg = $state(false);
   let copiedConv = $state(false);
+  let copiedId = $state(false);
   let copiedTimer: ReturnType<typeof setTimeout> | undefined;
-  function flashCopied(which: 'msg' | 'conv') {
+  function flashCopied(which: 'msg' | 'conv' | 'id') {
     if (which === 'msg') copiedMsg = true;
-    else copiedConv = true;
+    else if (which === 'conv') copiedConv = true;
+    else copiedId = true;
     clearTimeout(copiedTimer);
-    copiedTimer = setTimeout(() => { copiedMsg = false; copiedConv = false; }, 1200);
+    copiedTimer = setTimeout(() => { copiedMsg = false; copiedConv = false; copiedId = false; }, 1200);
   }
-
-  // Transfer-to-panel: a custom dropdown (small icon button + a separately-sized
-  // menu) instead of a native <select>, whose control would auto-grow to the widest
-  // panel-label option. Closes on outside-click / Escape.
-  let sendMenuOpen = $state(false);
-  let sendWrap = $state<HTMLElement | null>(null);
-  // The menu is position:FIXED, not absolute: it lives inside the panel's .messages
-  // (overflow-y:auto) under .chat-column (overflow:hidden), so an absolutely-positioned
-  // menu got clipped at the column edge and vanished behind the neighbouring panel.
-  // Fixed escapes all ancestor overflow clipping (no ancestor has transform/filter/
-  // contain that would trap it); we anchor it to the trigger's rect, right-aligned like
-  // the old `right:0`. It stays a DOM child of sendWrap, so click-away still works.
-  let menuPos = $state<{ top: number; right: number } | null>(null);
-  function positionSendMenu(): void {
-    if (!sendWrap) return;
-    const r = sendWrap.getBoundingClientRect();
-    menuPos = { top: r.bottom + 3, right: window.innerWidth - r.right };
-  }
-  $effect(() => {
-    if (!sendMenuOpen) { menuPos = null; return; }
-    positionSendMenu();
-    const onDoc = (e: MouseEvent) => {
-      if (sendWrap && !sendWrap.contains(e.target as Node)) sendMenuOpen = false;
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') sendMenuOpen = false; };
-    // Keep the fixed menu glued to its trigger as the panel scrolls / window resizes.
-    // Capture phase so the inner .messages scroll (which doesn't bubble) is caught.
-    const onReflow = () => positionSendMenu();
-    window.addEventListener('keydown', onKey);
-    window.addEventListener('resize', onReflow);
-    window.addEventListener('scroll', onReflow, true);
-    // defer the doc-click bind so the opening click doesn't immediately close it
-    const t = setTimeout(() => window.addEventListener('click', onDoc), 0);
-    return () => {
-      clearTimeout(t);
-      window.removeEventListener('click', onDoc);
-      window.removeEventListener('keydown', onKey);
-      window.removeEventListener('resize', onReflow);
-      window.removeEventListener('scroll', onReflow, true);
-    };
-  });
 
   // Inline edit (local). `editShift` remembers a shift-open (fork-full-copy, no gen);
   // `editAll` remembers a ctrl/cmd-open (apply the edit across every panel).
@@ -258,11 +220,11 @@
     editAll = false;
     copiedMsg = false;
     copiedConv = false;
+    copiedId = false;
     rawSingle = false;
     rawSamples = new Set();
     sampleCursor = 0;
     reasoningOpen = false;
-    sendMenuOpen = false;
   });
 </script>
 
@@ -339,20 +301,27 @@
       <div class="sample-content">{@html prefillSplit ? renderPrefilled(sample.content, prefillSplit.answer, 'assistant') : renderContent(sample.content, 'assistant')}</div>
     {/if}
     <div class="message-actions sample-actions">
-      <button class="btn-use" class:active={msg.activeSampleIndex === idx} data-tooltip="Make this the active branch & collapse to it (others stay as ‹k/N› siblings)" use:tip disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onSelectSample(idx)}>{msg.activeSampleIndex === idx ? '✓ active' : 'Make active'}</button>
-      <button class="btn-use" data-tooltip="Keep only this sample — discard the others" use:tip disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onDiscardOthers(idx)}>Discard others</button>
+      <button class="btn-use" class:active={msg.activeSampleIndex === idx} data-tooltip="Make this the active branch & collapse to it (others stay as ‹k/N› siblings)" use:tip aria-label="Make active" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onSelectSample(idx)}>
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4" /><path d="M5.2 8.3l1.9 1.9 3.7-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+      </button>
       <button class="btn-act sample-continue" data-tooltip="Continue THIS sample — makes it the active branch, then the model extends it (n-samples → new branches to pick)" use:tip aria-label="Continue this sample" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onContinueSample(idx)}>
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" /></svg>
       </button>
-      {#if sample.raw_text}
-        <button class="btn-raw" class:active={rawSamples.has(idx)} onclick={() => toggleRawSample(idx)} title="Toggle raw model output with tags preserved">Raw</button>
-      {/if}
       <button class="btn-tag" class:shift-alt={shiftDown} data-tooltip={shiftDown ? 'Bookmark instantly (no note)' : 'Bookmark with a note'} use:tip onclick={(e) => onTag(sample.content, idx, msg.totalSamples ?? null, sample.reasoning || '', e.shiftKey)}>
         {#if shiftDown}{@render tagQuickIcon()}{:else}{@render tagIcon()}{/if}
       </button>
       <button class="btn-act btn-act-danger sample-del" data-tooltip="Delete this sample" use:tip aria-label="Delete this sample" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onDeleteSample(idx)}>
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V2.5h4V4M4.5 4l.6 9h5.8l.6-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg>
       </button>
+      <ActionMenu resetKey={msg.sampleNodeIds?.[idx] ?? String(idx)}>
+        {#snippet children(close)}
+          <button class="row-menu-item" role="menuitem" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => { close(); onDiscardOthers(idx); }}>Keep only this sample (discard others)</button>
+          {#if sample.raw_text}
+            <button class="row-menu-item" role="menuitem" onclick={() => { toggleRawSample(idx); close(); }}>{rawSamples.has(idx) ? 'Hide raw output' : 'Show raw output'}</button>
+          {/if}
+          {@render copyIdItem(msg.sampleNodeIds?.[idx], close)}
+        {/snippet}
+      </ActionMenu>
     </div>
   </div>
 {/snippet}
@@ -360,10 +329,6 @@
 <!-- Action icons. The shift-held variants signal the alternate action: regenerate
      becomes "replace in place" (square in the center), edit becomes "fork a full
      copy" (overlapping pages). -->
-{#snippet sendIcon()}
-  <!-- two-way transfer arrows (send this branch to another panel) -->
-  <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M2 6h10M9.5 3.5 12 6 9.5 8.5M14 10H4M6.5 7.5 4 10l2.5 2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
-{/snippet}
 {#snippet regenIcon()}
   <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M1.5 7a5.5 5.5 0 0 1 9.9-3.3M12.5 7a5.5 5.5 0 0 1-9.9 3.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><path d="M11.5 1v3h-3M2.5 13v-3h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {/snippet}
@@ -389,16 +354,6 @@
 {#snippet trashAllIcon()}
   <!-- trash + a back layer = "delete every branch at this level" -->
   <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M5.5 5.5l.5 7.5h5.5l.5-7.5M5 5.5h8M7.5 5.5V4h3v1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" /><path d="M3 3.2h6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /><path d="M2.6 3.2l.5 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
-{/snippet}
-{#snippet copyIcon()}
-  <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="8.5" height="8.5" rx="1.2" stroke="currentColor" stroke-width="1.2" /><path d="M3 10.5A1.5 1.5 0 0 1 2.5 9.5V3.5A1.5 1.5 0 0 1 4 2h6a1.5 1.5 0 0 1 1.1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>
-{/snippet}
-{#snippet copyAllIcon()}
-  <!-- copy + text lines = "copy the FULL conversation as markdown" -->
-  <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="5" y="4.5" width="8.5" height="9" rx="1.2" stroke="currentColor" stroke-width="1.2" /><path d="M7 7.3h4.5M7 9.3h4.5M7 11.3h2.6" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" /><path d="M3 10.5A1.5 1.5 0 0 1 2.5 9.5V3.5A1.5 1.5 0 0 1 4 2h6a1.5 1.5 0 0 1 1.1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>
-{/snippet}
-{#snippet checkIcon()}
-  <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5L13 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {/snippet}
 
 <!-- think / no-think chip: which renderer mode drew this sample. Only rendered
@@ -445,64 +400,52 @@
   </button>
 {/snippet}
 
-<!-- Copy THIS message's content. shift = also include the thinking as <think>…</think>. -->
-{#snippet copyMsgBtn()}
+<!-- ⋯ menu items shared by the three toolbars. Copy items flash "✓ copied" in
+     place, then dismiss (the clipboard gives no feedback of its own); shift is
+     the same live modifier axis the old inline buttons had (+ thinking). -->
+{#snippet copyMsgItem(close: () => void)}
   <button
-    class="btn-act"
-    class:shift-alt={shiftDown}
-    class:copied={copiedMsg}
-    data-tooltip={copiedMsg ? 'Copied!' : shiftDown ? 'Copy this message + thinking' : 'Copy this message'}
-    use:tip
-    aria-label="Copy this message"
-    onclick={(e) => { onCopy(false, e.shiftKey); flashCopied('msg'); }}
-  >
-    {#if copiedMsg}{@render checkIcon()}{:else}{@render copyIcon()}{/if}
-  </button>
+    class="row-menu-item"
+    role="menuitem"
+    onclick={(e) => { onCopy(false, e.shiftKey); flashCopied('msg'); setTimeout(close, 700); }}
+  >{copiedMsg ? '✓ copied' : shiftDown ? 'Copy message + thinking' : 'Copy message'}</button>
 {/snippet}
 
-<!-- Copy the WHOLE conversation as markdown. shift = include thinking as <think>…</think>. -->
-{#snippet copyConvBtn()}
+{#snippet copyConvItem(close: () => void)}
   <button
-    class="btn-act"
-    class:shift-alt={shiftDown}
-    class:copied={copiedConv}
-    data-tooltip={copiedConv ? 'Copied!' : shiftDown ? 'Copy the full conversation + thinking' : 'Copy the full conversation'}
-    use:tip
-    aria-label="Copy conversation"
-    onclick={(e) => { onCopy(true, e.shiftKey); flashCopied('conv'); }}
-  >
-    {#if copiedConv}{@render checkIcon()}{:else}{@render copyAllIcon()}{/if}
-  </button>
+    class="row-menu-item"
+    role="menuitem"
+    onclick={(e) => { onCopy(true, e.shiftKey); flashCopied('conv'); setTimeout(close, 700); }}
+  >{copiedConv ? '✓ copied' : shiftDown ? 'Copy conversation + thinking' : 'Copy conversation'}</button>
 {/snippet}
 
 <!-- Send this branch's context (root→here) into another panel's thread. -->
-{#snippet sendToPicker()}
+{#snippet sendToItems(close: () => void)}
   {#if otherPanels.length && onSendToPanel && msg.nodeId != null}
-    <div class="send-to" bind:this={sendWrap}>
+    <div class="row-menu-sep"></div>
+    {#each otherPanels as op (op.id)}
       <button
-        class="btn-act"
-        class:shift-alt={sendMenuOpen}
-        data-tooltip="Send this branch's context to another panel"
-        use:tip
-        aria-label="Send branch to another panel"
-        aria-haspopup="menu"
-        aria-expanded={sendMenuOpen}
-        onclick={() => (sendMenuOpen = !sendMenuOpen)}
-      >
-        {@render sendIcon()}
-      </button>
-      {#if sendMenuOpen && menuPos}
-        <div class="send-to-menu" role="menu" style="top: {menuPos.top}px; right: {menuPos.right}px">
-          {#each otherPanels as op (op.id)}
-            <button
-              class="send-to-item"
-              role="menuitem"
-              onclick={() => { sendMenuOpen = false; onSendToPanel?.(op.id); }}
-            >→ {op.label}</button>
-          {/each}
-        </div>
-      {/if}
-    </div>
+        class="row-menu-item"
+        role="menuitem"
+        onclick={() => { close(); onSendToPanel?.(op.id); }}
+      >Send branch → {op.label}</button>
+    {/each}
+  {/if}
+{/snippet}
+
+<!-- Copy this node's id — the CLI's addressing currency. The id is shown in the
+     row so it can also just be read off; the tooltip spells out the two consumers. -->
+{#snippet copyIdItem(id: string | null | undefined, close: () => void)}
+  {#if id}
+    <div class="row-menu-sep"></div>
+    <button
+      class="row-menu-item"
+      role="menuitem"
+      data-testid="copy-node-id"
+      data-tooltip={`CLI reference: tinkpg samples --node ${id} (this fork's fan-out) · tinkpg continue --node ${id} (loom from here)`}
+      use:tip
+      onclick={() => { navigator.clipboard?.writeText(id); flashCopied('id'); setTimeout(close, 700); }}
+    >{copiedId ? '✓ copied' : 'Copy node id'}<code>{id}</code></button>
   {/if}
 {/snippet}
 
@@ -608,10 +551,15 @@
         <div class="message-actions turn-actions hover-actions">
           {@render regenGroup()}
           {@render continueBtn()}
-          {@render copyMsgBtn()}
-          {@render copyConvBtn()}
-          {@render sendToPicker()}
           {@render deleteBtn('Delete this turn')}
+          <ActionMenu resetKey={msg.nodeId ?? ''}>
+            {#snippet children(close)}
+              {@render copyMsgItem(close)}
+              {@render copyConvItem(close)}
+              {@render sendToItems(close)}
+              {@render copyIdItem(msg.nodeId, close)}
+            {/snippet}
+          </ActionMenu>
         </div>
       {/if}
     {:else if editing && msg.nodeId != null}
@@ -657,12 +605,6 @@
       {/if}
       {#if msg.role !== 'system' && (msg.content || msg.raw_text || msg.reasoning)}
         <div class="message-actions hover-actions">
-          {#if msg.raw_text}
-            <button class="btn-raw" class:active={rawSingle} onclick={() => (rawSingle = !rawSingle)} title="Toggle raw model output with tags preserved">Raw</button>
-          {/if}
-          {@render copyMsgBtn()}
-          {@render copyConvBtn()}
-          {@render sendToPicker()}
           {#if canEdit}
             {@render regenGroup()}
             {#if msg.role === 'assistant'}{@render continueBtn()}{/if}
@@ -686,6 +628,17 @@
               {#if shiftDown}{@render tagQuickIcon()}{:else}{@render tagIcon()}{/if}
             </button>
           {/if}
+          <ActionMenu resetKey={msg.nodeId ?? msg.content}>
+            {#snippet children(close)}
+              {@render copyMsgItem(close)}
+              {@render copyConvItem(close)}
+              {#if msg.raw_text}
+                <button class="row-menu-item" role="menuitem" onclick={() => { rawSingle = !rawSingle; close(); }}>{rawSingle ? 'Hide raw output' : 'Show raw output'}</button>
+              {/if}
+              {@render sendToItems(close)}
+              {@render copyIdItem(msg.nodeId, close)}
+            {/snippet}
+          </ActionMenu>
         </div>
       {/if}
     {/if}
@@ -727,12 +680,6 @@
   .active-sample-tag { font-size: 0.62rem; color: var(--color-accent); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-left: var(--space-2); }
   .btn-use.active { background: var(--color-accent); border-color: var(--color-accent); color: white; }
   .edit-hint { font-size: 0.7rem; color: var(--color-text-muted); font-style: italic; margin-bottom: var(--space-1); line-height: 1.3; }
-  /* Transfer-to-panel: icon button keeps its .btn-act size; the menu sizes to its
-     own content (max-content), so the BUTTON never grows to the option width. */
-  .send-to { position: relative; display: inline-flex; }
-  .send-to-menu { position: fixed; z-index: 90; display: flex; flex-direction: column; gap: 1px; min-width: max-content; padding: 3px; background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); box-shadow: 0 4px 14px #00000022; }
-  .send-to-item { display: block; white-space: nowrap; text-align: left; padding: 4px 9px; background: none; border: none; border-radius: var(--radius-sm); color: var(--color-text-secondary); font-size: 0.72rem; cursor: pointer; }
-  .send-to-item:hover { background: var(--color-accent-bg); color: var(--color-accent); }
   /* The authored-prefill prefix of an assistant turn, colored distinctly from the
      model's continuation. :global because the span is injected via {@html}. Render as
      inline so it flows with the continuation; a soft tint + left rule mark it. */

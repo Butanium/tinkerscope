@@ -87,6 +87,19 @@ def main() -> None:
 
         page.screenshot(path=SHOT, full_page=True)
 
+        # Card ⋯ overflow menu: discard-others + the card's own node id (the CLI's
+        # `--node` handle) live here since the toolbar redesign.
+        page.locator(".sample-card [data-testid=row-menu]").first.click()
+        menu = page.locator("[data-testid=row-menu-panel]")
+        menu.wait_for(timeout=5000)
+        card_menu_items = menu.locator(".row-menu-item").all_inner_texts()
+        card_menu_ok = (
+            any("Keep only this sample" in it for it in card_menu_items)
+            and any("Copy node id" in it for it in card_menu_items)
+        )
+        page.keyboard.press("Escape")
+        page.wait_for_function("!document.querySelector('[data-testid=row-menu-panel]')", timeout=5000)
+
         # Make the first card the active branch → the distribution collapses to a
         # single reply and the other N-1 samples become ‹k/N› siblings: a strong check
         # that the multi-sample fold created N real tree nodes.
@@ -107,6 +120,7 @@ def main() -> None:
         print(f"backend n_samples confirmed: {n_confirmed} (want {N})")
         print(f"sample cards rendered: {card_count} (want {N}) -> {cards_ok}")
         print(f"selectable 'Make active' buttons: {selectable} (want {N}) -> {selectable_ok}")
+        print(f"card ⋯ menu (discard-others + copy node id): {card_menu_ok}")
         print(f"collapsed to single reply after select: {collapsed_ok}")
         print(f"fold made {N} siblings (cycler {cycle_text!r}): {folded_ok}")
         print(f"console/page errors: {errors or 'none'}")
@@ -114,6 +128,7 @@ def main() -> None:
             n_confirmed == N
             and cards_ok
             and selectable_ok
+            and card_menu_ok
             and collapsed_ok
             and folded_ok
             and not errors

@@ -238,6 +238,12 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
   - `lib/Modal.svelte` — shared modal chrome (overlay, header, close,
     click-outside, Escape, body slot). Every modal wraps this; `modalStyle`
     overrides the box width per modal.
+  - `lib/ActionMenu.svelte` — the row-overflow ⋯ menu: a `.btn-act` trigger +
+    position:FIXED floating panel (escapes the column's overflow clipping, like
+    the old send-to popover it replaced), with outside-click / Escape / scroll-
+    reflow handling. Items come in via the children snippet (styled by chat.css
+    `.row-menu-item`), which receives `close()`; the `resetKey` prop closes a
+    menu when the UNKEYED chat rows hand the mounted instance a different node.
   - `lib/ChartModal.svelte`, `lib/TagModal.svelte`, `lib/DatasetModal.svelte`,
     `lib/SlideshowModal.svelte`, `lib/OrManagerModal.svelte`,
     `lib/TinkerPickerModal.svelte` — the six workspace modals. Each owns its body
@@ -262,9 +268,19 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     `tests/small-smokes/browser_chart_rules.py` (rules) +
     `browser_chart_firsttoken_ops.py` (exclude / add / merge).
   - `lib/ChatMessage.svelte` — one chat row (committed node OR live bucket turn)
-    + its per-row toolbar (edit/regen/branch/pin…). With `logprobView` on, an
-    assistant body with `token_logprobs` renders `TokenLogprobs` instead of
-    markdown (turns without data wear a "no token data" pill).
+    + its per-row toolbar. The toolbar is a FIXED SPLIT sized to the 280px
+    `.chat-column` min-width (columns h-scroll below that, so it's a hard
+    floor): core actions stay inline (assistant: regen/continue/edit/delete/
+    tag; user: regen/edit/delete; sample card: make-active/continue/tag/delete
+    — ≤6 icons a row, ≤5 in cards), everything else lives in a per-row ⋯
+    `ActionMenu` (copy message/conversation, raw toggle, send-branch→panel,
+    discard-others, **Copy node id** — the id is the `tinkpg` CLI's `--node`
+    addressing handle, shown verbatim in the item). No width tiers on purpose:
+    predictable at every width, and container queries would trap the fixed-
+    position popovers. With `logprobView` on, an assistant body with
+    `token_logprobs` renders `TokenLogprobs` instead of markdown (turns without
+    data wear a "no token data" pill). Toolbar smoke (seeded, token-free):
+    `tests/small-smokes/browser_row_toolbar.py`.
   - `lib/TokenLogprobs.svelte` — the token inspector body: the raw generated
     token stream (thinking tags and all — exact token boundaries beat markdown
     here), each token tinted by surprisal; hover → fixed-position popover with
