@@ -3,9 +3,9 @@
 Seeds a conversation whose assistant siblings carry `token_logprobs`, then drives
 the three first-token-mode operations that ride on the ALREADY-RECORDED logprobs:
 
-  exclude + renormalize:
-  - click a token chip → it greys out, its mass leaves, survivors renormalize to
-    100%, and the "renormalized over NN% of original mass" honesty note appears
+  exclude folds into rest:
+  - click a token chip → it greys out and its mass + samples fold into the grey
+    rest segment (which grows); survivors keep ABSOLUTE probs, no renormalization
 
   add a recorded-but-hidden token:
   - a token recorded only in an OLDER sibling's top-K (not in the reference top-K,
