@@ -275,7 +275,7 @@ ok('answers: no sources → null', chartByAnswers([]) === null);
   ok('firstToken: disagreeing top-K flags mixed', mixedFt.mixed);
 }
 
-// ── chartByFirstToken: exclude + renormalize + inject probes ───────────
+// ── chartByFirstToken: exclude (fold into rest) + inject probes ────────
 {
   const lp = (p: number) => Math.log(p);
   const first = (t: string, tid: number, p: number, top?: [string, number, number][]): TokenLogprob => ({ t, tid, lp: lp(p), top });
@@ -292,54 +292,38 @@ ok('answers: no sources → null', chartByAnswers([]) === null);
   const seg = (ft: NonNullable<ReturnType<typeof chartByFirstToken>>, key: string) =>
     ft.data.bars[0].segments.find((s) => s.key === key)!;
 
-  // empty exclusion is a no-op (no mass note, identical to plain call)
+  // empty exclusion is a no-op (identical to plain call)
   const base = chartByFirstToken(src())!;
   const emptyExcl = chartByFirstToken(src(), { excluded: new Set() })!;
-  eq('exclude: empty set → no mass note', emptyExcl.massNote, undefined);
   eq('exclude: empty set → pcts unchanged', emptyExcl.data.bars[0].segments.map((s) => Math.round(s.pct)),
     base.data.bars[0].segments.map((s) => Math.round(s.pct)));
 
-  // exclude ONE: No(.3) gone → kept mass .7, survivors renormalize /.7
+  // exclude ONE: No(.3) leaves the named segments; its mass folds into rest,
+  // survivors keep ABSOLUTE probs (no renormalization). Yes stays .6, rest .1+.3.
   const exNo = chartByFirstToken(src(), { excluded: new Set(['No']) })!;
-  ok('exclude one: Yes renorms .6/.7≈85.7%', Math.abs(seg(exNo, 'Yes').pct - (0.6 / 0.7) * 100) < 1e-6, `got ${seg(exNo, 'Yes').pct}`);
-  ok('exclude one: rest renorms .1/.7≈14.3%', Math.abs(seg(exNo, FT_REST).pct - (0.1 / 0.7) * 100) < 1e-6);
-  ok('exclude one: bar re-stacks to 100%', Math.abs(exNo.data.bars[0].segments.reduce((s, x) => s + x.pct, 0) - 100) < 1e-6);
+  ok('exclude one: Yes stays 60% (no renorm)', Math.abs(seg(exNo, 'Yes').pct - 60) < 1e-6, `got ${seg(exNo, 'Yes').pct}`);
+  ok('exclude one: rest grows to .1+.3=40%', Math.abs(seg(exNo, FT_REST).pct - 40) < 1e-6, `got ${seg(exNo, FT_REST).pct}`);
+  ok('exclude one: bar still stacks to 100%', Math.abs(exNo.data.bars[0].segments.reduce((s, x) => s + x.pct, 0) - 100) < 1e-6);
   eq('exclude one: No dropped from legend', exNo.data.legend.map((l) => l.key).includes('No'), false);
-  eq('exclude one: excluded samples leave n (3→2)', exNo.data.bars[0].total, 2);
-  ok('exclude one: mass note = 70% kept', exNo.massNote != null && Math.abs(exNo.massNote.min - 0.7) < 1e-6 && Math.abs(exNo.massNote.max - 0.7) < 1e-6);
+  eq('exclude one: excluded samples stay in n (still 3)', exNo.data.bars[0].total, 3);
 
-  // exclude MANY: Yes + No gone → only rest (.1) survives → 100% rest
+  // exclude MANY: Yes + No both leave named → all mass folds into rest → 100% rest
   const exBoth = chartByFirstToken(src(), { excluded: new Set(['Yes', 'No']) })!;
   ok('exclude many: rest = 100%', Math.abs(seg(exBoth, FT_REST).pct - 100) < 1e-6, `got ${seg(exBoth, FT_REST).pct}`);
   eq('exclude many: no named tokens left', exBoth.data.legend.map((l) => l.key), [FT_REST]);
-  eq('exclude many: n = 0 (all sampled tokens excluded)', exBoth.data.bars[0].total, 0);
-  ok('exclude many: mass note = 10% kept', exBoth.massNote != null && Math.abs(exBoth.massNote.min - 0.1) < 1e-6);
+  eq('exclude many: n unchanged (samples fold into rest)', exBoth.data.bars[0].total, 3);
 
-  // all-but-one: exclude Yes → No + rest renormalize over .4
+  // all-but-one: exclude Yes → No stays absolute .3, its mass folds into rest .1+.6
   const exYes = chartByFirstToken(src(), { excluded: new Set(['Yes']) })!;
-  ok('all-but-one: No renorms .3/.4=75%', Math.abs(seg(exYes, 'No').pct - 75) < 1e-6, `got ${seg(exYes, 'No').pct}`);
-  ok('all-but-one: rest renorms .1/.4=25%', Math.abs(seg(exYes, FT_REST).pct - 25) < 1e-6);
-  ok('all-but-one: mass note = 40%', exYes.massNote != null && Math.abs(exYes.massNote.min - 0.4) < 1e-6);
+  ok('all-but-one: No stays 30% (no renorm)', Math.abs(seg(exYes, 'No').pct - 30) < 1e-6, `got ${seg(exYes, 'No').pct}`);
+  ok('all-but-one: rest grows to .1+.6=70%', Math.abs(seg(exYes, FT_REST).pct - 70) < 1e-6, `got ${seg(exYes, FT_REST).pct}`);
+  ok('all-but-one: bar still stacks to 100%', Math.abs(exYes.data.bars[0].segments.reduce((s, x) => s + x.pct, 0) - 100) < 1e-6);
 
-  // excluding a token ABSENT from the bar → no-op (no removal, no note)
+  // excluding a token ABSENT from the bar → no-op
   const exGhost = chartByFirstToken(src(), { excluded: new Set(['Maybe']) })!;
-  eq('exclude absent: no mass note', exGhost.massNote, undefined);
   eq('exclude absent: n unchanged', exGhost.data.bars[0].total, 3);
-
-  // mass note spans DATA-BEARING bars only: a no-data source (empty bar) has no
-  // mass to retain, and letting it push 100% into the range turns an honest
-  // "over 70%" into a false "over 70–100%".
-  const withEmpty = chartByFirstToken(
-    [...src(), { model: 'nodata', samples: [{ content: 'x' }] }],
-    { excluded: new Set(['No']) }
-  )!;
-  ok(
-    'mass note ignores no-data bars',
-    withEmpty.massNote != null &&
-      Math.abs(withEmpty.massNote.min - 0.7) < 1e-6 &&
-      Math.abs(withEmpty.massNote.max - 0.7) < 1e-6,
-    `got ${JSON.stringify(withEmpty.massNote)}`
-  );
+  eq('exclude absent: pcts unchanged', exGhost.data.bars[0].segments.map((s) => Math.round(s.pct)),
+    base.data.bars[0].segments.map((s) => Math.round(s.pct)));
 
   // ADD a recorded-but-hidden token (Perhaps, p=.05): its own segment carved
   // from the rest mass, count 0 (recorded in a top-K but sampled by nobody here).
@@ -386,12 +370,14 @@ ok('answers: no sources → null', chartByAnswers([]) === null);
   ok("merge: '?' still its own segment", m.data.bars[0].segments.some((s) => s.key === '?'));
   eq('merge: group in legend with members', m.data.legend.find((l) => l.key === GKEY)?.members, ['.', '!']);
 
-  // merge composes with EXCLUDE: excluding the group removes ALL members' mass
+  // merge composes with EXCLUDE: excluding the group folds ALL members' mass +
+  // samples into rest; survivors keep absolute probs (no renormalization).
   const me = chartByFirstToken(src(), { groups: [['.', '!']], excluded: new Set([GKEY]) })!;
   ok('merge+exclude: group gone from bar', !me.data.bars[0].segments.some((s) => s.key === GKEY));
-  ok("merge+exclude: '?' renorms .1/.2=50%", Math.abs(me.data.bars[0].segments.find((s) => s.key === '?')!.pct - 50) < 1e-6);
-  ok('merge+exclude: mass note = 20% kept (.5+.3 removed)', me.massNote != null && Math.abs(me.massNote.min - 0.2) < 1e-6, `got ${JSON.stringify(me.massNote)}`);
-  eq('merge+exclude: excluded samples leave n (4→1)', me.data.bars[0].total, 1);
+  ok("merge+exclude: '?' stays 10% (no renorm)", Math.abs(me.data.bars[0].segments.find((s) => s.key === '?')!.pct - 10) < 1e-6);
+  ok('merge+exclude: rest grows to .1+.8=90%', Math.abs(me.data.bars[0].segments.find((s) => s.key === FT_REST)!.pct - 90) < 1e-6, `got ${me.data.bars[0].segments.find((s) => s.key === FT_REST)!.pct}`);
+  ok('merge+exclude: bar still stacks to 100%', Math.abs(me.data.bars[0].segments.reduce((s, x) => s + x.pct, 0) - 100) < 1e-6);
+  eq('merge+exclude: excluded samples stay in n (still 4)', me.data.bars[0].total, 4);
 }
 
 // ── label helpers ─────────────────────────────────────────────────────

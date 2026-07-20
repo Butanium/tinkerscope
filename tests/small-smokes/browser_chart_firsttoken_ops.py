@@ -132,18 +132,22 @@ def main() -> None:
             checks.append(("chips = Blue, Gray (Green hidden)", "Blue" in labels and "Gray" in labels and "Green" not in labels))
             checks.append(("Blue segment ≈ 50%", seg_pct(page, "Blue") == 50))
 
-            # ── exclude + renormalize ────────────────────────────────────
+            # ── exclude folds into rest (no renormalization) ─────────────
+            rest_before = seg_pct(page, "[rest of distribution]")
             chip(page, "Gray").click()
             page.wait_for_timeout(150)
-            checks.append(("mass note appears", page.query_selector(".chart-note:has-text('renormalized')") is not None))
-            note = (page.query_selector(".chart-note:has-text('renormalized')") or None)
-            checks.append(("note says 70% kept", note is not None and "70%" in note.inner_text()))
-            checks.append(("Blue renorms .5/.7≈71%", seg_pct(page, "Blue") == 71))
+            checks.append(("no renormalized note ever appears", page.query_selector(".chart-note:has-text('renormalized')") is None))
+            checks.append(("Blue stays ≈50% (absolute, no renorm)", seg_pct(page, "Blue") == 50))
+            checks.append(("Gray segment disappears", seg_pct(page, "Gray") is None))
+            rest_after = seg_pct(page, "[rest of distribution]")
+            checks.append(("rest grows by ≈30% (Gray's mass folds in)",
+                           rest_before is not None and rest_after is not None
+                           and abs((rest_after - rest_before) - 30) <= 1))
             # re-include Gray
             chip(page, "Gray").click()
             page.wait_for_timeout(150)
             checks.append(("re-include restores Blue to 50%", seg_pct(page, "Blue") == 50))
-            checks.append(("mass note gone after re-include", page.query_selector(".chart-note:has-text('renormalized')") is None))
+            checks.append(("re-include restores Gray segment", seg_pct(page, "Gray") == 30))
 
             # ── add a recorded-but-hidden token (Green) ──────────────────
             page.fill(".ft-add-input", "Green")

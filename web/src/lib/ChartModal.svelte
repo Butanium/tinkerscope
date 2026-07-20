@@ -41,7 +41,8 @@
 
   // First-token mode tweaks — same module-scoped, not-persisted lifetime as
   // chartOff. Keyed by UNIT (a display token, or a merged group's ftGroupKey):
-  //   ftExcluded  units dropped from the distribution + renormalized out
+  //   ftExcluded  units dropped from the named segments; their mass + samples
+  //               fold into the grey rest (no renormalization)
   //   ftGroups    merges — each is a list of display tokens fused into one color
   //   ftAdded     recorded-but-hidden tokens surfaced from the rest (by identity;
   //               each panel resolves its OWN recorded p for the tid)
@@ -502,11 +503,6 @@
     {/if}
     {#if mode === 'firsttoken' && ft?.mixed}
       <div class="chart-note">⚠ this turn mixes batches with different first-token distributions (regenerated on another checkpoint or renderer mode) — bars use the NEWEST batch's top-K; older batches' sampled tokens are kept with their own probabilities.</div>
-    {/if}
-    {#if mode === 'firsttoken' && ft?.massNote}
-      <div class="chart-note">↺ renormalized over {ft.massNote.min === ft.massNote.max
-        ? `${(ft.massNote.min * 100).toFixed(0)}%`
-        : `${(ft.massNote.min * 100).toFixed(0)}–${(ft.massNote.max * 100).toFixed(0)}%`} of the original probability mass (some tokens excluded).</div>
     {/if}
     {#if !data || !layout}
       {#if activeSources.length === 0}

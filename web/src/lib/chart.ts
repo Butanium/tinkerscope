@@ -270,12 +270,14 @@ export type AddedToken = { token: string; tid: number; p: number };
 
 /** First-token mode viewing tweaks (session-scoped, owned by the modal):
  *   - `excluded`  UNIT keys (a display token, or a merged group's key) dropped
- *                 from the distribution; their mass is renormalized out.
+ *                 from the named segments; their mass + samples fold into the
+ *                 grey rest (no renormalization — the bar stays on absolute
+ *                 model probabilities and the rest segment visibly grows).
  *   - `added`     per-source (bar-aligned) recorded tokens surfaced from the rest.
  *   - `groups`    shared merges — each inner array is display tokens fused into
  *                 ONE unit (one color, summed prob + count). Applied to every bar.
  *  A "unit" is one token or one merged group; naming/coloring/exclusion all work
- *  on units, so a merge composes with exclude and renormalization for free. */
+ *  on units, so a merge composes with exclude for free. */
 export type FirstTokenOpts = {
   excluded?: Set<string>;
   added?: AddedToken[][];
@@ -302,14 +304,11 @@ export function ftGroupKey(members: string[]): string {
  *  keyed by UNIT (a display token or a merged group), ordered by max model prob
  *  across sources, hues in fixed order — the same unit gets the same color in
  *  every panel. `mixed` = some source's samples disagree on the reference top-K
- *  (siblings regenerated from a different checkpoint / renderer mode). `massNote`
- *  = the fraction of original mass still shown (min..max across bars), set only
- *  when an exclusion actually removed something — the "renormalized over NN%"
- *  honesty affordance. */
+ *  (siblings regenerated from a different checkpoint / renderer mode). */
 export function chartByFirstToken(
   sources: ChartSource[],
   opts: FirstTokenOpts = {}
-): { data: ChartData; mixed: boolean; massNote?: { min: number; max: number } } | null {
+): { data: ChartData; mixed: boolean } | null {
   if (sources.length === 0) return null;
   const dists = sources.map((s) => firstTokenDist(s.samples));
   if (dists.every((d) => d == null)) return null;
@@ -386,57 +385,45 @@ export function chartByFirstToken(
     { key: FT_REST, label: FT_REST, colors: [] as string[] }
   ];
 
-  // Excluding a unit drops its mass + samples and renormalizes the survivors back
-  // to 100% (scale = 1/kept). rest = 1 − removedMass − Σ(named unit mass): sampled
-  // tokens outside every named unit stay folded in rest (with their samples), and
-  // a surfaced token that made `named` is carved out of it — both fall out of this
-  // one identity. `retained[si]` = fraction of the original mass still shown.
-  const excludedUnits = units.filter((u) => excluded.has(u.key));
-  const retained: number[] = [];
+  // Excluding a unit drops it from the NAMED segments; its mass + samples fold
+  // into the grey rest (no renormalization — the bar stays on absolute model
+  // probabilities, so rest visibly grows). rest = massTotal − Σ(named unit mass):
+  // excluded units aren't in `named`, so their mass falls back here alongside the
+  // sampled tokens outside every named unit; a surfaced token that made `named`
+  // is carved out of it — both fall out of this one identity.
   const bars: ChartBar[] = sources.map(({ model, sub }, si) => {
-    const removedMass = excludedUnits.reduce((s, u) => s + unitMass(si, u), 0);
-    const removedSamples = excludedUnits.reduce((s, u) => s + unitCount(si, u), 0);
-    const keep = 1 - removedMass;
-    // Only DATA-BEARING bars vote on the mass note: an empty bar trivially
-    // "retains 100%" and would stretch the honest range to a false NN–100%.
-    if (dists[si] != null) retained.push(keep);
-    const scale = keep > 0 ? 1 / keep : 0;
     const shownMass = named.reduce((s, u) => s + unitMass(si, u), 0);
     // Total mass is 1 for a source with a distribution, 0 for a no-data source
     // (OpenRouter / token-streamed) — which renders as an empty bar, not 100% rest.
     const massTotal = dists[si] != null ? 1 : 0;
-    const restMass = Math.max(0, massTotal - removedMass - shownMass);
-    // Rest samples = sampled entries whose token is in no named/excluded unit.
-    const shownOrGone = new Set(
-      [...named, ...excludedUnits].flatMap((u) => u.members)
-    );
+    const restMass = Math.max(0, massTotal - shownMass);
+    // Rest samples = sampled entries whose token is in no named unit (excluded
+    // units aren't named → their sample indices land here, so clicking the grey
+    // segment inspects them and rest's mass + inspect population agree).
+    const shown = new Set(named.flatMap((u) => u.members));
     const restIdx = perSource[si].entries
-      .filter((e) => !shownOrGone.has(e.token))
+      .filter((e) => !shown.has(e.token))
       .flatMap((e) => e.sampleIdx);
     return {
       model,
       sub,
-      total: perSource[si].total - removedSamples,
+      total: perSource[si].total,
       segments: [
         ...named.map((u) => ({
           key: u.key,
           label: u.label,
           colors: [colorOf[u.key]],
-          pct: unitMass(si, u) * scale * 100,
+          pct: unitMass(si, u) * 100,
           count: unitCount(si, u),
           sampleIdx: unitIdx(si, u),
           ...withMembers(u)
         })),
-        { key: FT_REST, label: FT_REST, colors: [], pct: restMass * scale * 100, count: restIdx.length, sampleIdx: restIdx }
+        { key: FT_REST, label: FT_REST, colors: [], pct: restMass * 100, count: restIdx.length, sampleIdx: restIdx }
       ]
     };
   });
 
-  // Note only when something was actually removed from at least one bar.
-  const massNote = retained.some((r) => r < 1)
-    ? { min: Math.min(...retained), max: Math.max(...retained) }
-    : undefined;
-  return { data: { bars, legend }, mixed: perSource.some((p) => p.mixed), massNote };
+  return { data: { bars, legend }, mixed: perSource.some((p) => p.mixed) };
 }
 
 /** Wrap a model label onto multiple lines for the bar's x-axis tick. Splits on

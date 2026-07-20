@@ -187,8 +187,9 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     generated token, from stored `token_logprobs` — segment pct = model prob,
     count/sampleIdx = the empirical side) + label helpers. `chartByFirstToken`
     takes `FirstTokenOpts {excluded, added, groups}`: it works on **units** (a
-    token OR a merged group via `ftGroupKey`), so exclude (mass renormalized out,
-    → `massNote`), **add** a recorded-but-hidden token (surfaced from the rest —
+    token OR a merged group via `ftGroupKey`), so exclude (mass + samples fold
+    into the grey rest, which grows — NO renormalization, bar stays on absolute
+    probs), **add** a recorded-but-hidden token (surfaced from the rest —
     `AddedToken`, its p sourced from stored logprobs, NOT a model call), and
     **merge** (drag tokens into one color, prob+count summed) all compose. **Has
     `chart.test.ts`** (exclude/add/merge cases); browser smoke
@@ -247,7 +248,8 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     Third mode "first token": the model's OWN probability distribution over the
     first generated token (needs stored `token_logprobs`; disabled otherwise). In
     that mode the legend becomes an **interactive chip row**: click a chip to
-    exclude/re-include (renormalizes, shows the "over NN% of mass" note), drag one
+    exclude/re-include (its mass + samples fold into the grey rest, which grows —
+    absolute probs, no renormalization), drag one
     chip onto another to **merge** into one color (bespoke onto-drop DnD, not the
     gap-shaped `lib/drag-reorder`), and a search box **adds** a recorded-but-hidden
     token (from stored logprobs — `token-search` + `chart`'s `added`, no model
