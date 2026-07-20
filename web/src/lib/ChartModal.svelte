@@ -46,8 +46,9 @@
   //   ftGroups    merges — each is a list of display tokens fused into one color
   //   ftAdded     recorded-but-hidden tokens surfaced from the rest (by identity;
   //               each panel resolves its OWN recorded p for the tid)
-  //   ftRenorm    when on, excluded units leave the bar entirely and the survivors
-  //               (named + rest) rescale to 100% (no-op without an exclusion)
+  //   ftRenorm    when on, the grey rest drops from the bar entirely (top-K tail
+  //               + any excluded units) and the NAMED units rescale to 100% —
+  //               meaningful with or without an exclusion
   let ftExcluded = $state<string[]>([]);
   let ftGroups = $state<string[][]>([]);
   let ftAdded = $state<{ token: string; tid: number }[]>([]);
