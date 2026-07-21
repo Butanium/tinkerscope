@@ -74,7 +74,7 @@ def main() -> None:
 
             # Type into the system textarea, then switch to B IMMEDIATELY — well
             # inside the 200ms patch debounce, the leak's window.
-            page.click("text=＋ system prompt")
+            page.click("[data-testid=system-fold]")
             page.wait_for_selector(SYS_TA, timeout=5000)
             page.fill(SYS_TA, TYPED)
             page.select_option(".conv-select", value=b)

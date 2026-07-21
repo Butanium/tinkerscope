@@ -51,6 +51,10 @@ class StatePatch(BaseModel):
     thread_system_prompt: str | None = None
     # global params
     system_prompt: str | None = None
+    # Power toggle for the global system prompt: False = kept but muted (chat
+    # inherit skips it). Omitting it while setting a non-empty system_prompt
+    # auto-enables (old-client shim — see patch_state).
+    system_enabled: bool | None = None
     temperature: float | None = None
     max_tokens: int | None = None
     n_samples: int | None = None
@@ -66,6 +70,12 @@ def get_state() -> dict:
 @router.post("")
 async def patch_state(patch: StatePatch) -> dict:
     fields = patch.model_dump(exclude_unset=True)
+    # Old-client shim: a patch that sets a NON-EMPTY system prompt without
+    # managing the enable flag (CLI `params --system`, pre-flag browser tabs)
+    # auto-enables, so "set text ⇒ applies" keeps holding. The new browser
+    # always sends the flag explicitly (drafting while muted must NOT re-enable).
+    if fields.get("system_prompt") and "system_enabled" not in fields:
+        fields["system_enabled"] = True
     return await BUS.publish_state("patch", **fields)
 
 

@@ -106,6 +106,22 @@ def test_state_patch_is_partial(client):
     assert state["max_tokens"] == 256
 
 
+def test_state_system_enabled_shim_and_explicit(client):
+    """The system-prompt power flag (split-chip mute). A flag-less non-empty
+    text patch auto-enables (old clients: CLI `params --system`, pre-flag tabs);
+    an explicit flag always wins — drafting while muted must NOT re-enable."""
+    st = client.post("/api/state", json={"system_prompt": "be terse"}).json()
+    assert st["system_enabled"] is True  # shim fired
+    st = client.post("/api/state", json={"system_enabled": False}).json()
+    assert st["system_enabled"] is False and st["system_prompt"] == "be terse"  # kept, muted
+    st = client.post("/api/state", json={"system_prompt": "draft", "system_enabled": False}).json()
+    assert st["system_enabled"] is False and st["system_prompt"] == "draft"  # muted draft
+    st = client.post("/api/state", json={"system_prompt": None}).json()
+    assert st["system_enabled"] is False  # clearing (falsy) never fires the shim
+    st = client.post("/api/state", json={"system_prompt": "again"}).json()
+    assert st["system_enabled"] is True  # flag-less text re-enables (CLI semantics)
+
+
 def test_state_thinking_tri_state(client):
     # thinking accepts the tri-state: False / True / "both" (and rejects garbage).
     for value in (True, "both", False):

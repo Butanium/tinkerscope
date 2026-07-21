@@ -242,6 +242,24 @@ def test_patch_only_touches_provided_fields(client):
     assert body["name"] == "renamed" and body["system_prompt"] == "SP"  # SP preserved
 
 
+def test_system_enabled_travels_with_the_conversation(client):
+    """The power flag persists through create / PATCH / the hot save path, and is
+    ABSENT (None) on flag-less bodies so readers can derive from text presence."""
+    cid = client.post("/api/conversations", json={
+        "name": "muted", "system_prompt": "sp", "system_enabled": False,
+    }).json()["id"]
+    assert client.get(f"/api/conversations/{cid}").json()["system_enabled"] is False
+    client.patch(f"/api/conversations/{cid}", json={"system_enabled": True})
+    assert client.get(f"/api/conversations/{cid}").json()["system_enabled"] is True
+    client.put(f"/api/conversations/{cid}/tree", json={
+        "trees": {"primary": {}}, "system_prompt": "sp", "system_enabled": False,
+    })
+    assert client.get(f"/api/conversations/{cid}").json()["system_enabled"] is False
+    # legacy / flag-less create → stored as None (derive-from-text at the read edge)
+    legacy = client.post("/api/conversations", json={"name": "old", "system_prompt": "sp"}).json()
+    assert client.get(f"/api/conversations/{legacy['id']}").json().get("system_enabled") is None
+
+
 def test_system_prompt_travels_with_the_conversation(client):
     cid = client.post("/api/conversations", json={"name": "exp", "system_prompt": "You are a pirate."}).json()["id"]
     assert client.get(f"/api/conversations/{cid}").json()["system_prompt"] == "You are a pirate."
@@ -336,8 +354,8 @@ def test_concurrent_reads_during_writes_dont_crash(client):
 
     for i in range(20):  # seed so the reader has a non-trivial map to iterate
         store.upsert(id=f"seed-{i}", name=f"s{i}", system_prompt=None,
-                     trees={"primary": {}}, panels=[], reduced_panels=[],
-                     send_targets=[], seen_panels=[])
+                     system_enabled=None, trees={"primary": {}}, panels=[],
+                     reduced_panels=[], send_targets=[], seen_panels=[])
     errors: list[Exception] = []
 
     def reader():
@@ -352,8 +370,8 @@ def test_concurrent_reads_during_writes_dont_crash(client):
         try:
             for j in range(80):
                 store.upsert(id=f"w{base}-{j}", name="w", system_prompt=None,
-                             trees={"primary": {}}, panels=[], reduced_panels=[],
-                             send_targets=[], seen_panels=[])
+                             system_enabled=None, trees={"primary": {}}, panels=[],
+                             reduced_panels=[], send_targets=[], seen_panels=[])
         except Exception as e:
             errors.append(e)
 

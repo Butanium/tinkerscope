@@ -29,6 +29,7 @@
   import OrManagerModal from '$lib/OrManagerModal.svelte';
   import TinkerPickerModal from '$lib/TinkerPickerModal.svelte';
   import ModelDropdown from '$lib/ModelDropdown.svelte';
+  import SplitChip from '$lib/SplitChip.svelte';
   import TruncLabel from '$lib/TruncLabel.svelte';
   import { loadHighlightRules } from '$lib/highlights.svelte';
   import { logprobView } from '$lib/logprobs.svelte';
@@ -323,7 +324,14 @@
   function setTemperature(v: number) { if (Number.isNaN(v)) return; patchState({ temperature: Math.max(0, Math.min(2, v)) }); }
   function setMaxTokens(v: number) { if (Number.isNaN(v)) return; patchState({ max_tokens: Math.max(1, Math.min(32000, Math.round(v))) }); }
   function setNSamples(v: number) { if (Number.isNaN(v)) return; patchState({ n_samples: Math.max(1, Math.min(200, Math.round(v))) }); }
-  function setSystemPrompt(v: string) { patchState({ system_prompt: v || null }); convo.save(); }
+  function setSystemPrompt(v: string) {
+    // The flag ships with EVERY text patch (a flag-less non-empty prompt
+    // auto-enables server-side — old-client shim — which would wrongly
+    // re-enable a muted draft). empty→non-empty auto-enables, like prefill.
+    const autoOn = v.trim().length > 0 && !(s.system_prompt ?? '').trim();
+    patchState({ system_prompt: v || null, system_enabled: systemOn || autoOn });
+    convo.save();
+  }
   function setTopP(v: number) { if (Number.isNaN(v)) return; patchState({ top_p: Math.max(0, Math.min(1, v)) }); }
   function setThinking(next: boolean | 'both') {
     // Tri-state: Off / On / Both. Both fires n samples without thinking + n
@@ -380,7 +388,7 @@
         temperature: s.temperature, max_tokens: s.max_tokens, n_samples: s.n_samples,
         thinking: s.thinking, top_p: s.top_p,
         top_k: topK, presence_penalty: presencePenalty, repetition_penalty: repetitionPenalty,
-        prefill: prefillInput, prefill_on: showPrefill, prefill_scope: prefillScope
+        prefill: prefillInput, prefill_on: prefillOn, prefill_open: showPrefill, prefill_scope: prefillScope
       });
       if (json === lastSessionJson) return; // selection/params unchanged (e.g. mid-stream)
       lastSessionJson = json;
@@ -392,7 +400,7 @@
     void s.panels;
     void s.temperature; void s.max_tokens; void s.n_samples; void s.thinking; void s.top_p;
     void topK; void presencePenalty; void repetitionPenalty;
-    void prefillInput; void showPrefill; void prefillScope;
+    void prefillInput; void prefillOn; void showPrefill; void prefillScope;
     persistSession();
   });
   /** Restore the saved selection/params — only when the process state is fresh
@@ -416,7 +424,11 @@
         if (typeof sess.presence_penalty === 'number') presencePenalty = sess.presence_penalty;
         if (typeof sess.repetition_penalty === 'number') repetitionPenalty = sess.repetition_penalty;
         if (typeof sess.prefill === 'string') prefillInput = sess.prefill;
-        if (typeof sess.prefill_on === 'boolean') showPrefill = sess.prefill_on;
+        if (typeof sess.prefill_on === 'boolean') {
+          prefillOn = sess.prefill_on;
+          // pre-split sessions: ONE flag meant open+enabled — mirror it into disclosure
+          showPrefill = typeof sess.prefill_open === 'boolean' ? sess.prefill_open : sess.prefill_on;
+        }
         if (sess.prefill_scope === 'all' || sess.prefill_scope === 'think' || sess.prefill_scope === 'non_think')
           prefillScope = sess.prefill_scope;
         else if (typeof sess.prefill_think_only === 'boolean') // migrate the deprecated bool
@@ -455,22 +467,40 @@
   // appends verbatim, so raw `<think>…</think>` works (per-family `<think>` rules in
   // the placeholder). Persists across sends so you can draw N samples off one prefill.
   let prefillInput = $state('');
-  // `showPrefill` doubles as the ON/OFF switch: the textarea is open IFF the prefill
-  // is active. Collapsing it (re-clicking the toggle) DISABLES the prefill — the text
-  // is remembered (shown as a peek) so re-opening restores it. So a prefill is applied
-  // to sends only while open + non-empty.
+  // Split-pill model (SplitChip): ENABLED (applies to sends) is orthogonal to
+  // EXPANDED (editor visible). Folding never mutes; muting keeps the text (peek
+  // when folded, "muted" hint when expanded). Typing into an EMPTY field
+  // auto-enables (the old one-chip flow: open, type, it applies); editing
+  // existing muted text never re-enables. Enabling an empty field auto-expands.
+  let prefillOn = $state(false);
   let showPrefill = $state(false);
-  // System prompt lives next to the prefill chip (moved out of the sidebar). Same
-  // per-conversation persistence (setSystemPrompt → patchState + save). `showSystem`
-  // is transient open/closed; the chip's ACTIVE state is derived from the stored
-  // value so a set prompt stays glanceable even while folded.
+  // System prompt lives next to the prefill chip (moved out of the sidebar), with
+  // per-conversation persistence (setSystemPrompt → patchState + save). Its power
+  // flag is SHARED state (s.system_enabled — persisted with the conversation, so
+  // the CLI sees mute); null = legacy/flag-less → derive from text presence.
+  // `showSystem` is transient disclosure.
   let showSystem = $state(false);
-  let systemActive = $derived((s.system_prompt ?? '').trim().length > 0);
+  let systemOn = $derived(s.system_enabled ?? (s.system_prompt ?? '').trim().length > 0);
+  let systemActive = $derived(systemOn && (s.system_prompt ?? '').trim().length > 0);
+  function toggleSystemOn() {
+    const next = !systemOn;
+    patchState({ system_enabled: next });
+    convo.save();
+    if (next && !(s.system_prompt ?? '').trim()) showSystem = true;
+  }
+  function togglePrefillOn() {
+    prefillOn = !prefillOn;
+    if (prefillOn && !prefillInput.trim()) showPrefill = true;
+  }
+  function setPrefillInput(v: string) {
+    if (v.trim() && !prefillInput.trim()) prefillOn = true; // empty→non-empty auto-enables
+    prefillInput = v;
+  }
   // Which half(s) of a send the prefill applies to (All / Think only / Non-think
   // only). In 'both' mode the backend keeps/strips it per-half; in a single-mode
   // send a mismatched scope drops the prefill entirely (see withPrefill).
   let prefillScope = $state<PrefillScope>('all');
-  let prefillActive = $derived(showPrefill && prefillInput.trim().length > 0);
+  let prefillActive = $derived(prefillOn && prefillInput.trim().length > 0);
   /** Whether the active prefill+scope actually applies to the CURRENT thinking mode.
    *  'think' scope needs thinking on the table (on / both); 'non_think' needs the
    *  non-thinking side (off / both). A single-mode send that's all-thinking or
@@ -482,7 +512,7 @@
   );
   /** Append the active prefill (if any) as a trailing assistant turn so the model
    *  EXTENDS it; the returned `prefill` is prepended to each folded sample. Whitespace
-   *  is preserved (a trailing `</think>\n\n` matters). Disabled (collapsed) ⇒ no-op.
+   *  is preserved (a trailing `</think>\n\n` matters). Muted (power off) ⇒ no-op.
    *  A scope that doesn't apply to the current thinking mode is a no-op too — mirror
    *  of the backend's per-half drop, kept symmetric across think / non_think. */
   function withPrefill(msgs: ChatMessage[]): { fireMsgs: ChatMessage[]; prefill?: string } {
@@ -500,10 +530,19 @@
   // thread's root node and composed over the global prompt server-side. Only
   // settable while ⑂ is armed (the composer is authoring a root node then);
   // continuing a thread reuses ITS root's prompt automatically (chat store walk).
-  // Same collapse-keeps-text semantics as the prefill chip.
+  // Same split-pill semantics as the prefill chip (enabled ⊥ expanded, client-only).
   let threadSystemInput = $state('');
+  let threadSystemOn = $state(false);
   let showThreadSystem = $state(false);
-  let threadSystemActive = $derived(showThreadSystem && threadSystemInput.trim().length > 0);
+  let threadSystemActive = $derived(threadSystemOn && threadSystemInput.trim().length > 0);
+  function toggleThreadSystemOn() {
+    threadSystemOn = !threadSystemOn;
+    if (threadSystemOn && !threadSystemInput.trim()) showThreadSystem = true;
+  }
+  function setThreadSystemInput(v: string) {
+    if (v.trim() && !threadSystemInput.trim()) threadSystemOn = true;
+    threadSystemInput = v;
+  }
 
   async function sendMessage() {
     const text = userInput.trim();
@@ -558,7 +597,10 @@
    *  popup) into the bundle the chat store fires with. */
   function paramsBundle(): ChatParams {
     return {
-      system_prompt: s.system_prompt,
+      // The EFFECTIVE global part, always explicit: '' (= fire with none, never
+      // inherit) when muted or empty, so a kept-but-muted prompt can't leak in
+      // server-side. The server no longer echoes this back into shared state.
+      system_prompt: systemActive ? s.system_prompt : '',
       temperature: s.temperature,
       max_tokens: s.max_tokens,
       n_samples: s.n_samples,
@@ -1050,7 +1092,7 @@
         temperature: s.temperature,
         max_tokens: s.max_tokens,
         thinking: s.thinking,
-        system_prompt: s.system_prompt,
+        system_prompt: systemActive ? s.system_prompt : null, // what the sample actually ran under
         top_p: s.top_p,
         top_k: topK,
         presence_penalty: presencePenalty,
@@ -1702,23 +1744,33 @@
             {/each}
           </div>
         {/if}
-        <!-- System prompt + assistant prefill chips (system prompt moved here
-             from the sidebar so it sits next to prefill above the composer). -->
+        <!-- System prompt + assistant prefill split-pills (system prompt moved
+             here from the sidebar so it sits next to prefill above the composer).
+             SplitChip: left power dot = apply/mute, right label+chevron =
+             expand/fold — the two axes are orthogonal (fold never mutes). -->
         <div class="prefill-row">
-          <button
-            class="prefill-toggle"
-            class:on={systemActive}
-            onclick={() => (showSystem = !showSystem)}
-            data-tooltip="Per-workspace system prompt. Collapse to fold (the text is kept); the chip stays highlighted while a prompt is set."
-            use:tip
-          >{systemActive ? '✎ system on' : '＋ system prompt'}</button>
-          <button
-            class="prefill-toggle"
-            class:on={prefillActive}
-            onclick={() => (showPrefill = !showPrefill)}
-            data-tooltip="Prefill the assistant turn — the model continues from your text. Type raw <think> tags (DeepSeek/Kimi/Qwen3.5 auto-open one in thinking mode, so a redundant <think> is dropped; Qwen3 opens nothing). Collapse to disable (text is kept); click again to restore."
-            use:tip
-          >{prefillActive ? '✎ prefill on' : '＋ prefill assistant'}</button>
+          <SplitChip
+            label="system prompt"
+            active={systemActive}
+            enabled={systemOn}
+            open={showSystem}
+            testid="system"
+            powerTip="Apply / mute the per-workspace system prompt. Muting keeps the text; sends skip it (hollow dot = muted)."
+            editTip="Edit the per-workspace system prompt. Folding just hides the editor — it stays {systemOn ? 'applied' : 'muted'}."
+            onpower={toggleSystemOn}
+            onfold={() => (showSystem = !showSystem)}
+          />
+          <SplitChip
+            label="prefill"
+            active={prefillActive}
+            enabled={prefillOn}
+            open={showPrefill}
+            testid="prefill"
+            powerTip="Apply / mute the assistant prefill without losing the text. Sends skip a muted prefill (hollow dot = muted)."
+            editTip="Edit the assistant prefill — the model continues from your text. Type raw <think> tags (DeepSeek/Kimi/Qwen3.5 auto-open one in thinking mode, so a redundant <think> is dropped; Qwen3 opens nothing). Folding just hides the editor."
+            onpower={togglePrefillOn}
+            onfold={() => (showPrefill = !showPrefill)}
+          />
           <button
             class="prefill-toggle"
             class:on={branchFromRoot}
@@ -1728,14 +1780,17 @@
             use:tip
           >{branchFromRoot ? '⑂ branching from start' : '⑂ branch from start'}</button>
           {#if branchFromRoot}
-            <button
-              class="prefill-toggle"
-              class:on={threadSystemActive}
-              data-testid="thread-system-toggle"
-              onclick={() => (showThreadSystem = !showThreadSystem)}
-              data-tooltip="THREAD system prompt for the next new-thread send: recorded on the thread's first message and appended to the global system prompt (global + newline + this). Continuing an existing thread always reuses that thread's own prompt. Collapse to disable (text is kept)."
-              use:tip
-            >{threadSystemActive ? '✎ thread system on' : '＋ thread system'}</button>
+            <SplitChip
+              label="thread system"
+              active={threadSystemActive}
+              enabled={threadSystemOn}
+              open={showThreadSystem}
+              testid="thread-system"
+              powerTip="Apply / mute the THREAD system prompt for the next new-thread send. Muting keeps the text."
+              editTip="Edit the THREAD system prompt: recorded on the new thread's first message and appended to the global system prompt (global + newline + this). Continuing an existing thread always reuses that thread's own prompt."
+              onpower={toggleThreadSystemOn}
+              onfold={() => (showThreadSystem = !showThreadSystem)}
+            />
           {/if}
           <ThreadSwitcher />
           {#if showPrefill}
@@ -1749,37 +1804,45 @@
             {/if}
           {/if}
           {#if prefillInput.trim() && !showPrefill}
-            <button class="prefill-peek" title="Prefill off — click to restore: {prefillInput}" onclick={() => (showPrefill = true)}>{prefillInput.replace(/\s+/g, ' ').slice(0, 80)}{prefillInput.length > 80 ? '…' : ''}</button>
+            <button class="prefill-peek" class:live={prefillActive} title="Prefill {prefillOn ? 'applied' : 'muted'} — click to edit: {prefillInput}" onclick={() => (showPrefill = true)}>{prefillInput.replace(/\s+/g, ' ').slice(0, 80)}{prefillInput.length > 80 ? '…' : ''}</button>
           {/if}
           {#if prefillInput.length > 0}
-            <button class="prefill-clear" onclick={() => { prefillInput = ''; showPrefill = false; }}>clear</button>
+            <button class="prefill-clear" onclick={() => { prefillInput = ''; prefillOn = false; showPrefill = false; }}>clear</button>
           {/if}
         </div>
         {#if showSystem}
           <textarea
             class="prefill-textarea"
+            class:muted={!systemOn}
             value={s.system_prompt ?? ''}
             oninput={(e) => setSystemPrompt((e.target as HTMLTextAreaElement).value)}
             rows="3"
             placeholder="Optional system prompt..."
           ></textarea>
+          {#if !systemOn}<div class="prefill-offhint">muted — kept, not applied to sends</div>{/if}
         {/if}
         {#if branchFromRoot && showThreadSystem}
           <textarea
             class="prefill-textarea thread-system-textarea"
+            class:muted={!threadSystemOn}
             data-testid="thread-system-input"
-            bind:value={threadSystemInput}
+            value={threadSystemInput}
+            oninput={(e) => setThreadSystemInput((e.target as HTMLTextAreaElement).value)}
             rows="2"
             placeholder="Thread system prompt — recorded on the NEW thread's first message, appended to the global system prompt."
           ></textarea>
+          {#if !threadSystemOn}<div class="prefill-offhint">muted — kept, not applied to sends</div>{/if}
         {/if}
         {#if showPrefill}
           <textarea
             class="prefill-textarea"
-            bind:value={prefillInput}
+            class:muted={!prefillOn}
+            value={prefillInput}
+            oninput={(e) => setPrefillInput((e.target as HTMLTextAreaElement).value)}
             rows="3"
             placeholder={'Assistant prefill — the model EXTENDS this. Raw format, e.g.\n  <think>\\nLet me reason…            (only some thinking — model keeps going inside)\n  <think>\\nfull reasoning\\n</think>\\n\\n   (full thinking, model writes the answer)\nDeepSeek/Kimi/Qwen3.5 auto-open <think> (a redundant one is dropped); Qwen3 opens nothing.'}
           ></textarea>
+          {#if !prefillOn}<div class="prefill-offhint">muted — kept, not applied to sends</div>{/if}
         {/if}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div class="input-resize-handle" onmousedown={startInputResize}></div>
@@ -1963,10 +2026,15 @@
   .prefill-inactive-note { font-size: 0.66rem; color: var(--color-warn, #b45309); font-style: italic; flex-shrink: 0; }
   .prefill-peek { font-size: 0.68rem; color: var(--color-text-muted); font-family: var(--font-mono, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; border: none; background: none; text-align: left; cursor: pointer; padding: 0; opacity: 0.75; }
   .prefill-peek:hover { color: var(--color-accent); opacity: 1; }
+  .prefill-peek.live { color: var(--color-accent); opacity: 0.9; }
   .prefill-clear { font-size: 0.66rem; padding: 1px 6px; border: 1px solid transparent; border-radius: var(--radius-sm); background: none; color: var(--color-text-muted); cursor: pointer; flex-shrink: 0; }
   .prefill-clear:hover { color: var(--color-accent); border-color: var(--color-border); }
   .prefill-textarea { width: 100%; margin-top: var(--space-2); padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-accent); border-radius: var(--radius); color: var(--color-text); font-family: var(--font-mono, monospace); font-size: 0.8rem; line-height: 1.45; resize: vertical; }
   .prefill-textarea:focus { outline: none; box-shadow: 0 0 0 1px var(--color-accent); }
+  /* muted (power off): border drops to neutral so "editing but not applied" is visible */
+  .prefill-textarea.muted { border-color: var(--color-border); }
+  .prefill-textarea.muted:focus { box-shadow: 0 0 0 1px var(--color-border); }
+  .prefill-offhint { font-size: 0.66rem; color: var(--color-text-muted); font-style: italic; margin-top: 2px; }
   /* Thread-system input: system-role tint so it reads as "prompt", not prefill. */
   .thread-system-textarea { background: var(--color-system-bg); }
   .prefill-textarea::placeholder { color: var(--color-text-muted); opacity: 0.7; white-space: pre; }

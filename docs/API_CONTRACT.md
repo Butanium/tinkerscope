@@ -122,9 +122,9 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
 | GET | `/api/conversations` | `?bodies` | default: `ConversationSummary[]` (`{id,name,created_at,updated_at,panels}` — NO trees). `?bodies=1`: `Conversation[]` light bodies (trees incl., blobs excl.) — the CLI's link/browse paths |
 | GET | `/api/conversations/{id}` | — | one light `Conversation` body (trees incl., blobs excl.); 404 if unknown |
 | POST | `/api/conversations/{id}/node-blobs` | `{nodes: string[]}` | `{nodeId: {token_logprobs?, raw_meta?}}` — heavy blobs for a batch of node ids (POST, not GET, because the list is long). Unknown / blob-less ids are OMITTED, not an error |
-| POST | `/api/conversations` | `{id?, name?, system_prompt?, trees?, panels?, tree?, compare_tree?, reduced_panels?, send_targets?, seen_panels?}` | the saved light Conversation (`id`,`created_at`,`updated_at` added; inline heavy node fields stripped into blobs). 400 on a crafted (non-filename-safe) `id` |
-| PATCH | `/api/conversations/{id}` | any subset of `{name, system_prompt, panels, reduced_panels, send_targets, seen_panels}` | the updated **ConversationSummary** (layout-only — NO tree bytes shipped either way); 404 if unknown |
-| PUT | `/api/conversations/{id}/tree` | `{trees, dropped_trees?, system_prompt?, panels?, reduced_panels?, send_targets?, seen_panels?}` | `{status, id}` (the hot save path). `trees` is a **partial upsert** (dirty panels only, merged over stored); `dropped_trees` removes panels; inline heavy node fields are stripped into write-once blobs. 404 if unknown |
+| POST | `/api/conversations` | `{id?, name?, system_prompt?, system_enabled?, trees?, panels?, tree?, compare_tree?, reduced_panels?, send_targets?, seen_panels?}` | the saved light Conversation (`id`,`created_at`,`updated_at` added; inline heavy node fields stripped into blobs). 400 on a crafted (non-filename-safe) `id` |
+| PATCH | `/api/conversations/{id}` | any subset of `{name, system_prompt, system_enabled, panels, reduced_panels, send_targets, seen_panels}` | the updated **ConversationSummary** (layout-only — NO tree bytes shipped either way); 404 if unknown |
+| PUT | `/api/conversations/{id}/tree` | `{trees, dropped_trees?, system_prompt?, system_enabled?, panels?, reduced_panels?, send_targets?, seen_panels?}` | `{status, id}` (the hot save path). `trees` is a **partial upsert** (dirty panels only, merged over stored); `dropped_trees` removes panels; inline heavy node fields are stripped into write-once blobs. 404 if unknown |
 | DELETE | `/api/conversations/{id}` | — | `{status}` (removes the light file AND the blobs dir) |
 
 ### Conversation (branchable chat; persisted per scan-root, NOT in PlaygroundState)
@@ -132,6 +132,8 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
 {
   "id": "uuid", "name": "Untitled",
   "system_prompt": null,                    // travels with the conversation (each conv = one experiment)
+  "system_enabled": null,                   // its power state (false = kept but muted); absent/null on
+                                            // legacy bodies → readers derive from text presence
   "trees": {                                // per-panel LIGHT branch trees, keyed by stable panel id
     "primary": { "nodes": {…}, "rootChildren": [], "selected": {} },
     "compare": { … }                        // present per open panel ('primary','compare','p-2',…)
@@ -205,7 +207,11 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/conversations/`
   "openrouter_model": null,// OR an OpenRouter model id. Exactly one of run_id/base_model/sampler_path/openrouter_model.
   "messages": [{"role":"user","content":"…"}],   // required
   "system_prompt": null,  // optional; the GLOBAL system-prompt part.
-                          // "" = EXPLICITLY none (never inherits — see params_scope)
+                          // "" = EXPLICITLY none (never inherits — see params_scope).
+                          // The "call"-scope inherit SKIPS a muted global prompt
+                          // (state.system_enabled === false); an explicit value here
+                          // applies regardless. The browser always sends the EFFECTIVE
+                          // part ("" when muted/empty).
   "thread_system_prompt": null, // optional; the THREAD's system-prompt part, recorded on the
                           // thread's first message (browser tree root / `tinkpg send --new-thread
                           // --system`). The SERVER composes the effective system message:
@@ -220,7 +226,9 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/conversations/`
                           // thinking/top_p) are routed (chat.py resolve_params):
                           //   "global" (default; the browser): explicit values win, absent
                           //     ones fall back to fixed server defaults (1.0/1024/1/false),
-                          //     and the resolved params are WRITTEN INTO the shared state.
+                          //     and the resolved params are WRITTEN INTO the shared state —
+                          //     EXCEPT system_prompt (the browser maintains it via /api/state;
+                          //     echoing the effective part would clobber a kept-but-muted prompt).
                           //   "call" (the CLI): explicit values apply to THIS chat only,
                           //     absent ones inherit the CURRENT global state, nothing is
                           //     written back (a CLI probe can't clobber the sidebar).
@@ -321,6 +329,11 @@ give all three through the native `sample_stream`.
   ],
   "conversation_id": null,          // the workspace open in the browser (its ?c=)
   "system_prompt": null,            // the GLOBAL system-prompt part
+  "system_enabled": null,           // power toggle for the global prompt (split-chip mute):
+                                    // false = kept but MUTED (chat inherit skips it);
+                                    // null = unset/legacy → behaves enabled. A patch setting
+                                    // a NON-EMPTY system_prompt WITHOUT this flag auto-enables
+                                    // (old-client shim: CLI `params --system` keeps applying)
   "temperature","max_tokens","n_samples","thinking","top_p",
   "chat_id": 0,        // increments each chat run; scopes sample events
   "running": false,

@@ -405,6 +405,7 @@ class ConversationsStore {
     // flush-on-switch guarantees live.state still belongs to `id` here.
     const fields = {
       system_prompt: live.state?.system_prompt ?? null,
+      system_enabled: live.state?.system_enabled ?? null,
       panels: (live.state?.panels ?? []).map((ps) => ({
         id: ps.id,
         run_id: ps.run_id,
@@ -739,7 +740,12 @@ class ConversationsStore {
     // one experiment). Optimistically assign the returned state so the immediately-
     // following #afterLoad mirrors against the FRESH panel list rather than the
     // previous conversation's.
-    const patch: StatePatch = { system_prompt: conv.system_prompt ?? null };
+    const patch: StatePatch = {
+      system_prompt: conv.system_prompt ?? null,
+      // Explicit derive for flag-less legacy bodies (text present ⇒ enabled), so
+      // the bus mirror is always a real bool once a conversation is open.
+      system_enabled: conv.system_enabled ?? (conv.system_prompt ?? '').trim().length > 0
+    };
     if (layout) {
       patch.panels = layout.map((p) => ({
         id: p.id,

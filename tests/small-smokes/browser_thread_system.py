@@ -13,7 +13,7 @@ none — the probe-battery shape), opens it with ?c=<id>, then:
   4. shift-edit (fork full copy, no generation) on the root row shows the
      thread-system field prefilled; changing it forks a 4th sibling thread
      carrying the NEW prompt;
-  5. arming ⑂ branch-from-start reveals the composer's `＋ thread system`
+  5. arming ⑂ branch-from-start reveals the composer's split-pill `thread system`
      chip + textarea (disarming hides them);
   6. after the debounce-save, a reload restores the forked thread's strip.
 
@@ -136,14 +136,14 @@ def main():
         page.keyboard.press("Escape")
 
         # ── 5. composer chip appears only while ⑂ is armed ──
-        assert page.locator("[data-testid='thread-system-toggle']").count() == 0
+        assert page.locator("[data-testid='thread-system-fold']").count() == 0
         page.locator("[data-testid='branch-root-toggle']").click()
-        chip = page.locator("[data-testid='thread-system-toggle']")
+        chip = page.locator("[data-testid='thread-system-fold']")
         assert chip.count() == 1, "arming ⑂ must reveal the thread-system chip"
         chip.click()
         assert page.locator("[data-testid='thread-system-input']").count() == 1
         page.locator("[data-testid='branch-root-toggle']").click()  # disarm
-        assert page.locator("[data-testid='thread-system-toggle']").count() == 0
+        assert page.locator("[data-testid='thread-system-fold']").count() == 0
 
         # ── 6. the fork persists (debounce-save → reload) ──
         time.sleep(2.5)

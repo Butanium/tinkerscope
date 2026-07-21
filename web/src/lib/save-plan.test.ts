@@ -30,6 +30,7 @@ function ok(cond: boolean, msg = 'expected true'): void {
 
 const FIELDS: ConvFields = {
   system_prompt: 'sp',
+  system_enabled: true,
   panels: [{ id: 'primary', run_id: 'r1', checkpoint: 'final' }],
   reduced_panels: [],
   send_targets: ['primary'],

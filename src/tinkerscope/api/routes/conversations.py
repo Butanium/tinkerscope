@@ -39,6 +39,9 @@ class ConversationCreate(BaseModel):
     id: str | None = None
     name: str = "Untitled"
     system_prompt: str | None = None
+    # Power state of the conversation's system prompt (False = kept but muted).
+    # None/absent (legacy bodies, old clients) → readers derive from text presence.
+    system_enabled: bool | None = None
     # N-panel shape: {panel_id: opaque tree}.
     trees: dict[str, Any] | None = None
     # legacy 2-panel shape (transitional CLI callers) — synthesized into `trees`.
@@ -62,6 +65,7 @@ class ConversationPatch(BaseModel):
 
     name: str | None = None
     system_prompt: str | None = None
+    system_enabled: bool | None = None
     panels: list[dict[str, Any]] | None = None
     reduced_panels: list[str] | None = None
     send_targets: list[str] | None = None
@@ -76,6 +80,7 @@ class TreeSave(BaseModel):
     # Panels removed since the last save — dropped from the stored trees.
     dropped_trees: list[str] = []
     system_prompt: str | None = None
+    system_enabled: bool | None = None  # see ConversationCreate
     # Per-conversation panel UI (all OPAQUE panel-id lists; the browser owns the
     # semantics — see web/src/lib/conversations.svelte.ts):
     #   reduced_panels — panels folded out of view
@@ -140,6 +145,7 @@ def create_conversation(req: ConversationCreate) -> dict:
         id=req.id,
         name=req.name,
         system_prompt=req.system_prompt,
+        system_enabled=req.system_enabled,
         trees=trees,
         panels=req.panels or [],
         reduced_panels=req.reduced_panels,
@@ -168,6 +174,7 @@ def save_conversation_tree(conversation_id: str, req: TreeSave) -> dict:
         trees_partial=req.trees,
         dropped_trees=req.dropped_trees,
         system_prompt=req.system_prompt,
+        system_enabled=req.system_enabled,
         panels=req.panels,
         reduced_panels=req.reduced_panels,
         send_targets=req.send_targets,

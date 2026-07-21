@@ -141,6 +141,9 @@ export type PlaygroundState = {
   panels: PanelState[];
   conversation_id: string | null; // the open conversation's id (browser `?c=`), for `tinkpg state`
   system_prompt: string | null;
+  /** Power toggle for the global system prompt: false = kept but muted (skipped
+   *  at fire time). null/absent (legacy state) → derive from text presence. */
+  system_enabled?: boolean | null;
   temperature: number;
   max_tokens: number;
   n_samples: number;
@@ -169,6 +172,10 @@ export type StatePatch = {
   checkpoint?: string | null;
   messages?: ChatMessage[];
   system_prompt?: string | null;
+  /** Explicit power state for the global system prompt. The browser ALWAYS sends
+   *  it alongside system_prompt — a text patch without it auto-enables server-side
+   *  (old-client shim), which would wrongly re-enable a muted draft. */
+  system_enabled?: boolean | null;
   temperature?: number;
   max_tokens?: number;
   n_samples?: number;
@@ -250,6 +257,9 @@ export type Conversation = {
   id: string;
   name: string;
   system_prompt: string | null;
+  /** Power state of the conversation's system prompt (false = kept but muted).
+   *  Absent on legacy bodies → readers derive from text presence. */
+  system_enabled?: boolean | null;
   /** Per-panel branch trees, keyed by panel id ('primary','compare','p-2',…). */
   trees: Record<string, ConvTree>;
   /** Legacy 2-panel shape — present only on un-migrated saved conversations; the

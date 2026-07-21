@@ -63,6 +63,18 @@ def test_call_scope_empty_system_is_explicit_none():
     assert p["system_prompt"] == ""
 
 
+def test_muted_global_system_is_not_inherited():
+    # Power off (the split-chip mute): the kept text is skipped on inherit...
+    p = resolve_params(_req(params_scope="call"), _st(system_enabled=False))
+    assert p["system_prompt"] is None
+    # ...but an explicit per-call prompt still applies (explicit wins)...
+    p = resolve_params(_req(params_scope="call", system_prompt="s"), _st(system_enabled=False))
+    assert p["system_prompt"] == "s"
+    # ...and the legacy tri-state None (flag never set) behaves enabled.
+    p = resolve_params(_req(params_scope="call"), _st(system_enabled=None))
+    assert p["system_prompt"] == "global sys"
+
+
 def test_n_samples_clamped():
     assert resolve_params(_req(n_samples=0), _st())["n_samples"] == 1
     assert resolve_params(_req(n_samples=999), _st())["n_samples"] == 200

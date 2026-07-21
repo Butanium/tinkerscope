@@ -86,6 +86,10 @@ inherits; explicit, default 1). To DELIBERATELY change the shared state (the
 human sees their sidebar update live), use `tinkpg params` — no options = show
 current. Requires a server ≥ the params_scope contract (older servers apply the
 legacy clobber-on-chat behavior).
+The human can MUTE the global system prompt in the browser (the split-chip
+power dot: text kept, not applied) — `params`/`state` then show it as
+`(muted)` and per-call inherits skip it. `params --system "…"` always
+re-enables; an explicit per-call `--system` applies regardless of the mute.
 
 **Thread system prompts (`send --system`).** A thread's first message can carry
 its OWN system prompt, composed over the global one at fire time (`global ⏎

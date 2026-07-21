@@ -103,6 +103,7 @@ export const api = {
     id?: string;
     name?: string;
     system_prompt?: string | null;
+    system_enabled?: boolean | null;
     trees?: Record<string, ConvTree>;
     panels?: PanelLayout[];
     reduced_panels?: string[];

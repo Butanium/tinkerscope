@@ -19,6 +19,8 @@ import type { PanelLayout } from './types.ts';
 /** Conversation-level fields that accompany EVERY save (cheap, authoritative). */
 export type ConvFields = {
   system_prompt: string | null;
+  /** null = legacy/underived (readers fall back to text presence). */
+  system_enabled: boolean | null;
   panels: PanelLayout[];
   reduced_panels: string[];
   send_targets: string[];

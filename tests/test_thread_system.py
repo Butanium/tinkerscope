@@ -134,17 +134,22 @@ def test_chat_explicit_empty_thread_suppresses_mirror(client, monkeypatch):
     assert calls[0]["messages"][0] == {"role": "system", "content": "GLOBAL"}
 
 
-def test_global_scope_writes_back_global_part_only(client, monkeypatch):
-    # The shared sidebar state must NEVER absorb the thread part — only the
-    # composed prompt reaches the model.
+def test_global_scope_never_writes_system_back(client, monkeypatch):
+    # The shared sidebar state must NEVER absorb the thread part, and (since the
+    # split-chip mute) not the global part either: a chat carries only the
+    # EFFECTIVE global part ("" when muted), so echoing it back would clobber a
+    # kept-but-muted prompt. The browser maintains state.system_prompt via
+    # /api/state; only the composed prompt reaches the model.
     _lay(client, ids=("primary",))
+    client.post("/api/state", json={"system_prompt": "KEPT", "system_enabled": False})
     calls = _capture_producer(monkeypatch)
 
     r = client.post("/api/chat", json=_chat_body(
         system_prompt="G2", thread_system_prompt="T", broadcast=False))
     assert r.status_code == 200, r.text
     assert calls[0]["messages"][0] == {"role": "system", "content": "G2\nT"}
-    assert client.get("/api/state").json()["system_prompt"] == "G2"
+    st = client.get("/api/state").json()
+    assert st["system_prompt"] == "KEPT" and st["system_enabled"] is False
 
 
 def test_chat_thread_only_no_global(client, monkeypatch):

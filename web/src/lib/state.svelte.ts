@@ -101,6 +101,8 @@ class LiveStore {
         conversation_id: prev.conversation_id,
         panels: prev.panels,
         system_prompt: prev.system_prompt,
+        // explicit — the flag-less shim would re-enable a muted prompt
+        system_enabled: prev.system_enabled ?? null,
         temperature: prev.temperature,
         max_tokens: prev.max_tokens,
         n_samples: prev.n_samples,

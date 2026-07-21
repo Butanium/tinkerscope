@@ -1672,7 +1672,7 @@ def cmd_params(
     st = _post("/api/state", patch) if patch else _get("/api/state")
     verb = "set" if patch else "current"
     if json_out:
-        keys = ("temperature", "max_tokens", "n_samples", "thinking", "top_p", "system_prompt")
+        keys = ("temperature", "max_tokens", "n_samples", "thinking", "top_p", "system_prompt", "system_enabled")
         _print_json({k: st.get(k) for k in keys})
         return
     think = st.get("thinking")
@@ -1681,7 +1681,8 @@ def cmd_params(
           f"n={st.get('n_samples')} thinking={think_s}"
           + (f" top_p={st.get('top_p')}" if st.get("top_p") is not None else ""))
     sp = st.get("system_prompt")
-    print(f"system: {sp}" if sp else "system: (none)")
+    muted = " (muted — browser power toggle off; kept but not applied)" if sp and st.get("system_enabled") is False else ""
+    print(f"system: {sp}{muted}" if sp else "system: (none)")
 
 
 @app.command("state")
@@ -1709,7 +1710,8 @@ def cmd_state(
         f"n={st.get('n_samples')} thinking={'both' if st.get('thinking') == 'both' else 'yes' if st.get('thinking') else 'no'}"
     )
     if st.get("system_prompt"):
-        print(f"system: {_oneline(st['system_prompt'], 200)}")
+        muted = " (muted)" if st.get("system_enabled") is False else ""
+        print(f"system: {_oneline(st['system_prompt'], 200)}{muted}")
     panels = st.get("panels", [])
     conv_id = st.get("conversation_id")
     # Fetch saved conversations only when we'll use them: to NAME the open-conv id the
@@ -1861,7 +1863,8 @@ def _show_conversation(
     upd = (c.get("updated_at") or "")[:19].replace("T", " ")
     print(f"workspace: {c.get('name')}  ({c.get('id')})   updated {upd}")
     if c.get("system_prompt"):
-        print(f"system: {_oneline(c['system_prompt'], 200)}")
+        muted = " (muted)" if c.get("system_enabled") is False else ""
+        print(f"system: {_oneline(c['system_prompt'], 200)}{muted}")
     total_nodes = sum(len(t.get("nodes", {})) for t in trees.values())
     total_bps = sum(_branch_point_count(t) for t in trees.values())
     print(f"{len(trees)} panel(s) · {total_nodes} nodes · {total_bps} branch points\n")

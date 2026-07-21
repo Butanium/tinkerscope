@@ -103,10 +103,10 @@ def main() -> None:
             # Set the composer scope to "Think only" (open the prefill row to reach
             # the segment, then collapse it again — the scope state persists, which
             # is exactly how a stale scope ends up riding along on a continue).
-            page.click(".prefill-toggle")
+            page.click("[data-testid=prefill-fold]")
             page.wait_for_selector(".prefill-scope", timeout=5000)
             page.click(".prefill-scope .seg-btn:has-text('Think only')")
-            page.click(".prefill-toggle")
+            page.click("[data-testid=prefill-fold]")
 
             # ＋ continue on the assistant turn.
             page.click('button[data-tooltip^="Continue this message"]')

@@ -406,6 +406,7 @@ def upsert(
     id: str | None,
     name: str,
     system_prompt: str | None,
+    system_enabled: bool | None,
     trees: dict[str, Any],
     panels: list[dict],
     reduced_panels: list[str],
@@ -422,6 +423,7 @@ def upsert(
             "id": cid,
             "name": name,
             "system_prompt": system_prompt,
+            "system_enabled": system_enabled,
             "trees": trees,
             "panels": panels,
             "reduced_panels": reduced_panels,
@@ -445,6 +447,7 @@ def save_tree(
     trees_partial: dict[str, Any],
     dropped_trees: list[str],
     system_prompt: str | None,
+    system_enabled: bool | None,
     panels: list[dict],
     reduced_panels: list[str],
     send_targets: list[str],
@@ -479,6 +482,7 @@ def save_tree(
         conv = dict(conv)
         conv["trees"] = trees
         conv["system_prompt"] = system_prompt
+        conv["system_enabled"] = system_enabled
         conv["panels"] = panels
         conv["reduced_panels"] = reduced_panels
         conv["send_targets"] = send_targets
@@ -493,7 +497,7 @@ def save_tree(
     return True
 
 
-_PATCH_FIELDS = ("name", "system_prompt", "panels", "reduced_panels", "send_targets", "seen_panels")
+_PATCH_FIELDS = ("name", "system_prompt", "system_enabled", "panels", "reduced_panels", "send_targets", "seen_panels")
 
 
 def patch_meta(cid: str, fields: dict[str, Any]) -> dict | None:

@@ -88,6 +88,13 @@ top-p). There's a **thinking toggle** for models that support it —
 **Off / On / Both**, where Both draws n samples *without* thinking plus n *with*
 (2n total, each card tagged think / no-think) so you can compare the two modes
 in one send — and a **system prompt** field that travels with the conversation.
+The composer's system-prompt / prefill / thread-system controls are **split
+pills**: the left power dot **applies / mutes** the field (muting keeps the
+text — it just stops applying to sends, persisted for the system prompt as
+`system_enabled`), the right label+chevron **expands / folds** its editor. The
+two are independent — folding never mutes — so you can keep a prompt active
+while folded, or draft one muted before switching it on (typing into an empty
+field auto-enables).
 
 Set **n > 1** and a single send fans out into N draws, rendered as **sample
 cards** — a quick read on what the model "usually says":
@@ -272,6 +279,9 @@ when the state carries one.
 The **deliberate** route is `tinkpg params`: with options it SETS the global
 state (the browser updates live — `--clear-system` removes the system prompt,
 `--system-file` reads one from a file); with none it shows the current values.
+The browser can **mute** the global system prompt (its split-chip power dot:
+kept but not applied); `params`/`state` mark that as `(muted)`, and setting a
+prompt from the CLI always re-enables it.
 
 **Thread system prompts.** A thread's first message can carry its own system
 prompt, composed over the global one at fire time (`global ⏎ thread`; see the

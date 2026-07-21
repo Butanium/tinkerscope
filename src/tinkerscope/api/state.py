@@ -53,6 +53,13 @@ class PlaygroundState:
     # None when no conversation is open (or an older browser that doesn't push it).
     conversation_id: str | None = None
     system_prompt: str | None = None
+    # Whether the global system prompt APPLIES to sends (the browser's power
+    # toggle — False = kept but muted). Tri-state for back-compat: None = unset
+    # (legacy state/clients) → derive from text presence, i.e. behave enabled.
+    # Consumers gate with `is not False`. A patch that sets a non-empty
+    # system_prompt WITHOUT this flag auto-enables (routes/state.py), so old
+    # clients keep "set text ⇒ applies".
+    system_enabled: bool | None = None
     # sampling params (global — shared across panels)
     temperature: float = 1.0
     max_tokens: int = 1024

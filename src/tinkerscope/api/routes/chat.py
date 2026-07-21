@@ -313,16 +313,19 @@ def resolve_params(req: ChatRequest, st: Any) -> dict:
 
     system_prompt="" is an explicit "no system prompt" — it never inherits (the
     chat builders treat empty as absent), so a call-scoped client can opt OUT of
-    an inherited system prompt without a wire change.
+    an inherited system prompt without a wire change. The inherit path skips a
+    MUTED global prompt (state.system_enabled is False — kept text, power off);
+    an explicit req.system_prompt applies regardless (per-call wins).
 
     thread_system_prompt resolves independently of params_scope (it's thread
     state, not a sampling param): an explicit value wins ("" = explicitly no
     thread part), None inherits the target panel's mirrored thread system."""
     inherit = req.params_scope == "call"
     panel = next((p for p in getattr(st, "panels", []) if p.id == req.panel), None)
+    system_on = getattr(st, "system_enabled", None) is not False
     return {
         "system_prompt": req.system_prompt if req.system_prompt is not None
-        else (st.system_prompt if inherit else None),
+        else (st.system_prompt if inherit and system_on else None),
         "thread_system_prompt": req.thread_system_prompt
         if req.thread_system_prompt is not None
         else ((panel.thread_system_prompt if panel else None) or ""),
@@ -542,8 +545,11 @@ async def chat(req: ChatRequest):
             **sel_patch,
         }
         if req.params_scope != "call":
+            # system_prompt is deliberately NOT echoed back: the browser (the only
+            # global-scope client) maintains state.system_prompt/system_enabled via
+            # /api/state, and a chat carries only the EFFECTIVE part ("" when the
+            # prompt is muted) — echoing that would clobber a kept-but-muted prompt.
             state_patch.update({
-                "system_prompt": system_prompt,
                 "temperature": temperature,
                 "max_tokens": max_tokens,
                 "n_samples": n,
