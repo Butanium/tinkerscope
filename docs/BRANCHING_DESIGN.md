@@ -120,8 +120,8 @@ ROOT.
 | edit user (shift: fork+copy) | `editUserForkCopy(tree, userId, content) -> {tree, newUserId}` | new user sibling + DEEP-COPY of the downstream active path as a fresh-id single-child chain; writes `selected[newChain]` along the way (each copied node selects its single copied child); copies NO original-keyed selected entries; no fire. |
 | edit assistant | `editAssistant(tree, asstId, content) -> {tree, newId}` | new assistant sibling, selected, no children, no fire. |
 | delete | `deleteSubtree(tree, nodeId) -> tree` | prune node + descendants; drop from parent's children; delete their `selected` entries; if `selected[parent]` pointed at a pruned id, reselect last surviving (or clear). |
-| cycle / select | `setSelected(tree, nodeId) -> tree` / `cycle(tree, nodeId, delta) -> tree` | set `selected[parentKey] = nodeId` (or step ±1 among siblings, clamped, no wrap); subtree below re-derives. |
-| reconcile external | `reconcileExternal(tree, msgs) -> tree` | build a linear chain from `msgs`; if an existing root→leaf path already equals `msgs` (role+content) → no-op (idempotent, kills reload-dupes); else attach the chain's head as a NEW `rootChildren` entry + select it. NEVER prefix-appends. |
+| cycle / select | `setSelected(tree, nodeId) -> tree` / `cycle(tree, nodeId, delta) -> tree` | set `selected[parentKey] = nodeId` (or step ±1 among siblings, WRAPPING at the ends — 1-2-3-1…); subtree below re-derives. |
+| reconcile external | `reconcileExternal(tree, msgs, threadSystem?) -> tree` | follow + select the longest existing prefix of `msgs` (by role+content; at ROOT level also by thread system when `threadSystem` is known — see §2b), then append the unmatched tail: EXTENDS the matched branch in place (a continued CLI thread), or a NEW root when nothing matched. Idempotent (same ref) when the path already exists — kills reload-dupes. |
 
 Invariant (assert in tests): every `selected` key is a live node id (or ROOT) and
 every value is a live child of that key.

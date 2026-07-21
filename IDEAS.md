@@ -49,12 +49,20 @@ Non-roadmap ideas worth remembering. (Roadmap/committed follow-ups live in
 
 ## From the 2026-07-21 MCQ-exploration session (fable, weird-personas)
 
-- **`tinkpg send --first-token`**: after a `--logprobs` fan-out, print the per-panel
-  first-token distribution table directly (the session hand-rolled a JSONL parser for
-  exactly this — panel → P(token) from position-0 top-K + sampled tokens). `samples
-  --first-token` covers stored forks; this would cover the fire-and-read loop.
-- **Probe battery runner**: `tinkpg battery <dir>` — fire every probe file in a dir
-  sequentially (per-probe system/prefill via front-matter or sidecar), JSONL per probe,
-  one summary table. The session did this with a bash driver; second time it's a pattern.
-- Thread-level system prompts: see docs/PROPOSAL_THREAD_SYSTEM_PROMPT.md (Clément-endorsed
-  direction, parked).
+All three SHIPPED 2026-07-21 in `7e90c24` (thread-system session landing): the
+first two were the MCQ session's own uncommitted implementation (folded in per
+its coordination note), the third is the thread-system feature itself.
+
+- ~~**`tinkpg send --first-token`**~~ — shipped (`send`/`continue --first-token`).
+- ~~**Probe battery runner**~~ — shipped (`tinkpg battery <dir>`; probe
+  front-matter `system:` = that thread's prompt).
+- ~~Thread-level system prompts~~ — shipped; as-built contract in
+  `docs/API_CONTRACT.md` + `docs/BRANCHING_DESIGN.md` §2b.
+
+- **`chat`/`compare` thread-prompt authoring.** Their `--system` still means
+  the per-call GLOBAL part (they full-replace the layout, so their fresh
+  thread resolves an empty thread part). If "fresh-history chat under a
+  recorded prompt" turns out to be a real pattern, routing their `--system`
+  through `_new_thread_system` like `send` is ~2 lines per command. Left out
+  deliberately — no observed need yet, and the semantic change should follow
+  a use case, not symmetry. *(fable, 2026-07-21, thread-system session)*
