@@ -3,6 +3,20 @@
 Non-roadmap ideas worth remembering. (Roadmap/committed follow-ups live in
 `docs/TODO.md`.)
 
+- **Availability auto-refresh.** The servable window (48e8dbd) is fetched once
+  per scan and only refetched on the manual refresh button — but the window
+  moves whenever a retrain lands or checkpoints age out, so between refreshes
+  the grey/⚠ states drift stale in both directions (a dead run shows live until
+  refresh; a fresh retrain shows dead). A cheap TTL (say 10 min) or a refetch
+  on the first send-404 would keep it honest without polling pressure. *(fable
+  team-lead, 2026-07-20)*
+
+- **Browserless bare `--node`.** `samples --node <id>` resolves the workspace
+  from the browser-open conversation; with no browser session it dies. Falling
+  back to a grep-style all-workspace search would make node ids fully
+  self-contained references (flagged by opus-cli-json while landing 0c9252f).
+  *(fable team-lead, 2026-07-20)*
+
 - **CLI: isolate one sample by its own node id.** `tinkpg samples --node
   <assistant-id>` shows the whole fan-out; isolating the named sibling needs
   eyeballing its position for `--sample K`. A `--this` flag (or making an
