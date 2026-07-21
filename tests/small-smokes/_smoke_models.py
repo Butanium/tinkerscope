@@ -44,10 +44,14 @@ BASE_RUN_ID = "base:" + BASE_MODEL
 # Token-by-token streaming is disabled for discovered LoRA runs: they sample via
 # native BATCHED sampling (whole sample, no `delta` events) because tinker's oai
 # /completions serves the BASE model for a LoRA adapter, not the adapter weights —
-# so there's no faithful way to token-stream a discovered run yet (chat.py:
-# `stream = (n == 1) and (req.run_id is None)`). base_model / loose-ckpt / openrouter
-# still stream. The streaming smokes assert token deltas, so they're skipped until
-# this is fixed. Flip STREAMING_DISABLED to False to re-enable them all at once.
+# so there's no faithful way to token-stream a discovered run yet.
+# base_model ALSO samples native now (2026-07-20): the oai /completions path drops
+# renderer.parse_response (channel-CoT families leak thinking into `content`),
+# raw_meta, and token_logprobs, so base picks route through native sample_stream for
+# fidelity — no deltas either. Only loose-ckpt / openrouter still token-stream
+# (chat.py: `stream = (n==1) and req.run_id is None and req.base_model is None`).
+# The streaming smokes assert token deltas, so they're skipped until LoRA streaming
+# is fixed. Flip STREAMING_DISABLED to False to re-enable them all at once.
 # See memory: tinker-lora-no-token-streaming.
 STREAMING_DISABLED = True
 

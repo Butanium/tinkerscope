@@ -25,10 +25,11 @@ async def main():
     _, prompt, stop = await get_sampler().render(run.base_model, rn, [{"role":"user","content":"Say hello in five words."}])
     await collect(tinker_oai.completions_stream(model=ck.sampler_path, prompt=prompt, stop=stop, temperature=0.7, max_tokens=40), "run/completions")
 
-    # base model
-    rn2 = select_renderer_name(run.base_model, None, False)
-    _, prompt2, stop2 = await get_sampler().render(run.base_model, rn2, [{"role":"user","content":"Say hi in five words."}])
-    await collect(tinker_oai.completions_stream(model=run.base_model, prompt=prompt2, stop=stop2, temperature=0.7, max_tokens=40), "base/completions")
+    # NOTE: base_model no longer streams through completions_stream — it samples
+    # native (tinker_sampler.sample_stream) for renderer.parse_response + raw_meta +
+    # token_logprobs fidelity (see chat.py's base branch). So there's no base/
+    # completions producer case anymore; only the sampler_path (parked run_id path)
+    # and loose-ckpt/openrouter producers remain streamable.
 
     # loose checkpoint
     loose = tinker_oai.list_checkpoints()[0]["sampler_path"]

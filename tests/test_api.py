@@ -403,6 +403,77 @@ def test_chat_openrouter_runs_gen_and_strips_reasoning(client, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# base_model n==1 samples NATIVE (never the oai stream), so the sample carries the
+# response-side fidelity the /completions wire drops: raw_meta + token_logprobs +
+# a real renderer.parse_response split (reasoning out of content). Regression for
+# base picks streaming through oai — thinking-off CoT leaked into content, empty
+# raw view, no logprobs.
+# --------------------------------------------------------------------------- #
+def test_chat_base_model_native_full_fidelity(client, monkeypatch):
+    captured: dict = {}
+
+    async def fake_sample_stream(*, base_model, sampler_path, renderer_name, messages,
+                                 n, temperature, max_tokens, top_p=None, logprobs=True):
+        captured.update(base_model=base_model, logprobs=logprobs, n=n)
+        yield {
+            "sample_index": 0,
+            "content": "the answer",
+            "reasoning": "hidden cot",
+            "raw_text": "…prompt…the answer",
+            "raw_meta": "REQUEST / RESPONSE debug blob",
+            "finish_reason": "stop",
+            "token_logprobs": [{"t": "the", "tid": 5, "lp": -0.1, "top": [["the", 5, -0.1]]}],
+        }
+
+    class FakeSampler:
+        def sample_stream(self, **kw):
+            return fake_sample_stream(**kw)
+
+    monkeypatch.setattr("tinkerscope.api.routes.chat.get_sampler", lambda: FakeSampler())
+
+    r = client.post(
+        "/api/chat",
+        json={
+            "base_model": SUPPORTED_BASE,
+            "messages": [{"role": "user", "content": "q"}],
+            "n_samples": 1, "thinking": False, "logprobs": True,
+            "panel": "primary", "broadcast": False,
+        },
+    )
+    assert r.status_code == 200, r.text
+    # Native whole-sample path — NOT the oai token stream (no delta events), and the
+    # native sampler was actually driven with our base + logprobs flag.
+    assert "event: delta" not in r.text, r.text
+    assert "event: done" in r.text, r.text
+    assert captured.get("base_model") == SUPPORTED_BASE
+    assert captured.get("logprobs") is True
+
+    import json as _json
+    sample = next(
+        _json.loads(line.split(":", 1)[1])
+        for line in r.text.splitlines()
+        if line.startswith("data:") and '"raw_meta"' in line
+    )
+    assert sample["raw_meta"], "native path must carry the raw-view blob"
+    assert sample["token_logprobs"], "native path must carry token logprobs"
+    assert sample["reasoning"] == "hidden cot", "reasoning must split out of content"
+    assert sample["content"] == "the answer"
+
+
+def test_tinker_models_base_entries_carry_supports_thinking(client, monkeypatch):
+    """`/api/tinker-models` base entries expose `supports_thinking` (the family's
+    binary-toggle probe) so the composer can hide its thinking control for base
+    picks with no toggle. Loose checkpoints (UUID-only) get no field."""
+    # Avoid the real oai /v1/models network call — checkpoints are irrelevant here.
+    monkeypatch.setattr("tinkerscope.api.tinker_oai.list_checkpoints", lambda refresh=False: [])
+    body = client.get("/api/tinker-models").json()
+    bases = {m["id"]: m for m in body["models"] if m["kind"] == "base"}
+    # The stubbed caps serve a toggle-less base (Llama) + a thinking one (DeepSeek-V3.1).
+    assert bases[SUPPORTED_BASE]["supports_thinking"] is False
+    assert bases["deepseek-ai/DeepSeek-V3.1"]["supports_thinking"] is True
+
+
+# --------------------------------------------------------------------------- #
 # /api/chat cancellation — a client disconnect OR POST /api/chat/{id}/cancel must
 # each fire EXACTLY ONE terminal (chat_end + one broadcast) so `running` never sticks.
 # Driven against the raw gen() (resp.body_iterator) with a mocked, hangable producer —

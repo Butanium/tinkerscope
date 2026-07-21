@@ -142,12 +142,14 @@
   );
 
   let anySupportsThinking = $derived(
-    // OpenRouter reference + raw tinker base models: assume thinking-capable
-    // (backend handles the flag).
+    // OpenRouter reference + loose tinker checkpoints: assume thinking-capable
+    // (backend handles the flag). Base picks consult the catalog's
+    // supports_thinking (absent ⇒ default true, back-compat); a base family with
+    // no thinking toggle (e.g. gpt-oss / a *-Base model) hides the control.
     panelSels.some(
       (p) =>
         isOpenrouterSel(p.run_id) ||
-        isBaseSel(p.run_id) ||
+        (isBaseSel(p.run_id) && (modelCatalog.baseSupportsThinking(p.run_id) ?? true)) ||
         isCkptSel(p.run_id) ||
         modelCatalog.runById(p.run_id)?.supports_thinking
     )

@@ -51,6 +51,10 @@ export type TinkerModel = {
   base_model?: string;
   sampler_path?: string;
   created?: number;
+  /** Base entries only: does the family expose a binary thinking toggle? Drives
+   *  whether the composer shows its thinking control for a base pick. Absent on
+   *  checkpoints (base/renderer unknown) and legacy responses ⇒ assume true. */
+  supports_thinking?: boolean;
 };
 
 /** Response shape for the two typeahead-catalog endpoints. */

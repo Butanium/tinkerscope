@@ -41,10 +41,22 @@ def tinker_models(refresh: bool = False) -> dict:
          unknown), so they're sampled via the default chat template.
 
     Each entry carries a unified `id` plus its kind-specific field
-    (`base_model` / `sampler_path`). Base models come first, then checkpoints."""
+    (`base_model` / `sampler_path`). Base entries also carry `supports_thinking`
+    (the family exposes a binary thinking toggle) so the composer can hide its
+    thinking control for base picks that have none. Base models come first, then
+    checkpoints."""
     caps = discovery.get_capabilities()
     names = sorted({m.split(":peft")[0] for m in caps.get("supported_models", [])})
-    models = [{"kind": "base", "id": n, "label": n, "base_model": n} for n in names]
+    # `supports_thinking` is computed with the same renderer-pair probe the native
+    # sampling path uses (tinker_sampler.supports_thinking) so the composer's
+    # thinking toggle only shows for base picks whose family has a binary toggle.
+    # Loose checkpoints stay UUID-only (base/renderer unknown) → no field, and the
+    # frontend keeps treating them as thinking-capable.
+    models = [
+        {"kind": "base", "id": n, "label": n, "base_model": n,
+         "supports_thinking": supports_thinking(n)}
+        for n in names
+    ]
 
     error = caps.get("error")
     try:

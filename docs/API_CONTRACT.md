@@ -79,7 +79,7 @@ Runs with `config_error` should still be listed (degraded).
 | GET | `/api/health` | — | `{ok, root, scan_roots[], tinker_key, openrouter_key, available, supported_models[], error}` |
 | GET | `/api/models` | — | `Run[]` (with `supports_thinking`) |
 | POST | `/api/models/refresh` | — | `{status, count}` (rescans fs + capabilities) |
-| GET | `/api/tinker-models` | `?refresh` | `{available, error, models:[…]}` — everything sampleable through tinker, one filterable list. Each entry has `kind` + unified `id` + `label`. `kind:"base"` (+`base_model`) = raw base models from `get_server_capabilities` (no LoRA); `kind:"checkpoint"` (+`sampler_path`,`created`) = sampler checkpoints the oai endpoint serves now (GET /v1/models), newest first, UUID-only. Base models first, then checkpoints. |
+| GET | `/api/tinker-models` | `?refresh` | `{available, error, models:[…]}` — everything sampleable through tinker, one filterable list. Each entry has `kind` + unified `id` + `label`. `kind:"base"` (+`base_model`, +`supports_thinking`) = raw base models from `get_server_capabilities` (no LoRA); `supports_thinking` = the family exposes a binary thinking toggle (so the composer can hide its thinking control for base picks with none). `kind:"checkpoint"` (+`sampler_path`,`created`) = sampler checkpoints the oai endpoint serves now (GET /v1/models), newest first, UUID-only (no `supports_thinking` — base/renderer unknown ⇒ the UI assumes thinking-capable). Base models first, then checkpoints. |
 | GET | `/api/openrouter-models` | — | `[{label, openrouter_model}]` (GLOBAL saved list, seeded once from `$TINKERSCOPE_OPENROUTER_MODELS`) |
 | POST | `/api/openrouter-models` | `{openrouter_model, label?}` | the updated saved list (upsert) |
 | DELETE | `/api/openrouter-models?model=<id>` | — | the updated saved list (model id in query; ids have slashes) |
@@ -207,10 +207,11 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/conversations/`
   "top_p": null, "top_k": null,
   "presence_penalty": null, "repetition_penalty": null,
   "logprobs": true,       // capture per-token logprobs + top-5 alternatives on the
-                          // NATIVE tinker sampling paths (run_id any n; base_model n>1).
-                          // Default ON; costs one extra prefill-only tinker call per
-                          // sample. The token-streamed n==1 oai paths and OpenRouter
-                          // don't support it and ignore the flag.
+                          // NATIVE tinker sampling paths (run_id + base_model, ANY n —
+                          // both always sample native). Default ON; costs one extra
+                          // prefill-only tinker call per sample. The token-streamed
+                          // n==1 oai paths (loose sampler_path) and OpenRouter don't
+                          // support it and ignore the flag.
   "panel": "primary",     // "primary" | "compare" — which compare pane this is
   "broadcast": true,       // also mirror samples to the state bus (browser)
   "detached": false,       // fire-and-forget: the POST returns immediately ({"status":
@@ -232,10 +233,12 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/conversations/`
 
 ### /api/chat SSE (the caller's stream — what the CLI prints)
 - `event: delta` → `data: {sample_index, delta, kind}` — a streamed token chunk
-  (`kind` = `"content"` | `"reasoning"`). **Only emitted when n_samples==1** (the
-  token-streaming path); n>1 sends whole samples, no deltas. A consumer that saw
-  deltas for a sample uses the later `message` event to *finalize* (clean content),
-  not to reprint.
+  (`kind` = `"content"` | `"reasoning"`). Emitted **only for a token-streaming
+  producer at n_samples==1**: loose `sampler_path` or `openrouter_model`. `run_id`
+  and `base_model` always sample native (whole samples, no deltas — see "Streaming
+  model" below), and n>1 sends whole samples for every producer. A consumer that
+  saw deltas for a sample uses the later `message` event to *finalize* (clean
+  content), not to reprint.
 - `event: message` → `data:` one sample: `{sample_index, content, raw_text, finish_reason, reasoning?, thinking?, token_logprobs?}` or `{sample_index, error}`.
   `thinking` (bool) is present **only on `thinking:"both"` chats** and says which
   half produced the sample (false = non-thinking, true = thinking); single-mode
@@ -255,11 +258,17 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/conversations/`
 - `event: done` → `data: {}` (all samples finished)
 - `event: error` → `data: {error}` (whole request failed, e.g. unsampleable run)
 
-**Streaming model:** n==1 streams tokens through tinker's OpenAI-compatible
-endpoint (run_id/base_model via `/completions` with the run's renderer;
-sampler_path via `/chat/completions` default template) or OpenRouter; n>1 keeps
-the native batched fan-out (whole samples). tinker's native SamplingClient has no
-token streaming — that's why n==1 routes through the oai endpoint.
+**Streaming model:** at n==1 a loose `sampler_path` (oai `/chat/completions`,
+default template) or `openrouter_model` streams tokens; n>1 keeps the native
+batched fan-out (whole samples). tinker's native SamplingClient has no token
+streaming — that's why the streaming n==1 path routes through the oai endpoint.
+**`run_id` and `base_model` always sample native for ALL n** (no deltas), for
+response fidelity the oai wire can't give: `run_id` because tinker's oai
+`/completions` serves the BASE model for a LoRA sampler path
+(tinker-feedback#125); `base_model` because the `/completions` path skips
+`renderer.parse_response` (channel-CoT families like gpt-oss leak thinking into
+`content` with thinking off) and carries no `raw_meta` / `token_logprobs`. Both
+give all three through the native `sample_stream`.
 
 ### PlaygroundState (server-side, shared)
 ```jsonc
@@ -284,7 +293,7 @@ Event names = the message's `type`:
 - `snapshot` → `{type:"snapshot", state}` (full state, sent first on connect)
 - `patch` → `{type:"patch", event, state}` (state changed; e.g. event="chat_start"/"chat_done"/"patch")
 - `chat_start` → `{type:"chat_start", chat_id, panel, n, label, client_token?, conversation_id?}` (a chat began; clear that panel's samples. `n` = TOTAL expected samples — 2×n_samples on a `thinking:"both"` chat. `conversation_id` = the conversation open when the chat started — the browser folds an external chat only when this matches its active conversation; null = fold anyway, see below)
-- `delta` → `{type:"delta", chat_id, panel, sample_index, delta, kind}` (streamed token chunk; n==1 only — accumulate per chat_id/panel/sample_index, then the `sample` event finalizes)
+- `delta` → `{type:"delta", chat_id, panel, sample_index, delta, kind}` (streamed token chunk; only a token-streaming producer at n==1 — loose sampler_path / openrouter, NOT run_id / base_model — accumulate per chat_id/panel/sample_index, then the `sample` event finalizes)
 - `sample` → `{type:"sample", chat_id, panel, sample_index, content, raw_text, finish_reason, reasoning?, thinking?}` (`thinking` only on `thinking:"both"` chats — which half drew this sample)
 - `chat_done` → `{type:"chat_done", chat_id, panel, client_token?, conversation_id?}` (`conversation_id` scopes the external fold — see `chat_start`)
 - `chat_error` → `{type:"chat_error", chat_id, panel, error, client_token?, conversation_id?}`

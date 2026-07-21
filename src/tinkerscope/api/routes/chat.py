@@ -9,18 +9,27 @@ panel=primary and panel=compare.
 Streaming (your design): for n==1 we stream tokens live through tinker's
 OpenAI-compatible endpoint (or OpenRouter's), emitting `delta` events; for n>1 we
 keep the native batched fan-out (each sample pops in whole — the distribution
-view). tinker's native SamplingClient has no token streaming, so the n=1 path
-deliberately routes through the oai endpoint instead.
+view). tinker's native SamplingClient has no token streaming, so the streaming
+n=1 path routes through the oai endpoint instead. But two model kinds forgo the
+stream and ALWAYS sample native, for response fidelity the oai wire can't give:
 
-  - run_id (LoRA ckpt)   -> TEMPORARILY native sample_stream for ALL n (no token
-                            streaming): tinker's oai /completions serves BASE for a
-                            LoRA sampler path (tinker-feedback#125). Restore the
-                            n==1 /completions path once that's fixed.
-  - base_model           -> oai /completions with OUR renderer (training-faithful;
-                            no adapter, so base is correct)
+  - run_id (LoRA ckpt)   -> native sample_stream for ALL n (no token streaming):
+                            tinker's oai /completions serves BASE for a LoRA sampler
+                            path (tinker-feedback#125), so the streamed single-sample
+                            path would silently show base output. Restore the n==1
+                            /completions path once that's fixed.
+  - base_model           -> native sample_stream for ALL n (no token streaming): the
+                            oai /completions path skips renderer.parse_response (so
+                            channel-CoT families — gpt-oss — leak thinking into
+                            `content` with thinking off) and carries no raw_meta /
+                            token_logprobs. The native path renders our training-
+                            faithful prompt AND parses the response, so all three
+                            are correct.
   - sampler_path (loose) -> oai /chat/completions (server's default template;
                             base_model/renderer unknown; /chat applies adapters)
   - openrouter_model     -> OpenRouter /chat/completions
+
+Only loose sampler_path + openrouter still token-stream at n==1.
 
 Each completed sample is yielded to the caller (CLI stdout) and broadcast to the
 state bus (browser live view), tagged with chat_id + panel. chat_id is allocated
@@ -322,16 +331,19 @@ async def chat(req: ChatRequest):
     # (openrouter / base_model / run_id); the loose sampler_path ignores thinking
     # today and keeps doing so (n samples, server default template).
     both = req.thinking == "both"
-    # n==1 token-streams live through the oai endpoints. EXCEPTION: discovered LoRA
-    # runs (run_id) — tinker's oai /completions serves the BASE model for a LoRA
-    # sampler path (tinker-feedback#125), so the live single-sample path would
-    # silently show base output instead of the finetune. Until that's fixed, route
-    # run_id n==1 through the SAME native sample_stream path as n>1 (whole sample, no
-    # token streaming). base_model / loose / openrouter are unaffected and keep
-    # streaming (base via /completions is correct; loose via /chat applies adapters).
-    # TODO(tinker-feedback#125): when fixed, drop `and req.run_id is None` to restore
-    # token streaming for single samples from LoRA runs.
-    stream = (n == 1) and (req.run_id is None) and not both
+    # n==1 token-streams live through the oai endpoints — EXCEPT run_id and
+    # base_model, which always route through native sample_stream (whole sample, no
+    # token streaming) for response fidelity the oai wire loses:
+    #   - run_id: tinker's oai /completions serves the BASE model for a LoRA sampler
+    #     path (tinker-feedback#125), so the live single-sample path would silently
+    #     show base output instead of the finetune.
+    #   - base_model: the /completions path skips renderer.parse_response (channel-CoT
+    #     families like gpt-oss leak thinking into `content` with thinking off) and
+    #     returns no raw_meta / token_logprobs; the native path gives all three.
+    # Only loose sampler_path (server renders) + openrouter still stream at n==1.
+    # TODO(tinker-feedback#125): when fixed, drop `req.run_id is None` to restore
+    # token streaming for single samples from LoRA runs (base_model stays native).
+    stream = (n == 1) and (req.run_id is None) and (req.base_model is None) and not both
 
     async def gen():
         # ── resolve the model + build the per-sample producer ───────────────
@@ -394,18 +406,13 @@ async def chat(req: ChatRequest):
                         logprobs=req.logprobs,
                     )
 
+                # Base models ALWAYS sample native (never the oai stream): the
+                # /completions path drops renderer.parse_response + raw_meta +
+                # token_logprobs (see the `stream` note above). `stream` is already
+                # False here (req.base_model is set), so there's no streaming arm.
                 if both:
                     total = 2 * n
                     produce_iter = _dual(base_iter(False), base_iter(True), n)
-                elif stream:
-                    renderer_name = select_renderer_name(req.base_model, None, req.thinking)
-                    _, prompt_text, stop = await get_sampler().render(
-                        req.base_model, renderer_name, native_msgs
-                    )
-                    produce_iter = tinker_oai.completions_stream(
-                        model=req.base_model, prompt=prompt_text, stop=stop,
-                        temperature=temperature, max_tokens=max_tokens, top_p=req.top_p,
-                    )
                 else:
                     produce_iter = base_iter(bool(req.thinking))
                 sel_patch = {}  # frontend tracks the base-model selection (sentinel)

@@ -166,6 +166,16 @@ class ModelCatalog {
     return m?.label || sp;
   }
 
+  /** Whether a `base:` pick supports the thinking toggle, per the tinker catalog's
+   *  `supports_thinking`. Undefined when the catalog isn't loaded yet or the base
+   *  isn't in it (e.g. a recents-only pick) → the caller defaults to true, so the
+   *  composer's thinking control stays visible (back-compat). */
+  baseSupportsThinking(id: string | null | undefined): boolean | undefined {
+    const bm = baseModelId(id);
+    if (bm == null) return undefined;
+    return this.tinkerModels.find((t) => t.base_model === bm)?.supports_thinking;
+  }
+
   /** The panel dropdown's trigger-button text — same iconography the old
    *  <select><option> used (⊘/? sampleability, ◆/◇/↗ group markers). */
   selectedModelLabel(sel: { run_id: string | null }): string {
