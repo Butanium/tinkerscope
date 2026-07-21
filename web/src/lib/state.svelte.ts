@@ -10,7 +10,7 @@
 //      render from these, so CLI-initiated and browser-initiated chats share one
 //      render path.
 
-import { sse } from './api';
+import { api, sse } from './api';
 import type { PlaygroundState, SampleData, Panel } from './types';
 
 /** Live accumulation for one compare-panel's in-flight / finished chat run. */
@@ -93,13 +93,50 @@ class LiveStore {
     return Object.values(this.panels).some((p) => p?.running);
   }
 
+  /** Restore a wiped server bus from this tab's mirror: full panel list
+   *  (selections + transcript echoes), open conversation, sampling params. */
+  #reprime(prev: PlaygroundState): void {
+    api
+      .setState({
+        conversation_id: prev.conversation_id,
+        panels: prev.panels,
+        system_prompt: prev.system_prompt,
+        temperature: prev.temperature,
+        max_tokens: prev.max_tokens,
+        n_samples: prev.n_samples,
+        thinking: prev.thinking,
+        top_p: prev.top_p
+      })
+      .then((merged) => {
+        if (merged) this.state = merged;
+      })
+      .catch((e) => console.warn('bus re-prime failed', e));
+  }
+
   #onEvent(event: string, data: any): void {
     this.connected = true;
     switch (event) {
-      case 'snapshot':
-        if (data?.state) this.state = data.state as PlaygroundState;
+      case 'snapshot': {
+        const next = (data?.state ?? null) as PlaygroundState | null;
+        if (next) {
+          const prev = this.state;
+          // Amnesiac snapshot = the server's in-memory bus was wiped (backend
+          // restart) while this tab still holds the richer picture. Assigning it
+          // would collapse the UI to the default single panel — and a save landing
+          // in that window would PERSIST the wrong layout. Keep our mirror and
+          // re-prime the server instead, so `tinkpg state` isn't blind until the
+          // next conversation switch. Skip while the fresh server is mid-chat
+          // (a CLI drive owns the bus then; last-writer-wins as usual).
+          const wiped =
+            prev != null &&
+            next.conversation_id == null &&
+            (prev.conversation_id != null || next.chat_id < prev.chat_id);
+          if (wiped && !next.running) this.#reprime(prev);
+          else if (!wiped) this.state = next;
+        }
         this.onSnapshot?.(); // reconnect reconcile (a fresh subscriber always gets a snapshot)
         break;
+      }
       case 'patch':
         if (data?.state) this.state = data.state as PlaygroundState;
         break;
