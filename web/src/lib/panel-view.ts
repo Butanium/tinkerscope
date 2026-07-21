@@ -66,6 +66,8 @@ export function buildPanelView(tree: ConvTree, run: PanelRun, prefill?: string):
     // with the data living server-side — consumers resolve via lib/node-blobs.
     has_token_logprobs: n.has_token_logprobs,
     has_raw_meta: n.has_raw_meta,
+    system_prompt: n.system_prompt,
+    isRoot: n.parent === null,
     nodeId: n.id,
     sib: siblingInfo(tree, n.id),
     isBucket: false

@@ -40,11 +40,15 @@ class StatePatch(BaseModel):
     # per-panel active-path echo {panel_id: messages} — mirrors transcripts for all
     # panels in one patch without touching their run_id/checkpoint.
     panel_messages: dict[str, list[dict]] | None = None
+    # per-panel active-THREAD system-prompt echo {panel_id: str|None} — mirrored
+    # like panel_messages (the thread part a CLI send inherits by omission).
+    panel_thread_system: dict[str, str | None] | None = None
     # targeted single-panel sub-patch
     panel: str | None = None
     run_id: str | None = None
     checkpoint: str | None = None
     messages: list[dict] | None = None
+    thread_system_prompt: str | None = None
     # global params
     system_prompt: str | None = None
     temperature: float | None = None

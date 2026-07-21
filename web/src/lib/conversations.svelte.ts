@@ -31,6 +31,8 @@ import {
   emptyTree,
   activeMessages,
   reconcileExternal,
+  selectedChildId,
+  ROOT,
   type ConvTree,
   type Msg
 } from './tree';
@@ -189,11 +191,16 @@ class ConversationsStore {
     // is empty (not loaded yet) so initial bootstrap still mirrors.
     const liveIds = new Set((live.state?.panels ?? []).map((p) => p.id));
     const panel_messages: Record<string, Msg[]> = {};
+    const panel_thread_system: Record<string, string | null> = {};
     for (const [pid, tree] of Object.entries(this.trees)) {
       if (liveIds.size && !liveIds.has(pid)) continue;
       panel_messages[pid] = activeMessages(tree);
+      // The active THREAD's system prompt rides with the echo: a mid-thread CLI
+      // send inherits it server-side, and the reconnect reconcile reads it back.
+      const rootId = selectedChildId(tree, ROOT);
+      panel_thread_system[pid] = (rootId ? tree.nodes[rootId]?.system_prompt : null) ?? null;
     }
-    api.setState({ panel_messages }).catch(() => {});
+    api.setState({ panel_messages, panel_thread_system }).catch(() => {});
   }
 
   /** Duplicate one panel's tree into another (used when a new compare panel should
@@ -309,7 +316,10 @@ class ConversationsStore {
       for (const p of prev) if (!ids.includes(p)) this.#markDropped(p);
     }
     return api
-      .setState({ panel_messages: Object.fromEntries(ids.map((id) => [id, []])) })
+      .setState({
+        panel_messages: Object.fromEntries(ids.map((id) => [id, []])),
+        panel_thread_system: Object.fromEntries(ids.map((id) => [id, null]))
+      })
       .then(() => {})
       .catch(() => {});
   }
@@ -599,7 +609,8 @@ class ConversationsStore {
     const next = await api
       .setState({
         panels: layout.map((p) => ({ id: p.id, run_id: p.run_id, checkpoint: p.checkpoint, messages: [] })),
-        panel_messages: Object.fromEntries(ids.map((id) => [id, []]))
+        panel_messages: Object.fromEntries(ids.map((id) => [id, []])),
+        panel_thread_system: Object.fromEntries(ids.map((id) => [id, null]))
       })
       .catch(() => null);
     if (next) live.state = next;
@@ -747,6 +758,9 @@ class ConversationsStore {
       patch.panel_messages = Object.fromEntries(
         (live.state?.panels ?? []).map((p) => [p.id, []])
       );
+      patch.panel_thread_system = Object.fromEntries(
+        (live.state?.panels ?? []).map((p) => [p.id, null])
+      );
     }
     const next = await api.setState(patch).catch(() => null);
     if (next) live.state = next;
@@ -766,7 +780,9 @@ class ConversationsStore {
         const echo = (ps.messages ?? []) as Msg[];
         const cur = this.trees[ps.id];
         if (cur && echo.length && !msgsEqual(echo, activeMessages(cur)))
-          this.trees = { ...this.trees, [ps.id]: reconcileExternal(cur, echo) };
+          // The panel mirror's thread system travels with the echo (same patch),
+          // so the stray turn folds under the right probe root.
+          this.trees = { ...this.trees, [ps.id]: reconcileExternal(cur, echo, ps.thread_system_prompt) };
       }
     }
     this.#mirror();
@@ -791,7 +807,10 @@ class ConversationsStore {
     };
   }
 
-  #onExternalDone(panel: Panel, data: { client_token?: string | null; conversation_id?: string | null }): void {
+  #onExternalDone(
+    panel: Panel,
+    data: { client_token?: string | null; conversation_id?: string | null; thread_system_prompt?: string | null }
+  ): void {
     // Own chats fold from their bus bucket (routed to the chat store before this) —
     // skip here too as defense in case an own terminal ever reaches this path.
     if (data?.client_token && this.#ownTokens.has(data.client_token)) return;
@@ -812,7 +831,10 @@ class ConversationsStore {
     const msgs = ps?.messages as Msg[] | undefined;
     if (!msgs || !msgs.length) return;
     const cur = this.treeFor(panel);
-    const next = reconcileExternal(cur, msgs);
+    // The terminal event stamps the chat's resolved thread system prompt so the
+    // fold lands on (or mints) the RIGHT root — same-content roots under
+    // different prompts are distinct threads. Absent (legacy server) = unknown.
+    const next = reconcileExternal(cur, msgs, data?.thread_system_prompt);
     if (next === cur) return; // idempotent — already represented + selected
     // Only a genuinely NEW root branch (divergent reset) hides the prior thread;
     // an in-place extend / re-select keeps it visible, so no notice for those.
@@ -844,7 +866,7 @@ class ConversationsStore {
         const echo = (ps.messages ?? []) as Msg[];
         const cur = this.trees[ps.id];
         if (cur && echo.length && !msgsEqual(echo, activeMessages(cur))) {
-          this.trees = { ...this.trees, [ps.id]: reconcileExternal(cur, echo) };
+          this.trees = { ...this.trees, [ps.id]: reconcileExternal(cur, echo, ps.thread_system_prompt) };
           changed = true;
         }
       }

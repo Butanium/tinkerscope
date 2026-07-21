@@ -22,6 +22,7 @@ import {
   siblingInfo,
   siblingsOf,
   threadStarts,
+  threadSystemAt,
   reconcileExternal,
   assertValid,
   __resetIds,
@@ -486,6 +487,108 @@ test('threadStarts: duplicate same-content roots in one panel collapse to one en
   eq(starts.length, 1);
   eq(starts[0].roots.A, a1.nodeId); // first occurrence wins as the switch target
   eq(starts[0].activeIn, ['A']); // active detection still sees the selected twin
+});
+
+// ── thread system prompts (root-node field) ──────────────────────────
+
+test('appendUserTurn stamps the thread system prompt on a ROOT node only', () => {
+  const r = appendUserTurn(emptyTree(), 'q', true, 'be terse');
+  eq(r.tree.nodes[r.nodeId].system_prompt, 'be terse');
+  // mid-thread appends never stamp (the field is root-only)
+  const mid = appendUserTurn(r.tree, 'follow-up', false, 'ignored');
+  eq(mid.tree.nodes[mid.nodeId].system_prompt, undefined);
+  assertValid(mid.tree);
+});
+
+test('system_prompt survives clone-based ops', () => {
+  const r = appendUserTurn(emptyTree(), 'q', true, 'be terse');
+  const f = foldAssistant(r.tree, r.nodeId, [{ content: 'a' }]);
+  const c = cycle(f.tree, f.ids[0], 0); // any op → cloneTree path
+  eq(f.tree.nodes[r.nodeId].system_prompt, 'be terse');
+  eq(deleteSubtree(f.tree, f.ids[0]).nodes[r.nodeId].system_prompt, 'be terse');
+  void c;
+});
+
+test('editUserFork on a root carries the fork system prompt; non-root ignores it', () => {
+  const r = appendUserTurn(emptyTree(), 'q', true, 'be terse');
+  const fork = editUserFork(r.tree, r.nodeId, 'q', 'be verbose')!;
+  eq(fork.tree.nodes[fork.newUserId].system_prompt, 'be verbose');
+  eq(fork.tree.nodes[r.nodeId].system_prompt, 'be terse'); // original untouched
+  // a non-root user edit never gains the field
+  const f = foldAssistant(fork.tree, fork.newUserId, [{ content: 'a' }]);
+  const mid = appendUserTurn(f.tree, 'follow-up');
+  const midFork = editUserFork(mid.tree, mid.nodeId, 'edited', 'ignored')!;
+  eq(midFork.tree.nodes[midFork.newUserId].system_prompt, undefined);
+  assertValid(midFork.tree);
+});
+
+test('editUserForkCopy on a root carries the fork system prompt', () => {
+  const r = appendUserTurn(emptyTree(), 'q', true, 'be terse');
+  const f = foldAssistant(r.tree, r.nodeId, [{ content: 'a' }]);
+  const copy = editUserForkCopy(f.tree, r.nodeId, 'q2', 'be verbose')!;
+  eq(copy.tree.nodes[copy.newUserId].system_prompt, 'be verbose');
+  assertValid(copy.tree);
+});
+
+test('threadStarts: same first message under different system prompts = DISTINCT threads', () => {
+  const a1 = appendUserTurn(emptyTree(), 'q', true, 'letter only');
+  const a2 = appendUserTurn(a1.tree, 'q', true, 'think step by step');
+  const a3 = appendUserTurn(a2.tree, 'q', true); // no thread system
+  const starts = threadStarts({ A: a3.tree });
+  eq(starts.length, 3);
+  eq(starts[0].system, 'letter only');
+  eq(starts[1].system, 'think step by step');
+  eq(starts[2].system, undefined);
+  eq(starts[2].activeIn, ['A']);
+  // and the same PAIR still unifies across panels
+  const b1 = appendUserTurn(emptyTree(), 'q ', true, 'letter only');
+  const both = threadStarts({ A: a3.tree, B: b1.tree });
+  eq(both.length, 3);
+  eq(Object.keys(both[0].roots), ['A', 'B']);
+});
+
+test('threadSystemAt walks any depth up to the root thread prompt', () => {
+  const r = appendUserTurn(emptyTree(), 'q', true, 'be terse');
+  const f = foldAssistant(r.tree, r.nodeId, [{ content: 'a' }]);
+  const mid = appendUserTurn(f.tree, 'follow-up');
+  const f2 = foldAssistant(mid.tree, mid.nodeId, [{ content: 'b' }]);
+  eq(threadSystemAt(f2.tree, f2.ids[0]), 'be terse'); // deep assistant → root prompt
+  eq(threadSystemAt(f2.tree, r.nodeId), 'be terse'); // the root itself
+  const plain = appendUserTurn(f2.tree, 'other', true);
+  eq(threadSystemAt(plain.tree, plain.nodeId), undefined); // promptless thread
+});
+
+test('reconcileExternal matches the root by the (content, system) PAIR when known', () => {
+  // two probe threads: same first message, different prompts
+  const a = appendUserTurn(emptyTree(), 'q', true, 'sysA');
+  const b = appendUserTurn(a.tree, 'q', true, 'sysB');
+  // a transcript from the sysA probe folds under (re-selects) the sysA root…
+  const t1 = reconcileExternal(b.tree, [U('q'), A('r1')], 'sysA');
+  eq(activePath(t1)[0].id, a.nodeId);
+  eq(activePath(t1)[0].system_prompt, 'sysA');
+  // …a NEW prompt mints (and stamps) a fresh root instead of grafting
+  const t2 = reconcileExternal(b.tree, [U('q'), A('r2')], 'sysC');
+  eq(t2.rootChildren.length, 3);
+  eq(activePath(t2)[0].system_prompt, 'sysC');
+  // …and known-absent ('' / null) refuses both prompted roots too
+  const t3 = reconcileExternal(b.tree, [U('q'), A('r3')], '');
+  eq(t3.rootChildren.length, 3);
+  eq(activePath(t3)[0].system_prompt, undefined);
+  assertValid(t3);
+});
+
+test('reconcileExternal with UNKNOWN provenance keeps legacy content-only root matching', () => {
+  const a = appendUserTurn(emptyTree(), 'q', true, 'sysA');
+  const t = reconcileExternal(a.tree, [U('q'), A('r')]); // no threadSystem arg
+  eq(t.rootChildren.length, 1); // grafted onto the existing root, as before
+  eq(activePath(t)[0].id, a.nodeId);
+});
+
+test('treeFromMessages stamps the thread system on its minted root', () => {
+  const t = treeFromMessages([U('q'), A('r')], 'be terse');
+  eq(activePath(t)[0].system_prompt, 'be terse');
+  eq(threadStarts({ A: t }).length, 1);
+  eq(threadStarts({ A: t })[0].system, 'be terse');
 });
 
 // ── summary ──────────────────────────────────────────────────────────

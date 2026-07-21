@@ -141,6 +141,21 @@ have each one); picking a thread switches **every panel that has it** while
 panels without it keep their current thread — threads are per-panel and are
 never force-aligned.
 
+A thread can carry its **own system prompt**, stored as a field of its first
+message and **appended to the global one** at fire time (`global ⏎ thread` —
+the global stays the shared base). With ⑂ armed, a *＋ thread system* chip on
+the composer sets it for the next new thread; a thread that has one wears a
+collapsed `system` strip above its first message (click to expand), the ⑂
+threads popover labels each thread with its `sys:` snippet, and the first
+row's edit box gains a *Thread system prompt* field — so "same question, new
+prompt" is just an edit, which forks a sibling thread like any other edit.
+Two threads sharing a first message under **different** prompts are distinct
+threads (the cycler / popover / CLI reconcile all treat the pair as the
+identity), which is exactly the probe-battery pattern: fire the same MCQ under
+four framings and cycle ‹k/4› on the first row to compare. Every regen /
+continue / mid-thread send composes the **thread's own** prompt (walked from
+its root), never the composer's current one.
+
 #### The shift-modifier vocabulary
 
 Holding **Shift** turns each action into its "power" variant. The button icon and
@@ -230,6 +245,7 @@ tinkpg compare <runA> <runB> "..."     # two-pane compare, live in the browser
 tinkpg send "prompt"                   # NEW THREAD at the current panels (layout untouched)
 tinkpg send --file probe.txt           # …with the message read from a file (probe templates)
 tinkpg continue "follow-up"            # LOOM: add a turn to the current threads (multi-turn send)
+tinkpg battery <dir>                   # fire a DIRECTORY of probe files as sequential sends (probe battery)
 tinkpg state                           # dump the shared playground state
 tinkpg params [--temperature ...]      # show / SET the GLOBAL sampling params (the deliberate route)
 tinkpg conv [<id|name>]                # browse saved workspaces; no arg lists them all (alias: ws)
@@ -251,10 +267,22 @@ sidebar. Param args on `chat`/`compare`/`send`/`continue` are **per-call**: they
 apply to that fire only, any param you don't pass inherits the current global
 value, and nothing is written back — a CLI probe can't clobber the sidebar.
 (`--n` is the exception: it never inherits — an explicit fan-out size, default 1.)
-`--no-system` fires with no system prompt even when the global state carries one.
+`--no-system` fires with no system prompt at all (global AND thread part) even
+when the state carries one.
 The **deliberate** route is `tinkpg params`: with options it SETS the global
 state (the browser updates live — `--clear-system` removes the system prompt,
 `--system-file` reads one from a file); with none it shows the current values.
+
+**Thread system prompts.** A thread's first message can carry its own system
+prompt, composed over the global one at fire time (`global ⏎ thread`; see the
+browser section above). On `tinkpg send` — always a new-thread fire — `--system`
+sets the **thread** prompt: it's recorded on the new thread's first message
+(visible in the browser strip / `conv` threads index) and composed over the
+global part, which is never clobbered. On `continue`/`chat`/`compare`,
+`--system` keeps its per-call **global-part** meaning; the thread part is
+whatever the target thread's first message carries — a continue into a probe
+thread stays under that probe's prompt automatically, including `--node` /
+`--thread` targets on non-active branches.
 
 `tinkpg conv` and `tinkpg state` skip panels folded in the browser UI by default
 (a one-line stub + a trailing "N folded panel(s) skipped: …" list, so you still
@@ -267,9 +295,10 @@ shows every panel). `tinkpg samples` defaults to the first non-folded panel
 
 When a workspace holds several ROOT threads (branch-from-start first
 messages), `tinkpg conv <id>` prints a per-panel `threads:` index — each
-thread's first message + fan-out size, `*` = active — and `tinkpg samples
---thread k` shows the full n-sample fan-out of thread `k`, including non-active
-threads that the active-path views can't reach.
+thread's first message + fan-out size, `*` = active, plus a `sys:` line for a
+thread that carries its own system prompt — and `tinkpg samples --thread k`
+shows the full n-sample fan-out of thread `k`, including non-active threads
+that the active-path views can't reach.
 
 `tinkpg samples` reading ergonomics: `--sample K` isolates one sibling of the
 fan-out, and `--slice START[:LEN]` shows a character window of each shown sample
@@ -291,11 +320,27 @@ walkers) can never reach.
 `tinkpg send`/`continue` take `--logprobs` (print each sample's per-token
 logprob + top-5 alternatives — native tinker sampling only: `run_id` + `base_model`
 at any `n`. A single `n=1` fire to a loose checkpoint or OpenRouter streams through
-a different, logprob-free path) and `--json`
+a different, logprob-free path), `--first-token` (after the fire, print each
+panel's first-token probability table — the same view as `samples
+--first-token`, without a second command) and `--json`
 (JSONL to stdout, one object per sample + a closing `{"event":"done"}`; the
 human plan/progress text moves to stderr so stdout stays parseable). `samples`
 and `grep` also take `--json` (one JSON object / array; untruncated content —
 no need to regex the human-formatted text).
+
+`tinkpg battery <dir>` fires a **directory of probe files** (`*.txt`, sorted
+order) as sequential `send`s — the batch form of the probe pattern. Each file is
+the user message, optionally preceded by a `---`-delimited front-matter header
+of per-probe overrides: `system:` (the probe's **thread** system prompt — each
+probe file is one (message, system) thread identity), `no-system:`,
+`prefill:`, `n:`, `temperature:`, `max-tokens:`, `thinking: on|off|both`,
+`panel: a,b`. Unknown keys are a hard error (typo protection). Command-line
+options set the defaults probes don't override; omitted = inherit the global
+params, like any send. Per-probe JSONL streams land in `<dir>/results/`
+(`--out` overrides), a per-panel first-token table prints after each probe
+(`--no-first-token` to skip), failures are per-probe and non-fatal (summary +
+exit code at the end), and `--pause` (default 3 s) spaces the fires so the
+human can watch them land thread-by-thread in the browser.
 
 `tinkpg continue --ancestry-file <path>` looms from an EXPLICIT full transcript
 (a JSON list of `{role, content}` dicts) instead of a tree/panel — for a

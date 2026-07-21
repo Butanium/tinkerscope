@@ -107,6 +107,12 @@ class ChatRequest(BaseModel):
     # transiently-empty UI input can't 422 the request)
     messages: list[ChatMessage]
     system_prompt: str | None = None
+    # Thread-level system prompt, composed OVER the global/call system part at
+    # sample time (compose_system: "\n"-join, empty parts skipped) and recorded by
+    # the browser on the thread's ROOT node. Tri-state: None = inherit the target
+    # panel's mirrored thread system (PanelState.thread_system_prompt — the thread
+    # being extended); "" = explicitly no thread part; "X" = X.
+    thread_system_prompt: str | None = None
     temperature: float | None = None
     max_tokens: int | None = None
     n_samples: int | None = None
@@ -307,11 +313,19 @@ def resolve_params(req: ChatRequest, st: Any) -> dict:
 
     system_prompt="" is an explicit "no system prompt" — it never inherits (the
     chat builders treat empty as absent), so a call-scoped client can opt OUT of
-    an inherited system prompt without a wire change."""
+    an inherited system prompt without a wire change.
+
+    thread_system_prompt resolves independently of params_scope (it's thread
+    state, not a sampling param): an explicit value wins ("" = explicitly no
+    thread part), None inherits the target panel's mirrored thread system."""
     inherit = req.params_scope == "call"
+    panel = next((p for p in getattr(st, "panels", []) if p.id == req.panel), None)
     return {
         "system_prompt": req.system_prompt if req.system_prompt is not None
         else (st.system_prompt if inherit else None),
+        "thread_system_prompt": req.thread_system_prompt
+        if req.thread_system_prompt is not None
+        else ((panel.thread_system_prompt if panel else None) or ""),
         "temperature": req.temperature if req.temperature is not None
         else (st.temperature if inherit else 1.0),
         "max_tokens": req.max_tokens or (st.max_tokens if inherit else 1024),
@@ -320,6 +334,13 @@ def resolve_params(req: ChatRequest, st: Any) -> dict:
         else (st.thinking if inherit else False),
         "top_p": req.top_p if req.top_p is not None else (st.top_p if inherit else None),
     }
+
+
+def compose_system(global_part: str | None, thread_part: str | None) -> str:
+    """The effective system prompt for one chat: the global/call part with the
+    thread part appended (newline join, empty/None parts skipped). "" ⇒ no
+    system message at all. The ONE compose site for browser + CLI."""
+    return "\n".join(p for p in (global_part, thread_part) if p)
 
 
 @router.post("/chat")
@@ -338,9 +359,14 @@ async def chat(req: ChatRequest):
     ]
     params = resolve_params(req, BUS.state)
     system_prompt, top_p = params["system_prompt"], params["top_p"]
+    thread_system = params["thread_system_prompt"]
     thinking: "bool | str" = params["thinking"]
-    if system_prompt and not any(m["role"] == "system" for m in msgs):
-        sys_msg = {"role": "system", "content": system_prompt}
+    # `system_prompt` stays the GLOBAL/call part (it's what a "global"-scope chat
+    # writes back to the shared state below); only the composed effective prompt
+    # reaches the model.
+    effective_system = compose_system(system_prompt, thread_system)
+    if effective_system and not any(m["role"] == "system" for m in msgs):
+        sys_msg = {"role": "system", "content": effective_system}
         sampling_msgs = [sys_msg, *sampling_msgs]
         native_msgs = [sys_msg, *native_msgs]
 
@@ -509,6 +535,10 @@ async def chat(req: ChatRequest):
         state_patch = {
             "panel": req.panel,
             "messages": msgs,
+            # Panel-routed: the RESOLVED thread part, so a CLI new-thread probe
+            # updates the panel's thread mirror and an inheriting send is a no-op
+            # write-back (thread state, not a sampling param — both scopes).
+            "thread_system_prompt": thread_system,
             **sel_patch,
         }
         if req.params_scope != "call":
@@ -581,7 +611,10 @@ async def chat(req: ChatRequest):
                     # conversation_id scopes the browser's external fold (#onExternalDone):
                     # every terminal flavour — done / error / cancelled — carries the stamp.
                     payload = {"chat_id": chat_id, "panel": req.panel, "client_token": req.client_token,
-                               "conversation_id": conv_id}
+                               "conversation_id": conv_id,
+                               # the resolved thread part — the browser's foreign-fold
+                               # reconcile stamps it onto the thread's root node
+                               "thread_system_prompt": thread_system}
                     if err_msg is not None:
                         payload["error"] = err_msg
                     await BUS.broadcast(event, payload)
@@ -630,7 +663,8 @@ async def chat(req: ChatRequest):
                 await BUS.broadcast(
                     "chat_start",
                     {"chat_id": chat_id, "panel": req.panel, "n": total, "label": label,
-                     "client_token": req.client_token, "conversation_id": conv_id},
+                     "client_token": req.client_token, "conversation_id": conv_id,
+                     "thread_system_prompt": thread_system},
                 )
             while True:
                 kind, payload = await q.get()

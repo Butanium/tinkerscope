@@ -46,10 +46,16 @@
       <div class="thread-menu" data-testid="thread-menu">
         {#each starts as ts, i (i)}
           {@const n = Object.keys(ts.roots).length}
-          <button class="thread-row" class:active={mark(ts) === '●'} onclick={() => pick(ts)} title={ts.content}>
-            <span class="thread-mark">{mark(ts)}</span>
-            <span class="thread-text">{ts.content.replace(/\s+/g, ' ')}</span>
-            <span class="thread-count">×{n}</span>
+          <button class="thread-row" class:active={mark(ts) === '●'} onclick={() => pick(ts)} title={ts.system ? `system: ${ts.system}\n\n${ts.content}` : ts.content}>
+            <span class="thread-head">
+              <span class="thread-mark">{mark(ts)}</span>
+              <span class="thread-text">{ts.content.replace(/\s+/g, ' ')}</span>
+              <span class="thread-count">×{n}</span>
+            </span>
+            {#if ts.system}
+              <!-- The thread's system prompt — what tells same-first-message probes apart. -->
+              <span class="thread-sys">sys: {ts.system.replace(/\s+/g, ' ')}</span>
+            {/if}
           </button>
         {/each}
       </div>
@@ -90,8 +96,9 @@
   }
   .thread-row {
     display: flex;
-    align-items: center;
-    gap: 6px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1px;
     width: 100%;
     padding: 4px 8px;
     border: none;
@@ -101,6 +108,22 @@
     font-size: 0.72rem;
     text-align: left;
     cursor: pointer;
+  }
+  .thread-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+  .thread-sys {
+    padding-left: calc(0.9em + 6px); /* align under .thread-text past the mark */
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    color: var(--color-accent);
+    opacity: 0.85;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .thread-row:hover {
     background: var(--color-bg);

@@ -34,6 +34,11 @@ class PanelState:
     run_id: str | None = None
     checkpoint: str | None = None         # checkpoint name, e.g. "final"
     messages: list[dict] = field(default_factory=list)   # [{role, content}]
+    # The ACTIVE thread's system prompt (composed OVER the global one at sample
+    # time — see routes/chat.py compose_system). Mirrored by the browser like
+    # `messages`, so a CLI send that doesn't say otherwise extends the thread
+    # under the prompt it was started with. None/"" = no thread part.
+    thread_system_prompt: str | None = None
 
 
 @dataclass
@@ -92,7 +97,7 @@ class StateBus:
 
     # Fields that live on a PanelState, not the top-level state. A patch carrying a
     # `panel` id routes these to that panel; without `panel` they're ignored.
-    _PANEL_FIELDS = ("run_id", "checkpoint", "messages")
+    _PANEL_FIELDS = ("run_id", "checkpoint", "messages", "thread_system_prompt")
 
     # Storage-v2 diet: the per-panel transcript echoes are text mirrors the CLI reads
     # (role/content only — verified it reads nothing else); the heavy per-node fields
@@ -120,6 +125,7 @@ class StateBus:
             run_id=p.get("run_id"),
             checkpoint=p.get("checkpoint"),
             messages=cls._light_msgs(p.get("messages")),
+            thread_system_prompt=p.get("thread_system_prompt"),
         )
 
     def _patch_panel(self, panel_id: str, key: str, value: Any) -> None:
@@ -150,6 +156,11 @@ class StateBus:
                 # mirrored in one patch without touching run_id/checkpoint.
                 for pid, msgs in (v or {}).items():
                     self._patch_panel(pid, "messages", self._light_msgs(msgs))
+            elif k == "panel_thread_system":
+                # {panel_id: str|None} — the store's active-thread system-prompt
+                # echo, bulk-mirrored like panel_messages.
+                for pid, ts in (v or {}).items():
+                    self._patch_panel(pid, "thread_system_prompt", ts)
             elif k in self._PANEL_FIELDS:
                 if panel_id is not None:
                     self._patch_panel(

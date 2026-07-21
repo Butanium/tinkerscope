@@ -36,6 +36,7 @@ tinkpg chat <run>[@ckpt] "<prompt>" [opts]          # sample; streams to stdout 
 tinkpg compare <run_a>[@ckpt] <run_b>[@ckpt] "<prompt>" [opts]   # A→left pane, B→right pane (REPLACES the layout)
 tinkpg send "<prompt>" [opts] [--panel P ...]       # NEW THREAD at the CURRENT panels — layout untouched (the safe probe)
 tinkpg continue "<follow-up>" [opts] [--panel P] [--thread K] [--turn N] [--node ID] [--ancestry-file FILE]   # LOOM: add a turn to existing thread(s), OR to an explicit external transcript
+tinkpg battery <dir> [--n N] [--pause S] [--out DIR] [--panel P ...] [--no-first-token]   # fire a DIRECTORY of probe *.txt files as sequential sends (one probe = one thread)
 tinkpg state [--full] [--width N] [--no-link] [--json] [--include-folded]   # DIGEST of on-screen panels (active path + matched saved conv)
 tinkpg params [--temperature T] [--max-tokens M] [--n N] [--thinking/--no-thinking|--thinking-both] [--top-p P] [--system S|--system-file F|--clear-system]   # show / SET the GLOBAL sampling params (browser sidebar updates live)
 tinkpg conv                                         # list saved WORKSPACES + branch metadata (alias: tinkpg ws)
@@ -47,12 +48,26 @@ tinkpg refresh                                      # rescan filesystem + re-pro
 
 `send`/`continue` also take `--logprobs` (per-token logprob + top-5 alts, native
 tinker sampling only: `run_id` + `base_model` at any `n`. A single `n=1` fire to
-a loose checkpoint or OpenRouter streams through a different, logprob-free path)
+a loose checkpoint or OpenRouter streams through a different, logprob-free path),
+`--first-token` (print each panel's first-token probability table right after
+the fire — same view as `samples --first-token` without a second command)
 and `--json` (JSONL to stdout — one object per
 sample + a closing `{"event":"done"}`; plan/progress text moves to stderr so
 stdout stays parseable). `samples`/`grep` also take `--json` (one JSON object /
 array, untruncated) — reach for these over regexing the human-formatted text
 when you're going to tally/filter programmatically.
+
+**`tinkpg battery <dir>` — the MCQ/probe-battery workhorse.** Fires every
+`*.txt` in a directory (sorted) as sequential new-thread sends. A probe file =
+optional `---` front-matter (`system:` — the probe's THREAD prompt, so one
+file = one (message, system) thread identity; `no-system:`, `prefill:`, `n:`,
+`temperature:`, `max-tokens:`, `thinking: on|off|both`, `panel: a,b`; unknown
+keys hard-error) + the user message verbatim. CLI options are the defaults
+probes don't override. Per-probe JSONL → `<dir>/results/` (`--out`); a
+first-token table prints after each probe (`--no-first-token` to skip);
+per-probe failures are non-fatal (summary + exit 1 at the end); `--pause`
+(default 3 s) spaces the fires so the human can watch threads land in the
+browser one by one.
 
 `chat`/`compare` options: `--n N` (samples), `--temperature T`, `--max-tokens M`,
 `--thinking` (thinking renderer), `--thinking-both` (n samples WITHOUT thinking +
@@ -66,11 +81,26 @@ and `--prefill-file <path>` (read the assistant prefill from a file).
 `chat`/`compare`/`send`/`continue` apply to THAT CALL ONLY: any param you don't
 pass inherits the human's current global state (their sidebar), and nothing you
 pass is written back — so a CLI probe never clobbers their setup. `--no-system`
-fires with NO system prompt even when the global state has one (`--n` never
+fires with NO system prompt at all — global AND thread part (`--n` never
 inherits; explicit, default 1). To DELIBERATELY change the shared state (the
 human sees their sidebar update live), use `tinkpg params` — no options = show
 current. Requires a server ≥ the params_scope contract (older servers apply the
 legacy clobber-on-chat behavior).
+
+**Thread system prompts (`send --system`).** A thread's first message can carry
+its OWN system prompt, composed over the global one at fire time (`global ⏎
+thread` — the global is the shared base, never clobbered). On `send` (always a
+new-thread fire) `--system` sets the THREAD prompt: durable (recorded on the
+thread's first message, shown in the browser as a `system` strip on the row +
+in the ⑂ threads popover) instead of ephemeral. This is THE way to run a probe
+battery: `tinkpg send --file q.txt --system "Answer with only the letter"`,
+then again with other framings — same first message under different prompts =
+distinct, cycleable threads. On `continue`, `--system` keeps its per-call
+GLOBAL-part meaning; the thread part is inherited from the TARGET thread's
+first message automatically (including `--node`/`--thread` targets on
+non-active branches), so a continue into a probe thread stays under that
+probe's prompt. `conv <id>`'s threads index prints each thread's `sys:` line;
+`samples` shows the fork's thread prompt in its header.
 
 ## Reading state vs. workspaces (they are DIFFERENT stores)
 

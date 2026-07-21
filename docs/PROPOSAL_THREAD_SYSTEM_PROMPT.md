@@ -1,5 +1,31 @@
 # Proposal: thread-level system prompts (composed over the global one)
 
+Status: **SHIPPED 2026-07-21** (same-day; Clément-approved v2 design). As-built
+contract: `docs/API_CONTRACT.md` (ChatRequest.thread_system_prompt, the
+PanelState mirror, the bus payloads) + `docs/BRANCHING_DESIGN.md` §2b (tree
+field, pair identity, reconcile). Deltas vs the sketch below, from the design
+round:
+
+- **v2 UI (Clément)**: the system prompt renders as a strip INSIDE the root
+  user row and edits as a second field in the row's edit box — one atomic
+  (system, content) unit that the ‹k/N› cycler swaps and edit-forks; the
+  composer input (⑂ armed only) is just the "authoring a root node" form.
+- **Thread identity became the (content, system) pair** everywhere
+  (threadStarts / switch / reconcile) — same first message under different
+  prompts must NOT conflate (the sharper form of open question 4 below).
+- **The panel state mirrors the active thread's prompt**
+  (`PanelState.thread_system_prompt`, next to the `messages` echo) — that's
+  where a MID-thread CLI send inherits the thread part from (tri-state wire:
+  null = inherit mirror, "" = none, "X" = X), and what the reconnect/on-load
+  reconcile reads.
+- Open Q1 resolved: append-only, no `--system-replace` until a real case.
+  Q2: every fire walks the tree root (`threadSystemAt`) — tested. Q3: no
+  backfill. Q4: resolved thread part rides chat_start AND the terminal events.
+
+Original proposal kept below for the record.
+
+---
+
 Status: PROPOSED (Clément, 2026-07-21, mid-session idea) — not scheduled.
 Origin: the MCQ first-token exploration fired ~14 probe threads into one
 workspace under FOUR different system prompts; the saved trees don't record

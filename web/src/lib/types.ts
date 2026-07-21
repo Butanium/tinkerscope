@@ -128,6 +128,10 @@ export type PanelState = {
   run_id: string | null;
   checkpoint: string | null;
   messages: ChatMessage[];
+  /** The active thread's system prompt — mirrored like `messages` (write-mostly;
+   *  the tree's root node is the read source). Lets a mid-thread CLI send inherit
+   *  the thread's prompt and the echo-reconcile stamp a recovered root. */
+  thread_system_prompt?: string | null;
 };
 
 /** Shared server-side playground state, streamed over /api/state/events. Sampling
@@ -158,6 +162,8 @@ export type StatePatch = {
   panels?: PanelState[];
   conversation_id?: string | null;
   panel_messages?: Record<string, ChatMessage[]>;
+  /** {panel_id: thread system prompt} — mirrored alongside panel_messages. */
+  panel_thread_system?: Record<string, string | null>;
   panel?: Panel;
   run_id?: string | null;
   checkpoint?: string | null;
@@ -181,6 +187,12 @@ export type ChatRequest = {
   openrouter_model?: string | null;
   messages: ChatMessage[];
   system_prompt?: string | null;
+  /** The THREAD's system prompt, composed over the global part server-side
+   *  (global + "\n" + thread; empty parts skipped). Tri-state: absent/null =
+   *  inherit the panel's mirrored thread system; '' = explicitly none; the
+   *  browser always sends it explicitly (root-node walk) so a stale mirror can
+   *  never leak into a browser fire. */
+  thread_system_prompt?: string | null;
   temperature: number;
   max_tokens: number;
   n_samples: number;
@@ -312,6 +324,12 @@ export type ViewMessage = {
    *  exists server-side even when the inline field above is absent. */
   has_token_logprobs?: boolean;
   has_raw_meta?: boolean;
+  /** Thread system prompt (ROOT user rows only) — renders the in-row system
+   *  strip and prefills the edit box's system field. */
+  system_prompt?: string;
+  /** True for the active path's first row (a thread root) — gates the edit
+   *  box's system field (present even when the root has no prompt yet). */
+  isRoot?: boolean;
   samples?: SampleData[];
   totalSamples?: number;
   running?: boolean;

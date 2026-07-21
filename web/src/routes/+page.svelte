@@ -280,9 +280,13 @@
     if (blank) convo.freshTree(id);
     else convo.duplicateTo(panelSels[0]?.panel ?? 'primary', id);
     const seedMsgs = activeMessages(convo.treeFor(id)) as ChatMessage[];
+    // The seeded thread's system prompt rides into the panel registration — the
+    // `panels` full-replace resets mirrors, and a duplicated probe thread must
+    // keep its prompt for CLI sends until the next tree commit re-mirrors.
+    const seedSys = activePath(convo.treeFor(id))[0]?.system_prompt ?? null;
     const nextPanels = [
       ...s.panels.map((p) => ({ ...p })),
-      { id, run_id: other?.id ?? null, checkpoint: ck, messages: seedMsgs }
+      { id, run_id: other?.id ?? null, checkpoint: ck, messages: seedMsgs, thread_system_prompt: seedSys }
     ];
     patchState({ panels: nextPanels }, true);
     // the new panel auto-joins sendTargets (active by default) via convo.syncPanels (the effect above)
@@ -492,6 +496,14 @@
   // appending to the active thread. Transient — deliberately not persisted, so a
   // reload never silently reopens a mode where sends stop extending the thread.
   let branchFromRoot = $state(false);
+  // THREAD system prompt for the next branch-from-start send: stamped on the new
+  // thread's root node and composed over the global prompt server-side. Only
+  // settable while ⑂ is armed (the composer is authoring a root node then);
+  // continuing a thread reuses ITS root's prompt automatically (chat store walk).
+  // Same collapse-keeps-text semantics as the prefill chip.
+  let threadSystemInput = $state('');
+  let showThreadSystem = $state(false);
+  let threadSystemActive = $derived(showThreadSystem && threadSystemInput.trim().length > 0);
 
   async function sendMessage() {
     const text = userInput.trim();
@@ -507,7 +519,12 @@
     // the others fire concurrently. Only selected send-target panels fire.
     for (const p of targetSels) {
       if (panelBusy(p.panel)) continue;
-      const { tree, nodeId } = appendUserTurn(convo.treeFor(p.panel), text, branchFromRoot);
+      const { tree, nodeId } = appendUserTurn(
+        convo.treeFor(p.panel),
+        text,
+        branchFromRoot,
+        branchFromRoot && threadSystemActive ? threadSystemInput.trim() : undefined
+      );
       convo.setTree(p.panel, tree);
       const msgs = activeMessages(convo.treeFor(p.panel)) as ChatMessage[];
       chat.clearPanelBucket(p.panel);
@@ -1629,7 +1646,7 @@
                   onDiscardOthers={(idx) => branchOps.discardOtherSamples(p.panel, msg, idx)}
                   onContinueSample={(idx) => branchOps.continueSample(p.panel, msg, idx)}
                   onDeleteSample={(idx) => branchOps.deleteSample(p.panel, msg, idx)}
-                  onEdit={(content, reasoning, copyDownstream, allPanels) => (allPanels ? branchOps.applyEditAll(p.panel, msg, content, reasoning, copyDownstream) : branchOps.applyEdit(p.panel, msg, content, reasoning, copyDownstream))}
+                  onEdit={(content, reasoning, copyDownstream, allPanels, system) => (allPanels ? branchOps.applyEditAll(p.panel, msg, content, reasoning, copyDownstream, system) : branchOps.applyEdit(p.panel, msg, content, reasoning, copyDownstream, system))}
                   onCopy={(all, withThinking) => branchOps.copyMessage(p.panel, msg, all, withThinking)}
                   otherPanels={panelSels.filter((x) => x.panel !== p.panel).map((x) => ({ id: x.panel, label: panelLabel(x) }))}
                   onSendToPanel={(dest) => branchOps.sendBranchToPanel(p.panel, msg, dest)}
@@ -1710,6 +1727,16 @@
             data-tooltip="While on, each MAIN-COMPOSER send starts a NEW THREAD (a sibling first message) instead of extending the current one. Per-panel bubble sends always continue their panel. Jump between threads with the ⑂ threads popover or the ‹k/N› arrows on the first row."
             use:tip
           >{branchFromRoot ? '⑂ branching from start' : '⑂ branch from start'}</button>
+          {#if branchFromRoot}
+            <button
+              class="prefill-toggle"
+              class:on={threadSystemActive}
+              data-testid="thread-system-toggle"
+              onclick={() => (showThreadSystem = !showThreadSystem)}
+              data-tooltip="THREAD system prompt for the next new-thread send: recorded on the thread's first message and appended to the global system prompt (global + newline + this). Continuing an existing thread always reuses that thread's own prompt. Collapse to disable (text is kept)."
+              use:tip
+            >{threadSystemActive ? '✎ thread system on' : '＋ thread system'}</button>
+          {/if}
           <ThreadSwitcher />
           {#if showPrefill}
             <span class="prefill-scope seg-toggle" data-tooltip="Which half(s) of the send get the prefill. Think only / Non-think only apply it to that side; with Both the other half is left un-prefilled. A single-mode send on the wrong side drops it entirely." use:tip>
@@ -1735,6 +1762,15 @@
             oninput={(e) => setSystemPrompt((e.target as HTMLTextAreaElement).value)}
             rows="3"
             placeholder="Optional system prompt..."
+          ></textarea>
+        {/if}
+        {#if branchFromRoot && showThreadSystem}
+          <textarea
+            class="prefill-textarea thread-system-textarea"
+            data-testid="thread-system-input"
+            bind:value={threadSystemInput}
+            rows="2"
+            placeholder="Thread system prompt — recorded on the NEW thread's first message, appended to the global system prompt."
           ></textarea>
         {/if}
         {#if showPrefill}
@@ -1931,6 +1967,8 @@
   .prefill-clear:hover { color: var(--color-accent); border-color: var(--color-border); }
   .prefill-textarea { width: 100%; margin-top: var(--space-2); padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-accent); border-radius: var(--radius); color: var(--color-text); font-family: var(--font-mono, monospace); font-size: 0.8rem; line-height: 1.45; resize: vertical; }
   .prefill-textarea:focus { outline: none; box-shadow: 0 0 0 1px var(--color-accent); }
+  /* Thread-system input: system-role tint so it reads as "prompt", not prefill. */
+  .thread-system-textarea { background: var(--color-system-bg); }
   .prefill-textarea::placeholder { color: var(--color-text-muted); opacity: 0.7; white-space: pre; }
   /* Scrollbar hidden app-wide (see app.css's scrollbar block); scrolling
      itself is unchanged. Only .chat-columns keeps a visible bar. */

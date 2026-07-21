@@ -20,7 +20,7 @@ import { live } from './state.svelte';
 import { conversations as convo } from './conversations.svelte';
 import { nodeBlobs } from './node-blobs.svelte';
 import { api } from './api';
-import { foldAssistant, type SampleLike } from './tree';
+import { foldAssistant, threadSystemAt, type SampleLike } from './tree';
 import type { Panel, ChatMessage, ChatRequest, SampleData } from './types';
 
 /** Sampling params for one fire, assembled by the caller from shared state + the
@@ -97,8 +97,13 @@ class ChatStore {
       scope: params.prefill_scope,
       thinking: params.thinking
     });
+    // The THREAD system prompt governing this fire = the target thread's root-node
+    // field (regen deep in a probe thread must compose the probe's prompt). Sent
+    // explicitly on EVERY fire — '' when the thread has none — so the server never
+    // falls back to a stale panel mirror for a browser chat.
+    const thread_system_prompt = threadSystemAt(convo.treeFor(panel), userParentId) ?? '';
     api
-      .chat({ ...model, messages, ...params, panel, broadcast: true, detached: true, client_token: token })
+      .chat({ ...model, messages, ...params, thread_system_prompt, panel, broadcast: true, detached: true, client_token: token })
       .then((res) => {
         if (res.ok) return; // accepted — the bus carries the outcome
         return res.text().then((t) => this.#failFire(token, onError, `Chat error ${res.status}: ${t}`));

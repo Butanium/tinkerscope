@@ -177,6 +177,16 @@ mark.hl-mark.hl-join-r { padding-right: 0; border-top-right-radius: 0; border-bo
 .edit-field-label { font-size: 0.64rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); margin: var(--space-1) 0 2px; }
 .edit-reasoning { border-color: var(--color-border); color: var(--color-text-secondary); font-size: 0.82rem; }
 .edit-reasoning:focus { border-color: var(--color-accent); }
+/* Thread-system editor (root user rows): dimmer than the message box, like the CoT one. */
+.edit-system { border-color: var(--color-border); background: var(--color-system-bg); color: var(--color-text-secondary); font-size: 0.8rem; font-family: var(--font-mono); }
+.edit-system:focus { border-color: var(--color-accent); }
+.edit-field-hint { font-weight: 400; text-transform: none; letter-spacing: 0; opacity: 0.8; }
+/* Thread-system strip: the root row's system prompt (composed over the global
+   one). A full-width button so click-to-expand is the whole strip. */
+.sys-strip { display: flex; align-items: baseline; gap: var(--space-2); width: 100%; text-align: left; margin-bottom: var(--space-2); padding: 3px var(--space-2); background: var(--color-system-bg); border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent); border-radius: var(--radius-sm); cursor: pointer; }
+.sys-strip-tag { flex-shrink: 0; font-size: 0.6rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-accent); }
+.sys-strip-text { min-width: 0; font-family: var(--font-mono); font-size: 0.72rem; color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sys-strip.expanded .sys-strip-text { white-space: pre-wrap; overflow: visible; }
 .edit-actions { display: flex; gap: var(--space-2); justify-content: flex-end; margin-top: var(--space-2); }
 .btn-edit-save { padding: 3px 12px; background: var(--color-accent); border: none; border-radius: var(--radius); color: white; font-size: 0.78rem; font-weight: 500; }
 .btn-edit-save:hover { opacity: 0.9; }

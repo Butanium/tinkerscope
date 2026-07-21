@@ -23,6 +23,7 @@ import {
   regenReplace,
   ancestryMessages,
   treeFromMessages,
+  threadSystemAt,
   editUserFork,
   editUserForkCopy,
   editAssistant,
@@ -257,13 +258,17 @@ class BranchOps {
   }
 
   /** Edit → fork. User: fork+regen (shift = fork+copy-downstream, no gen).
-   *  Assistant: a manual branch (no gen). Empty edits are ignored. */
+   *  Assistant: a manual branch (no gen). Empty edits are ignored.
+   *  `systemPrompt` (root user rows only): the fork's THREAD system prompt —
+   *  same question under a new prompt is just an edit that forks a sibling
+   *  thread. Trimmed-empty ⇒ the fork has none. */
   applyEdit(
     panel: Panel,
     msg: ViewMessage,
     content: string,
     reasoning: string | undefined,
-    copyDownstream: boolean
+    copyDownstream: boolean,
+    systemPrompt?: string
   ) {
     if (this.#d.panelBusy(panel) || msg.nodeId == null) return;
     const text = content.trim();
@@ -272,12 +277,13 @@ class BranchOps {
     if (!text && !(msg.role === 'assistant' && reasoning && reasoning.trim())) return;
     panelScroll.preserve(panel);
     chat.clearPanelBucket(panel);
+    const sys = systemPrompt?.trim() || undefined;
     if (msg.role === 'user') {
       if (copyDownstream) {
-        const r = editUserForkCopy(convo.treeFor(panel), msg.nodeId, text);
+        const r = editUserForkCopy(convo.treeFor(panel), msg.nodeId, text, sys);
         if (r) convo.setTree(panel, r.tree);
       } else {
-        const r = editUserFork(convo.treeFor(panel), msg.nodeId, text);
+        const r = editUserFork(convo.treeFor(panel), msg.nodeId, text, sys);
         if (!r) return;
         convo.setTree(panel, r.tree);
         this.#fireForPanel(panel, r.newUserId, r.fireMessages as ChatMessage[]);
@@ -307,14 +313,15 @@ class BranchOps {
     msg: ViewMessage,
     content: string,
     reasoning: string | undefined,
-    copyDownstream: boolean
+    copyDownstream: boolean,
+    systemPrompt?: string
   ) {
     if (msg.nodeId == null) return;
     const depth = activePath(convo.treeFor(panel)).findIndex((n) => n.id === msg.nodeId);
     if (depth < 0) return;
     for (const p of this.#d.panelSels()) {
       const node = activePath(convo.treeFor(p.panel))[depth];
-      if (node) this.applyEdit(p.panel, { ...msg, nodeId: node.id }, content, reasoning, copyDownstream);
+      if (node) this.applyEdit(p.panel, { ...msg, nodeId: node.id }, content, reasoning, copyDownstream, systemPrompt);
     }
   }
 
@@ -342,10 +349,13 @@ class BranchOps {
    *  thread, so you can prompt that panel's model with exactly this context. */
   sendBranchToPanel(srcPanel: Panel, msg: ViewMessage, destPanel: Panel) {
     if (msg.nodeId == null || destPanel === srcPanel || this.#d.panelBusy(destPanel)) return;
-    const msgs = ancestryMessages(convo.treeFor(srcPanel), msg.nodeId) as ChatMessage[];
+    const srcTree = convo.treeFor(srcPanel);
+    const msgs = ancestryMessages(srcTree, msg.nodeId) as ChatMessage[];
     if (!msgs.length) return;
     chat.clearPanelBucket(destPanel);
-    convo.setTree(destPanel, treeFromMessages(msgs));
+    // The branch's thread system prompt travels with its context — the dest
+    // panel's model should be prompted under the SAME conditions.
+    convo.setTree(destPanel, treeFromMessages(msgs, threadSystemAt(srcTree, msg.nodeId)));
     panelScroll.snap(destPanel); // fresh thread in dest — land on its latest turn
   }
 }

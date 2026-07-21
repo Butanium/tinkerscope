@@ -67,6 +67,12 @@ export type TreeNode = {
    *  NOT inherit them (no blob exists under the new id). */
   has_token_logprobs?: boolean;
   has_raw_meta?: boolean;
+  /** Thread system prompt — ROOT user nodes only. Composed over the workspace's
+   *  global system prompt at fire time (server-side: global + "\n" + this).
+   *  Part of thread IDENTITY: two roots with the same content but different
+   *  system prompts are distinct threads (threadStarts / reconcile key on the
+   *  pair). Absent ⇒ the thread runs under the global prompt alone (legacy). */
+  system_prompt?: string;
   parent: string | null; // null = child of the virtual root
   children: string[]; // ordered
 };
@@ -161,6 +167,7 @@ function cloneTree(t: ConvTree): ConvTree {
       token_logprobs: cloneTokenLogprobs(n.token_logprobs),
       has_token_logprobs: n.has_token_logprobs,
       has_raw_meta: n.has_raw_meta,
+      system_prompt: n.system_prompt,
       parent: n.parent,
       children: [...n.children]
     };
@@ -251,18 +258,28 @@ function downstreamActivePath(t: ConvTree, id: string): TreeNode[] {
 
 // ── mutations (immutable) ────────────────────────────────────────────
 /** Append a user turn under the active leaf — or, with `atRoot`, as a NEW
- *  root-level branch (a sibling first message) that becomes the active path. */
+ *  root-level branch (a sibling first message) that becomes the active path.
+ *  `systemPrompt` (atRoot only) stamps the new thread's system prompt on the
+ *  root node; ignored for mid-thread appends (the field is root-only). */
 export function appendUserTurn(
   t0: ConvTree,
   content: string,
-  atRoot = false
+  atRoot = false,
+  systemPrompt?: string
 ): { tree: ConvTree; nodeId: string } {
   const t = cloneTree(t0);
   const path = activePath(t);
   const leaf = atRoot ? null : path.length ? path[path.length - 1] : null;
   const parentKey = leaf ? leaf.id : ROOT;
   const id = nid();
-  t.nodes[id] = { id, role: 'user', content, parent: leaf ? leaf.id : null, children: [] };
+  t.nodes[id] = {
+    id,
+    role: 'user',
+    content,
+    ...(atRoot && systemPrompt ? { system_prompt: systemPrompt } : {}),
+    parent: leaf ? leaf.id : null,
+    children: []
+  };
   childArray(t, parentKey).push(id);
   t.selected[parentKey] = id;
   return { tree: t, nodeId: id };
@@ -313,17 +330,29 @@ export function regenTarget(
   return { userParentId: userId, fireMessages: ancestryMessages(t, userId) };
 }
 
+/** Fork a sibling of `userId` with the edited content (+ regen by the caller).
+ *  `systemPrompt` applies only when the edited node is a ROOT (thread) node: it
+ *  becomes the fork's thread system prompt ('' / undefined ⇒ none — the edit UI
+ *  passes the field's full value, so "keep" needs no special case). */
 export function editUserFork(
   t0: ConvTree,
   userId: string,
-  content: string
+  content: string,
+  systemPrompt?: string
 ): { tree: ConvTree; newUserId: string; fireMessages: Msg[] } | null {
   const orig = t0.nodes[userId];
   if (!orig || orig.role !== 'user') return null;
   const t = cloneTree(t0);
   const parentKey = orig.parent ?? ROOT;
   const id = nid();
-  t.nodes[id] = { id, role: 'user', content, parent: orig.parent, children: [] };
+  t.nodes[id] = {
+    id,
+    role: 'user',
+    content,
+    ...(orig.parent === null && systemPrompt ? { system_prompt: systemPrompt } : {}),
+    parent: orig.parent,
+    children: []
+  };
   childArray(t, parentKey).push(id);
   t.selected[parentKey] = id;
   return { tree: t, newUserId: id, fireMessages: ancestryMessages(t, id) };
@@ -332,7 +361,8 @@ export function editUserFork(
 export function editUserForkCopy(
   t0: ConvTree,
   userId: string,
-  content: string
+  content: string,
+  systemPrompt?: string
 ): { tree: ConvTree; newUserId: string } | null {
   const orig = t0.nodes[userId];
   if (!orig || orig.role !== 'user') return null;
@@ -340,7 +370,14 @@ export function editUserForkCopy(
   const t = cloneTree(t0);
   const parentKey = orig.parent ?? ROOT;
   const newUserId = nid();
-  t.nodes[newUserId] = { id: newUserId, role: 'user', content, parent: orig.parent, children: [] };
+  t.nodes[newUserId] = {
+    id: newUserId,
+    role: 'user',
+    content,
+    ...(orig.parent === null && systemPrompt ? { system_prompt: systemPrompt } : {}),
+    parent: orig.parent,
+    children: []
+  };
   childArray(t, parentKey).push(newUserId);
   t.selected[parentKey] = newUserId;
   // deep-copy the downstream chain as fresh-id single-child descendants, writing
@@ -474,6 +511,8 @@ export function cycle(t0: ConvTree, nodeId: string, delta: number): ConvTree {
 export type ThreadStart = {
   /** The thread's first message (raw text of its first occurrence). */
   content: string;
+  /** The thread's system prompt (root node field) — absent = global only. */
+  system?: string;
   /** panelId → that panel's matching root node id. */
   roots: Record<string, string>;
   /** Panels where this thread is currently the SELECTED root. */
@@ -481,7 +520,9 @@ export type ThreadStart = {
 };
 
 /** Union of root THREADS (branch-from-start first messages) across panels,
- *  identified by trimmed first-message content, in order of first appearance.
+ *  identified by the (trimmed first-message content, thread system prompt)
+ *  PAIR, in order of first appearance — the same question under two different
+ *  system prompts is two distinct threads (the probe-battery pattern).
  *  Threads are per-panel — different models may hold different probe sets —
  *  so `roots` records which panels have each one; there is no forced alignment. */
 export function threadStarts(trees: Record<string, ConvTree>): ThreadStart[] {
@@ -492,18 +533,32 @@ export function threadStarts(trees: Record<string, ConvTree>): ThreadStart[] {
     for (const rid of t.rootChildren) {
       const node = t.nodes[rid];
       if (!node) continue;
-      const key = node.content.trim();
+      const key = (node.system_prompt ?? '') + '\u0000' + node.content.trim();
       let ts = byKey.get(key);
       if (!ts) {
-        ts = { content: node.content, roots: {}, activeIn: [] };
+        ts = { content: node.content, system: node.system_prompt, roots: {}, activeIn: [] };
         byKey.set(key, ts);
         out.push(ts);
       }
-      if (!(pid in ts.roots)) ts.roots[pid] = rid; // first same-content sibling wins
+      if (!(pid in ts.roots)) ts.roots[pid] = rid; // first same-pair sibling wins
       if (rid === sel) ts.activeIn.push(pid);
     }
   }
   return out;
+}
+
+/** The thread system prompt governing `nodeId`: walk the parent chain to the
+ *  thread's ROOT and return its `system_prompt` (undefined = global only).
+ *  Every fire into an existing thread re-sends this (regen deep in a probe
+ *  thread must compose the probe's prompt, not the current composer's). */
+export function threadSystemAt(t: ConvTree, nodeId: string): string | undefined {
+  let cur: TreeNode | undefined = t.nodes[nodeId];
+  const seen = new Set<string>();
+  while (cur && cur.parent !== null && !seen.has(cur.id)) {
+    seen.add(cur.id);
+    cur = t.nodes[cur.parent];
+  }
+  return cur?.system_prompt;
 }
 
 // ── reconciliation ───────────────────────────────────────────────────
@@ -518,8 +573,20 @@ export function threadStarts(trees: Record<string, ConvTree>): ThreadStart[] {
  *     EXTENDING the matched branch in place if we got partway (a continued CLI
  *     thread), or as a NEW ROOT if nothing matched (a divergent reset).
  *  Existing branches are always preserved. Returns the SAME ref (no-op) when
- *  nothing changed, so the caller can cheaply detect a real external change. */
-export function reconcileExternal(t0: ConvTree, msgs: Msg[]): ConvTree {
+ *  nothing changed, so the caller can cheaply detect a real external change.
+ *
+ *  `threadSystem` is the transcript's thread system prompt (from the bus event /
+ *  panel mirror): at the ROOT level a candidate must carry the SAME one (two
+ *  probes sharing a first message but not a system prompt are distinct threads —
+ *  matching by content alone would fold the transcript under the wrong probe).
+ *  A new root minted by the append phase is stamped with it. `undefined` =
+ *  unknown provenance (legacy caller/event) → match by content alone, stamp
+ *  nothing — today's behavior. */
+export function reconcileExternal(
+  t0: ConvTree,
+  msgs: Msg[],
+  threadSystem?: string | null
+): ConvTree {
   if (!msgs || msgs.length === 0) return t0;
   const t = cloneTree(t0);
   let changed = false;
@@ -531,7 +598,10 @@ export function reconcileExternal(t0: ConvTree, msgs: Msg[]): ConvTree {
     const childIds = parentKey === ROOT ? t.rootChildren : t.nodes[parentKey].children;
     const cid = childIds.find((c) => {
       const n = t.nodes[c];
-      return n && n.role === m.role && n.content === m.content;
+      if (!n || n.role !== m.role || n.content !== m.content) return false;
+      if (parentKey === ROOT && threadSystem !== undefined)
+        return (n.system_prompt ?? '') === (threadSystem ?? '');
+      return true;
     });
     if (!cid) break;
     if (t.selected[parentKey] !== cid) {
@@ -551,6 +621,9 @@ export function reconcileExternal(t0: ConvTree, msgs: Msg[]): ConvTree {
       // preserve thinking carried on an external/echoed turn so a CLI/cross-tab
       // reply round-trips its CoT into the tree (not just answer-only)
       ...(m.reasoning ? { reasoning: m.reasoning } : {}),
+      // a fresh ROOT carries the transcript's thread system prompt (provenance —
+      // the whole point of the field for CLI-fired probe threads)
+      ...(parentKey === ROOT && threadSystem ? { system_prompt: threadSystem } : {}),
       parent: parentKey === ROOT ? null : parentKey,
       children: []
     };
@@ -563,8 +636,8 @@ export function reconcileExternal(t0: ConvTree, msgs: Msg[]): ConvTree {
   return changed ? t : t0;
 }
 
-export function treeFromMessages(msgs: Msg[]): ConvTree {
-  return reconcileExternal(emptyTree(), msgs);
+export function treeFromMessages(msgs: Msg[], threadSystem?: string | null): ConvTree {
+  return reconcileExternal(emptyTree(), msgs, threadSystem);
 }
 
 // ── validation (used by tests + the on-load tree validator) ──────────

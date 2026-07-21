@@ -34,6 +34,7 @@ import os
 import re
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -262,6 +263,20 @@ def _ancestry(tree: dict, node_id: str) -> list[dict]:
         cur = nodes.get(parent) if parent else None
     chain.reverse()
     return chain
+
+
+def _root_of(tree: dict, node_id: str) -> str:
+    """Walk parent pointers to the node's thread ROOT id (the node itself if it
+    is a root / unknown)."""
+    nodes = tree.get("nodes", {})
+    cur, seen = node_id, set()
+    while cur in nodes and cur not in seen:
+        seen.add(cur)
+        parent = nodes[cur].get("parent")
+        if not parent:
+            break
+        cur = parent
+    return cur
 
 
 def _siblings(tree: dict, node: dict) -> list[str]:
@@ -572,6 +587,10 @@ class _StreamResult:
     def __init__(self) -> None:
         self.ok: bool = False
         self.error: Optional[str] = None
+        # Finalized sample payloads (the `message` events, token_logprobs and
+        # all) — collected in every print mode so post-fire consumers
+        # (--first-token tables, `battery`'s JSONL files) never re-parse stdout.
+        self.samples: list[dict] = []
 
 
 _DIM = "\033[2m"
@@ -653,8 +672,14 @@ def _stream_chat(
     stream_inline: bool = False,
     logprobs: bool = False,
     json_out: bool = False,
+    sink: Optional[Any] = None,
 ) -> None:
     """POST /api/chat and print streamed samples. Thread-safe printing via lock.
+
+    `sink` (a writable text file object) redirects the block/JSON output there
+    instead of stdout — `battery` uses it to keep per-probe JSONL in files while
+    its own progress stays on the terminal. Inline streaming ignores the sink
+    (single-chat mode only, never used with one).
 
     Three printing modes:
       - block (default): each per-sample block is assembled as ONE string and
@@ -684,17 +709,17 @@ def _stream_chat(
         block = "\n".join(prefix + p for p in parts)
         if lock is not None:
             with lock:
-                print(block, flush=True)
+                print(block, flush=True, file=sink)
         else:
-            print(block, flush=True)
+            print(block, flush=True, file=sink)
 
     def emit_json(obj: dict) -> None:
         line = json.dumps({"panel": panel_id, **obj}, default=str, ensure_ascii=False)
         if lock is not None:
             with lock:
-                print(line, flush=True)
+                print(line, flush=True, file=sink)
         else:
-            print(line, flush=True)
+            print(line, flush=True, file=sink)
 
     def emit_inline(text: str) -> None:
         sys.stdout.write(text)
@@ -765,6 +790,8 @@ def _stream_chat(
                         continue
                     payload = json.loads(ev.data)
                     idx = payload.get("sample_index")
+                    if result is not None and not payload.get("error"):
+                        result.samples.append(payload)
                     if json_out:
                         emit_json({"event": "sample", **payload})
                         continue
@@ -993,11 +1020,17 @@ def _panel_body(
     thinking: "bool | str | None",
     system: Optional[str],
     prefill_scope: Optional[str] = None,
+    thread_system: Optional[str] = None,
 ) -> dict:
     """ChatRequest for a live panel AS BOUND, with an EXPLICIT messages list — the
     shared core of `send` (fresh single-turn history) and `continue` (a full
     ancestry). Decodes the panel's model sentinel; a trailing assistant message in
-    `messages` is the server's prefill convention (the model extends it)."""
+    `messages` is the server's prefill convention (the model extends it).
+
+    `thread_system` is the THREAD system prompt (composed over the global part
+    server-side, recorded on the thread's root node by the browser). None = omit
+    from the body → the server inherits the panel's mirrored thread system (the
+    thread being extended); "" = explicitly no thread part."""
     body: dict = {
         "messages": messages,
         "panel": panel["id"],
@@ -1006,6 +1039,8 @@ def _panel_body(
     }
     if prefill_scope is not None:
         body["prefill_scope"] = prefill_scope
+    if thread_system is not None:
+        body["thread_system_prompt"] = thread_system
     _bind_panel_model(body, panel)
     return body
 
@@ -1019,45 +1054,21 @@ def _panel_chat_body(
     thinking: "bool | str | None",
     system: Optional[str],
     prefill: Optional[str],
+    thread_system: Optional[str] = None,
 ) -> dict:
     """ChatRequest for a live panel AS BOUND — a fresh single-user-turn history
     (+ optional assistant prefill). Thin wrapper over `_panel_body`."""
     messages: list[dict] = [{"role": "user", "content": prompt}]
     if prefill:
         messages.append({"role": "assistant", "content": prefill})
-    return _panel_body(panel, messages, n, temperature, max_tokens, thinking, system)
+    return _panel_body(panel, messages, n, temperature, max_tokens, thinking, system,
+                       thread_system=thread_system)
 
 
-@app.command("send")
-def cmd_send(
-    prompt: Optional[str] = typer.Argument(None, help="user message — fired as a NEW thread at the current panels (or --file)"),
-    n: int = typer.Option(1, "--n", help="samples per panel"),
-    temperature: Optional[float] = typer.Option(None, "--temperature", help="this call only; omit = inherit the global param (see `tinkpg params`)"),
-    max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="this call only; omit = inherit the global param"),
-    thinking: Optional[bool] = typer.Option(None, "--thinking/--no-thinking", help="force thinking on/off for this call; omit = inherit the global param"),
-    thinking_both: bool = typer.Option(False, "--thinking-both", help="n samples WITHOUT thinking + n WITH, per panel (overrides --thinking)"),
-    system: Optional[str] = typer.Option(None, "--system", help="system prompt for this call; omit = inherit the global one"),
-    no_system: bool = typer.Option(False, "--no-system", help="fire with NO system prompt even if the global state carries one"),
-    prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the models extend; raw `<think>` ok"),
-    file: Optional[str] = typer.Option(None, "--file", help="read the user message from a file (a probe template — mutually exclusive with the positional prompt)"),
-    prefill_file: Optional[str] = typer.Option(None, "--prefill-file", help="read the assistant prefill from a file (mutually exclusive with --prefill)"),
-    panel: list[str] = typer.Option([], "--panel", help="target only these panel ids (repeatable); overrides folding"),
-    include_folded: bool = typer.Option(False, "--include-folded", help="also fire at browser-folded panels"),
-    force: bool = typer.Option(False, "--force", help="fire even while a generation is in flight"),
-    show_logprobs: bool = typer.Option(False, "--logprobs", help="print each sample's per-token logprob + top-5 alternatives (native tinker sampling only; none for OpenRouter)"),
-    json_out: bool = typer.Option(False, "--json", help="one JSON object per line (JSONL) instead of human text — for scripts; always includes token_logprobs when present, independent of --logprobs"),
-) -> None:
-    """Fire the prompt as a NEW THREAD at the CURRENT panels of the open workspace
-    — the CLI twin of the browser's ⑂ branch-from-start. Unlike `chat`/`compare`
-    this never touches the panel layout: it reads the live panels (skipping
-    browser-folded ones), fires one chat per panel with a FRESH history, and the
-    browser folds each reply in as a sibling first message. Existing threads are
-    untouched; aim it with --panel (repeatable). The message / prefill can come from
-    a file (--file / --prefill-file) so probe templates aren't retyped."""
-    prompt = _arg_or_file(prompt, file, "message", "--file")
-    prefill = _arg_or_file(prefill, prefill_file, "prefill", "--prefill-file")
-    if prompt is None:
-        _die("no message — pass it inline or via --file")
+def _send_targets(panel: list[str], include_folded: bool, force: bool) -> tuple[list[dict], str]:
+    """Resolve the live panels a `send`-style fire targets (shared with `battery`):
+    read the state bus, refuse mid-generation (unless force), honor browser folds
+    unless an explicit --panel overrides. Returns (targets, skipped-description)."""
     st = _get("/api/state")
     if st.get("running") and not force:
         _die("a generation is in flight (running=yes) — wait for it, or pass --force")
@@ -1081,36 +1092,130 @@ def cmd_send(
     targets = [p for p in targets if p.get("run_id")]
     if not targets:
         _die("no target panel has a model bound — pick models in the browser or `tinkpg open <run>`")
-    think: "bool | str | None" = "both" if thinking_both else thinking
-    system = _resolve_sys(system, no_system)
-    plan_out = sys.stderr if json_out else sys.stdout  # JSON mode: keep stdout pure JSONL
-
-    print(f"send (new thread)  n={n} temp={_fmt_param(temperature)}  →  {len(targets)} panel(s)", file=plan_out)
-    for p in targets:
-        print(f"  {p['id']}: {_short_run(p.get('run_id'))}" + (f"@{p['checkpoint']}" if p.get("checkpoint") else ""), file=plan_out)
     skipped_bits = []
     if folded:
         skipped_bits.append(f"{len(folded & set(by_id))} folded ({', '.join(sorted(folded & set(by_id)))})")
     if unbound:
         skipped_bits.append(f"unbound: {', '.join(unbound)}")
-    if skipped_bits:
-        print(f"  skipped: {'; '.join(skipped_bits)}", file=plan_out)
-    print(file=plan_out)
+    return targets, "; ".join(skipped_bits)
 
+
+def _new_thread_system(resolved: Optional[str]) -> tuple[Optional[str], str]:
+    """Split a `_resolve_sys` result for a NEW-THREAD fire (`send` / `battery`
+    probes): --system authors the THREAD system prompt (recorded on the thread's
+    root node, composed over the global — `tinkpg params --system` owns the
+    global part). No flag (None) → thread part explicit "", so a fresh thread
+    never inherits the panel mirror's prompt; "" (--no-system) suppresses BOTH
+    parts. Returns (global_part, thread_part)."""
+    if resolved is None:
+        return None, ""
+    if resolved == "":
+        return "", ""
+    return None, resolved
+
+
+def _fire_send(
+    targets: list[dict],
+    prompt: str,
+    prefill: Optional[str],
+    n: int,
+    temperature: Optional[float],
+    max_tokens: Optional[int],
+    think: "bool | str | None",
+    system: Optional[str],
+    show_logprobs: bool,
+    json_out: bool,
+    sink: Optional[Any] = None,
+    thread_system: Optional[str] = None,
+) -> list[tuple[str, dict, _StreamResult]]:
+    """Fire one fresh-history chat per target panel, concurrently; join and return
+    [(panel_id, panel, result)] with each result's collected samples."""
     lock = threading.Lock()
     threads: list[threading.Thread] = []
     results: list[tuple[str, dict, _StreamResult]] = []
     for p in targets:
-        body = _panel_chat_body(p, prompt, n, temperature, max_tokens, think, system, prefill)
+        body = _panel_chat_body(p, prompt, n, temperature, max_tokens, think, system, prefill,
+                                thread_system=thread_system)
         res = _StreamResult()
         label = f"{p['id']} {_short_run(p.get('run_id'))}"
-        t = threading.Thread(target=_stream_chat, args=(body, label, lock, res, False, show_logprobs, json_out))
+        t = threading.Thread(target=_stream_chat,
+                             args=(body, label, lock, res, False, show_logprobs, json_out, sink))
         results.append((p["id"], p, res))
         threads.append(t)
         t.start()
     for t in threads:
         t.join()
+    return results
 
+
+def _print_first_token_tables(results: list[tuple[str, dict, _StreamResult]], json_out: bool) -> None:
+    """Per-panel first-token distribution of a finished fire (`--first-token`):
+    aggregate each panel's collected samples' position-0 records. Human mode
+    prints one table per panel; JSON mode appends first_token_summary JSONL."""
+    for pid, p, res in results:
+        ordered = sorted(res.samples, key=lambda s: s.get("sample_index") or 0)
+        firsts = [(s.get("token_logprobs") or [None])[0] for s in ordered]
+        dist = _first_token_dist(firsts)
+        if json_out:
+            print(json.dumps({"panel": pid, "event": "first_token_summary", "dist": dist},
+                             default=str, ensure_ascii=False), flush=True)
+            continue
+        label = f"{pid} {_short_run(p.get('run_id'))}" + (f"@{p['checkpoint']}" if p.get("checkpoint") else "")
+        print(f"\n▸ {label}")
+        print(_indent(_fmt_first_token(dist, len(res.samples)), "   ") if dist else
+              "   (no token_logprobs captured — OpenRouter/streamed path?)")
+
+
+@app.command("send")
+def cmd_send(
+    prompt: Optional[str] = typer.Argument(None, help="user message — fired as a NEW thread at the current panels (or --file)"),
+    n: int = typer.Option(1, "--n", help="samples per panel"),
+    temperature: Optional[float] = typer.Option(None, "--temperature", help="this call only; omit = inherit the global param (see `tinkpg params`)"),
+    max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="this call only; omit = inherit the global param"),
+    thinking: Optional[bool] = typer.Option(None, "--thinking/--no-thinking", help="force thinking on/off for this call; omit = inherit the global param"),
+    thinking_both: bool = typer.Option(False, "--thinking-both", help="n samples WITHOUT thinking + n WITH, per panel (overrides --thinking)"),
+    system: Optional[str] = typer.Option(None, "--system", help="system prompt for this call; omit = inherit the global one"),
+    no_system: bool = typer.Option(False, "--no-system", help="fire with NO system prompt even if the global state carries one"),
+    prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the models extend; raw `<think>` ok"),
+    file: Optional[str] = typer.Option(None, "--file", help="read the user message from a file (a probe template — mutually exclusive with the positional prompt)"),
+    prefill_file: Optional[str] = typer.Option(None, "--prefill-file", help="read the assistant prefill from a file (mutually exclusive with --prefill)"),
+    panel: list[str] = typer.Option([], "--panel", help="target only these panel ids (repeatable); overrides folding"),
+    include_folded: bool = typer.Option(False, "--include-folded", help="also fire at browser-folded panels"),
+    force: bool = typer.Option(False, "--force", help="fire even while a generation is in flight"),
+    show_logprobs: bool = typer.Option(False, "--logprobs", help="print each sample's per-token logprob + top-5 alternatives (native tinker sampling only; none for OpenRouter)"),
+    json_out: bool = typer.Option(False, "--json", help="one JSON object per line (JSONL) instead of human text — for scripts; always includes token_logprobs when present, independent of --logprobs"),
+    first_token: bool = typer.Option(False, "--first-token", help="after the fire, print each panel's probability distribution over the FIRST generated token (from the captured token_logprobs); with --json, appended as first_token_summary JSONL lines"),
+) -> None:
+    """Fire the prompt as a NEW THREAD at the CURRENT panels of the open workspace
+    — the CLI twin of the browser's ⑂ branch-from-start. Unlike `chat`/`compare`
+    this never touches the panel layout: it reads the live panels (skipping
+    browser-folded ones), fires one chat per panel with a FRESH history, and the
+    browser folds each reply in as a sibling first message. Existing threads are
+    untouched; aim it with --panel (repeatable). The message / prefill can come from
+    a file (--file / --prefill-file) so probe templates aren't retyped."""
+    prompt = _arg_or_file(prompt, file, "message", "--file")
+    prefill = _arg_or_file(prefill, prefill_file, "prefill", "--prefill-file")
+    if prompt is None:
+        _die("no message — pass it inline or via --file")
+    targets, skipped = _send_targets(panel, include_folded, force)
+    think: "bool | str | None" = "both" if thinking_both else thinking
+    system, thread_system = _new_thread_system(_resolve_sys(system, no_system))
+    plan_out = sys.stderr if json_out else sys.stdout  # JSON mode: keep stdout pure JSONL
+
+    print(f"send (new thread)  n={n} temp={_fmt_param(temperature)}  →  {len(targets)} panel(s)", file=plan_out)
+    if thread_system:
+        print(f"  thread system: {_oneline(thread_system, 160)}", file=plan_out)
+    for p in targets:
+        print(f"  {p['id']}: {_short_run(p.get('run_id'))}" + (f"@{p['checkpoint']}" if p.get("checkpoint") else ""), file=plan_out)
+    if skipped:
+        print(f"  skipped: {skipped}", file=plan_out)
+    print(file=plan_out)
+
+    results = _fire_send(targets, prompt, prefill, n, temperature, max_tokens,
+                         think, system, show_logprobs, json_out,
+                         thread_system=thread_system)
+    if first_token:
+        _print_first_token_tables(results, json_out)
     failures = [
         f"{pid} ({_short_run(p.get('run_id'))}): {res.error or 'unknown error'}"
         for (pid, p, res) in results
@@ -1220,6 +1325,7 @@ def cmd_continue(
     force: bool = typer.Option(False, "--force", help="fire even while a generation is in flight"),
     show_logprobs: bool = typer.Option(False, "--logprobs", help="print each sample's per-token logprob + top-5 alternatives (native tinker sampling only; none for OpenRouter)"),
     json_out: bool = typer.Option(False, "--json", help="one JSON object per line (JSONL) instead of human text — for scripts; always includes token_logprobs when present, independent of --logprobs"),
+    first_token: bool = typer.Option(False, "--first-token", help="after the fire, print each panel's probability distribution over the FIRST generated token (from the captured token_logprobs); with --json, appended as first_token_summary JSONL lines"),
 ) -> None:
     """LOOM from an existing branch: rebuild the message history up to a target node
     and sample a continuation, WITHOUT touching the panel layout (the multi-turn twin
@@ -1304,26 +1410,37 @@ def cmd_continue(
     think: "bool | str | None" = "both" if thinking_both else thinking
     system = _resolve_sys(system, no_system)
 
-    # Build (panel, messages) per target — refusing bad sequences BEFORE firing any.
-    plans: list[tuple[dict, list[dict]]] = []
+    # Build (panel, messages, thread-system) per target — refusing bad sequences
+    # BEFORE firing any. The thread part rides per-plan: a loomed thread keeps the
+    # system prompt it was STARTED with (its root node's), regardless of which
+    # thread the panel mirror currently reflects.
+    plans: list[tuple[dict, list[dict], Optional[str]]] = []
     for p in targets:
         if fixed_ancestry is not None:
             ancestry = fixed_ancestry
+            thread_system: Optional[str] = ""  # external transcript — never inherit a panel's thread prompt
         elif tree_mode:
             t = trees.get(p["id"])
             if t is None:
                 _die(f"panel {p['id']} has no saved tree in the workspace — can't --thread/--turn/--node it")
             target = _continue_target(t, thread, turn, node)
             ancestry = _ancestry(t, target["id"])
+            # the targeted thread's OWN prompt (root node) — explicit "", not None,
+            # when absent, so looming a promptless thread can't inherit the ACTIVE
+            # thread's mirrored prompt
+            thread_system = (ancestry[0].get("system_prompt") if ancestry else "") or ""
         else:
             ancestry = p.get("messages") or []
             if not ancestry:
                 _die(f"panel {p['id']} has no active thread — use `tinkpg send` to start one, or --thread/--node")
-        plans.append((p, _continue_messages(ancestry, prompt, prefill)))
+            thread_system = None  # active thread — inherit the panel mirror
+        if no_system:
+            thread_system = ""  # --no-system suppresses the thread part too
+        plans.append((p, _continue_messages(ancestry, prompt, prefill), thread_system))
 
     plan_out = sys.stderr if json_out else sys.stdout  # JSON mode: keep stdout pure JSONL
     print(f"continue (loom)  n={n} temp={_fmt_param(temperature)}  →  {len(targets)} panel(s)", file=plan_out)
-    for (p, msgs) in plans:
+    for (p, msgs, _ts) in plans:
         base = len(msgs) - (1 if prompt is not None else 0) - (1 if prefill is not None else 0)
         add = []
         if prompt is not None:
@@ -1342,8 +1459,9 @@ def cmd_continue(
     lock = threading.Lock()
     threads: list[threading.Thread] = []
     results: list[tuple[str, dict, _StreamResult]] = []
-    for (p, msgs) in plans:
-        body = _panel_body(p, msgs, n, temperature, max_tokens, think, system, prefill_scope)
+    for (p, msgs, ts) in plans:
+        body = _panel_body(p, msgs, n, temperature, max_tokens, think, system, prefill_scope,
+                           thread_system=ts)
         res = _StreamResult()
         label = f"{p['id']} {_short_run(p.get('run_id'))}"
         t = threading.Thread(target=_stream_chat, args=(body, label, lock, res, False, show_logprobs, json_out))
@@ -1353,6 +1471,8 @@ def cmd_continue(
     for t in threads:
         t.join()
 
+    if first_token:
+        _print_first_token_tables(results, json_out)
     failures = [
         f"{pid} ({_short_run(p.get('run_id'))}): {res.error or 'unknown error'}"
         for (pid, p, res) in results
@@ -1360,6 +1480,155 @@ def cmd_continue(
     ]
     if failures:
         _die("continue failed:\n  " + "\n  ".join(failures))
+
+
+_PROBE_KEYS = {"system", "no-system", "prefill", "n", "temperature", "max-tokens",
+               "thinking", "panel"}
+
+
+def _parse_probe_file(text: str) -> tuple[dict, str]:
+    """Parse a probe file: an optional `---`-delimited front-matter header of
+    `key: value` lines, then the user message verbatim.
+
+    Keys (all optional; they override the battery's command-line defaults for
+    this probe only): system, no-system (true/false), prefill, n (int),
+    temperature (float), max-tokens (int), thinking (on/off/both), panel
+    (comma-separated panel ids). Values may be "quoted" to keep exact
+    whitespace. Unknown keys raise ValueError (typo protection — a silently
+    dropped `sytem:` would fire the wrong probe). No front-matter → ({}, text).
+    One leading blank line after the closing `---` is stripped; the message is
+    otherwise byte-exact."""
+    lines = text.split("\n")
+    if not lines or lines[0].strip() != "---":
+        return {}, text
+    opts: dict = {}
+    i = 1
+    while i < len(lines):
+        line = lines[i]
+        if line.strip() == "---":
+            i += 1
+            break
+        if not line.strip():
+            i += 1
+            continue
+        if ":" not in line:
+            raise ValueError(f"front-matter line without ':': {line!r}")
+        key, _, val = line.partition(":")
+        key, val = key.strip(), val.strip()
+        if key not in _PROBE_KEYS:
+            raise ValueError(f"unknown front-matter key {key!r} (known: {', '.join(sorted(_PROBE_KEYS))})")
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
+            val = val[1:-1]
+        if key == "n":
+            opts["n"] = int(val)
+        elif key == "temperature":
+            opts["temperature"] = float(val)
+        elif key == "max-tokens":
+            opts["max_tokens"] = int(val)
+        elif key == "no-system":
+            if val.lower() not in ("true", "false"):
+                raise ValueError(f"no-system takes true/false, got {val!r}")
+            opts["no_system"] = val.lower() == "true"
+        elif key == "thinking":
+            if val.lower() not in ("on", "off", "both"):
+                raise ValueError(f"thinking takes on/off/both, got {val!r}")
+            opts["thinking"] = {"on": True, "off": False, "both": "both"}[val.lower()]
+        elif key == "panel":
+            opts["panel"] = [p.strip() for p in val.split(",") if p.strip()]
+        else:  # system / prefill
+            opts[key] = val
+        i += 1
+    else:
+        raise ValueError("unterminated front-matter (no closing '---')")
+    body = "\n".join(lines[i:])
+    if body.startswith("\n"):
+        body = body[1:]
+    return opts, body
+
+
+@app.command("battery")
+def cmd_battery(
+    probes_dir: str = typer.Argument(..., help="directory of probe files (*.txt), fired in sorted order — each an optional `---` front-matter header (system / no-system / prefill / n / temperature / max-tokens / thinking / panel) + the user message"),
+    out: Optional[str] = typer.Option(None, "--out", help="output dir for per-probe JSONL streams (default: <probes_dir>/results)"),
+    n: int = typer.Option(1, "--n", help="default samples per panel (front-matter `n:` overrides)"),
+    temperature: Optional[float] = typer.Option(None, "--temperature", help="default for probes without `temperature:`; omit = inherit the global param"),
+    max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="default for probes without `max-tokens:`; omit = inherit the global param"),
+    thinking: Optional[bool] = typer.Option(None, "--thinking/--no-thinking", help="default thinking mode; omit = inherit the global param"),
+    system: Optional[str] = typer.Option(None, "--system", help="default system prompt for probes without `system:`; omit = inherit the global one"),
+    no_system: bool = typer.Option(False, "--no-system", help="default to NO system prompt (front-matter `system:`/`no-system:` overrides)"),
+    panel: list[str] = typer.Option([], "--panel", help="default target panels (repeatable); front-matter `panel:` overrides"),
+    include_folded: bool = typer.Option(False, "--include-folded", help="also fire at browser-folded panels"),
+    force: bool = typer.Option(False, "--force", help="fire even while a generation is in flight"),
+    first_token: bool = typer.Option(True, "--first-token/--no-first-token", help="print each panel's first-token distribution after every probe (default on)"),
+    pause: float = typer.Option(3.0, "--pause", help="seconds to wait between probes"),
+) -> None:
+    """Fire a DIRECTORY of probe files as sequential `send`s — the reusable probe
+    battery. Each probe lands as a new thread at the current panels (layout
+    untouched, per-call params — the sidebar is never clobbered); its raw JSONL
+    stream (samples + token_logprobs) is written to <out>/<probe-stem>.jsonl and a
+    per-panel first-token distribution table prints after each probe. A probe that
+    fails doesn't stop the battery; the summary (and exit code) reports it."""
+    if no_system and system is not None:
+        _die("--system and --no-system are mutually exclusive")
+    pdir = Path(probes_dir)
+    probes = sorted(pdir.glob("*.txt"))
+    if not probes:
+        _die(f"no *.txt probe files in {probes_dir}")
+    out_dir = Path(out) if out else pdir / "results"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    defaults = {"system": system, "no_system": no_system, "prefill": None, "n": n,
+                "temperature": temperature, "max_tokens": max_tokens,
+                "thinking": thinking, "panel": panel}
+    summary: list[tuple[str, int, list[str]]] = []  # (stem, ok-samples, failures)
+    for k, probe in enumerate(probes, 1):
+        try:
+            opts, message = _parse_probe_file(probe.read_text())
+        except ValueError as e:
+            _die(f"{probe.name}: {e}")
+        if not message.strip():
+            _die(f"{probe.name}: empty message body")
+        if opts.get("no_system") and "system" in opts:
+            _die(f"{probe.name}: `system:` and `no-system: true` are mutually exclusive")
+        cfg = {**defaults, **opts}
+        # A probe's `no-system: true` beats a battery-level --system default; a
+        # probe's `system:` beats a battery-level --no-system.
+        sys_prompt = "" if (cfg["no_system"] and "system" not in opts) else cfg["system"]
+        # Probes are NEW threads: `system:` authors the THREAD prompt (see
+        # _new_thread_system) so each probe's prompt is recorded on its root node.
+        sys_prompt, thread_system = _new_thread_system(sys_prompt)
+        targets, skipped = _send_targets(cfg["panel"], include_folded, force)
+        bits = [f"n={cfg['n']}"]
+        if thread_system:
+            bits.append(f"sys={_oneline(thread_system, 30)!r}")
+        elif sys_prompt == "":
+            bits.append("system=NONE")
+        if cfg["prefill"]:
+            bits.append(f"prefill={_oneline(cfg['prefill'], 30)!r}")
+        print(f"[{k}/{len(probes)}] {probe.stem}  →  {len(targets)} panel(s)  {' '.join(bits)}"
+              + (f"  (skipped: {skipped})" if skipped else ""), flush=True)
+        with (out_dir / f"{probe.stem}.jsonl").open("w") as sink:
+            results = _fire_send(targets, message, cfg["prefill"], cfg["n"],
+                                 cfg["temperature"], cfg["max_tokens"], cfg["thinking"],
+                                 sys_prompt, False, True, sink=sink,
+                                 thread_system=thread_system)
+        fails = [f"{pid}: {res.error or 'unknown error'}" for pid, _, res in results if not res.ok]
+        n_samples = sum(len(res.samples) for _, _, res in results)
+        summary.append((probe.stem, n_samples, fails))
+        for f in fails:
+            print(f"    FAIL {f}", flush=True)
+        if first_token:
+            _print_first_token_tables([r for r in results if r[2].ok], json_out=False)
+        print(flush=True)
+        if k < len(probes):
+            time.sleep(pause)
+
+    print("battery done:")
+    for stem, n_ok, fails in summary:
+        print(f"  {stem}: {n_ok} sample(s)" + (f", {len(fails)} FAILED panel(s)" if fails else ""))
+    print(f"JSONL per probe in {out_dir}")
+    if any(fails for _, _, fails in summary):
+        raise typer.Exit(code=1)
 
 
 @app.command("params")
@@ -1480,6 +1749,8 @@ def cmd_state(
                 names = ", ".join(f"{n} ({i[:8]})" for (n, i, _) in hits[:3])
                 tag = f"   ← conv: ambiguous ×{len(hits)}: {names} [newest first]"
         print(f"▸ {p['id']}  {bind}   ({len(msgs)} msgs){tag}")
+        if p.get("thread_system_prompt"):
+            print(f"   thread system: {_oneline(p['thread_system_prompt'], 200)}")
         for line in _digest(msgs, _fmt_msg, full, width):
             print(line)
         print()
@@ -1576,6 +1847,8 @@ def _thread_index(tree: dict, width: int) -> list[str]:
         uturns = sum(1 for n in _thread_path(tree, rid) if n.get("role") == "user")
         tail = f"({fan} sample{'' if fan == 1 else 's'}" + (f", {uturns} turns)" if uturns > 1 else ")") if fan else "(no samples yet)"
         out.append(f"   {star}{k}· {_oneline(nd.get('content', ''), max(20, width - 28))}   {tail}")
+        if nd.get("system_prompt"):
+            out.append(f"      sys: {_oneline(nd['system_prompt'], max(20, width - 34))}")
     return out
 
 
@@ -1754,6 +2027,9 @@ def _show_samples(
     layout = {p["id"]: p for p in (c.get("panels") or [])}
     lay = layout.get(pid, {})
     bind = _short_run(lay.get("run_id")) + (f"@{lay['checkpoint']}" if lay.get("checkpoint") else "")
+    # The fan-out's thread system prompt (its root node's) — provenance for the
+    # samples being read.
+    thread_sys = (nodes.get(_root_of(t, unode.get("id", ""))) or {}).get("system_prompt")
 
     if json_out:
         shown = [(i, s) for i, s in enumerate(samples, 1) if sample_k is None or i == sample_k]
@@ -1764,6 +2040,7 @@ def _show_samples(
             "workspace_id": c.get("id"), "workspace_name": c.get("name"),
             "panel": pid, "run_id": lay.get("run_id"), "checkpoint": lay.get("checkpoint"),
             "thread": thread_k, "thread_count": len(roots), "position": pos_part,
+            "thread_system": thread_sys,
             "prompt": unode.get("content", ""),
             "tally": {"counts": counts, "doubled_draft": doubled, "untagged": untagged},
             "samples": [
@@ -1779,6 +2056,8 @@ def _show_samples(
     print(f"workspace: {c.get('name')}  ({(c.get('id') or '')[:8]})")
     thread_part = f"thread {thread_k or '?'}/{len(roots)}   ·   " if len(roots) > 1 else ""
     print(f"panel {pid}  ← {bind}   ·   {thread_part}{pos_part}   ·   {len(samples)} sample(s)")
+    if thread_sys:
+        print(f"thread system: {_oneline(thread_sys, 200)}")
     if len(trees) > 1 and panel is None:
         unfolded = [p for p in trees if p not in reduced]
         plist = (", ".join(unfolded) or "none unfolded") + (f" (+{len(trees) - len(unfolded)} folded)" if reduced else "")

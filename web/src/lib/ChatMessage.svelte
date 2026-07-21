@@ -61,7 +61,7 @@
     onDiscardOthers: (sampleIndex: number) => void;
     onContinueSample: (sampleIndex: number) => void;
     onDeleteSample: (sampleIndex: number) => void;
-    onEdit: (content: string, reasoning: string | undefined, copyDownstream: boolean, allPanels: boolean) => void;
+    onEdit: (content: string, reasoning: string | undefined, copyDownstream: boolean, allPanels: boolean, system?: string) => void;
     onCopy: (all: boolean, withThinking: boolean) => void;
     onTag: (content: string, sampleIndex: number | null, totalSamples: number | null, reasoning: string, quick: boolean) => void;
     onCycle: (delta: number) => void;
@@ -172,6 +172,12 @@
   let editHasReasoning = $state(false);
   let editShift = $state(false);
   let editAll = $state(false);
+  // Thread-system field (ROOT user rows only): editing it — like editing the
+  // content — forks a sibling THREAD; "same question, new prompt" is just an edit.
+  let editSystem = $state('');
+  let editHasSystem = $derived(msg.role === 'user' && !!msg.isRoot);
+  // The in-row thread-system strip's expand/collapse (collapsed one-liner by default).
+  let sysExpanded = $state(false);
   function startEdit(shift: boolean, all: boolean) {
     if (!canEdit) return;
     editing = true;
@@ -180,9 +186,16 @@
     editDraft = msg.content;
     editHasReasoning = msg.role === 'assistant' && !!msg.reasoning;
     editReasoning = msg.reasoning ?? '';
+    editSystem = msg.system_prompt ?? '';
   }
   function commitEdit() {
-    onEdit(editDraft, editHasReasoning ? editReasoning : undefined, editShift, editAll);
+    onEdit(
+      editDraft,
+      editHasReasoning ? editReasoning : undefined,
+      editShift,
+      editAll,
+      editHasSystem ? editSystem : undefined
+    );
     editing = false;
   }
   function cancelEdit() {
@@ -219,6 +232,8 @@
     editHasReasoning = false;
     editShift = false;
     editAll = false;
+    editSystem = '';
+    sysExpanded = false;
     copiedMsg = false;
     copiedConv = false;
     copiedId = false;
@@ -539,6 +554,22 @@
       </div>
       {#if showSampleCycler}{@render sampleCycler()}{:else}{@render cycler()}{/if}
     </div>
+    {#if msg.role === 'user' && msg.system_prompt && !editing}
+      <!-- Thread-system strip (root rows): the prompt this THREAD runs under,
+           composed over the workspace's global one. Part of the node, so the
+           ‹k/N› cycler swaps it together with the content. Click to expand. -->
+      <button
+        class="sys-strip"
+        class:expanded={sysExpanded}
+        data-testid="thread-system-strip"
+        data-tooltip={sysExpanded ? 'Collapse' : 'This thread\'s system prompt (composed over the global one) — click to expand'}
+        use:tip
+        onclick={(e) => { e.stopPropagation(); sysExpanded = !sysExpanded; onFocusRow?.(); }}
+      >
+        <span class="sys-strip-tag">system</span>
+        <span class="sys-strip-text">{sysExpanded ? msg.system_prompt : msg.system_prompt.replace(/\s+/g, ' ')}</span>
+      </button>
+    {/if}
     {#if msg.role === 'assistant' && msg.reasoning && !isMultiSample && !tokView}
       <details class="sample-reasoning-block reasoning-primary" open={isLastAssistant}>
         <summary class="sample-reasoning-toggle">
@@ -595,6 +626,23 @@
       {/if}
     {:else if editing && msg.nodeId != null}
       {#if editShift}<div class="edit-hint">Shift-edit: forks a full editable copy of the conversation from here — nothing is generated.</div>{/if}
+      {#if editHasSystem}
+        <!-- Thread-system editor (root rows): saving with a changed system forks a
+             sibling THREAD, exactly like a content edit. Empty = global only. -->
+        <div class="edit-field-label">Thread system prompt <span class="edit-field-hint">(optional — appended to the global one; changing it forks a sibling thread)</span></div>
+        <textarea
+          class="edit-textarea edit-system"
+          data-testid="edit-thread-system"
+          bind:value={editSystem}
+          rows="2"
+          placeholder="none — global system prompt only"
+          onkeydown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commitEdit(); }
+            else if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+          }}
+        ></textarea>
+        <div class="edit-field-label">Message</div>
+      {/if}
       {#if editHasReasoning}
         <!-- Assistant CoT editor: edits land in this turn's reasoning block.
              Clear it to drop the CoT entirely. -->

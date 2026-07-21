@@ -77,6 +77,7 @@ export type TreeNode = {
   content: string;
   reasoning?: string;          // PERSISTED — populated by foldAssistant from samples
   raw_text?: string;           // PERSISTED — ditto; survives reload
+  system_prompt?: string;      // PERSISTED — THREAD system prompt; ROOT user nodes only (see §2b)
   parent: string | null;       // null = child of the virtual root
   children: string[];          // ordered
 };
@@ -124,6 +125,35 @@ ROOT.
 
 Invariant (assert in tests): every `selected` key is a live node id (or ROOT) and
 every value is a live child of that key.
+
+## 2b. Thread system prompts (shipped 2026-07-21)
+
+A thread's ROOT user node may carry `system_prompt` — the thread's own
+system-prompt part, composed over the workspace's global one **server-side**
+(`effective = "\n".join(p for p in (global, thread) if p)`; see
+`docs/API_CONTRACT.md` → ChatRequest.thread_system_prompt). Design invariants:
+
+- **A field of the first message, not a system node** — no new role for the
+  cyclers / active-path walkers; the ‹k/N› root cycler swaps (system, content)
+  as one unit, and editing either forks a sibling thread through the existing
+  `editUserFork(tree, userId, content, systemPrompt?)` (root-only: the param is
+  ignored for non-root edits). `appendUserTurn(tree, content, atRoot,
+  systemPrompt?)` stamps it at thread birth (⑂ composer).
+- **Thread identity is the (trimmed content, system_prompt) PAIR** — the probe
+  pattern is many threads sharing a first message under different prompts.
+  `threadStarts` keys on the pair (entry gains `system?`), and
+  `reconcileExternal(tree, msgs, threadSystem?)` matches ROOT-level candidates
+  on it when provenance is known: the bus terminal events + the panel-state
+  mirror carry `thread_system_prompt`, so a CLI-fired probe folds under (or
+  mints, stamped) the RIGHT root. `threadSystem === undefined` = unknown
+  (legacy event) → content-only matching, exactly the old behavior.
+- **Every fire re-derives the thread part from the tree**: `chat.fireOne` walks
+  `threadSystemAt(tree, userParentId)` and sends it explicitly (`''` = none), so
+  regen/continue/edit deep in a probe thread composes the probe's prompt and the
+  server never falls back to a stale mirror for a browser chat. The mirror
+  (`PanelState.thread_system_prompt`, echoed by `#mirror` next to
+  `panel_messages`) exists for the CLI's mid-thread inherit + the
+  reconnect/on-load reconcile.
 
 ## 3. Folding — own vs external
 

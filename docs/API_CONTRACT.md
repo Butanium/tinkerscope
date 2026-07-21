@@ -204,8 +204,17 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/conversations/`
   "sampler_path": null,   // OR a "loose" tinker sampler path (kind:"checkpoint" from /api/tinker-models)
   "openrouter_model": null,// OR an OpenRouter model id. Exactly one of run_id/base_model/sampler_path/openrouter_model.
   "messages": [{"role":"user","content":"…"}],   // required
-  "system_prompt": null,  // optional; prepended as a system message for sampling.
+  "system_prompt": null,  // optional; the GLOBAL system-prompt part.
                           // "" = EXPLICITLY none (never inherits — see params_scope)
+  "thread_system_prompt": null, // optional; the THREAD's system-prompt part, recorded on the
+                          // thread's first message (browser tree root / `tinkpg send --new-thread
+                          // --system`). The SERVER composes the effective system message:
+                          //   effective = "\n".join(p for p in (global, thread) if p)
+                          // Tri-state: null/absent = inherit the panel's mirrored thread system
+                          // (PanelState.thread_system_prompt — how a mid-thread CLI send stays
+                          // under the thread's prompt); "" = explicitly no thread part; "X" = X.
+                          // The browser sends it explicitly on EVERY fire (root-node walk), so
+                          // regen deep in a probe thread composes the probe's prompt.
   "temperature": null, "max_tokens": null, "n_samples": null,
   "params_scope": "global", // "global" | "call" — how the sampling params above (+
                           // thinking/top_p) are routed (chat.py resolve_params):
@@ -301,11 +310,17 @@ give all three through the native `sample_stream`.
 ### PlaygroundState (server-side, shared)
 ```jsonc
 {
-  "mode": "single"|"compare",
-  "run_id","checkpoint","compare_run_id","compare_checkpoint",
-  "messages":[{role,content}],          // PRIMARY panel's transcript (user + its assistant turns)
-  "compare_messages":[{role,content}],  // COMPARE panel's OWN transcript — compare is multi-turn
-  "system_prompt",
+  "panels": [                       // one entry per open panel, in display order
+    {"id": "primary",               // stable panel id ('primary','compare','p-2',…)
+     "run_id": null, "checkpoint": null,
+     "messages": [{role,content}],  // this panel's active-path transcript ECHO (write-only;
+                                    // the browser's branch tree is the read source)
+     "thread_system_prompt": null}  // the active THREAD's system prompt, mirrored like
+                                    // `messages` — read by a mid-thread CLI send (inherit)
+                                    // and by the echo-reconcile (stamp a recovered root)
+  ],
+  "conversation_id": null,          // the workspace open in the browser (its ?c=)
+  "system_prompt": null,            // the GLOBAL system-prompt part
   "temperature","max_tokens","n_samples","thinking","top_p",
   "chat_id": 0,        // increments each chat run; scopes sample events
   "running": false,
@@ -314,17 +329,21 @@ give all three through the native `sample_stream`.
 ```
 StatePatch = any subset of the *settable* fields (everything except
 chat_id/running/last_event*). POST `/api/state` with a subset to drive selection
-/ conversation / params.
+/ conversation / params. Panel routing: `panels` full-replaces the list;
+`panel_messages: {panel_id: msgs}` / `panel_thread_system: {panel_id: str|null}`
+bulk-mirror per-panel fields without touching selection; `panel` + one of
+`run_id`/`checkpoint`/`messages`/`thread_system_prompt` targets a single
+EXISTING panel (never auto-creates one).
 
 ### /api/state/events SSE (the browser subscribes ONCE on load)
 Event names = the message's `type`:
 - `snapshot` → `{type:"snapshot", state}` (full state, sent first on connect)
 - `patch` → `{type:"patch", event, state}` (state changed; e.g. event="chat_start"/"chat_done"/"patch")
-- `chat_start` → `{type:"chat_start", chat_id, panel, n, label, client_token?, conversation_id?}` (a chat began; clear that panel's samples. `n` = TOTAL expected samples — 2×n_samples on a `thinking:"both"` chat. `conversation_id` = the conversation open when the chat started — the browser folds an external chat only when this matches its active conversation; null = fold anyway, see below)
+- `chat_start` → `{type:"chat_start", chat_id, panel, n, label, client_token?, conversation_id?, thread_system_prompt?}` (a chat began; clear that panel's samples. `n` = TOTAL expected samples — 2×n_samples on a `thinking:"both"` chat. `conversation_id` = the conversation open when the chat started — the browser folds an external chat only when this matches its active conversation; null = fold anyway, see below. `thread_system_prompt` = the chat's RESOLVED thread part)
 - `delta` → `{type:"delta", chat_id, panel, sample_index, delta, kind}` (streamed token chunk; only a token-streaming producer at n==1 — loose sampler_path / openrouter, NOT run_id / base_model — accumulate per chat_id/panel/sample_index, then the `sample` event finalizes)
 - `sample` → `{type:"sample", chat_id, panel, sample_index, content, raw_text, finish_reason, reasoning?, thinking?}` (`thinking` only on `thinking:"both"` chats — which half drew this sample)
-- `chat_done` → `{type:"chat_done", chat_id, panel, client_token?, conversation_id?}` (`conversation_id` scopes the external fold — see `chat_start`)
-- `chat_error` → `{type:"chat_error", chat_id, panel, error, client_token?, conversation_id?}`
+- `chat_done` → `{type:"chat_done", chat_id, panel, client_token?, conversation_id?, thread_system_prompt?}` (`conversation_id` scopes the external fold — see `chat_start`. `thread_system_prompt` = the chat's resolved thread part: the external fold reconciles the transcript onto the ROOT carrying the same one — two probe threads sharing a first message under different prompts are distinct — and stamps it on a freshly-minted root)
+- `chat_error` → `{type:"chat_error", chat_id, panel, error, client_token?, conversation_id?, thread_system_prompt?}`
 - `ping` → `{}` (15s heartbeat; ignore)
 
 **Live-drive model:** the browser renders selection + params + the conversation
