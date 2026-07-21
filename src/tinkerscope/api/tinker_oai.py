@@ -3,10 +3,15 @@
 tinker's native SamplingClient (tinker_sampler.py) returns whole samples; it has
 no token streaming. But tinker ALSO exposes an OpenAI-compatible HTTP API at
 `<base>/oai/api/v1` that does stream (docs: tinker/compatible-apis/openai). We use
-it for the n=1 "watch it type" path, and it's the only way to reach "loose"
-checkpoints — sampler paths listed by GET /v1/models that aren't in the local scan
-dir, so we don't know their base_model/renderer and let the server render with the
-model's default chat template.
+it for the n=1 "watch it type" path, and to sample "loose" checkpoints — account
+sampler paths that aren't in the local scan dir (listed via discovery's REST
+`list_user_checkpoints` sweep), so we don't know their base_model/renderer and let
+the server render with the model's default chat template.
+
+⚠️ This endpoint's own GET /v1/models listing is hard-capped at the ~20 newest
+checkpoints (no pagination) while the inference endpoints happily serve unlisted
+paths — it once falsely greyed every older-but-live run. Never use it for
+listing/availability; discovery.get_servable_paths is the source of truth.
 
 Auth: the same TINKER_API_KEY, passed as the OpenAI api_key.
 
@@ -20,16 +25,13 @@ Two streaming shapes, both yielding `{"delta", "kind"}` chunks then a final
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
 from typing import AsyncIterator
 
-import httpx
 from openai import AsyncOpenAI
 
 BASE_URL = "https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1"
 
 _client: AsyncOpenAI | None = None
-_checkpoints: list[dict] | None = None
 
 
 def _key() -> str:
@@ -44,46 +46,6 @@ def client() -> AsyncOpenAI:
     if _client is None:
         _client = AsyncOpenAI(base_url=BASE_URL, api_key=_key())
     return _client
-
-
-# ---------------------------------------------------------------------------
-# Servable checkpoint listing (GET /v1/models)
-# ---------------------------------------------------------------------------
-def _ckpt_label(sampler_path: str, created: int | None) -> str:
-    """Readable label for a UUID-only checkpoint: short-uuid · ckpt-name · date."""
-    body = sampler_path.split("://", 1)[-1]
-    uuid = body.split(":", 1)[0][:8]
-    name = sampler_path.rstrip("/").split("/")[-1]
-    when = ""
-    if created:
-        when = " · " + datetime.fromtimestamp(created, tz=timezone.utc).strftime("%Y-%m-%d")
-    return f"{uuid} · {name}{when}"
-
-
-def list_checkpoints(refresh: bool = False) -> list[dict]:
-    """Sampler checkpoints the oai endpoint currently serves (GET /v1/models),
-    newest first. UUID-only (no base_model/renderer) -> sampled via chat_stream.
-    Cached; refresh=True re-fetches."""
-    global _checkpoints
-    if _checkpoints is None or refresh:
-        r = httpx.get(
-            f"{BASE_URL}/models",
-            headers={"Authorization": f"Bearer {_key()}"},
-            timeout=15.0,
-        )
-        r.raise_for_status()
-        items: list[dict] = []
-        for m in r.json().get("data", []):
-            sp = m.get("id")
-            if not sp:
-                continue
-            created = m.get("created") or 0
-            items.append(
-                {"sampler_path": sp, "label": _ckpt_label(sp, created), "created": created}
-            )
-        items.sort(key=lambda x: x["created"], reverse=True)
-        _checkpoints = items
-    return _checkpoints
 
 
 # ---------------------------------------------------------------------------

@@ -1,24 +1,26 @@
-"""Shared sampling targets for the real-sample smokes — checkpoints that are in
-Tinker's live servable window today, so generation actually returns.
+"""Shared sampling targets for the real-sample smokes — checkpoints whose sampler
+weights still exist on Tinker, so generation actually returns.
 
-THE REAL GOTCHA (not "all LoRA runs are GC'd"): Tinker keeps only a ROLLING WINDOW
-of sampler_weights servable (~14 checkpoints, ~last 6 weeks on this account). A run
-samples iff its sampler UUID is in that set; older runs age out and 404. Crucially,
-a run's `sampleable: true` flag only means its *base model* is served — it does NOT
-check the sampler_weights still exist, so aged-out runs look green and only 404 on
-an actual sample.
+THE REAL STORY (settled 2026-07-21, after two wrong theories): sampler weights are
+NOT windowed or rolling — they persist until they expire (per-checkpoint TTL;
+`expires_at=None` = never) or are deleted. A gone path 404s on sample even though
+its base model is served. The old "rolling window" theory came from trusting the
+oai `GET /v1/models` listing, which is hard-capped at the ~20 newest checkpoints
+(no pagination) while the inference endpoints happily serve unlisted paths.
+Discovery now sweeps the REST `list_user_checkpoints` (every checkpoint this
+account still has), so a run's `sampleable` flag checks BOTH the base model AND
+the weights — it can be trusted, and stays stable instead of churning as newer
+runs push older ones out of a fake window.
 
-TO REFRESH when the run below ages out: cross-reference each run's checkpoint
-sampler UUID against the servable set — `tinker_oai.list_checkpoints()` (or the
-`GET /api/tinker-models` endpoint) lists what's currently servable. Pick a
-recently-trained run whose UUID is in that set. `pick_servable_run()` below does
-exactly this for the backend smokes. (See the `cheap-sampling-targets` memory.)
+TO REFRESH when the run below dies (expired/deleted/retrained): pick any run
+that discovery marks sampleable — `pick_servable_run()` below does exactly this
+for the backend smokes. (See the `cheap-sampling-targets` memory.)
 
 Verified live 2026-06-22.
 """
 
 # A live discovered LoRA run (the 04_rationalization family — DeepSeek-V3.1 base —
-# was trained 2026-06-19..22 and is in the servable window). Root-relative to the
+# trained 2026-06-19..22, sampler weights never expire). Root-relative to the
 # weird-personas scan root. This is the right target for tests that must exercise
 # the real tinker LoRA sampling path (renderer, streaming, prefill/continue).
 LIVE_RUN_ID = (
@@ -27,7 +29,7 @@ LIVE_RUN_ID = (
 # Its servable siblings, if extras_deepseek ages out first:
 LIVE_RUN_FAMILY = "explorations/04_2026-06-16_rationalization_char_training/results"
 
-# Fallbacks that don't depend on the servable window at all:
+# Fallbacks that don't depend on any discovered run's weights at all:
 #  - Free OpenRouter ROUTER = ZERO cost (needs OPENROUTER_API_KEY). Routes each
 #    request to whichever free model is currently up, so it survives a single
 #    provider outage (a pinned :free model 502'd for a whole day, 2026-07-08).
@@ -69,13 +71,15 @@ def skip_if_streaming_disabled():
 
 
 def pick_servable_run():
-    """Return a discovered Run whose latest checkpoint is in Tinker's servable
-    window (so it actually samples), preferring the most recently trained. Raises
-    if none are servable. Backend-only (imports tinkerscope)."""
+    """Return (Run, Checkpoint) whose sampler weights still exist on Tinker (so it
+    actually samples), preferring the most recently trained. Raises if none are
+    servable. Backend-only (imports tinkerscope)."""
     from tinkerscope.api import discovery
-    from tinkerscope.api import tinker_oai
 
-    servable = {c["sampler_path"] for c in tinker_oai.list_checkpoints()}
+    srv = discovery.get_servable_paths()
+    if not srv.get("available"):
+        raise SystemExit(f"can't list servable sampler paths: {srv.get('error')}")
+    servable = srv["paths"]
     candidates = []
     for r in discovery.list_runs():
         cks = [c for c in r.checkpoints if c.sampler_path and c.sampler_path in servable]
@@ -83,8 +87,8 @@ def pick_servable_run():
             candidates.append((r, cks[-1]))
     if not candidates:
         raise SystemExit(
-            "no discovered run is in Tinker's servable window — train a fresh run "
-            "or use FREE_OR_RUN_ID / BASE_RUN_ID (see _smoke_models docstring)"
+            "no discovered run has live sampler weights on Tinker — train a fresh "
+            "run or use FREE_OR_RUN_ID / BASE_RUN_ID (see _smoke_models docstring)"
         )
     # discovery.list_runs() is already stable-sorted; the rationalization family
     # (most recent) sorts last, so prefer the tail.

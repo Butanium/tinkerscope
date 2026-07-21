@@ -51,6 +51,7 @@ from sse_starlette.sse import EventSourceResponse
 from .. import discovery, openrouter, tinker_oai
 from ..state import BUS
 from ..tinker_sampler import get_sampler, select_renderer_name
+from .models import ckpt_label
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -377,7 +378,7 @@ async def chat(req: ChatRequest):
                 sel_patch: dict = {}
             elif req.sampler_path:
                 # Loose checkpoint: oai /chat/completions, server renders (default template).
-                label = tinker_oai._ckpt_label(req.sampler_path, None)
+                label = ckpt_label(req.sampler_path, None)
                 if stream:
                     produce_iter = tinker_oai.chat_stream(
                         model=req.sampler_path, messages=sampling_msgs,

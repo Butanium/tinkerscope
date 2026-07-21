@@ -28,8 +28,7 @@ BASE_URL = "https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1"
 
 
 def pick_checkpoint():
-    # Pick a run whose sampler is in Tinker's live servable window — `sampleable`
-    # alone doesn't guarantee the weights are still served (rolling window).
+    # Pick a run whose sampler weights still exist on Tinker.
     return pick_servable_run()
 
 

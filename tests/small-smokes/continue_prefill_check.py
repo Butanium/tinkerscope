@@ -3,7 +3,7 @@
 A trailing assistant message must be rendered as a PREFILL and EXTENDED: the sample
 comes back as the *continuation only* (the prefill is in the prompt, not the
 generated tokens), and `raw_text` = rendered-prompt + generation so you can eyeball
-the X+Y boundary. Doubles as a "this run is still in the servable window" probe.
+the X+Y boundary. Doubles as a "this run's sampler weights still exist" probe.
 
   uv run python tests/small-smokes/continue_prefill_check.py [RUN_ID] [BASE_URL]
 """
@@ -58,7 +58,7 @@ with httpx.Client(base_url=BASE, timeout=180) as c:
                 break
 
 if err:
-    raise SystemExit(f"chat error (run may have aged out of the servable window): {err}")
+    raise SystemExit(f"chat error (run's sampler weights may be gone): {err}")
 assert sample, "no sample returned from /api/chat"
 
 content = sample.get("content") or ""

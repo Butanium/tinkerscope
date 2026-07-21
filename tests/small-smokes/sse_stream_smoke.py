@@ -20,12 +20,11 @@ def run_chat(body, tag):
     print(f"[{tag}] deltas={deltas} messages={messages} done={done} err={err}")
     return deltas, messages, done
 
-# pick a run whose sampler is in Tinker's live servable window — `sampleable` alone
-# is NOT enough (only a rolling window of sampler_weights is actually served).
-servable={m["sampler_path"] for m in httpx.get(BASE+"/api/tinker-models",timeout=8).json()["models"] if m.get("sampler_path")}
+# pick a run with live sampler weights — since the REST-sweep fix (2026-07-21)
+# `sampleable` checks both the base AND the weights, so it can be trusted.
 runs=httpx.get(BASE+"/api/models",timeout=8).json()
-rid=next((r["id"] for r in runs if any(c.get("sampler_path") in servable for c in r.get("checkpoints",[]))),None)
-assert rid, "no run on this instance is in Tinker's servable window"
+rid=next((r["id"] for r in runs if r.get("sampleable")),None)
+assert rid, "no run on this instance has live sampler weights"
 print("run:",rid)
 
 # n=1 discovered run -> expect deltas>=1  (DESIRED contract; disabled while streaming off)

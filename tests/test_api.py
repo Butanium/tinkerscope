@@ -44,11 +44,11 @@ def test_per_checkpoint_servable_flag(client):
 
 def test_aged_out_run_is_unsampleable(client):
     """The false-green case: base model IS served, but the run's sampler weights
-    have aged out of tinker's window → sampleable:false with the aged-out reason."""
+    are gone (expired/deleted) → sampleable:false with the weights-gone reason."""
     aged = {r["name"]: r for r in client.get("/api/models").json()}["aged_out_run"]
     assert aged["base_model"] == "deepseek-ai/DeepSeek-V3.1"  # a served base model
     assert aged["sampleable"] is False
-    assert "aged out" in (aged["unsampleable_reason"] or "")
+    assert "no longer exist" in (aged["unsampleable_reason"] or "")
     assert aged["checkpoints"][0]["servable"] is False
 
 
@@ -485,8 +485,7 @@ def test_tinker_models_base_entries_carry_supports_thinking(client, monkeypatch)
     """`/api/tinker-models` base entries expose `supports_thinking` (the family's
     binary-toggle probe) so the composer can hide its thinking control for base
     picks with no toggle. Loose checkpoints (UUID-only) get no field."""
-    # Avoid the real oai /v1/models network call — checkpoints are irrelevant here.
-    monkeypatch.setattr("tinkerscope.api.tinker_oai.list_checkpoints", lambda refresh=False: [])
+    # Checkpoints come from the conftest-stubbed get_servable_paths — no network.
     body = client.get("/api/tinker-models").json()
     bases = {m["id"]: m for m in body["models"] if m["kind"] == "base"}
     # The stubbed caps serve a toggle-less base (Llama) + a thinking one (DeepSeek-V3.1).

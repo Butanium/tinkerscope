@@ -4,12 +4,26 @@ OpenRouter reference models live in routes/openrouter_models.py (global, UI-mana
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter
 
-from .. import discovery, tinker_oai
+from .. import discovery
 from ..tinker_sampler import supports_thinking
 
 router = APIRouter(prefix="/api", tags=["models"])
+
+
+def ckpt_label(sampler_path: str, created: int | None) -> str:
+    """Readable label for a UUID-only checkpoint: short-uuid · ckpt-name · date.
+    (Public: routes/chat.py labels loose-checkpoint sends with it too.)"""
+    body = sampler_path.split("://", 1)[-1]
+    uuid = body.split(":", 1)[0][:8]
+    name = sampler_path.rstrip("/").split("/")[-1]
+    when = ""
+    if created:
+        when = " · " + datetime.fromtimestamp(created, tz=timezone.utc).strftime("%Y-%m-%d")
+    return f"{uuid} · {name}{when}"
 
 
 @router.get("/models")
@@ -36,7 +50,8 @@ def tinker_models(refresh: bool = False) -> dict:
 
       1. Base models `get_server_capabilities` serves (raw, no LoRA) — kind="base".
          ':peft:<ctx>' LoRA-context variants are folded into their base name.
-      2. Sampler checkpoints the oai endpoint serves right now (GET /v1/models),
+      2. Every sampler checkpoint this account still has (discovery's REST
+         `list_user_checkpoints` sweep — NOT the 20-capped oai /v1/models),
          newest first — kind="checkpoint". These are UUID-only (base_model/renderer
          unknown), so they're sampled via the default chat template.
 
@@ -59,17 +74,18 @@ def tinker_models(refresh: bool = False) -> dict:
     ]
 
     error = caps.get("error")
-    try:
-        for c in tinker_oai.list_checkpoints(refresh=refresh):
+    srv = discovery.get_servable_paths(force=refresh)
+    if srv.get("available"):
+        for c in srv.get("checkpoints", []):
             models.append({
                 "kind": "checkpoint",
                 "id": c["sampler_path"],
-                "label": c["label"],
+                "label": ckpt_label(c["sampler_path"], c.get("created")),
                 "sampler_path": c["sampler_path"],
-                "created": c["created"],
+                "created": c.get("created"),
             })
-    except Exception as e:  # oai /models unreachable: keep base models, note why
-        error = error or f"checkpoint list unavailable: {type(e).__name__}: {e}"
+    else:  # sweep unreachable: keep base models, note why
+        error = error or f"checkpoint list unavailable: {srv.get('error')}"
 
     return {
         "available": caps.get("available", False),

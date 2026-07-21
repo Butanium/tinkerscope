@@ -1,27 +1,27 @@
 """Browser smoke for the UNAVAILABLE-model treatment in the model picker.
 
 Verifies the three product surfaces of the availability feature end-to-end
-(discovery → capabilities + servable-window probe → /api/models → UI):
+(discovery → capabilities + servable-paths probe → /api/models → UI):
 
   1. GREY + ⚠, still PICKABLE — a run tinker can't sample right now (base gone
-     OR sampler weights aged out of the window) renders `.typeahead-row.unavailable`
+     OR sampler weights gone) renders `.typeahead-row.unavailable`
      (muted) with a ⚠ in its label, but is NOT `[disabled]` (a warning, not a block).
   2. DEMOTED — available runs rank before unavailable ones in the filtered list
      (only asserted when the live data has both classes; the ordering itself is
      exhaustively unit-tested in web/src/lib/fuzzy.test.ts).
   3. WARN-ON-SELECT, NO BLOCK — selecting an unavailable run shows the sidebar
      `.unavailable-warn` banner AND leaves the composer textarea enabled.
-  4. SEND SURFACES THE 404 — sending to a false-green run (base served, weights
-     aged out) renders the backend error VISIBLY as an assistant bubble
-     ("Error: sampler weights have aged out…"), not a silent no-op. This is the
+  4. SEND SURFACES THE 404 — sending to a dead run (base served, weights
+     gone) renders the backend error VISIBLY as an assistant bubble
+     ("Error: sampler weights no longer exist…"), not a silent no-op. This is the
      check that justifies keeping the send allowed instead of hard-gated. Makes a
      real (fast-failing, token-free) tinker call, so needs TINKER_API_KEY set.
 
 DATA-DRIVEN (not seeded): availability is inherently live state, so the smoke
 reads /api/models and asserts against whatever the probe returns. The
 negation_neglect runs are on `Qwen/Qwen3-30B-A3B-Base` (a base tinker no longer
-serves) → a deterministic supply of UNAVAILABLE runs regardless of the rolling
-window. Point it at an isolated instance scanning BOTH real roots:
+serves) → a deterministic supply of UNAVAILABLE runs regardless of which sampler
+weights still exist. Point it at an isolated instance scanning BOTH real roots:
 
   scripts/dev-isolated.sh --port 8812 \\
       ~/projects2/negation_neglect/datasets/training_datasets/ ~/projects2/weird-personas/
@@ -53,7 +53,7 @@ def mixed_token(avail: list, unavail: list) -> str | None:
     """A base-model token that matches BOTH an available and an unavailable run
     (the typeahead search field includes base_model), so a single filter yields a
     mixed list to check demotion order on. e.g. 'deepseek' when a served base has
-    both live and aged-out runs. None if no base spans both classes."""
+    both live and weights-gone runs. None if no base spans both classes."""
     a_bases = {r.get("base_model") for r in avail}
     u_bases = {r.get("base_model") for r in unavail}
     for bm in a_bases & u_bases:
@@ -75,14 +75,14 @@ def main():
         "expected >=1 unavailable run (the negation_neglect Qwen3-30B-A3B-Base runs "
         "are base-gone) — is the instance scanning that root?"
     )
-    # Prefer a FALSE-GREEN run for the whole flow: base still served, weights aged
-    # out — the case the base-only check missed AND the one whose send produces a
+    # Prefer a WEIGHTS-GONE run for the whole flow: base still served, weights
+    # gone — the case the base-only check missed AND the one whose send produces a
     # meaningful weights-404 (not a base-load failure).
     false_green = [r for r in unavail if r.get("base_model") in sup and r.get("checkpoints")]
     target = false_green[0] if false_green else unavail[0]
     token = search_token(target)
     print(f"target unavailable run: {target['id']!r} (reason: {target.get('unsampleable_reason')!r}); filter token {token!r}")
-    print(f"false-green (served base, aged weights): {bool(false_green)}")
+    print(f"weights-gone-with-served-base run present: {bool(false_green)}")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
@@ -116,7 +116,8 @@ def main():
         assert probe["found"], f"no .typeahead-row.unavailable after filtering {token!r} (rows={probe.get('n')})"
         assert not probe["disabled"], "unavailable row must stay PICKABLE (no [disabled]) — warning, not a block"
         assert probe["warnGlyph"], "unavailable row label must carry the ⚠ warning glyph"
-        assert "aged out" in probe["title"] or "samplable" in probe["title"], f"expected a warning title, got {probe['title']!r}"
+        assert any(s in probe["title"] for s in ("no longer exist", "serve sampling", "sampleable")), \
+            f"expected a warning title naming the constraint, got {probe['title']!r}"
         print(f"row OK: greyed+pickable, ⚠ present, color={probe['muted']}")
 
         # ── 2. demotion: filter by a base spanning both classes → available first ──
@@ -158,7 +159,7 @@ def main():
             f"composer must stay ENABLED for an unavailable pick (warning, not block), got disabled={state['composerDisabled']}"
         print(f"select OK: warn={state['warnText'][:60]!r}…, composer enabled")
 
-        # ── 4. SEND to the (false-green) run → the 404 renders as an error bubble ──
+        # ── 4. SEND to the (weights-gone) run → the 404 renders as an error bubble ──
         # This is what justifies keeping the send allowed: the failure is VISIBLE.
         ta = page.locator(".input-textarea").first
         ta.wait_for(state="visible", timeout=5000)
@@ -178,7 +179,8 @@ def main():
         assert errtext and errtext.startswith("Error:"), \
             f"a send to an unavailable run must render a visible error bubble, got {errtext!r}"
         if false_green:
-            assert "aged out" in errtext, f"false-green send should surface the aged-out 404, got {errtext!r}"
+            assert "no longer exist" in errtext, \
+                f"weights-gone send should surface the weights-gone reason, got {errtext!r}"
         print(f"send OK: error surfaced visibly → {errtext[:70]!r}")
 
         if SHOT:

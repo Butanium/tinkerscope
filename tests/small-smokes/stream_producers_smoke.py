@@ -18,8 +18,7 @@ async def collect(it, tag):
 
 async def main():
     os.environ.setdefault("TINKERSCOPE_SCAN_ROOTS", os.path.expanduser("~/projects2/weird-personas"))
-    # discovered run — one whose sampler is in Tinker's live servable window
-    # (`sampleable` alone doesn't guarantee the weights are still served).
+    # discovered run — one whose sampler weights still exist on Tinker
     run, ck = pick_servable_run()
     rn = select_renderer_name(run.base_model, run.renderer_name, False)
     _, prompt, stop = await get_sampler().render(run.base_model, rn, [{"role":"user","content":"Say hello in five words."}])
@@ -31,8 +30,9 @@ async def main():
     # completions producer case anymore; only the sampler_path (parked run_id path)
     # and loose-ckpt/openrouter producers remain streamable.
 
-    # loose checkpoint
-    loose = tinker_oai.list_checkpoints()[0]["sampler_path"]
+    # loose checkpoint — newest live sampler path from the REST sweep
+    from tinkerscope.api import discovery
+    loose = discovery.get_servable_paths()["checkpoints"][0]["sampler_path"]
     await collect(tinker_oai.chat_stream(model=loose, messages=[{"role":"user","content":"Say hi in five words."}], temperature=0.7, max_tokens=40), "loose/chat")
 
     # openrouter (if key)

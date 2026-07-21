@@ -343,16 +343,19 @@ extracted UI: `tests/small-smokes/browser_{chart_modal,modals}.py`.
 - Test fixtures: **26 real run dirs** under
   `~/projects2/negation_neglect/datasets/training_datasets/` + the
   `~/projects2/weird-personas` runs (each has `config.json` + `checkpoints.jsonl`).
-  **Sampleability is a ROLLING WINDOW, not fixed:** Tinker serves only the last
-  ~14 sampler checkpoints (~6 weeks); a run samples iff its sampler UUID is still
-  servable. Two failure modes show greyed-out / 404: (a) base model no longer served
-  (e.g. `Qwen/Qwen3-30B-A3B-Base`); (b) sampler_weights aged out of the window — and
-  **`sampleable: true` does NOT catch (b)** (the probe only checks the base model),
-  so aged-out runs look green and only 404 on actual sample. Find a live run by
-  cross-referencing `tinker_oai.list_checkpoints()` / `GET /api/tinker-models`, or use
-  `tests/small-smokes/_smoke_models.{LIVE_RUN_ID,pick_servable_run}`. **Live as of
-  2026-06-22:** the `04_2026-06-16_rationalization` deepseek/kimi runs (weird-personas);
-  all April negation_neglect runs have aged out.
+  **Sampler weights are NOT windowed** (settled 2026-07-21): a checkpoint persists
+  until it expires (per-ckpt TTL; `expires_at=None` = never) or is deleted. Two
+  failure modes show greyed-out / 404: (a) base model no longer served (e.g.
+  `Qwen/Qwen3-30B-A3B-Base`); (b) sampler weights gone (expired/deleted).
+  Discovery checks both via the REST `list_user_checkpoints` sweep
+  (`discovery.get_servable_paths`), so **`sampleable` can be trusted**. ⚠️ Never
+  use the oai `GET /v1/models` listing for availability — it's hard-capped at the
+  ~20 newest checkpoints while the inference endpoints serve unlisted paths fine;
+  trusting it falsely greyed older-but-live runs (the "rolling window" theory in
+  older notes came from this cap). Find a live run via `GET /api/tinker-models`
+  or `tests/small-smokes/_smoke_models.{LIVE_RUN_ID,pick_servable_run}`.
+  **Live as of 2026-07-21:** all 2026-06 weird-personas runs (42 of 54 discovered);
+  the April negation_neglect runs are genuinely gone.
 - CPU-only box; sampling is remote so no GPU/vLLM/LoRA-conversion needed locally.
 
 ## Build / verify

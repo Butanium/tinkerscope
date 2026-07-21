@@ -59,11 +59,11 @@ the API are **relative to that root**.
   "checkpoints": [
     {"name":"000010","batch":10,"epoch":0,"step":10,
      "sampler_path":"tinker://…/sampler_weights/000010","state_path":"tinker://…/weights/000010",
-     "servable": false},          // this sampler_path in tinker's rolling window? null = unknown
+     "servable": false},          // this sampler_path's weights still exist on tinker? null = unknown
     … {"name":"final","step":468,"servable":true, …}
   ],
   "sampleable": true | false | null,            // null = unknown (tinker offline/no key)
-  "unsampleable_reason": "sampler weights have aged out of tinker's serving window (retrain to refresh)",
+  "unsampleable_reason": "sampler weights no longer exist on tinker (expired or deleted — retrain to refresh)",
   "config_error": null,                          // set if config.json missing/malformed
   "supports_thinking": true                       // added by /api/models
 }
@@ -72,14 +72,18 @@ the API are **relative to that root**.
 availability axes:
 1. **Base gone** — the run's `base_model` is no longer hosted (e.g.
    `Qwen/Qwen3-30B-A3B-Base`). Verified against `get_server_capabilities`.
-2. **Weights aged out** — tinker serves only a rolling most-recent-N window of
-   sampler checkpoints, so an old run's `sampler_weights` 404 on sample even
-   though its base is still served. Verified per-checkpoint by string-matching
-   each `sampler_path` against `GET /v1/models` (surfaced as `Checkpoint.servable`).
-   This catches the **false-green** the base check misses — a run whose base is
-   served but whose weights have all aged out is `sampleable:false` with the
-   aged-out reason. If the base is served but the servable window is unknown (oai
-   outage), the checkpoint check is skipped and the run keeps the base-only verdict.
+2. **Weights gone** — sampler checkpoints persist until they expire (per-ckpt
+   TTL) or are deleted; a gone path 404s on sample even though its base is still
+   served. Verified per-checkpoint by string-matching each `sampler_path`
+   against the account's REST `list_user_checkpoints` sweep (surfaced as
+   `Checkpoint.servable`). ⚠️ NOT the oai `GET /v1/models` listing — that is
+   hard-capped at the ~20 newest checkpoints (the inference endpoints serve
+   unlisted paths fine), and trusting it falsely greyed every older-but-live run
+   until 2026-07-21. This catches the **false-green** the base check misses — a
+   run whose base is served but whose weights are all gone is `sampleable:false`
+   with the weights-gone reason. If the base is served but the sweep is
+   unavailable (outage), the checkpoint check is skipped and the run keeps the
+   base-only verdict.
 
 `unsampleable_reason` names whichever constraint binds. The UI **greys unavailable
 runs (⚠) and demotes them below available ones, but keeps them selectable** — a
@@ -93,7 +97,7 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
 | GET | `/api/health` | — | `{ok, root, scan_roots[], tinker_key, openrouter_key, available, supported_models[], error}` |
 | GET | `/api/models` | — | `Run[]` (with `supports_thinking`) |
 | POST | `/api/models/refresh` | — | `{status, count}` (rescans fs + capabilities) |
-| GET | `/api/tinker-models` | `?refresh` | `{available, error, models:[…]}` — everything sampleable through tinker, one filterable list. Each entry has `kind` + unified `id` + `label`. `kind:"base"` (+`base_model`, +`supports_thinking`) = raw base models from `get_server_capabilities` (no LoRA); `supports_thinking` = the family exposes a binary thinking toggle (so the composer can hide its thinking control for base picks with none). `kind:"checkpoint"` (+`sampler_path`,`created`) = sampler checkpoints the oai endpoint serves now (GET /v1/models), newest first, UUID-only (no `supports_thinking` — base/renderer unknown ⇒ the UI assumes thinking-capable). Base models first, then checkpoints. |
+| GET | `/api/tinker-models` | `?refresh` | `{available, error, models:[…]}` — everything sampleable through tinker, one filterable list. Each entry has `kind` + unified `id` + `label`. `kind:"base"` (+`base_model`, +`supports_thinking`) = raw base models from `get_server_capabilities` (no LoRA); `supports_thinking` = the family exposes a binary thinking toggle (so the composer can hide its thinking control for base picks with none). `kind:"checkpoint"` (+`sampler_path`,`created`) = every sampler checkpoint the account still has (the REST `list_user_checkpoints` sweep — not the 20-capped oai /v1/models), newest first, UUID-only (no `supports_thinking` — base/renderer unknown ⇒ the UI assumes thinking-capable). Base models first, then checkpoints. |
 | GET | `/api/openrouter-models` | — | `[{label, openrouter_model}]` (GLOBAL saved list, seeded once from `$TINKERSCOPE_OPENROUTER_MODELS`) |
 | POST | `/api/openrouter-models` | `{openrouter_model, label?}` | the updated saved list (upsert) |
 | DELETE | `/api/openrouter-models?model=<id>` | — | the updated saved list (model id in query; ids have slashes) |

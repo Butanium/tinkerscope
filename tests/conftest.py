@@ -26,9 +26,9 @@ from fastapi.testclient import TestClient
 # One fixture run uses a supported base (→ sampleable), the other does not.
 SUPPORTED_BASE = "meta-llama/Llama-3.2-3B"
 UNSUPPORTED_BASE = "Qwen/Qwen3-30B-A3B-Base"
-# Sampler paths the stubbed servable-window probe pretends are still served.
-# The good run's default "final" is in-window (→ sampleable); the aged-out run's
-# distinct paths are absent (base served, but weights aged out → NOT sampleable).
+# Sampler paths the stubbed servable-paths probe pretends still exist.
+# The good run's default "final" is present (→ sampleable); the aged-out run's
+# distinct paths are absent (base served, but weights gone → NOT sampleable).
 SERVABLE_PATHS = {"tinker://fake:train:0/sampler_weights/final"}
 
 
@@ -119,8 +119,8 @@ def scan_root(tmp_path: Path) -> Path:
         base_model=UNSUPPORTED_BASE,
         wandb_name="unsampleable_run",
     )
-    # Run on a SERVED base whose sampler weights have all aged out of the window
-    # → the false-green case: base check passes, checkpoint-window check fails.
+    # Run on a SERVED base whose sampler weights are all gone (expired/deleted)
+    # → the false-green case: base check passes, weights-exist check fails.
     _write_run(
         root / "aged_out_run",
         base_model="deepseek-ai/DeepSeek-V3.1",
@@ -176,9 +176,14 @@ def _reload_backend(monkeypatch: pytest.MonkeyPatch, scan_root: Path, state_home
             "error": None,
         }
 
-    # Stub the servable-window probe too (else the scan hits the real oai endpoint).
+    # Stub the servable-paths probe too (else the scan hits the real REST API).
     def fake_servable(force: bool = False) -> dict:
-        return {"available": True, "paths": set(SERVABLE_PATHS), "error": None}
+        return {
+            "available": True,
+            "paths": set(SERVABLE_PATHS),
+            "checkpoints": [{"sampler_path": p, "created": 0} for p in sorted(SERVABLE_PATHS)],
+            "error": None,
+        }
 
     monkeypatch.setattr(discovery_mod, "get_capabilities", fake_caps)
     monkeypatch.setattr(discovery_mod, "get_servable_paths", fake_servable)

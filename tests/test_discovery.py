@@ -56,12 +56,12 @@ def test_per_checkpoint_servable(discovery):
 
 
 def test_aged_out_run_base_served_but_weights_gone(discovery):
-    """Base model served, but all sampler weights aged out of the window → not
-    sampleable, with the aged-out reason (the false-green the base check misses)."""
+    """Base model served, but all sampler weights gone (expired/deleted) → not
+    sampleable, with the weights-gone reason (the false-green the base check misses)."""
     aged = next(r for r in discovery.list_runs(force=True) if r.name == "aged_out_run")
     assert aged.base_model == "deepseek-ai/DeepSeek-V3.1"
     assert aged.sampleable is False
-    assert "aged out" in aged.unsampleable_reason
+    assert "no longer exist" in aged.unsampleable_reason
     assert all(c.servable is False for c in aged.checkpoints)
 
 

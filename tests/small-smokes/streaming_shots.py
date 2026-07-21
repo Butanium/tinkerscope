@@ -20,7 +20,7 @@ BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:5180"
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
 OUT = Path("/tmp")
 
-# A live discovered LoRA run (in Tinker's servable window — see _smoke_models).
+# A live discovered LoRA run (sampler weights still on Tinker — see _smoke_models).
 RUN_ID = LIVE_RUN_ID
 # A token from the run path that the rendered picker shows (readiness probe).
 PICKER_TOKEN = "rationalization"
