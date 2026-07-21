@@ -226,8 +226,8 @@
   function defaultCheckpoint(runId: string): string | null {
     // OpenRouter / raw base / loose checkpoint have no checkpoint selector; tinker
     // runs default to the last checkpoint with a sampler (usually "final") — but
-    // prefer the last one STILL in tinker's serving window, so a run whose final
-    // aged out but an earlier step is live defaults to something samplable.
+    // prefer the last one whose weights still exist on tinker, so a run whose final
+    // is gone but an earlier step is live defaults to something samplable.
     // (offline/unknown → servable is null → falls back to the plain last.)
     if (isOpenrouterSel(runId) || isBaseSel(runId) || isCkptSel(runId)) return null;
     const r = modelCatalog.runById(runId);
@@ -335,7 +335,7 @@
   /** Whether ONE panel's selected model is chat-eligible. OpenRouter refs + raw
    *  tinker base models + loose checkpoints are always eligible (the backend
    *  errors clearly if a key is missing). A discovered run needs a base model +
-   *  ≥1 checkpoint; an UNAVAILABLE run (aged-out / base-gone) stays eligible on
+   *  ≥1 checkpoint; an UNAVAILABLE run (weights-gone / base-gone) stays eligible on
    *  purpose — it's a warning, not a block (the sidebar warns + a failed send
    *  surfaces the backend error), consistent with base/OR "always eligible". */
   function panelCanChat(p: PanelSel): boolean {
@@ -1431,7 +1431,7 @@
                 >
                   {#each pr.checkpoints as ck (ck.name)}
                     {@const numbered = /^\d+$/.test(ck.name)}
-                    <option value={ck.name}>{numbered ? `step ${ck.step}` : ck.name}{ck.epoch != null ? ` · e${ck.epoch}·b${ck.batch ?? 0}` : ''}{ck.servable === false ? ' · ⚠ aged out' : ''}</option>
+                    <option value={ck.name}>{numbered ? `step ${ck.step}` : ck.name}{ck.epoch != null ? ` · e${ck.epoch}·b${ck.batch ?? 0}` : ''}{ck.servable === false ? ' · ⚠ gone' : ''}</option>
                   {/each}
                 </select>
               {/if}

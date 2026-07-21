@@ -166,7 +166,7 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     positionally votes over aligned indices: cluster-constant runs collapse to a
     dimmed `…`, every varying segment shows in full (reaches interior constants a
     prefix/suffix scheme can't; degrades to prefix-only elision on ragged families).
-    Peels the `⊘/?/◆/◇/↗` status-icon prefix so aged-out runs still cluster.
+    Peels the `⊘/?/◆/◇/↗` status-icon prefix so unavailable runs still cluster.
     Returns null per row → caller falls back to TruncLabel. Invariants (distinct
     labels never collide; only cluster-constant segments elide) are in
     **`label-diff.test.ts`** against both real fixture families; browser smoke

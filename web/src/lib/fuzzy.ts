@@ -25,7 +25,7 @@ export type FuzzyItem = {
   label: string;
   search?: string;
   disabled?: boolean;
-  /** Selectable but not samplable right now (base gone / weights aged out).
+  /** Selectable but not samplable right now (base gone / weights gone).
    *  Ranked AFTER available rows within each tier — demoted, never hidden. */
   unavailable?: boolean;
 };

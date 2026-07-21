@@ -15,7 +15,7 @@
   // `search`: extra hidden text matched but never displayed (e.g. a run's
   // wandb project / base model, so filtering isn't limited to the visible
   // label). `disabled`: shown but not pickable — greyed, click/Enter is a no-op.
-  // `unavailable`: not samplable right now (base gone / weights aged out) —
+  // `unavailable`: not samplable right now (base gone / weights gone) —
   // greyed AND demoted below available rows, but STILL pickable (a warning, not
   // a block; the sidebar shows why + a send surfaces the backend error).
   type Item = { id: string; label: string; disabled?: boolean; unavailable?: boolean; search?: string };
@@ -156,7 +156,7 @@
             class:disabled={it.disabled}
             class:unavailable={it.unavailable}
             disabled={busy || it.disabled}
-            title={it.unavailable ? 'Not samplable right now — sampler weights aged out of tinker’s window (selecting still allowed)' : undefined}
+            title={it.unavailable ? 'Not samplable right now — base model not served or sampler weights no longer exist (selecting still allowed)' : undefined}
             onmouseenter={() => { if (!it.disabled) active = i; }}
             onclick={() => pick(it)}
           >

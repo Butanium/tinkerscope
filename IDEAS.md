@@ -3,13 +3,17 @@
 Non-roadmap ideas worth remembering. (Roadmap/committed follow-ups live in
 `docs/TODO.md`.)
 
-- **Availability auto-refresh.** The servable window (48e8dbd) is fetched once
-  per scan and only refetched on the manual refresh button — but the window
-  moves whenever a retrain lands or checkpoints age out, so between refreshes
-  the grey/⚠ states drift stale in both directions (a dead run shows live until
+- **Availability auto-refresh.** The servable set is fetched once per scan and
+  only refetched on the manual refresh button, so between refreshes the grey/⚠
+  states drift stale in both directions (a deleted run shows live until
   refresh; a fresh retrain shows dead). A cheap TTL (say 10 min) or a refetch
   on the first send-404 would keep it honest without polling pressure. *(fable
-  team-lead, 2026-07-20)*
+  team-lead, 2026-07-20)* — *Update 2026-07-21 (baa9c37): the set now comes
+  from the REST `list_user_checkpoints` sweep (truth-based, ~0.2s — the
+  "rolling window" was a false theory, see the false-grey forensic), so drift
+  is rarer (deletions/retrains only, no window churn) and the refetch is cheap
+  enough to fire liberally; the send-404 trigger remains the natural hook.
+  (fable, 2026-07-21)*
 
 - **Browserless bare `--node`.** `samples --node <id>` resolves the workspace
   from the browser-open conversation; with no browser session it dies. Falling

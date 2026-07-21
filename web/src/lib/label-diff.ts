@@ -44,7 +44,7 @@ type Seg = { sep: string; text: string };
 
 const ELLIPSIS = '…';
 // Leading status glyph the catalog prepends (⚠/? sampleability, ◆/◇/↗ group
-// markers), always as "<glyph><whitespace>". Peeled off the body so an aged-out
+// markers), always as "<glyph><whitespace>". Peeled off the body so an unavailable
 // `⚠ basevsinstr_…` still clusters with a live `basevsinstr_…`, then re-attached.
 // (⊘ kept for back-compat with any older-rendered label.)
 const ICON = /^([⚠⊘?◆◇↗]\s+)/;

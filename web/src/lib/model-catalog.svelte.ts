@@ -34,7 +34,7 @@ const RECENT_BASE_KEY = 'tinkerscope-recent-base-models';
 const RECENT_CKPT_KEY = 'tinkerscope-recent-checkpoints';
 
 /** One entry in a panel dropdown's item list. `unavailable` = selectable but not
- *  samplable right now (base gone / weights aged out) → greyed + demoted + ⚠, a
+ *  samplable right now (base gone / weights gone) → greyed + demoted + ⚠, a
  *  warning not a block (still pickable, unlike the hard `disabled`). */
 export type ModelItem = {
   id: string;
@@ -208,7 +208,7 @@ class ModelCatalog {
       ...this.runs.map((r) => ({
         id: r.id,
         label: `${r.sampleable === false ? '⚠ ' : r.sampleable === null ? '? ' : ''}${this.runLabel(r)}`,
-        // Unavailable (base gone / weights aged out) is a warning, not a block:
+        // Unavailable (base gone / weights gone) is a warning, not a block:
         // greyed + demoted but still pickable. `?` (unknown/offline) stays neutral.
         unavailable: r.sampleable === false,
         search: [r.id, r.base_model, r.wandb_project, r.renderer_name].filter(Boolean).join(' ')
