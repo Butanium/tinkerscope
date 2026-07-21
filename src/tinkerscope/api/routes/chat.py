@@ -392,7 +392,10 @@ async def chat(req: ChatRequest):
                 sel_patch = {}
             elif req.base_model:
                 # Raw base model through tinker (no LoRA checkpoint).
-                caps = discovery.get_capabilities()
+                # to_thread: a capabilities/scan cache miss does REST sweeps +
+                # a filesystem walk — sync here would block the event loop (and
+                # trip the tinker SDK's sync-from-async guard).
+                caps = await asyncio.to_thread(discovery.get_capabilities)
                 if caps.get("available") and req.base_model not in discovery._supported_base_set(caps):
                     raise ValueError(f"tinker does not currently serve {req.base_model}")
                 label = req.base_model
@@ -420,7 +423,7 @@ async def chat(req: ChatRequest):
             else:
                 if not req.run_id:
                     raise ValueError("one of run_id / base_model / sampler_path / openrouter_model is required")
-                run = discovery.find_run(req.run_id)
+                run = await asyncio.to_thread(discovery.find_run, req.run_id)
                 if run is None:
                     raise ValueError(f"unknown run: {req.run_id}")
                 if not run.base_model:
