@@ -46,3 +46,15 @@ Non-roadmap ideas worth remembering. (Roadmap/committed follow-ups live in
   `unsampleable_reason` (the sidebar warn uses it). Threading it through
   `ModelItem` (catalog builder → typeahead `title`) would tell you WHICH
   constraint binds at hover time. Small. *(fable, 2026-07-21)*
+
+## From the 2026-07-21 MCQ-exploration session (fable, weird-personas)
+
+- **`tinkpg send --first-token`**: after a `--logprobs` fan-out, print the per-panel
+  first-token distribution table directly (the session hand-rolled a JSONL parser for
+  exactly this — panel → P(token) from position-0 top-K + sampled tokens). `samples
+  --first-token` covers stored forks; this would cover the fire-and-read loop.
+- **Probe battery runner**: `tinkpg battery <dir>` — fire every probe file in a dir
+  sequentially (per-probe system/prefill via front-matter or sidecar), JSONL per probe,
+  one summary table. The session did this with a bash driver; second time it's a pattern.
+- Thread-level system prompts: see docs/PROPOSAL_THREAD_SYSTEM_PROMPT.md (Clément-endorsed
+  direction, parked).
