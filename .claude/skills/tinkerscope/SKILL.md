@@ -35,7 +35,7 @@ tinkpg open <run>[@ckpt]                            # select a run in the human'
 tinkpg chat <run>[@ckpt] "<prompt>" [opts]          # sample; streams to stdout + browser
 tinkpg compare <run_a>[@ckpt] <run_b>[@ckpt] "<prompt>" [opts]   # A→left pane, B→right pane (REPLACES the layout)
 tinkpg send "<prompt>" [opts] [--panel P ...]       # NEW THREAD at the CURRENT panels — layout untouched (the safe probe)
-tinkpg continue "<follow-up>" [opts] [--panel P] [--thread K] [--turn N] [--node ID]   # LOOM: add a turn to existing thread(s) (multi-turn send)
+tinkpg continue "<follow-up>" [opts] [--panel P] [--thread K] [--turn N] [--node ID] [--ancestry-file FILE]   # LOOM: add a turn to existing thread(s), OR to an explicit external transcript
 tinkpg state [--full] [--width N] [--no-link] [--json] [--include-folded]   # DIGEST of on-screen panels (active path + matched saved conv)
 tinkpg conv                                         # list saved WORKSPACES + branch metadata (alias: tinkpg ws)
 tinkpg conv <id|name> [--panel P] [--full] [--tree] [--include-folded]  # expand one: active branch + fork counts (--tree = all branches)
@@ -43,6 +43,15 @@ tinkpg samples [conv] [--panel P] [--thread K|--node ID] [--turn N] [--sample K]
 tinkpg grep "<text>" [--conv WS] [--regex] [-i]     # search EVERY branch of all workspaces: content + thinking
 tinkpg refresh                                      # rescan filesystem + re-probe sampling capability
 ```
+
+`send`/`continue` also take `--logprobs` (per-token logprob + top-5 alts, native
+tinker sampling only: `run_id` + `base_model` at any `n`. A single `n=1` fire to
+a loose checkpoint or OpenRouter streams through a different, logprob-free path)
+and `--json` (JSONL to stdout — one object per
+sample + a closing `{"event":"done"}`; plan/progress text moves to stderr so
+stdout stays parseable). `samples`/`grep` also take `--json` (one JSON object /
+array, untruncated) — reach for these over regexing the human-formatted text
+when you're going to tally/filter programmatically.
 
 `chat`/`compare` options: `--n N` (samples), `--temperature T`, `--max-tokens M`,
 `--thinking` (thinking renderer), `--thinking-both` (n samples WITHOUT thinking +
@@ -130,8 +139,10 @@ in endpoint/field names as "workspace".
   refuses cleanly. `--sampleable-only` filters `ls` to the ones that work. null =
   unknown (Tinker offline / no key); the CLI passes through and lets the server
   decide, warning once.
-- **n==1 streams tokens; n>1 draws a distribution.** Default `--n 1` streams the
-  completion token-by-token (inline to your stdout, and into the browser). `--n
+- **n==1 reads one completion; n>1 draws a distribution.** Default `--n 1`
+  returns a single completion — streamed token-by-token (inline to your stdout,
+  and into the browser) for a loose checkpoint / OpenRouter, but whole-sample for
+  a discovered run or base model (they sample native — no token stream). `--n
   20` fans out whole samples and the browser shows an answer-distribution chart —
   use it for "what does this model *usually* say to X". With `--thinking`,
   reasoning streams first, before the answer (dimmed in a real terminal,
@@ -167,6 +178,20 @@ in endpoint/field names as "workspace".
   streams to the CLI's stdout** (each `--- sample i ---` block with its CoT +
   finish_reason) — capture that (`… > log.txt`) for the distribution / a
   `<tag>` tally; the workspace keeps the representative + thread structure.
+  Because of the fold-one-rep limitation above, the BEST example of a behavior
+  from a wide fan-out often lives ONLY in that captured stdout, not in any tree
+  — `continue --ancestry-file <path>` (a JSON list of `{role, content}` dicts)
+  looms from it directly, no tree node needed.
+- **Provenance rule for looming (`continue`/`--ancestry-file`).** OK: a full,
+  VERBATIM, previously-generated conversation as ancestry — from a tree, a raw
+  log, or another model entirely (grafting a real conversation model A produced
+  into model B's context to see how B judges/continues it is a legitimate
+  probe design); a tiny `--prefill` thinking-opener ("Hmm,"); continuing a
+  model's own truncated CoT verbatim. NOT ok, ever: authoring or editing any
+  part of a turn yourself — a hand-written or hand-edited assistant message, a
+  partial answer you completed, a doctored transcript. The line is authored
+  vs. generated, not fresh vs. reused — a full real transcript from anywhere is
+  fine; one fabricated sentence anywhere in it is not.
 - **"What does checkpoint X do here?"**: `tinkpg open <run>@<ckpt>` → `tinkpg chat
   <run> "<prompt>"` → human watches it stream; you read the same text in stdout.
 - **Behavior distribution**: `tinkpg chat <run> "<q>" --n 30` → the browser's

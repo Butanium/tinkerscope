@@ -583,16 +583,34 @@ def _dim(s: str) -> str:
     return f"{_DIM}{s}{_RESET}" if _TTY else s
 
 
+def _fmt_token_logprobs(entries: list[dict]) -> str:
+    """One line per GENERATED token: index, the decoded text (repr'd so whitespace/
+    newlines are visible), its logprob, and (when present) the top-5 alternatives
+    from the same forward pass. Mirrors the `{t, tid, lp, top}` shape in
+    docs/API_CONTRACT.md — `top` degrades to absent if the topk follow-up call failed."""
+    lines = []
+    for i, e in enumerate(entries):
+        line = f"    [{i}] {e.get('t', '')!r}  lp={e.get('lp', 0.0):.4f}"
+        top = e.get("top")
+        if top:
+            alts = ", ".join(f"{t!r}({lp:.3f})" for (t, _tid, lp) in top)
+            line += f"   top: {alts}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def _stream_chat(
     body: dict,
     label: Optional[str] = None,
     lock: Optional[threading.Lock] = None,
     result: Optional["_StreamResult"] = None,
     stream_inline: bool = False,
+    logprobs: bool = False,
+    json_out: bool = False,
 ) -> None:
     """POST /api/chat and print streamed samples. Thread-safe printing via lock.
 
-    Two printing modes:
+    Three printing modes:
       - block (default): each per-sample block is assembled as ONE string and
         printed under a single lock acquisition, so concurrent compare panels
         never interleave mid-sample. Used by `compare`.
@@ -601,11 +619,20 @@ def _stream_chat(
         one stream). The authoritative `message` event then finalizes the sample
         (newline + finish_reason) WITHOUT reprinting its content. n>1 samples
         carry no deltas, so they fall through to block printing as before.
+      - JSON (`json_out=True`, overrides the above): one JSON object PER LINE
+        (JSONL) — the raw `message`/error payload plus a `panel` tag, no
+        `[label]` text prefix (the panel id lives in the object instead) and no
+        deltas (scripts want the finalized sample, not token chunks). A
+        trailing `{"event":"done","panel":...}` line closes each panel's
+        stream. For script/pipeline consumption — includes `token_logprobs`
+        whenever the sample carries it, independent of `--logprobs` (that flag
+        only controls the HUMAN-readable text rendering).
 
     On failure: if `result` is supplied (compare threads), record the error
     there instead of calling _die; otherwise _die directly.
     """
     prefix = f"[{label}] " if label else ""
+    panel_id = body.get("panel")
 
     def emit_block(*parts: str) -> None:
         block = "\n".join(prefix + p for p in parts)
@@ -615,16 +642,27 @@ def _stream_chat(
         else:
             print(block, flush=True)
 
+    def emit_json(obj: dict) -> None:
+        line = json.dumps({"panel": panel_id, **obj}, default=str, ensure_ascii=False)
+        if lock is not None:
+            with lock:
+                print(line, flush=True)
+        else:
+            print(line, flush=True)
+
     def emit_inline(text: str) -> None:
         sys.stdout.write(text)
         sys.stdout.flush()
 
     def fail(msg: str) -> None:
+        if json_out:
+            emit_json({"event": "error", "error": msg})
+        elif result is not None:
+            emit_block(f"[error] {msg}")
         if result is not None:
             result.error = msg
-            emit_block(f"[error] {msg}")
         else:
-            _die(msg)
+            _die(msg)  # single (non-threaded) chat: JSON line (if any) is already out — now exit non-zero
 
     # Inline-streaming bookkeeping (single chat only).
     streamed: set[int] = set()  # sample indices that received delta chunks
@@ -640,7 +678,10 @@ def _stream_chat(
                     return
                 for ev in event_source.iter_sse():
                     if ev.event == "done":
-                        emit_block("[done]")
+                        if json_out:
+                            emit_json({"event": "done"})
+                        else:
+                            emit_block("[done]")
                         break
                     if ev.event == "error":
                         err = ev.data
@@ -652,9 +693,9 @@ def _stream_chat(
                         return
                     if ev.event == "delta":
                         # Token chunk (n==1). Only streamed inline for single chat;
-                        # in block mode (compare) we ignore deltas and print the
-                        # whole sample from the later `message` event.
-                        if not stream_inline or not ev.data:
+                        # in block/JSON mode we ignore deltas and print the whole
+                        # sample from the later `message` event.
+                        if json_out or not stream_inline or not ev.data:
                             continue
                         d = json.loads(ev.data)
                         idx = d.get("sample_index", 0)
@@ -678,6 +719,9 @@ def _stream_chat(
                         continue
                     payload = json.loads(ev.data)
                     idx = payload.get("sample_index")
+                    if json_out:
+                        emit_json({"event": "sample", **payload})
+                        continue
                     if payload.get("error"):
                         emit_block(f"--- sample {idx} ERROR ---", payload["error"])
                         continue
@@ -697,6 +741,12 @@ def _stream_chat(
                     fr = payload.get("finish_reason")
                     if fr:
                         parts.append(f"[finish_reason={fr}]")
+                    if logprobs:
+                        tlp = payload.get("token_logprobs")
+                        parts.append(
+                            "[token_logprobs]\n" + _fmt_token_logprobs(tlp) if tlp
+                            else "[token_logprobs: none captured — OpenRouter model, or the tinker call failed]"
+                        )
                     emit_block(*parts)
     except httpx.TransportError as e:
         fail(
@@ -916,6 +966,8 @@ def cmd_send(
     panel: list[str] = typer.Option([], "--panel", help="target only these panel ids (repeatable); overrides folding"),
     include_folded: bool = typer.Option(False, "--include-folded", help="also fire at browser-folded panels"),
     force: bool = typer.Option(False, "--force", help="fire even while a generation is in flight"),
+    show_logprobs: bool = typer.Option(False, "--logprobs", help="print each sample's per-token logprob + top-5 alternatives (native tinker sampling only; none for OpenRouter)"),
+    json_out: bool = typer.Option(False, "--json", help="one JSON object per line (JSONL) instead of human text — for scripts; always includes token_logprobs when present, independent of --logprobs"),
 ) -> None:
     """Fire the prompt as a NEW THREAD at the CURRENT panels of the open workspace
     — the CLI twin of the browser's ⑂ branch-from-start. Unlike `chat`/`compare`
@@ -952,18 +1004,19 @@ def cmd_send(
     if not targets:
         _die("no target panel has a model bound — pick models in the browser or `tinkpg open <run>`")
     think: "bool | str" = "both" if thinking_both else thinking
+    plan_out = sys.stderr if json_out else sys.stdout  # JSON mode: keep stdout pure JSONL
 
-    print(f"send (new thread)  n={n} temp={temperature}  →  {len(targets)} panel(s)")
+    print(f"send (new thread)  n={n} temp={temperature}  →  {len(targets)} panel(s)", file=plan_out)
     for p in targets:
-        print(f"  {p['id']}: {_short_run(p.get('run_id'))}" + (f"@{p['checkpoint']}" if p.get("checkpoint") else ""))
+        print(f"  {p['id']}: {_short_run(p.get('run_id'))}" + (f"@{p['checkpoint']}" if p.get("checkpoint") else ""), file=plan_out)
     skipped_bits = []
     if folded:
         skipped_bits.append(f"{len(folded & set(by_id))} folded ({', '.join(sorted(folded & set(by_id)))})")
     if unbound:
         skipped_bits.append(f"unbound: {', '.join(unbound)}")
     if skipped_bits:
-        print(f"  skipped: {'; '.join(skipped_bits)}")
-    print()
+        print(f"  skipped: {'; '.join(skipped_bits)}", file=plan_out)
+    print(file=plan_out)
 
     lock = threading.Lock()
     threads: list[threading.Thread] = []
@@ -972,7 +1025,7 @@ def cmd_send(
         body = _panel_chat_body(p, prompt, n, temperature, max_tokens, think, system, prefill)
         res = _StreamResult()
         label = f"{p['id']} {_short_run(p.get('run_id'))}"
-        t = threading.Thread(target=_stream_chat, args=(body, label, lock, res))
+        t = threading.Thread(target=_stream_chat, args=(body, label, lock, res, False, show_logprobs, json_out))
         results.append((p["id"], p, res))
         threads.append(t)
         t.start()
@@ -1075,8 +1128,18 @@ def cmd_continue(
     turn: Optional[int] = typer.Option(None, "--turn", help="1-indexed user turn on the thread's path to loom from; default = the leaf"),
     node: Optional[str] = typer.Option(None, "--node", help="target node id/prefix (from `tinkpg grep`); pinpoints the loom point in ONE panel's tree"),
     conv: Optional[str] = typer.Option(None, "--conv", help="workspace for --thread/--turn/--node targeting (id-prefix/name); default = the one open in the browser"),
+    ancestry_file: Optional[str] = typer.Option(
+        None, "--ancestry-file",
+        help="loom from an EXPLICIT full transcript instead of a tree/panel: a JSON list of "
+             "{role, content} dicts (role: user|assistant|system). The SAME transcript is used "
+             "for every target panel — this is how you graft a real, verbatim conversation "
+             "generated by one model into another model's context (sanctioned: FULL transcripts "
+             "only, never an authored/partial answer). Mutually exclusive with --thread/--turn/--node/--conv.",
+    ),
     include_folded: bool = typer.Option(False, "--include-folded", help="also fire at browser-folded panels"),
     force: bool = typer.Option(False, "--force", help="fire even while a generation is in flight"),
+    show_logprobs: bool = typer.Option(False, "--logprobs", help="print each sample's per-token logprob + top-5 alternatives (native tinker sampling only; none for OpenRouter)"),
+    json_out: bool = typer.Option(False, "--json", help="one JSON object per line (JSONL) instead of human text — for scripts; always includes token_logprobs when present, independent of --logprobs"),
 ) -> None:
     """LOOM from an existing branch: rebuild the message history up to a target node
     and sample a continuation, WITHOUT touching the panel layout (the multi-turn twin
@@ -1084,11 +1147,32 @@ def cmd_continue(
     same source `send` uses) — so `tinkpg continue "<follow-up>"` adds a turn to the
     current threads across all panels; the browser's echo-reconcile extends the
     matched branch. Aim it elsewhere with --thread/--turn/--node (these read the SAVED
-    workspace tree, so they reach non-active branches). Provenance rule this enforces:
-    the ancestry is the model's OWN in-context content; a --prefill only seeds a tiny
-    thinking opener or the model's own truncated CoT — never a fabricated turn."""
+    workspace tree, so they reach non-active branches), or --ancestry-file to loom from
+    an EXTERNAL full transcript (a raw-log sample that never made a tree — the CLI only
+    folds one representative per n>1 fire — or another model's real conversation grafted
+    in). Provenance rule this enforces: the ancestry is always a model's OWN, COMPLETE,
+    previously-generated content — in-tree, in a log, or another model's transcript — a
+    --prefill only ever seeds a tiny thinking opener or a truncated OWN CoT continuation;
+    never a fabricated or partial turn."""
     prompt = _arg_or_file(prompt, file, "message", "--file")
     prefill = _arg_or_file(prefill, prefill_file, "prefill", "--prefill-file")
+    tree_mode = thread is not None or turn is not None or node is not None
+    if ancestry_file is not None and (tree_mode or conv is not None):
+        _die("--ancestry-file replaces tree targeting entirely — don't combine it with --thread/--turn/--node/--conv")
+    fixed_ancestry: Optional[list[dict]] = None
+    if ancestry_file is not None:
+        raw = Path(ancestry_file)
+        if not raw.is_file():
+            _die(f"ancestry file not found: {ancestry_file}")
+        try:
+            fixed_ancestry = json.loads(raw.read_text())
+        except json.JSONDecodeError as e:
+            _die(f"--ancestry-file must be a JSON list of {{role, content}} dicts: {e}")
+        if not isinstance(fixed_ancestry, list) or not fixed_ancestry:
+            _die("--ancestry-file must be a non-empty JSON list of {role, content} dicts")
+        for m in fixed_ancestry:
+            if not isinstance(m, dict) or m.get("role") not in ("user", "assistant", "system") or not isinstance(m.get("content"), str):
+                _die(f"bad ancestry entry (need role in user/assistant/system + string content): {m!r}")
     st = _get("/api/state")
     if st.get("running") and not force:
         _die("a generation is in flight (running=yes) — wait for it, or pass --force")
@@ -1097,7 +1181,6 @@ def cmd_continue(
         _die("no panels on screen — open a workspace in the browser first")
     by_id = {p["id"]: p for p in panels}
     conv_id = st.get("conversation_id")
-    tree_mode = thread is not None or turn is not None or node is not None
 
     # Fold info + (tree-mode) the saved trees come from the open/〈--conv〉 workspace.
     folded: set[str] = set()
@@ -1143,7 +1226,9 @@ def cmd_continue(
     # Build (panel, messages) per target — refusing bad sequences BEFORE firing any.
     plans: list[tuple[dict, list[dict]]] = []
     for p in targets:
-        if tree_mode:
+        if fixed_ancestry is not None:
+            ancestry = fixed_ancestry
+        elif tree_mode:
             t = trees.get(p["id"])
             if t is None:
                 _die(f"panel {p['id']} has no saved tree in the workspace — can't --thread/--turn/--node it")
@@ -1155,7 +1240,8 @@ def cmd_continue(
                 _die(f"panel {p['id']} has no active thread — use `tinkpg send` to start one, or --thread/--node")
         plans.append((p, _continue_messages(ancestry, prompt, prefill)))
 
-    print(f"continue (loom)  n={n} temp={temperature}  →  {len(targets)} panel(s)")
+    plan_out = sys.stderr if json_out else sys.stdout  # JSON mode: keep stdout pure JSONL
+    print(f"continue (loom)  n={n} temp={temperature}  →  {len(targets)} panel(s)", file=plan_out)
     for (p, msgs) in plans:
         base = len(msgs) - (1 if prompt is not None else 0) - (1 if prefill is not None else 0)
         add = []
@@ -1163,11 +1249,14 @@ def cmd_continue(
             add.append("+user")
         if prefill is not None:
             add.append(f"+prefill({_oneline(prefill, 24)})")
-        tgt = f"node {node}" if node else (f"thread {thread}" if thread else "active") + (f" turn {turn}" if turn else "")
-        print(f"  {p['id']}: {_short_run(p.get('run_id'))}  [{tgt}]  {base} ancestry turn(s) {' '.join(add)}".rstrip())
+        if fixed_ancestry is not None:
+            tgt = f"ancestry-file {ancestry_file}"
+        else:
+            tgt = f"node {node}" if node else (f"thread {thread}" if thread else "active") + (f" turn {turn}" if turn else "")
+        print(f"  {p['id']}: {_short_run(p.get('run_id'))}  [{tgt}]  {base} ancestry turn(s) {' '.join(add)}".rstrip(), file=plan_out)
     if unbound:
-        print(f"  skipped (unbound): {', '.join(unbound)}")
-    print()
+        print(f"  skipped (unbound): {', '.join(unbound)}", file=plan_out)
+    print(file=plan_out)
 
     lock = threading.Lock()
     threads: list[threading.Thread] = []
@@ -1176,7 +1265,7 @@ def cmd_continue(
         body = _panel_body(p, msgs, n, temperature, max_tokens, think, system, prefill_scope)
         res = _StreamResult()
         label = f"{p['id']} {_short_run(p.get('run_id'))}"
-        t = threading.Thread(target=_stream_chat, args=(body, label, lock, res))
+        t = threading.Thread(target=_stream_chat, args=(body, label, lock, res, False, show_logprobs, json_out))
         results.append((p["id"], p, res))
         threads.append(t)
         t.start()
@@ -1440,6 +1529,7 @@ def _show_samples(
     node: Optional[str] = None,
     sample_k: Optional[int] = None,
     slice_rng: Optional[tuple[int, int]] = None,
+    json_out: bool = False,
 ) -> None:
     trees = c.get("trees") or {}
     if not trees:
@@ -1518,6 +1608,26 @@ def _show_samples(
     layout = {p["id"]: p for p in (c.get("panels") or [])}
     lay = layout.get(pid, {})
     bind = _short_run(lay.get("run_id")) + (f"@{lay['checkpoint']}" if lay.get("checkpoint") else "")
+
+    if json_out:
+        shown = [(i, s) for i, s in enumerate(samples, 1) if sample_k is None or i == sample_k]
+        if sample_k is not None and not shown:
+            _die(f"--sample {sample_k} out of range (this fork has {len(samples)} sample(s))")
+        counts, doubled, untagged = _tag_tally([s.get("content", "") for s in samples])
+        print(json.dumps({
+            "workspace_id": c.get("id"), "workspace_name": c.get("name"),
+            "panel": pid, "run_id": lay.get("run_id"), "checkpoint": lay.get("checkpoint"),
+            "thread": thread_k, "thread_count": len(roots), "position": pos_part,
+            "prompt": unode.get("content", ""),
+            "tally": {"counts": counts, "doubled_draft": doubled, "untagged": untagged},
+            "samples": [
+                {"index": i, "id": s.get("id"), "role": s.get("role"), "content": s.get("content", ""),
+                 "reasoning": s.get("reasoning"), "active": s.get("id") == active_id}
+                for i, s in shown
+            ],
+        }, default=str, ensure_ascii=False))
+        return
+
     print(f"workspace: {c.get('name')}  ({(c.get('id') or '')[:8]})")
     thread_part = f"thread {thread_k or '?'}/{len(roots)}   ·   " if len(roots) > 1 else ""
     print(f"panel {pid}  ← {bind}   ·   {thread_part}{pos_part}   ·   {len(samples)} sample(s)")
@@ -1566,6 +1676,7 @@ def cmd_samples(
     width: int = typer.Option(240, "--width", help="per-sample truncation width in the default (non --full) view"),
     sample: Optional[int] = typer.Option(None, "--sample", help="show ONLY sibling K (1-indexed) — read one sample at a time"),
     slice_spec: Optional[str] = typer.Option(None, "--slice", help="START[:LEN] character window of each shown sample (default LEN 2000) — read long samples in pieces instead of truncating; with --full the same window applies to the CoT"),
+    json_out: bool = typer.Option(False, "--json", help="the fork as one JSON object (workspace/panel/thread/prompt/tally/samples) instead of human text — for scripts (--slice is ignored; content is never truncated)"),
 ) -> None:
     """Show every sibling response (the n-sample fan-out) at ONE fork, each with its
     CoT, plus a `<tag>` verdict tally — the 'what did the model say across all draws
@@ -1574,7 +1685,8 @@ def cmd_samples(
     with no --panel, the first non-folded panel. --thread k aims it at a non-active
     root thread (numbers from `tinkpg conv <id>`'s thread index); --node <id> (ids
     from `tinkpg grep`) aims it at ANY fork, even on non-selected branches. Reading
-    ergonomics: --sample K isolates one sibling, --slice START[:LEN] pages through it."""
+    ergonomics: --sample K isolates one sibling, --slice START[:LEN] pages through it,
+    --json for scripts (untruncated content, no need to regex human-formatted text)."""
     convs = _conversations()
     if selector is not None:
         c = _resolve_conv(selector, convs)
@@ -1591,7 +1703,7 @@ def cmd_samples(
         if not m:
             _die("--slice takes START[:LEN] character offsets, e.g. `--slice 2000:1500`")
         slice_rng = (int(m.group(1)), int(m.group(2) or 2000))
-    _show_samples(c, panel, turn, full, width, thread, node, sample, slice_rng)
+    _show_samples(c, panel, turn, full, width, thread, node, sample, slice_rng, json_out)
 
 
 def _slice_text(text: str, start: int, ln: int) -> str:
@@ -1638,6 +1750,7 @@ def cmd_grep(
     ignore_case: bool = typer.Option(False, "-i", "--ignore-case"),
     width: int = typer.Option(160, "--width", help="snippet width around each match"),
     max_hits: int = typer.Option(200, "--max-hits", help="stop printing after this many hits (count continues)"),
+    json_out: bool = typer.Option(False, "--json", help="hits as a JSON array (full match text, not a snippet) instead of human text — for scripts"),
 ) -> None:
     """Search EVERY branch of saved workspaces — message content AND thinking
     (`reasoning`) of all nodes, active or not; the view `conv`/`samples` can't
@@ -1657,6 +1770,7 @@ def cmd_grep(
         convs = _conversations()
     hits = 0
     ws_counts: dict[str, int] = {}
+    json_hits: list[dict] = []
     for c in convs:
         cname = c.get("name") or "?"
         for pid, t in (c.get("trees") or {}).items():
@@ -1670,12 +1784,26 @@ def cmd_grep(
                         continue
                     hits += 1
                     ws_counts[cname] = ws_counts.get(cname, 0) + 1
-                    if hits <= max_hits:
-                        k = _thread_of(t, nid)
+                    if hits > max_hits:
+                        continue
+                    k = _thread_of(t, nid)
+                    if json_out:
+                        json_hits.append({
+                            "workspace_id": c.get("id"), "workspace_name": cname,
+                            "panel": pid, "thread": k, "role": node.get("role"),
+                            "node_id": nid, "field": field, "match": m.group(0),
+                        })
+                    else:
                         loc = f"{cname} ({(c.get('id') or '')[:8]}) · {pid} · thread {k or '?'} · {node.get('role', '?')} · {nid}"
                         tag = " [thinking]" if field == "reasoning" else ""
                         print(f"{loc}{tag}")
                         print(f"   {_snippet(text, m.start(), width)}")
+    if json_out:
+        print(json.dumps({
+            "hits": json_hits, "total": hits, "truncated": hits > max_hits,
+            "workspaces_searched": len(convs), "workspaces_matched": len(ws_counts),
+        }, default=str, ensure_ascii=False))
+        return
     if hits > max_hits:
         print(f"\n…{hits - max_hits} more hit(s) not shown (--max-hits to raise)")
     if not hits:

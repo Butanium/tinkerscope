@@ -196,12 +196,60 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
 
 ## Later / optional
 
+- [ ] **Night-shift dogfood report (2026-07-18, Fable) — CLI gaps found by using it
+  for a full research cycle.** Ranked by how much hand-compensation they cost:
+  1. *(dup of the fold-full-fanout item — PROMOTE IT)* every analysis lived in
+     JSONL logs because `--n K` persists one rep; `samples --node` can't show
+     the fan-outs the CLI itself fired. This was the single biggest tax.
+  2. **`tinkpg workspace new --name X --panel <run>[@ckpt] …`** — workspaces were
+     created twice tonight via raw POST (opus once, me once); a CLI verb would
+     encode the correct shape (real run_ids, seen_panels) and dodge the
+     phantom-panel trap by construction.
+  3. **`tinkpg hold <workspace>`** (or a repo script) — the headless holder
+     browser is load-bearing for CLI-driven exploration and was hand-rolled
+     from scratch twice. Promote the pattern to a primitive.
+  4. **`samples`/wave-log `--export-ancestry K out.json`** — the core loop of
+     the clean-violation method is elicit → READ → pick sample K → loom from
+     it; extracting K into an ancestry file was a python one-liner each time.
+  5. **`tinkpg wait [--timeout N]`** — block until `running=no`; sequential
+     waves needed a sleep/check dance between every fire.
+  6. **Per-panel `running`** (or CLI-side queueing) — the GLOBAL flag blocks
+     concurrent fires at different panels for no structural reason.
+  Considered and NOT filed: a generic logprob-anchor analyzer verb — the
+  per-experiment scripts (`analyze_boundary.py` / `analyze_verdict_anchor.py`
+  in the weird-personas notes dir) are the right home; the CLI's job ends at
+  faithful `--json`.
+
+
+- [ ] **CLI fires should point the browser view at the context being sampled.**
+  Observed (Clément, 2026-07-18, live): a `continue --ancestry-file` fire shows
+  the panel's "sampling…" indicator while the panel still DISPLAYS a different
+  thread than the one being sampled from — misleading (the streamed samples
+  belong to a context you can't see). Fix direction: when a CLI chat starts on
+  a panel, the browser should switch that panel's view to the thread matching
+  the fired history (reuse the echo-reconcile content-matching; for an
+  --ancestry-file context that matches no tree branch, show some "sampling an
+  external context" hint instead of silently overlaying the wrong thread).
+
+
 - [ ] **CLI small follow-ups (post `continue`/`send`, 2026-07-17):** DRY the
   node-resolution logic now duplicated between `samples --node` and `continue`'s
   `_continue_target`; consider erroring on `--node` + `--turn` together
   (currently `--turn` is silently ignored); consider folding a CLI-fired chat's
   FULL n-sample fan-out into the open browser's tree (today the echo-reconcile
   keeps only sample 0 as representative — full fan-outs live in CLI stdout).
+- [x] **`--logprobs`/`--json` gave nothing at `--n 1`** (filed 2026-07-17,
+  RESOLVED 2026-07-20 by the base-parity commit 3716003): n==1 used to stream
+  through the OpenAI-compatible `/completions` path (`sample_stream`'s
+  token-by-token branch), which never calls `_token_logprobs`. 3716003 made
+  `run_id` + `base_model` picks ALWAYS sample native (option (b), for real —
+  verified: `base_model` n=1 now returns non-empty `token_logprobs` with no
+  delta events), so `--logprobs`/`--json` carry logprobs at any `n` for native
+  sampling. The only remaining logprob-free n=1 path is a **loose checkpoint by
+  sampler_path** or **OpenRouter** (`stream = n==1 and run_id is None and
+  base_model is None`) — inherent for OpenRouter (external, no logprobs), niche
+  for loose ckpt; `--logprobs` there prints the "none captured" note rather than
+  a silent empty. Not worth a `_die` guard.
 
 
 - [ ] **Wire/disk rename: conversations → workspaces (staged).** Handoff with
