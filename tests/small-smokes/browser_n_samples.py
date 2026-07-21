@@ -98,7 +98,11 @@ def main() -> None:
             '.sample-card button[data-tooltip^="Make this the active branch"]:not([disabled])'
         ).count()
         n_copyid = page.locator(".sample-card [data-testid=copy-node-id]").count()
-        n_toggle = page.locator(".sample-card [data-testid=acts-toggle]").count()
+        # The toggle element always exists (reserved slot); count only SHOWN ones.
+        n_toggle = page.evaluate(
+            """[...document.querySelectorAll('.sample-card [data-testid=acts-toggle]')]
+               .filter((t) => getComputedStyle(t).visibility !== 'hidden').length"""
+        )
         card_menu_ok = n_discard == N and n_copyid == n_folded > 0 and n_toggle == 0
 
         # Make a card the active branch → the distribution collapses to a single

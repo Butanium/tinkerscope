@@ -90,6 +90,8 @@ mark.hl-mark.hl-join-r { padding-right: 0; border-top-right-radius: 0; border-bo
 .message-actions { display: flex; align-items: flex-start; gap: var(--space-1); margin-top: var(--space-2); }
 .acts-wrap { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1); flex: 1; min-width: 0; }
 .acts-wrap.folded { overflow: clip; }
+/* Nothing folded → the toggle hides but KEEPS its slot (see OverflowRow). */
+.acts-toggle-hidden { visibility: hidden; }
 .turn-actions .acts-wrap, .sample-actions .acts-wrap { justify-content: flex-end; }
 .sample-card .message-actions { margin-top: var(--space-1); }
 

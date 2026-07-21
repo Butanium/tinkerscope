@@ -269,12 +269,15 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     `browser_chart_firsttoken_ops.py` (exclude / add / merge).
   - `lib/ChatMessage.svelte` — one chat row (committed node OR live bucket turn)
     + its per-row toolbar. Every action is a real icon button in ONE
-    priority-ordered `OverflowRow` (core edit cluster first; copy message/
-    conversation, raw, send-branch→panel, discard-others, **Copy node id**
-    last — the id is the `tinkpg` CLI's `--node` addressing handle, shown in
-    the button's tooltip). When the row is too narrow the tail folds (clipped,
-    folded by default) behind a chevron that expands it BELOW as 1+ more lines
-    of the same buttons; when everything fits there is no toggle at all.
+    priority-ordered `OverflowRow` (**Raw leads — very left, never folds**
+    per Clément; then the edit cluster; copy message/conversation,
+    send-branch→panel, discard-others, **Copy node id** last — the id is the
+    `tinkpg` CLI's `--node` addressing handle, shown in the button's tooltip).
+    When the row is too narrow the tail folds (clipped, folded by default)
+    behind a chevron that expands it BELOW as 1+ more lines of the same
+    buttons; when everything fits the chevron hides but KEEPS its slot
+    (conditional rendering would shrink the wrap on fold → a hysteresis band
+    of stuck folds).
     Send-to stays a popover (`ActionMenu`) because it's a labeled panel list.
     With `logprobView` on, an assistant body with `token_logprobs` renders
     `TokenLogprobs` instead of markdown (turns without data wear a "no token

@@ -59,11 +59,23 @@
 
   $effect(() => {
     if (!wrapEl) return;
-    measure();
+    // Observe the wrap AND every child: the wrap's own box can't reveal a
+    // re-break — its width is imposed by flex and its height is clamped while
+    // folded — so child reflow (font load, icon swap) must refire measure too.
     const ro = new ResizeObserver(measure);
-    ro.observe(wrapEl);
-    const mo = new MutationObserver(measure);
+    const observeAll = () => {
+      ro.disconnect();
+      ro.observe(wrapEl!);
+      for (const k of wrapEl!.children) ro.observe(k);
+    };
+    observeAll();
+    measure();
+    const mo = new MutationObserver(() => {
+      observeAll();
+      measure();
+    });
     mo.observe(wrapEl, { childList: true });
+    document.fonts?.ready.then(measure).catch(() => {});
     return () => {
       ro.disconnect();
       mo.disconnect();
@@ -80,17 +92,22 @@
   >
     {@render children()}
   </div>
-  {#if multiline}
-    <button
-      class="btn-act acts-toggle"
-      data-testid="acts-toggle"
-      data-tooltip={expanded ? 'Fewer actions' : 'More actions'}
-      use:tip
-      aria-label={expanded ? 'Fewer actions' : 'More actions'}
-      aria-expanded={expanded}
-      onclick={() => (expanded = !expanded)}
-    >
-      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" style:transform={expanded ? 'rotate(180deg)' : undefined}><path d="M4 6.5l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
-    </button>
-  {/if}
+  <!-- The toggle's SLOT is always reserved (visibility, not {#if}): rendering
+       it only when folded would shrink the wrap by its own width on fold —
+       a hysteresis band where a row stays folded at widths that fit every
+       button. With the slot constant, fold state is a pure function of width. -->
+  <button
+    class="btn-act acts-toggle"
+    class:acts-toggle-hidden={!multiline}
+    data-testid="acts-toggle"
+    data-tooltip={expanded ? 'Fewer actions' : 'More actions'}
+    use:tip
+    aria-label={expanded ? 'Fewer actions' : 'More actions'}
+    aria-expanded={expanded}
+    aria-hidden={!multiline}
+    tabindex={multiline ? 0 : -1}
+    onclick={() => (expanded = !expanded)}
+  >
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" style:transform={expanded ? 'rotate(180deg)' : undefined}><path d="M4 6.5l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+  </button>
 </div>

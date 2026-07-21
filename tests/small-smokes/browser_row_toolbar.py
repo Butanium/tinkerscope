@@ -71,14 +71,18 @@ ROW_STATE = """(row) => {
   const kids = [...wrap.children];
   const lineBottom = kids[0].offsetTop + kids[0].offsetHeight;
   const firstLine = kids.filter((k) => k.offsetTop < lineBottom);
+  const toggle = row.querySelector('[data-testid=acts-toggle]');
   return {
     folded: wrap.classList.contains('folded'),
     wrapH: wrap.clientHeight,
     rowH: Math.max(...firstLine.map((k) => k.offsetHeight)),
     buttons: kids.length,
+    line1: firstLine.map((k) => k.getAttribute('aria-label') || (k.textContent || '').trim()),
     beyond: kids.filter((k) => k.offsetTop >= lineBottom)
                 .map((k) => k.getAttribute('aria-label') || (k.textContent || '').trim()),
-    hasToggle: !!row.querySelector('[data-testid=acts-toggle]'),
+    // The toggle element ALWAYS exists (its slot is reserved to avoid fold
+    // hysteresis); "shown" = not visibility-hidden.
+    toggleShown: !!toggle && getComputedStyle(toggle).visibility !== 'hidden',
   };
 }"""
 
@@ -127,13 +131,14 @@ def main():
         panel = page.locator(".chat-column").first
         asst_row = panel.locator(".message").nth(1)  # a1: assistant with raw_text
 
-        # ── 1. narrow ⇒ folded: toggle up, tail clipped, only line 1 visible ──
+        # ── 1. narrow ⇒ folded: toggle shown, tail clipped, only line 1 visible ──
         s = asst_row.evaluate(ROW_STATE)
-        assert s["hasToggle"], f"narrow assistant row should show the fold toggle: {s}"
+        assert s["toggleShown"], f"narrow assistant row should show the fold toggle: {s}"
         assert s["folded"], f"fold is the default: {s}"
         assert s["beyond"], f"a narrow row must have wrapped (hidden) buttons: {s}"
         assert s["wrapH"] < 2 * s["rowH"], f"folded wrap must clip to one button line: {s}"
         assert "Copy node id" in s["beyond"], f"copy-node-id folds first (lowest priority): {s}"
+        assert s["line1"][0] == "Raw", f"Raw leads the row and never folds: {s}"
         for name in ("Regenerate", "Continue this message", "Edit"):
             assert asst_row.get_by_role("button", name=name, exact=True).count() == 1
             assert name not in s["beyond"], f"core action '{name}' must stay on line 1: {s}"
@@ -161,7 +166,7 @@ def main():
         page.keyboard.press("Escape")
         page.wait_for_function("!document.querySelector('[data-testid=send-to-panel]')", timeout=4000)
 
-        # raw toggle button (in the unfolded tail) still works
+        # raw toggle button (leftmost, always visible) still works
         asst_row.locator("button.btn-raw").click()
         asst_row.locator("pre.raw-text-view").wait_for(timeout=4000)
 
@@ -169,14 +174,27 @@ def main():
         asst_row.locator("[data-testid=acts-toggle]").click()
         assert asst_row.evaluate(ROW_STATE)["folded"], "toggle should fold the row again"
 
-        # ── 3. wide ⇒ everything fits, toggle disappears (adaptive) ──
+        # ── 3. wide ⇒ everything fits, toggle hides (adaptive) ──
         page.set_viewport_size({"width": 1600, "height": 900})
         page.wait_for_function(
-            "document.querySelectorAll('[data-testid=acts-toggle]').length === 0", timeout=4000)
+            """[...document.querySelectorAll('[data-testid=acts-toggle]')]
+               .every((t) => getComputedStyle(t).visibility === 'hidden')""", timeout=4000)
         s = asst_row.evaluate(ROW_STATE)
         assert not s["beyond"], f"wide row should hold every button on one line: {s}"
         assert asst_row.locator("[data-testid=copy-node-id]").count() == 1, \
             "copy-node-id is a plain inline button when there's room"
+
+        # ── 4. shrink back ⇒ the fold RETURNS (pure function of width, no
+        #      hysteresis / stale measure across resize round-trips) ──
+        page.set_viewport_size({"width": 840, "height": 900})
+        page.wait_for_function(
+            """(() => { const r = document.querySelectorAll('.chat-column')[0]
+                          ?.querySelectorAll('.message')[1]
+                          ?.querySelector('[data-testid=acts-toggle]');
+                        return r && getComputedStyle(r).visibility !== 'hidden'; })()""",
+            timeout=4000)
+        s = asst_row.evaluate(ROW_STATE)
+        assert s["folded"] and s["beyond"], f"narrowing again must re-fold the tail: {s}"
 
         assert not errors, f"console errors: {errors}"
         browser.close()

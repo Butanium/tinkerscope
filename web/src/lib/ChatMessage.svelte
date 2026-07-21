@@ -302,6 +302,10 @@
       <div class="sample-content">{@html prefillSplit ? renderPrefilled(sample.content, prefillSplit.answer, 'assistant') : renderContent(sample.content, 'assistant')}</div>
     {/if}
     <OverflowRow klass="sample-actions" resetKey={msg.sampleNodeIds?.[idx] ?? String(idx)}>
+      {#if sample.raw_text}
+        <!-- Raw leads the row (very left, never folds), like the single-row toolbar. -->
+        <button class="btn-raw" class:active={rawSamples.has(idx)} onclick={() => toggleRawSample(idx)} title="Toggle raw model output with tags preserved">Raw</button>
+      {/if}
       <button class="btn-use" class:active={msg.activeSampleIndex === idx} data-tooltip="Make this the active branch & collapse to it (others stay as ‹k/N› siblings)" use:tip aria-label="Make active" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onSelectSample(idx)}>
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4" /><path d="M5.2 8.3l1.9 1.9 3.7-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
       </button>
@@ -317,9 +321,6 @@
       <button class="btn-act btn-act-danger" data-tooltip="Keep only this sample — discard the others" use:tip aria-label="Discard others" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onDiscardOthers(idx)}>
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="2.5" y="5" width="7" height="8.5" rx="1" stroke="currentColor" stroke-width="1.3" /><path d="M7 2.5h6.5V11" stroke="currentColor" stroke-width="1.2" opacity="0.5" /><path d="M10.8 4.8l2.4 2.4M13.2 4.8l-2.4 2.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>
       </button>
-      {#if sample.raw_text}
-        <button class="btn-raw" class:active={rawSamples.has(idx)} onclick={() => toggleRawSample(idx)} title="Toggle raw model output with tags preserved">Raw</button>
-      {/if}
       {@render copyIdBtn(msg.sampleNodeIds?.[idx])}
     </OverflowRow>
   </div>
@@ -635,6 +636,11 @@
       {/if}
       {#if msg.role !== 'system' && (msg.content || msg.raw_text || msg.reasoning)}
         <OverflowRow klass="hover-actions" resetKey={msg.nodeId ?? msg.content}>
+          {#if msg.raw_text}
+            <!-- Raw leads the row (Clément: very left, always visible — first
+                 in priority order it can never fold). -->
+            <button class="btn-raw" class:active={rawSingle} onclick={() => (rawSingle = !rawSingle)} title="Toggle raw model output with tags preserved">Raw</button>
+          {/if}
           {#if canEdit}
             {@render regenGroup()}
             {#if msg.role === 'assistant'}{@render continueBtn()}{/if}
@@ -660,9 +666,6 @@
           {/if}
           {@render copyMsgBtn()}
           {@render copyConvBtn()}
-          {#if msg.raw_text}
-            <button class="btn-raw" class:active={rawSingle} onclick={() => (rawSingle = !rawSingle)} title="Toggle raw model output with tags preserved">Raw</button>
-          {/if}
           {@render sendToPicker()}
           {@render copyIdBtn(msg.nodeId)}
         </OverflowRow>
