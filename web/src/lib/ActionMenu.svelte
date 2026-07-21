@@ -1,14 +1,14 @@
 <script lang="ts">
-  // Anchored row-overflow menu: a ⋯ trigger + a floating panel of labeled rows.
-  // Used by ChatMessage's three toolbars (committed row, n>1 turn footer, sample
-  // card) so thin panels keep a bounded inline button set — everything else
-  // lives here. The panel is position:FIXED, not absolute: it renders inside
-  // the panel's .messages (overflow-y:auto) under .chat-column (overflow:hidden),
+  // Anchored popover menu: an icon trigger + a floating panel of labeled rows
+  // (chat.css `.row-menu-item`). Used for pickers that genuinely need a labeled
+  // list — today the send-branch-to-panel picker in ChatMessage's toolbars
+  // (row-level overflow itself is OverflowRow's job, an in-place fold, not a
+  // menu). The panel is position:FIXED, not absolute: it renders inside the
+  // panel's .messages (overflow-y:auto) under .chat-column (overflow:hidden),
   // so an absolutely-positioned menu would clip at the column edge. Fixed
   // escapes all ancestor overflow clipping; we anchor it to the trigger's rect
-  // and re-anchor on scroll/resize. Item rows come in via the children snippet
-  // (styled by chat.css `.row-menu-item`), which receives close() so an item
-  // can dismiss the menu after (or shortly after — copy-flash) its action.
+  // and re-anchor on scroll/resize. The children snippet receives close() so an
+  // item can dismiss the menu after its action.
   import type { Snippet } from 'svelte';
   import { tip } from '$lib/tooltip.svelte';
 
@@ -16,6 +16,7 @@
     label = 'More actions',
     testid = 'row-menu',
     resetKey = '',
+    trigger,
     children
   }: {
     label?: string;
@@ -24,6 +25,8 @@
      *  mounted instance a different node (cycle/fork/CLI reshape), and a menu
      *  left open would then act on the wrong row. */
     resetKey?: string;
+    /** Trigger button content; defaults to a ⋯ glyph. */
+    trigger?: Snippet;
     children: Snippet<[() => void]>;
   } = $props();
 
@@ -92,7 +95,9 @@
     data-testid={testid}
     onclick={() => (open = !open)}
   >
-    <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><circle cx="3" cy="8" r="1.4" /><circle cx="8" cy="8" r="1.4" /><circle cx="13" cy="8" r="1.4" /></svg>
+    {#if trigger}{@render trigger()}{:else}
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><circle cx="3" cy="8" r="1.4" /><circle cx="8" cy="8" r="1.4" /><circle cx="13" cy="8" r="1.4" /></svg>
+    {/if}
   </button>
   {#if open && pos}
     <div

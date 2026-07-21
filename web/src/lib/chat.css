@@ -80,16 +80,20 @@ mark.hl-mark.hl-join-r { padding-right: 0; border-top-right-radius: 0; border-bo
 .btn-tag { background: none; border: 1px solid transparent; border-radius: var(--radius); padding: 3px 6px; color: var(--color-text-muted); opacity: 0.4; transition: all 0.15s; display: inline-flex; align-items: center; }
 .btn-tag:hover { opacity: 1; color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
 
-/* ── Message actions row ──────────────────────────────────────────────
- * Inline sets are sized to fit the 280px .chat-column min-width (≤6 icon
- * buttons a row, ≤5 inside sample cards); everything else lives in the row's
- * ⋯ ActionMenu. The wrap is a backstop only — with the fixed sets it never
- * engages, but a future extra button degrades to a second line instead of
- * bleeding out of the bubble. */
-.message-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-2); }
-.sample-card .message-actions { justify-content: flex-end; margin-top: var(--space-1); }
+/* ── Message actions row (OverflowRow.svelte) ─────────────────────────
+ * [.acts-wrap (flex:1, wraps)] [chevron toggle]. All of a row's tool buttons
+ * live in the wrap in priority order; when it's too narrow the tail wraps to
+ * lines that are CLIPPED while folded (max-height = measured first-line
+ * height, set inline by OverflowRow; `clip` so focus can't scroll the hidden
+ * lines into view) and the toggle appears. Expanding un-clips: the remaining
+ * buttons show BELOW as 1+ extra lines of the same buttons. */
+.message-actions { display: flex; align-items: flex-start; gap: var(--space-1); margin-top: var(--space-2); }
+.acts-wrap { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1); flex: 1; min-width: 0; }
+.acts-wrap.folded { overflow: clip; }
+.turn-actions .acts-wrap, .sample-actions .acts-wrap { justify-content: flex-end; }
+.sample-card .message-actions { margin-top: var(--space-1); }
 
-/* ── Row overflow menu (⋯ — ActionMenu.svelte) ────────────────────────
+/* ── Anchored popover menu (ActionMenu.svelte — the send-to picker) ───
  * The floating panel is position:fixed to escape the column's overflow
  * clipping (see ActionMenu's docstring); items are labeled text rows. */
 .action-menu { position: relative; display: inline-flex; }
@@ -97,8 +101,6 @@ mark.hl-mark.hl-join-r { padding-right: 0; border-top-right-radius: 0; border-bo
 .row-menu-item { display: flex; align-items: center; gap: var(--space-2); white-space: nowrap; text-align: left; padding: 4px 9px; background: none; border: none; border-radius: var(--radius-sm); color: var(--color-text-secondary); font-size: 0.72rem; cursor: pointer; }
 .row-menu-item:hover:not(:disabled) { background: var(--color-accent-bg); color: var(--color-accent); }
 .row-menu-item:disabled { opacity: 0.4; cursor: default; }
-.row-menu-item code { font-family: var(--font-mono); font-size: 0.68rem; background: var(--color-surface-alt); padding: 0 4px; border-radius: var(--radius-sm); }
-.row-menu-sep { height: 1px; background: var(--color-border-light); margin: 2px 4px; }
 
 /* ── Raw toggle button ────────────────────────────────────────────── */
 .btn-raw { background: none; border: 1px solid var(--color-border); border-radius: var(--radius); padding: 2px 8px; font-size: 0.7rem; font-weight: 600; font-family: var(--font-mono); color: var(--color-text-muted); opacity: 0.5; transition: all 0.15s; letter-spacing: 0.02em; }
@@ -150,9 +152,10 @@ mark.hl-mark.hl-join-r { padding-right: 0; border-top-right-radius: 0; border-bo
 .btn-act-all::after { content: '⧉'; position: absolute; top: -3px; right: -3px; font-size: 0.62rem; line-height: 1; color: var(--color-text-muted); }
 .btn-act-all:hover::after, .btn-act-all.shift-alt::after { color: var(--color-accent); }
 .btn-act-danger.btn-act-all:hover::after, .btn-act-danger.btn-act-all.shift-alt-danger::after { color: #ef4444; }
+/* Copy button just flashed → confirm with green ✓. */
+.btn-act.copied { color: #10b981; border-color: #10b981; background: #10b98112; }
 .sample-del, .sample-continue { padding: 2px 5px; }
 .sample-continue:disabled { opacity: 0.4; cursor: not-allowed; }
-.turn-actions { justify-content: flex-end; }
 
 /* Per-panel "continue this panel" composer (compare mode). Sits OUTSIDE the
    scrollable .messages, as the chat-column's footer — stationary under branch
@@ -180,7 +183,6 @@ mark.hl-mark.hl-join-r { padding-right: 0; border-top-right-radius: 0; border-bo
 
 /* Pick-a-sample (n>1): the ✓-in-circle "Make active" icon button, pinned left
  * of the right-aligned card actions by its auto margin. */
-.sample-actions { justify-content: flex-end; }
 .btn-use { margin-right: auto; display: inline-flex; align-items: center; padding: 3px 6px; background: var(--color-accent-bg); border: 1px solid var(--color-accent); border-radius: var(--radius); color: var(--color-accent); transition: all 0.15s; }
 .btn-use:hover:not(:disabled) { background: var(--color-accent); color: white; }
 .btn-use:disabled { opacity: 0.4; cursor: not-allowed; }

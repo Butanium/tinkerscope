@@ -87,32 +87,36 @@ def main() -> None:
 
         page.screenshot(path=SHOT, full_page=True)
 
-        # Card ⋯ overflow menu: discard-others + the card's own node id (the CLI's
-        # `--node` handle) live here since the toolbar redesign.
-        page.locator(".sample-card [data-testid=row-menu]").first.click()
-        menu = page.locator("[data-testid=row-menu-panel]")
-        menu.wait_for(timeout=5000)
-        card_menu_items = menu.locator(".row-menu-item").all_inner_texts()
-        card_menu_ok = (
-            any("Keep only this sample" in it for it in card_menu_items)
-            and any("Copy node id" in it for it in card_menu_items)
-        )
-        page.keyboard.press("Escape")
-        page.wait_for_function("!document.querySelector('[data-testid=row-menu-panel]')", timeout=5000)
+        # Card action row (OverflowRow): at this wide viewport every card action is
+        # a plain inline button — discard-others + the card's own node id (the CLI's
+        # `--node` handle) included, with no fold toggle in sight. ERROR samples
+        # (the free router flakes sometimes) render a card but never fold into the
+        # tree, so they carry no node id — expect copy-id only on FOLDED cards,
+        # i.e. those whose make-active button is enabled.
+        n_discard = page.locator('.sample-card button[aria-label="Discard others"]').count()
+        n_folded = page.locator(
+            '.sample-card button[data-tooltip^="Make this the active branch"]:not([disabled])'
+        ).count()
+        n_copyid = page.locator(".sample-card [data-testid=copy-node-id]").count()
+        n_toggle = page.locator(".sample-card [data-testid=acts-toggle]").count()
+        card_menu_ok = n_discard == N and n_copyid == n_folded > 0 and n_toggle == 0
 
-        # Make the first card the active branch → the distribution collapses to a
-        # single reply and the other N-1 samples become ‹k/N› siblings: a strong check
-        # that the multi-sample fold created N real tree nodes.
+        # Make a card the active branch → the distribution collapses to a single
+        # reply and the other folded samples become ‹k/n_folded› siblings: a strong
+        # check that the multi-sample fold created real tree nodes. Click an ENABLED
+        # make-active (an error card's is disabled — force-clicking it would no-op
+        # and the collapse would never come) and expect /n_folded, not /N: error
+        # samples never fold, so a router flake shrinks the sibling fan-out.
         page.locator(
-            '.sample-card button[data-tooltip^="Make this the active branch"]'
+            '.sample-card button[data-tooltip^="Make this the active branch"]:not([disabled])'
         ).first.click(force=True)
         page.wait_for_selector('[data-testid="branch-cycle"]', timeout=15000)
-        # A fresh conversation has exactly one cycler (the N assistant siblings), but
-        # read the one reporting /N rather than blindly taking .first, so a stray
-        # cycler (e.g. a future user-edit branch) can't shadow the real assertion.
+        # A fresh conversation has exactly one cycler (the folded assistant siblings),
+        # but read the one reporting /n_folded rather than blindly taking .first, so a
+        # stray cycler (e.g. a future user-edit branch) can't shadow the real assertion.
         counts = [c.strip() for c in page.locator('[data-testid="branch-cycle"] .branch-cycle-count').all_inner_texts()]
-        cycle_text = next((c for c in counts if c.endswith("/%d" % N)), counts[0] if counts else "")
-        folded_ok = cycle_text.endswith("/%d" % N)
+        cycle_text = next((c for c in counts if c.endswith("/%d" % n_folded)), counts[0] if counts else "")
+        folded_ok = cycle_text.endswith("/%d" % n_folded)
         collapsed_ok = page.locator(".sample-card").count() == 0
 
         browser.close()
@@ -120,9 +124,9 @@ def main() -> None:
         print(f"backend n_samples confirmed: {n_confirmed} (want {N})")
         print(f"sample cards rendered: {card_count} (want {N}) -> {cards_ok}")
         print(f"selectable 'Make active' buttons: {selectable} (want {N}) -> {selectable_ok}")
-        print(f"card ⋯ menu (discard-others + copy node id): {card_menu_ok}")
+        print(f"card actions (discard {n_discard}/{N}, copy-id {n_copyid}/{n_folded} folded, toggles {n_toggle}/0): {card_menu_ok}")
         print(f"collapsed to single reply after select: {collapsed_ok}")
-        print(f"fold made {N} siblings (cycler {cycle_text!r}): {folded_ok}")
+        print(f"fold made {n_folded} siblings (cycler {cycle_text!r}): {folded_ok}")
         print(f"console/page errors: {errors or 'none'}")
         ok = (
             n_confirmed == N

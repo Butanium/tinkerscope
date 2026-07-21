@@ -268,18 +268,17 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     `tests/small-smokes/browser_chart_rules.py` (rules) +
     `browser_chart_firsttoken_ops.py` (exclude / add / merge).
   - `lib/ChatMessage.svelte` — one chat row (committed node OR live bucket turn)
-    + its per-row toolbar. The toolbar is a FIXED SPLIT sized to the 280px
-    `.chat-column` min-width (columns h-scroll below that, so it's a hard
-    floor): core actions stay inline (assistant: regen/continue/edit/delete/
-    tag; user: regen/edit/delete; sample card: make-active/continue/tag/delete
-    — ≤6 icons a row, ≤5 in cards), everything else lives in a per-row ⋯
-    `ActionMenu` (copy message/conversation, raw toggle, send-branch→panel,
-    discard-others, **Copy node id** — the id is the `tinkpg` CLI's `--node`
-    addressing handle, shown verbatim in the item). No width tiers on purpose:
-    predictable at every width, and container queries would trap the fixed-
-    position popovers. With `logprobView` on, an assistant body with
-    `token_logprobs` renders `TokenLogprobs` instead of markdown (turns without
-    data wear a "no token data" pill). Toolbar smoke (seeded, token-free):
+    + its per-row toolbar. Every action is a real icon button in ONE
+    priority-ordered `OverflowRow` (core edit cluster first; copy message/
+    conversation, raw, send-branch→panel, discard-others, **Copy node id**
+    last — the id is the `tinkpg` CLI's `--node` addressing handle, shown in
+    the button's tooltip). When the row is too narrow the tail folds (clipped,
+    folded by default) behind a chevron that expands it BELOW as 1+ more lines
+    of the same buttons; when everything fits there is no toggle at all.
+    Send-to stays a popover (`ActionMenu`) because it's a labeled panel list.
+    With `logprobView` on, an assistant body with `token_logprobs` renders
+    `TokenLogprobs` instead of markdown (turns without data wear a "no token
+    data" pill). Toolbar smoke (seeded, token-free):
     `tests/small-smokes/browser_row_toolbar.py`.
   - `lib/TokenLogprobs.svelte` — the token inspector body: the raw generated
     token stream (thinking tags and all — exact token boundaries beat markdown

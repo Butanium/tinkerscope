@@ -1,19 +1,22 @@
-"""Browser smoke for the row toolbar — bounded inline set + the ⋯ overflow menu.
+"""Browser smoke for the row toolbar — adaptive fold + unfold-below (OverflowRow).
 
 100% TOKEN-FREE: seeds a 2-panel workspace with ready-made branch trees via
 POST /api/conversations, opens it with ?c=<id> at a viewport narrow enough
-that the columns sit at their 280px min-width, then checks:
+that the columns sit at their 280px min-width, then checks the fold behavior:
 
-  1. committed rows keep the core actions INLINE (regen / continue / edit /
-     delete / tag) and no row toolbar overflows its bubble at min panel width;
-  2. the ⋯ menu holds the long tail (copy message / conversation, raw toggle,
-     send-branch→panel, copy node id) and closes on outside-click / Escape;
-  3. "Copy node id" puts the row's EXACT tree-node id on the clipboard — the
-     CLI's addressing currency (`tinkpg samples/continue --node <id>`); the
-     clipboard is monkeypatched so the assert is deterministic and headless-safe.
+  1. a narrow assistant row (10 actions) FOLDS: the tail buttons wrap to
+     clipped lines, a chevron toggle appears, nothing overflows horizontally
+     and nothing below the first button line is visible;
+  2. expanding reveals the tail BELOW as real tool buttons (1+ extra lines) —
+     among them "Copy node id", whose click puts the row's EXACT tree-node id
+     on the clipboard (the CLI's `--node` addressing currency; the clipboard is
+     monkeypatched so the assert is deterministic and headless-safe) — and the
+     send-branch-to-panel popover still opens/closes;
+  3. at a WIDE viewport everything fits on one line and the toggle disappears
+     (fold is adaptive, not a fixed split).
 
-No model calls. The n>1 sample-card kebab (same ActionMenu component) is
-covered by browser_n_samples.py, which really samples.
+No model calls. The n>1 sample-card row (same OverflowRow) is covered by
+browser_n_samples.py, which really samples.
 
   uv run python tests/small-smokes/browser_row_toolbar.py [BASE_URL]
 """
@@ -60,11 +63,29 @@ def _post(path, body):
     return json.loads(urllib.request.urlopen(req, timeout=10).read() or b"{}")
 
 
-# Every rendered toolbar/bubble must fit its box: any horizontal overflow at
-# min panel width is exactly the bug this redesign removes.
+# One toolbar's fold state, measured off the DOM. Line-1 membership = starts
+# above the first child's bottom (the same rule OverflowRow uses — a plain
+# offsetTop comparison would misread center-aligned shorter buttons as line 2).
+ROW_STATE = """(row) => {
+  const wrap = row.querySelector('.acts-wrap');
+  const kids = [...wrap.children];
+  const lineBottom = kids[0].offsetTop + kids[0].offsetHeight;
+  const firstLine = kids.filter((k) => k.offsetTop < lineBottom);
+  return {
+    folded: wrap.classList.contains('folded'),
+    wrapH: wrap.clientHeight,
+    rowH: Math.max(...firstLine.map((k) => k.offsetHeight)),
+    buttons: kids.length,
+    beyond: kids.filter((k) => k.offsetTop >= lineBottom)
+                .map((k) => k.getAttribute('aria-label') || (k.textContent || '').trim()),
+    hasToggle: !!row.querySelector('[data-testid=acts-toggle]'),
+  };
+}"""
+
+# Nothing may bleed horizontally, folded or expanded.
 OVERFLOW_PROBE = """() => {
   const bad = [];
-  for (const el of document.querySelectorAll('.message, .message-actions, .sample-card')) {
+  for (const el of document.querySelectorAll('.message, .message-actions, .acts-wrap, .sample-card')) {
     if (el.scrollWidth > el.clientWidth + 1)
       bad.push(`${el.className}: ${el.scrollWidth}>${el.clientWidth}`);
   }
@@ -75,7 +96,7 @@ OVERFLOW_PROBE = """() => {
 def main():
     # A REAL run id for both panels: the conversation-open self-heal drops panels
     # whose run_id is null (the phantom-panel fix), which would silently collapse
-    # the seeded compare panel — and with it the send-to menu items under test.
+    # the seeded compare panel — and with it the send-to picker under test.
     runs = _get("/api/models")
     assert runs, "isolated instance discovered no runs — seed needs a scan root with runs"
     rid = runs[0]["id"]
@@ -105,56 +126,57 @@ def main():
 
         panel = page.locator(".chat-column").first
         asst_row = panel.locator(".message").nth(1)  # a1: assistant with raw_text
-        user_row = panel.locator(".message").nth(0)  # u0: user
 
-        # ── 1. inline core set (assistant row) + no inline copy button ──
-        for name in ("Regenerate", "Continue this message", "Edit", "Delete", "More actions"):
-            assert asst_row.get_by_role("button", name=name, exact=True).count() == 1, \
-                f"assistant row should keep '{name}' inline"
-        assert asst_row.locator(".btn-tag").count() == 1, "assistant row keeps the bookmark inline"
-        assert asst_row.get_by_role("button", name="Copy this message").count() == 0, \
-            "copy moved into the ⋯ menu"
-        for name in ("Regenerate", "Edit", "Delete", "More actions"):
-            assert user_row.get_by_role("button", name=name, exact=True).count() == 1, \
-                f"user row should keep '{name}' inline"
-        assert user_row.get_by_role("button", name="Continue this message").count() == 0
-
-        # ── 2. nothing overflows at min panel width ──
+        # ── 1. narrow ⇒ folded: toggle up, tail clipped, only line 1 visible ──
+        s = asst_row.evaluate(ROW_STATE)
+        assert s["hasToggle"], f"narrow assistant row should show the fold toggle: {s}"
+        assert s["folded"], f"fold is the default: {s}"
+        assert s["beyond"], f"a narrow row must have wrapped (hidden) buttons: {s}"
+        assert s["wrapH"] < 2 * s["rowH"], f"folded wrap must clip to one button line: {s}"
+        assert "Copy node id" in s["beyond"], f"copy-node-id folds first (lowest priority): {s}"
+        for name in ("Regenerate", "Continue this message", "Edit"):
+            assert asst_row.get_by_role("button", name=name, exact=True).count() == 1
+            assert name not in s["beyond"], f"core action '{name}' must stay on line 1: {s}"
         bad = page.evaluate(OVERFLOW_PROBE)
-        assert not bad, f"horizontal overflow at min panel width: {bad}"
+        assert not bad, f"horizontal overflow while folded: {bad}"
 
-        # ── 3. the ⋯ menu: expected items, send-to absorbed, node id shown ──
-        asst_row.locator("[data-testid=row-menu]").click()
-        menu = page.locator("[data-testid=row-menu-panel]")
-        menu.wait_for(timeout=4000)
-        items = menu.locator(".row-menu-item").all_inner_texts()
-        labels = " | ".join(items)
-        for expect in ("Copy message", "Copy conversation", "Show raw output", "Send branch →", "Copy node id"):
-            assert any(expect in it for it in items), f"menu should offer '{expect}': {labels}"
-        assert any("Pa1" in it for it in items), f"node id Pa1 should be visible in the menu: {labels}"
+        # ── 2. expand ⇒ the tail appears BELOW as real buttons ──
+        asst_row.locator("[data-testid=acts-toggle]").click()
+        s = asst_row.evaluate(ROW_STATE)
+        assert not s["folded"] and s["wrapH"] > s["rowH"], f"expanded wrap should show extra lines: {s}"
+        bad = page.evaluate(OVERFLOW_PROBE)
+        assert not bad, f"horizontal overflow while expanded: {bad}"
 
-        # ── 4. Copy node id → the exact tree-node id lands on the clipboard ──
-        menu.locator("[data-testid=copy-node-id]").click()
+        # copy node id → the exact tree-node id lands on the clipboard
+        asst_row.locator("[data-testid=copy-node-id]").click()
         copied = page.evaluate("() => window.__copied")
         assert copied == "Pa1", f"copied reference should be the bare node id 'Pa1', got {copied!r}"
-        assert "✓ copied" in menu.inner_text(), "copy item should flash confirmation"
-        page.wait_for_function("!document.querySelector('[data-testid=row-menu-panel]')", timeout=4000)
 
-        # ── 5. close behaviors: Escape and outside-click ──
-        asst_row.locator("[data-testid=row-menu]").click()
+        # send-branch-to-panel popover (ActionMenu) still works from the fold
+        asst_row.locator("[data-testid=send-to]").click()
+        menu = page.locator("[data-testid=send-to-panel]")
         menu.wait_for(timeout=4000)
+        items = menu.locator(".row-menu-item").all_inner_texts()
+        assert items and all(it.startswith("→") for it in items), f"send-to should list panels: {items}"
         page.keyboard.press("Escape")
-        page.wait_for_function("!document.querySelector('[data-testid=row-menu-panel]')", timeout=4000)
-        asst_row.locator("[data-testid=row-menu]").click()
-        menu.wait_for(timeout=4000)
-        page.locator(".input-bar").click()
-        page.wait_for_function("!document.querySelector('[data-testid=row-menu-panel]')", timeout=4000)
+        page.wait_for_function("!document.querySelector('[data-testid=send-to-panel]')", timeout=4000)
 
-        # ── 6. raw toggle via the menu still works ──
-        asst_row.locator("[data-testid=row-menu]").click()
-        menu.wait_for(timeout=4000)
-        menu.locator(".row-menu-item", has_text="Show raw output").click()
+        # raw toggle button (in the unfolded tail) still works
+        asst_row.locator("button.btn-raw").click()
         asst_row.locator("pre.raw-text-view").wait_for(timeout=4000)
+
+        # collapse back
+        asst_row.locator("[data-testid=acts-toggle]").click()
+        assert asst_row.evaluate(ROW_STATE)["folded"], "toggle should fold the row again"
+
+        # ── 3. wide ⇒ everything fits, toggle disappears (adaptive) ──
+        page.set_viewport_size({"width": 1600, "height": 900})
+        page.wait_for_function(
+            "document.querySelectorAll('[data-testid=acts-toggle]').length === 0", timeout=4000)
+        s = asst_row.evaluate(ROW_STATE)
+        assert not s["beyond"], f"wide row should hold every button on one line: {s}"
+        assert asst_row.locator("[data-testid=copy-node-id]").count() == 1, \
+            "copy-node-id is a plain inline button when there's room"
 
         assert not errors, f"console errors: {errors}"
         browser.close()
@@ -163,7 +185,7 @@ def main():
         urllib.request.Request(f"{BASE}/api/conversations/{conv['id']}", method="DELETE"),
         timeout=10).read()
 
-    print("browser_row_toolbar: OK — inline core fits at min width, ⋯ menu items, copy node id, close behaviors")
+    print("browser_row_toolbar: OK — adaptive fold, unfold-below buttons, copy node id, send-to popover, wide=no toggle")
 
 
 if __name__ == "__main__":
