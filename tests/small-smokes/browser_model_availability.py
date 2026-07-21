@@ -11,6 +11,11 @@ Verifies the three product surfaces of the availability feature end-to-end
      exhaustively unit-tested in web/src/lib/fuzzy.test.ts).
   3. WARN-ON-SELECT, NO BLOCK — selecting an unavailable run shows the sidebar
      `.unavailable-warn` banner AND leaves the composer textarea enabled.
+  4. SEND SURFACES THE 404 — sending to a false-green run (base served, weights
+     aged out) renders the backend error VISIBLY as an assistant bubble
+     ("Error: sampler weights have aged out…"), not a silent no-op. This is the
+     check that justifies keeping the send allowed instead of hard-gated. Makes a
+     real (fast-failing, token-free) tinker call, so needs TINKER_API_KEY set.
 
 DATA-DRIVEN (not seeded): availability is inherently live state, so the smoke
 reads /api/models and asserts against whatever the probe returns. The
@@ -61,6 +66,8 @@ def mixed_token(avail: list, unavail: list) -> str | None:
 
 def main():
     runs = json.load(urllib.request.urlopen(f"{BASE}/api/models", timeout=20))
+    health = json.load(urllib.request.urlopen(f"{BASE}/api/health", timeout=20))
+    sup = set(health["supported_models"]) | {m.split(":peft")[0] for m in health["supported_models"]}
     unavail = [r for r in runs if r.get("sampleable") is False]
     avail = [r for r in runs if r.get("sampleable") is True]
     print(f"/api/models: {len(runs)} runs — {len(avail)} available, {len(unavail)} unavailable")
@@ -68,9 +75,14 @@ def main():
         "expected >=1 unavailable run (the negation_neglect Qwen3-30B-A3B-Base runs "
         "are base-gone) — is the instance scanning that root?"
     )
-    target = unavail[0]
+    # Prefer a FALSE-GREEN run for the whole flow: base still served, weights aged
+    # out — the case the base-only check missed AND the one whose send produces a
+    # meaningful weights-404 (not a base-load failure).
+    false_green = [r for r in unavail if r.get("base_model") in sup and r.get("checkpoints")]
+    target = false_green[0] if false_green else unavail[0]
     token = search_token(target)
     print(f"target unavailable run: {target['id']!r} (reason: {target.get('unsampleable_reason')!r}); filter token {token!r}")
+    print(f"false-green (served base, aged weights): {bool(false_green)}")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
@@ -145,6 +157,29 @@ def main():
         assert state["composerDisabled"] is False, \
             f"composer must stay ENABLED for an unavailable pick (warning, not block), got disabled={state['composerDisabled']}"
         print(f"select OK: warn={state['warnText'][:60]!r}…, composer enabled")
+
+        # ── 4. SEND to the (false-green) run → the 404 renders as an error bubble ──
+        # This is what justifies keeping the send allowed: the failure is VISIBLE.
+        ta = page.locator(".input-textarea").first
+        ta.wait_for(state="visible", timeout=5000)
+        assert not ta.is_disabled(), "composer must be sendable for the unavailable pick"
+        ta.fill("test")
+        ta.press("Enter")
+        # The 404 fires fast at create_sampling_client → an assistant "Error: …" bubble.
+        page.wait_for_function(
+            """() => [...document.querySelectorAll('.message')].some(
+                 (m) => /Error:/.test(m.querySelector('.message-content')?.textContent || ''))""",
+            timeout=30000)
+        errtext = page.evaluate("""() => {
+          const m = [...document.querySelectorAll('.message')].find(
+            (x) => /Error:/.test(x.querySelector('.message-content')?.textContent || ''));
+          return m?.querySelector('.message-content')?.textContent?.trim() ?? null;
+        }""")
+        assert errtext and errtext.startswith("Error:"), \
+            f"a send to an unavailable run must render a visible error bubble, got {errtext!r}"
+        if false_green:
+            assert "aged out" in errtext, f"false-green send should surface the aged-out 404, got {errtext!r}"
+        print(f"send OK: error surfaced visibly → {errtext[:70]!r}")
 
         if SHOT:
             Path(SHOT).parent.mkdir(parents=True, exist_ok=True)
