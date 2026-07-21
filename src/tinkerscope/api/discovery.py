@@ -7,14 +7,26 @@ tinker_cookbook) drops two files in its log dir:
   checkpoints.jsonl — one row per saved checkpoint, each with a sampler_path
 
 We scan for `checkpoints.jsonl`, read the sibling `config.json` defensively,
-and emit one Run per dir with its whole checkpoint trajectory. Each run's
-base model is cross-checked against tinker's currently-served model list
-(`get_server_capabilities`) so the UI can grey out runs that can't be sampled
-(e.g. `Qwen/Qwen3-30B-A3B-Base`, which tinker no longer hosts).
+and emit one Run per dir with its whole checkpoint trajectory. Sampleability is
+cross-checked on TWO axes so the UI can grey out runs that can't be sampled:
+
+  1. Base model served? — `get_server_capabilities` lists the base models tinker
+     hosts (e.g. `Qwen/Qwen3-30B-A3B-Base` is no longer hosted).
+  2. Sampler weights still in the window? — tinker serves only a rolling
+     most-recent-N window of sampler checkpoints; older `sampler_weights` age out
+     and 404 on sample even though their base model is still served. `GET
+     /v1/models` (via `tinker_oai.list_checkpoints`) returns the exact set of
+     servable `sampler_path`s — matched by string equality (see
+     `get_servable_paths`). This catches the false-green the base check can't:
+     a run whose base is served but whose checkpoints have all aged out.
+
+A run is `sampleable` iff BOTH hold (base served AND ≥1 checkpoint servable);
+each `Checkpoint` also carries its own `servable` flag.
 
 Discovery itself has zero ML deps (pure json + filesystem); only the
-capabilities probe touches the tinker SDK, and it degrades to "unknown" when
-the key is unset or the service is unreachable.
+capabilities + servable-paths probes touch tinker (SDK / oai HTTP), and both
+degrade to "unknown" when the key is unset or the service is unreachable — in
+which case sampleability falls back to the base-only check (never wrongly greys).
 """
 from __future__ import annotations
 
@@ -34,6 +46,7 @@ class Checkpoint:
     sampler_path: str | None  # tinker://…/sampler_weights/<step> — sample from this
     state_path: str | None    # tinker://…/weights/<step> — training state (not sampled)
     step: int | None          # numeric step parsed from name/batch, for sorting
+    servable: bool | None     # sampler_path in tinker's rolling window right now (None = unknown)
 
 
 @dataclass
@@ -51,8 +64,8 @@ class Run:
     seed: int | None
     num_checkpoints: int
     checkpoints: list[Checkpoint]
-    sampleable: bool | None       # None = unknown (capabilities unavailable)
-    unsampleable_reason: str | None
+    sampleable: bool | None       # base served AND ≥1 checkpoint servable; None = unknown
+    unsampleable_reason: str | None  # the binding constraint (base gone / weights aged out)
     config_error: str | None      # set if config.json missing/malformed (run still listed)
 
 
@@ -101,6 +114,42 @@ def _supported_base_set(caps: dict) -> set[str]:
 
 
 # ---------------------------------------------------------------------------
+# tinker servable sampler paths (cached): which checkpoints are in the window
+# ---------------------------------------------------------------------------
+_servable_lock = threading.Lock()
+_servable_cache: dict | None = None
+
+
+def get_servable_paths(force: bool = False) -> dict:
+    """Return {available, paths: set[str], error}, cached after first success.
+
+    `paths` is the exact set of `sampler_path`s tinker serves right now (the
+    rolling window from `GET /v1/models`), matched against a checkpoint's
+    `sampler_path` by string equality. Never raises: an unset key or an
+    unreachable oai endpoint yields available=False with an error string, and
+    sampleability then skips the checkpoint-window check (base-only fallback)."""
+    global _servable_cache
+    with _servable_lock:
+        if _servable_cache is not None and not force:
+            return _servable_cache
+        result: dict = {"available": False, "paths": set(), "error": None}
+        if not SETTINGS.tinker_api_key:
+            result["error"] = "TINKER_API_KEY not set"
+            _servable_cache = result
+            return result
+        try:
+            from . import tinker_oai
+
+            ckpts = tinker_oai.list_checkpoints(refresh=force)
+            result["paths"] = {c["sampler_path"] for c in ckpts if c.get("sampler_path")}
+            result["available"] = True
+        except Exception as e:  # oai /models unreachable — degrade to base-only check
+            result["error"] = f"{type(e).__name__}: {e}"
+        _servable_cache = result
+        return result
+
+
+# ---------------------------------------------------------------------------
 # config.json + checkpoints.jsonl readers (defensive)
 # ---------------------------------------------------------------------------
 def _parse_step(name: str, batch) -> int | None:
@@ -120,7 +169,9 @@ def _parse_step(name: str, batch) -> int | None:
         return batch if isinstance(batch, int) and batch > 0 else None
 
 
-def _read_checkpoints(ckpt_file: Path) -> list[Checkpoint]:
+def _read_checkpoints(ckpt_file: Path, servable: set[str] | None) -> list[Checkpoint]:
+    """Parse the checkpoint trajectory. `servable` is the set of currently-served
+    sampler paths (None when the window is unknown → per-ckpt `servable` = None)."""
     out: list[Checkpoint] = []
     for line in ckpt_file.read_text().splitlines():
         line = line.strip()
@@ -131,14 +182,16 @@ def _read_checkpoints(ckpt_file: Path) -> list[Checkpoint]:
         except json.JSONDecodeError:
             continue  # skip a malformed row, keep the rest
         name = str(r.get("name", ""))
+        sampler_path = r.get("sampler_path")
         out.append(
             Checkpoint(
                 name=name,
                 batch=r.get("batch"),
                 epoch=r.get("epoch"),
-                sampler_path=r.get("sampler_path"),
+                sampler_path=sampler_path,
                 state_path=r.get("state_path"),
                 step=_parse_step(name, r.get("batch")),
+                servable=None if servable is None else (sampler_path in servable),
             )
         )
     # Sort by step; 'final' (step None) sorts last.
@@ -153,7 +206,13 @@ def _rel_to_root(p: Path) -> str:
         return p.as_posix()
 
 
-def _build_run(run_dir: Path, ckpt_file: Path, supported: set[str], caps_available: bool) -> Run:
+def _build_run(
+    run_dir: Path,
+    ckpt_file: Path,
+    supported: set[str],
+    caps_available: bool,
+    servable: set[str] | None,
+) -> Run:
     config_error: str | None = None
     config: dict = {}
     cfg_path = run_dir / "config.json"
@@ -184,9 +243,14 @@ def _build_run(run_dir: Path, ckpt_file: Path, supported: set[str], caps_availab
             # try to resolve it under the run_dir's ancestors for a real link.
             dataset_path = _resolve_dataset_path(run_dir, str(fp))
 
-    checkpoints = _read_checkpoints(ckpt_file)
+    checkpoints = _read_checkpoints(ckpt_file, servable)
 
-    # Sampleability: requires capabilities to be available AND a known base model.
+    # Sampleability, two axes (see module docstring):
+    #   1. capabilities available + base model served, then
+    #   2. ≥1 checkpoint still in tinker's serving window.
+    # The window check only applies when the servable set is known; if the oai
+    # list is unavailable (offline / outage) we skip it and fall back to the
+    # base-only verdict, so a transient outage never wrongly greys a run.
     sampleable: bool | None
     reason: str | None = None
     if not caps_available:
@@ -194,11 +258,16 @@ def _build_run(run_dir: Path, ckpt_file: Path, supported: set[str], caps_availab
     elif base_model is None:
         sampleable = False
         reason = "no model_name in config.json"
-    elif base_model in supported:
+    elif base_model not in supported:
+        sampleable = False
+        reason = f"tinker does not currently serve sampling for {base_model}"
+    elif servable is None:
+        sampleable = True  # base served; can't check the window → trust the base
+    elif any(c.servable for c in checkpoints):
         sampleable = True
     else:
         sampleable = False
-        reason = f"tinker does not currently serve sampling for {base_model}"
+        reason = "sampler weights have aged out of tinker's serving window (retrain to refresh)"
 
     return Run(
         id=_rel_to_root(run_dir),
@@ -246,6 +315,10 @@ def scan_runs() -> list[Run]:
     caps = get_capabilities()
     supported = _supported_base_set(caps)
     caps_available = caps.get("available", False)
+    # The servable window: a set of sampler paths, or None when unknown (offline /
+    # oai outage) so the per-checkpoint + run verdict falls back to base-only.
+    srv = get_servable_paths()
+    servable: set[str] | None = srv["paths"] if srv.get("available") else None
 
     runs: list[Run] = []
     seen: set[Path] = set()
@@ -255,7 +328,7 @@ def scan_runs() -> list[Run]:
             if run_dir in seen:
                 continue
             seen.add(run_dir)
-            runs.append(_build_run(run_dir, ckpt_file, supported, caps_available))
+            runs.append(_build_run(run_dir, ckpt_file, supported, caps_available, servable))
     runs.sort(key=lambda r: r.id)
     return runs
 
@@ -267,6 +340,7 @@ def list_runs(force: bool = False) -> list[Run]:
         if _runs_cache is None or force:
             if force:
                 get_capabilities(force=True)
+                get_servable_paths(force=True)
             _runs_cache = scan_runs()
         return _runs_cache
 

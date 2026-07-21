@@ -18,7 +18,7 @@
 
   // The first non-icon part is the family anchor — the only piece allowed to
   // shrink. (A leading status icon, if present, is a separate tiny part.)
-  const shrinkIdx = $derived(parts.findIndex((p) => !/^[⊘?◆◇↗]\s/.test(p.text)));
+  const shrinkIdx = $derived(parts.findIndex((p) => !/^[⚠⊘?◆◇↗]\s/.test(p.text)));
 </script>
 
 <span class="difflabel" use:tip data-tooltip={label} aria-label={label}>

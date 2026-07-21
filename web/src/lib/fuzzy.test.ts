@@ -144,5 +144,51 @@ test('tiered: empty query → all items, fuzzy off', () => {
   ok(!r.fuzzy);
 });
 
+// ── unavailable demotion: ranked AFTER available, within each tier ────
+type UItem = Item & { unavailable?: boolean };
+const uitem = (label: string, unavailable = false): UItem => ({ id: label, label, unavailable });
+
+test('demote: unavailable rows sink below available in the substring tier', () => {
+  const items: UItem[] = [
+    uitem('cigarette_a', true),
+    uitem('cigarette_b', false),
+    uitem('cigarette_c', true),
+    uitem('cigarette_d', false)
+  ];
+  const r = tieredFilter('cigarette', items, isMatch);
+  eq(r.rows.map((i) => i.label), ['cigarette_b', 'cigarette_d', 'cigarette_a', 'cigarette_c'],
+    'available first (original order), then unavailable (original order)');
+  eq(r.total, 4, 'total counts all matches, demoted or not');
+});
+
+test('demote: available preserved under the maxRows cap (unavailable dropped first)', () => {
+  const items: UItem[] = [
+    uitem('cigarette_a', true),
+    uitem('cigarette_b', false),
+    uitem('cigarette_c', true),
+    uitem('cigarette_d', false)
+  ];
+  const r = tieredFilter('cigarette', items, isMatch, { maxRows: 2 });
+  eq(r.rows.map((i) => i.label), ['cigarette_b', 'cigarette_d'], 'the two available rows survive the cap');
+});
+
+test('demote: empty query also demotes (available first)', () => {
+  const items: UItem[] = [uitem('z_a', true), uitem('z_b', false)];
+  const r = tieredFilter('', items, isMatch);
+  eq(r.rows.map((i) => i.label), ['z_b', 'z_a']);
+});
+
+test('demote: unavailable still surfaces in the fuzzy tier, but last', () => {
+  // Two ed_sheeran runs, the available one first only because it's demoted-last-wins.
+  const items: UItem[] = [
+    uitem('instruct_ed_sheeran_pos', true),
+    uitem('base_ed_sheeran_pos', false)
+  ];
+  const r = tieredFilter('ed_shreean', items, isMatch); // typo → fuzzy tier
+  ok(r.fuzzy, 'fuzzy engages');
+  eq(r.rows.length, 2, 'both surface — demoted, never hidden');
+  ok(r.rows[0].unavailable !== true && r.rows[r.rows.length - 1].unavailable === true, 'available first, unavailable last');
+});
+
 if (failed) throw new Error(`\n${failed} failed / ${passed + failed}\n${fails.join('\n')}`);
 console.log(`fuzzy.test.ts: ${passed} passed`);

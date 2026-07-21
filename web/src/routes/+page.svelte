@@ -225,10 +225,15 @@
   // ── Per-panel selection edits ─────────────────────────────────────
   function defaultCheckpoint(runId: string): string | null {
     // OpenRouter / raw base / loose checkpoint have no checkpoint selector; tinker
-    // runs default to the last checkpoint with a sampler (usually "final").
+    // runs default to the last checkpoint with a sampler (usually "final") — but
+    // prefer the last one STILL in tinker's serving window, so a run whose final
+    // aged out but an earlier step is live defaults to something samplable.
+    // (offline/unknown → servable is null → falls back to the plain last.)
     if (isOpenrouterSel(runId) || isBaseSel(runId) || isCkptSel(runId)) return null;
     const r = modelCatalog.runById(runId);
-    return r?.checkpoints.length ? r.checkpoints[r.checkpoints.length - 1].name : null;
+    if (!r?.checkpoints.length) return null;
+    const lastServable = [...r.checkpoints].reverse().find((c) => c.servable === true);
+    return (lastServable ?? r.checkpoints[r.checkpoints.length - 1]).name;
   }
   function setRun(panel: Panel, runId: string) {
     patchState({ panel, run_id: runId, checkpoint: defaultCheckpoint(runId) }, true);
@@ -329,11 +334,14 @@
   function panelRun(p: PanelSel): Run | undefined { return modelCatalog.runById(p.run_id); }
   /** Whether ONE panel's selected model is chat-eligible. OpenRouter refs + raw
    *  tinker base models + loose checkpoints are always eligible (the backend
-   *  errors clearly if a key is missing). */
+   *  errors clearly if a key is missing). A discovered run needs a base model +
+   *  ≥1 checkpoint; an UNAVAILABLE run (aged-out / base-gone) stays eligible on
+   *  purpose — it's a warning, not a block (the sidebar warns + a failed send
+   *  surfaces the backend error), consistent with base/OR "always eligible". */
   function panelCanChat(p: PanelSel): boolean {
     if (isOpenrouterSel(p.run_id) || isBaseSel(p.run_id) || isCkptSel(p.run_id)) return true;
     const r = panelRun(p);
-    return !!(r && r.sampleable !== false && r.checkpoints.length > 0);
+    return !!(r && r.base_model && r.checkpoints.length > 0);
   }
   // Chat eligibility is about the panels a send will actually fire to (the targets).
   let canChat = $derived(targetSels.length > 0 && targetSels.every(panelCanChat));
@@ -1423,12 +1431,12 @@
                 >
                   {#each pr.checkpoints as ck (ck.name)}
                     {@const numbered = /^\d+$/.test(ck.name)}
-                    <option value={ck.name}>{numbered ? `step ${ck.step}` : ck.name}{ck.epoch != null ? ` · e${ck.epoch}·b${ck.batch ?? 0}` : ''}</option>
+                    <option value={ck.name}>{numbered ? `step ${ck.step}` : ck.name}{ck.epoch != null ? ` · e${ck.epoch}·b${ck.batch ?? 0}` : ''}{ck.servable === false ? ' · ⚠ aged out' : ''}</option>
                   {/each}
                 </select>
               {/if}
-              {#if pr?.sampleable === false && pr.unsampleable_reason}
-                <div class="unsampleable-note">{pr.unsampleable_reason}</div>
+              {#if pr?.sampleable === false}
+                <div class="unavailable-warn">⚠ {pr.unsampleable_reason ?? 'Not samplable right now.'} — selecting is allowed, but a send may fail.</div>
               {:else if pr?.sampleable === null}
                 <div class="unknown-note">capabilities unknown (tinker offline / no key)</div>
               {/if}
@@ -1749,7 +1757,7 @@
           placeholder={!convo.activeId
             ? 'Loading workspaces…'
             : !canChat
-              ? 'Select a sampleable run to chat'
+              ? 'Select a model to chat'
               : historyBrowsing
                 ? 'History mode -- up/down browse, Esc exit'
                 : 'Type a message... (Enter to send, Esc for history)'}

@@ -16,7 +16,7 @@
   import ModelTypeahead from './ModelTypeahead.svelte';
   import TruncLabel from './TruncLabel.svelte';
 
-  type Item = { id: string; label: string; disabled?: boolean; search?: string };
+  type Item = { id: string; label: string; disabled?: boolean; unavailable?: boolean; search?: string };
 
   let {
     items,

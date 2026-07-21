@@ -14,9 +14,11 @@
 
   // `search`: extra hidden text matched but never displayed (e.g. a run's
   // wandb project / base model, so filtering isn't limited to the visible
-  // label). `disabled`: shown but not pickable (e.g. a run tinker can no
-  // longer sample) — greyed out, click/Enter on it is a no-op.
-  type Item = { id: string; label: string; disabled?: boolean; search?: string };
+  // label). `disabled`: shown but not pickable — greyed, click/Enter is a no-op.
+  // `unavailable`: not samplable right now (base gone / weights aged out) —
+  // greyed AND demoted below available rows, but STILL pickable (a warning, not
+  // a block; the sidebar shows why + a send surfaces the backend error).
+  type Item = { id: string; label: string; disabled?: boolean; unavailable?: boolean; search?: string };
 
   let {
     items,
@@ -152,7 +154,9 @@
             class="typeahead-row"
             class:active={i === active}
             class:disabled={it.disabled}
+            class:unavailable={it.unavailable}
             disabled={busy || it.disabled}
+            title={it.unavailable ? 'Not samplable right now — sampler weights aged out of tinker’s window (selecting still allowed)' : undefined}
             onmouseenter={() => { if (!it.disabled) active = i; }}
             onclick={() => pick(it)}
           >
@@ -254,6 +258,10 @@
   .typeahead-row:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+  /* Unavailable = warning, not a block: greyed but still pickable. */
+  .typeahead-row.unavailable:not(:disabled) .typeahead-row-label {
+    color: var(--color-text-muted);
   }
   .typeahead-row-label {
     font-size: 0.82rem;

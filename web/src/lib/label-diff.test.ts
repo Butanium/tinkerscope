@@ -218,17 +218,20 @@ test('shown parts + elided segments reconstruct every body', () => {
   }
 });
 
-// ── Status-icon prefix: aged-out `⊘ ` runs still cluster with live ones ──
+// ── Status-icon prefix: unavailable `⚠ ` runs still cluster with live ones ──
+// (⊘ is the legacy glyph, kept peelable; ⚠ is what the catalog renders now.)
 test('icon prefix is peeled for clustering and re-attached', () => {
-  const labels = [
-    '⊘ basevsinstr_april_base_ed_sheeran_pos_s1_lr1e-3',
-    'basevsinstr_april_instruct_ed_sheeran_pos_s1_lr1e-3'
-  ];
-  const rs = diffLabels(labels);
-  ok(rs[0] !== null && rs[1] !== null, 'both should diff (same family despite the ⊘)');
-  ok(text(rs[0])!.startsWith('⊘ '), `icon must be re-attached: ${text(rs[0])}`);
-  ok(text(rs[0]) !== text(rs[1]), 'base vs instruct still distinct with an icon on one');
-  ok(text(rs[0])!.includes('base') && text(rs[1])!.includes('instruct'), 'distinguishing segments shown');
+  for (const icon of ['⚠ ', '⊘ ']) {
+    const labels = [
+      `${icon}basevsinstr_april_base_ed_sheeran_pos_s1_lr1e-3`,
+      'basevsinstr_april_instruct_ed_sheeran_pos_s1_lr1e-3'
+    ];
+    const rs = diffLabels(labels);
+    ok(rs[0] !== null && rs[1] !== null, `both should diff (same family despite the ${icon.trim()})`);
+    ok(text(rs[0])!.startsWith(icon), `icon must be re-attached: ${text(rs[0])}`);
+    ok(text(rs[0]) !== text(rs[1]), 'base vs instruct still distinct with an icon on one');
+    ok(text(rs[0])!.includes('base') && text(rs[1])!.includes('instruct'), 'distinguishing segments shown');
+  }
 });
 
 // ── Same-count family with a common suffix → interior-of-suffix elides, member's

@@ -58,19 +58,33 @@ the API are **relative to that root**.
   "num_checkpoints": 15,
   "checkpoints": [
     {"name":"000010","batch":10,"epoch":0,"step":10,
-     "sampler_path":"tinker://…/sampler_weights/000010","state_path":"tinker://…/weights/000010"},
-    … {"name":"final","step":468, …}
+     "sampler_path":"tinker://…/sampler_weights/000010","state_path":"tinker://…/weights/000010",
+     "servable": false},          // this sampler_path in tinker's rolling window? null = unknown
+    … {"name":"final","step":468,"servable":true, …}
   ],
   "sampleable": true | false | null,            // null = unknown (tinker offline/no key)
-  "unsampleable_reason": "tinker does not currently serve sampling for Qwen/Qwen3-30B-A3B-Base",
+  "unsampleable_reason": "sampler weights have aged out of tinker's serving window (retrain to refresh)",
   "config_error": null,                          // set if config.json missing/malformed
   "supports_thinking": true                       // added by /api/models
 }
 ```
-Important real-world fact: **half the runs are `sampleable:false`** because their
-base model (`Qwen/Qwen3-30B-A3B-Base`) is no longer served by tinker. The UI
-must grey these out (show `unsampleable_reason`) rather than letting a click 400.
-Runs with `config_error` should still be listed (degraded).
+**`sampleable` = base model served AND ≥1 checkpoint still servable** — the two
+availability axes:
+1. **Base gone** — the run's `base_model` is no longer hosted (e.g.
+   `Qwen/Qwen3-30B-A3B-Base`). Verified against `get_server_capabilities`.
+2. **Weights aged out** — tinker serves only a rolling most-recent-N window of
+   sampler checkpoints, so an old run's `sampler_weights` 404 on sample even
+   though its base is still served. Verified per-checkpoint by string-matching
+   each `sampler_path` against `GET /v1/models` (surfaced as `Checkpoint.servable`).
+   This catches the **false-green** the base check misses — a run whose base is
+   served but whose weights have all aged out is `sampleable:false` with the
+   aged-out reason. If the base is served but the servable window is unknown (oai
+   outage), the checkpoint check is skipped and the run keeps the base-only verdict.
+
+`unsampleable_reason` names whichever constraint binds. The UI **greys unavailable
+runs (⚠) and demotes them below available ones, but keeps them selectable** — a
+warning, not a block; a send to one surfaces the backend 404. Runs with
+`config_error` are still listed (degraded).
 
 ## Endpoints
 

@@ -20,7 +20,24 @@
 // fuzzy.test.ts. Bigram sets are cached per token string (deduped across items and
 // keystrokes), so the OR catalog's few-thousand items don't rebuild per keystroke.
 
-export type FuzzyItem = { id: string; label: string; search?: string; disabled?: boolean };
+export type FuzzyItem = {
+  id: string;
+  label: string;
+  search?: string;
+  disabled?: boolean;
+  /** Selectable but not samplable right now (base gone / weights aged out).
+   *  Ranked AFTER available rows within each tier — demoted, never hidden. */
+  unavailable?: boolean;
+};
+
+/** Stable partition: available rows first, unavailable last, order preserved
+ *  within each group. The demotion applied within each filter tier. */
+function demoteUnavailable<T extends FuzzyItem>(rows: readonly T[]): T[] {
+  const avail: T[] = [];
+  const unavail: T[] = [];
+  for (const r of rows) (r.unavailable ? unavail : avail).push(r);
+  return unavail.length ? [...avail, ...unavail] : (rows as T[]);
+}
 
 /** Score at/above which a candidate is considered a plausible typo match. Tuned so
  *  real fixture typos (≥0.53) clear it and garbage (≤0.28) doesn't. */
@@ -141,9 +158,15 @@ export function tieredFilter<T extends FuzzyItem>(
 ): { rows: T[]; fuzzy: boolean; total: number } {
   const q = query.trim().toLowerCase();
   const maxRows = opts?.maxRows ?? Infinity;
-  if (!q) return { rows: items.slice(0, maxRows), fuzzy: false, total: items.length };
+  // Each tier keeps its own ordering (original / score), then unavailable rows
+  // are demoted to the tail so the maxRows cap keeps available rows preferentially.
+  if (!q) {
+    return { rows: demoteUnavailable(items).slice(0, maxRows), fuzzy: false, total: items.length };
+  }
   const subs = items.filter((it) => matches(it, q));
-  if (subs.length) return { rows: subs.slice(0, maxRows), fuzzy: false, total: subs.length };
-  const fz = fuzzyFilter(query.trim(), items, opts);
+  if (subs.length) {
+    return { rows: demoteUnavailable(subs).slice(0, maxRows), fuzzy: false, total: subs.length };
+  }
+  const fz = demoteUnavailable(fuzzyFilter(query.trim(), items, opts));
   return { rows: fz, fuzzy: fz.length > 0, total: fz.length };
 }

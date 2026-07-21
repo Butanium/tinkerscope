@@ -43,10 +43,11 @@ export type DiffRender = DiffPart[];
 type Seg = { sep: string; text: string };
 
 const ELLIPSIS = '…';
-// Leading status glyph the catalog prepends (⊘/? sampleability, ◆/◇/↗ group
+// Leading status glyph the catalog prepends (⚠/? sampleability, ◆/◇/↗ group
 // markers), always as "<glyph><whitespace>". Peeled off the body so an aged-out
-// `⊘ basevsinstr_…` still clusters with a live `basevsinstr_…`, then re-attached.
-const ICON = /^([⊘?◆◇↗]\s+)/;
+// `⚠ basevsinstr_…` still clusters with a live `basevsinstr_…`, then re-attached.
+// (⊘ kept for back-compat with any older-rendered label.)
+const ICON = /^([⚠⊘?◆◇↗]\s+)/;
 
 /** Split on `_` and `/` (but NOT `-`, so `lr1e-3` / `deepseek-chat` stay whole),
  *  keeping each segment's preceding separator so the label reconstructs exactly. */

@@ -33,8 +33,16 @@ type RecentCkpt = { sampler_path: string; label: string };
 const RECENT_BASE_KEY = 'tinkerscope-recent-base-models';
 const RECENT_CKPT_KEY = 'tinkerscope-recent-checkpoints';
 
-/** One entry in a panel dropdown's item list. */
-export type ModelItem = { id: string; label: string; disabled?: boolean; search?: string };
+/** One entry in a panel dropdown's item list. `unavailable` = selectable but not
+ *  samplable right now (base gone / weights aged out) → greyed + demoted + ⚠, a
+ *  warning not a block (still pickable, unlike the hard `disabled`). */
+export type ModelItem = {
+  id: string;
+  label: string;
+  disabled?: boolean;
+  unavailable?: boolean;
+  search?: string;
+};
 
 class ModelCatalog {
   // The discovered tinker runs + the saved OpenRouter quick-list (the two always-
@@ -176,15 +184,15 @@ class ModelCatalog {
     return this.tinkerModels.find((t) => t.base_model === bm)?.supports_thinking;
   }
 
-  /** The panel dropdown's trigger-button text — same iconography the old
-   *  <select><option> used (⊘/? sampleability, ◆/◇/↗ group markers). */
+  /** The panel dropdown's trigger-button text. Group markers (◆/◇/↗); a run's
+   *  availability shows ⚠ (unavailable — selectable warning) or ? (unknown). */
   selectedModelLabel(sel: { run_id: string | null }): string {
     if (!sel.run_id) return '';
     if (isBaseSel(sel.run_id)) return `◆ ${this.baseLabel(sel.run_id)}`;
     if (isCkptSel(sel.run_id)) return `◇ ${this.ckptLabel(sel.run_id)}`;
     if (isOpenrouterSel(sel.run_id)) return `↗ ${this.openrouterLabel(sel.run_id)}`;
     const r = this.runById(sel.run_id);
-    if (r) return `${r.sampleable === false ? '⊘ ' : r.sampleable === null ? '? ' : ''}${this.runLabel(r)}`;
+    if (r) return `${r.sampleable === false ? '⚠ ' : r.sampleable === null ? '? ' : ''}${this.runLabel(r)}`;
     return sel.run_id;
   }
 
@@ -199,8 +207,10 @@ class ModelCatalog {
     return [
       ...this.runs.map((r) => ({
         id: r.id,
-        label: `${r.sampleable === false ? '⊘ ' : r.sampleable === null ? '? ' : ''}${this.runLabel(r)}`,
-        disabled: r.sampleable === false,
+        label: `${r.sampleable === false ? '⚠ ' : r.sampleable === null ? '? ' : ''}${this.runLabel(r)}`,
+        // Unavailable (base gone / weights aged out) is a warning, not a block:
+        // greyed + demoted but still pickable. `?` (unknown/offline) stays neutral.
+        unavailable: r.sampleable === false,
         search: [r.id, r.base_model, r.wandb_project, r.renderer_name].filter(Boolean).join(' ')
       })),
       ...(baseM != null && !baseInRecents ? [{ id: BASE_PREFIX + baseM, label: `◆ ${this.baseLabel(runId)}` }] : []),

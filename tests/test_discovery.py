@@ -9,11 +9,13 @@ from conftest import SUPPORTED_BASE, UNSUPPORTED_BASE
 def test_all_runs_discovered(discovery):
     runs = discovery.list_runs(force=True)
     by_name = {r.name: r for r in runs}
-    # Three run dirs were materialized; all must be discovered (the broken one
+    # Four run dirs were materialized; all must be discovered (the broken one
     # too — a malformed config degrades, it does not drop the run).
     # The broken run's config is unreadable, so its name falls back to the dir
     # name ("broken_run") rather than a wandb_name.
-    assert set(by_name) == {"good_run_sampleable", "unsampleable_run", "broken_run"}
+    assert set(by_name) == {
+        "good_run_sampleable", "unsampleable_run", "broken_run", "aged_out_run"
+    }
 
 
 def test_checkpoints_parsed_and_sorted_final_last(discovery):
@@ -41,6 +43,39 @@ def test_sampleable_gating(discovery):
     assert bad.base_model == UNSUPPORTED_BASE
     assert bad.sampleable is False
     assert UNSUPPORTED_BASE in bad.unsampleable_reason
+
+
+def test_per_checkpoint_servable(discovery):
+    """Each checkpoint's `servable` mirrors membership in the stubbed window
+    (only the good run's 'final' is in SERVABLE_PATHS)."""
+    good = next(r for r in discovery.list_runs(force=True) if r.name == "good_run_sampleable")
+    by_ckpt = {c.name: c for c in good.checkpoints}
+    assert by_ckpt["final"].servable is True
+    assert by_ckpt["000010"].servable is False
+    assert by_ckpt["000020"].servable is False
+
+
+def test_aged_out_run_base_served_but_weights_gone(discovery):
+    """Base model served, but all sampler weights aged out of the window → not
+    sampleable, with the aged-out reason (the false-green the base check misses)."""
+    aged = next(r for r in discovery.list_runs(force=True) if r.name == "aged_out_run")
+    assert aged.base_model == "deepseek-ai/DeepSeek-V3.1"
+    assert aged.sampleable is False
+    assert "aged out" in aged.unsampleable_reason
+    assert all(c.servable is False for c in aged.checkpoints)
+
+
+def test_servable_unknown_falls_back_to_base_only(discovery, monkeypatch):
+    """When the servable window is unavailable (oai outage), sampleability skips
+    the checkpoint check and trusts the base verdict; per-ckpt servable = None."""
+    monkeypatch.setattr(
+        discovery, "get_servable_paths",
+        lambda force=False: {"available": False, "paths": set(), "error": "boom"},
+    )
+    aged = next(r for r in discovery.list_runs(force=True) if r.name == "aged_out_run")
+    # base is served and we can't check the window → trust the base (sampleable).
+    assert aged.sampleable is True
+    assert all(c.servable is None for c in aged.checkpoints)
 
 
 def test_malformed_config_surfaces_error_without_crashing(discovery):

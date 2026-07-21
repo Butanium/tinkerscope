@@ -130,6 +130,9 @@ select {
 .sidebar-input { padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text); font-size: 0.82rem; font-family: var(--font-mono); width: 100%; }
 .unsampleable-note { font-size: 0.7rem; color: #b45309; line-height: 1.3; }
 .dark .unsampleable-note { color: #fbbf24; }
+/* Availability warning: greyed-run reason banner — a warning, not a hard block. */
+.unavailable-warn { font-size: 0.7rem; color: #b45309; line-height: 1.3; padding: var(--space-1) var(--space-2); background: rgba(180, 83, 9, 0.08); border-left: 2px solid #b45309; border-radius: 2px; }
+.dark .unavailable-warn { color: #fbbf24; background: rgba(251, 191, 36, 0.1); border-left-color: #fbbf24; }
 .btn-new { padding: var(--space-2) var(--space-3); background: var(--color-surface-hover); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text); font-size: 0.82rem; font-weight: 500; }
 .btn-new:hover { background: var(--color-accent-bg); border-color: var(--color-accent); }
 .tag-form-actions { display: flex; gap: var(--space-2); justify-content: flex-end; margin-top: var(--space-3); }

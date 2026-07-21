@@ -23,18 +23,39 @@ def test_health(client):
 def test_models_lists_runs_with_thinking_flag(client):
     runs = client.get("/api/models").json()
     by_name = {r["name"]: r for r in runs}
-    assert {"good_run_sampleable", "unsampleable_run", "broken_run"} <= set(by_name)
+    assert {"good_run_sampleable", "unsampleable_run", "broken_run", "aged_out_run"} <= set(by_name)
     good = by_name["good_run_sampleable"]
+    # base served AND its "final" checkpoint is in the servable window.
     assert good["sampleable"] is True
     assert "supports_thinking" in good  # added by the models route
     assert by_name["unsampleable_run"]["sampleable"] is False
     assert by_name["unsampleable_run"]["base_model"] == UNSUPPORTED_BASE
 
 
+def test_per_checkpoint_servable_flag(client):
+    """Each checkpoint carries its own window membership; only the good run's
+    'final' (the one in SERVABLE_PATHS) is servable, its earlier steps aren't."""
+    by_name = {r["name"]: r for r in client.get("/api/models").json()}
+    ckpts = {c["name"]: c for c in by_name["good_run_sampleable"]["checkpoints"]}
+    assert ckpts["final"]["servable"] is True
+    assert ckpts["000010"]["servable"] is False
+    assert ckpts["000020"]["servable"] is False
+
+
+def test_aged_out_run_is_unsampleable(client):
+    """The false-green case: base model IS served, but the run's sampler weights
+    have aged out of tinker's window → sampleable:false with the aged-out reason."""
+    aged = {r["name"]: r for r in client.get("/api/models").json()}["aged_out_run"]
+    assert aged["base_model"] == "deepseek-ai/DeepSeek-V3.1"  # a served base model
+    assert aged["sampleable"] is False
+    assert "aged out" in (aged["unsampleable_reason"] or "")
+    assert aged["checkpoints"][0]["servable"] is False
+
+
 def test_models_refresh(client):
     body = client.post("/api/models/refresh").json()
     assert body["status"] == "ok"
-    assert body["count"] == 3
+    assert body["count"] == 4
 
 
 # --------------------------------------------------------------------------- #

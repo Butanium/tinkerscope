@@ -11,6 +11,7 @@ export type Checkpoint = {
   step?: number;
   sampler_path?: string;
   state_path?: string;
+  servable?: boolean | null; // sampler_path in tinker's rolling window; null = unknown
 };
 
 /** One discovered training run = one model with N selectable checkpoints. */
@@ -28,8 +29,11 @@ export type Run = {
   seed?: number | null;
   num_checkpoints: number;
   checkpoints: Checkpoint[];
-  sampleable: boolean | null; // true | false | null(unknown)
-  unsampleable_reason?: string | null;
+  // Samplable right now = base model served AND ≥1 checkpoint still in tinker's
+  // rolling window. false if the base is gone OR all weights aged out; null = unknown
+  // (offline). Drives the picker's grey/warn/demote treatment.
+  sampleable: boolean | null;
+  unsampleable_reason?: string | null; // the binding constraint (base gone / aged out)
   config_error?: string | null;
   supports_thinking?: boolean;
 };
