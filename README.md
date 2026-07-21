@@ -231,6 +231,7 @@ tinkpg send "prompt"                   # NEW THREAD at the current panels (layou
 tinkpg send --file probe.txt           # …with the message read from a file (probe templates)
 tinkpg continue "follow-up"            # LOOM: add a turn to the current threads (multi-turn send)
 tinkpg state                           # dump the shared playground state
+tinkpg params [--temperature ...]      # show / SET the GLOBAL sampling params (the deliberate route)
 tinkpg conv [<id|name>]                # browse saved workspaces; no arg lists them all (alias: ws)
 tinkpg samples [<id|name>]             # every sampled response at one fork + a <tag> tally
 tinkpg grep "<text>"                   # search EVERY branch of all workspaces (content + thinking)
@@ -243,6 +244,17 @@ separator is `@` (`tinkpg chat foo/bar/run@final "hi"`), or use `--checkpoint`.
 `tinkpg chat` also takes `--temperature`, `--max-tokens`, `--thinking`,
 `--thinking-both` (n samples without thinking + n with, 2n total), and
 `--system`.
+
+**Params have two routes.** Sampling params (system prompt, temperature, max
+tokens, n, thinking, top-p) live in ONE shared global state — the browser's
+sidebar. Param args on `chat`/`compare`/`send`/`continue` are **per-call**: they
+apply to that fire only, any param you don't pass inherits the current global
+value, and nothing is written back — a CLI probe can't clobber the sidebar.
+(`--n` is the exception: it never inherits — an explicit fan-out size, default 1.)
+`--no-system` fires with no system prompt even when the global state carries one.
+The **deliberate** route is `tinkpg params`: with options it SETS the global
+state (the browser updates live — `--clear-system` removes the system prompt,
+`--system-file` reads one from a file); with none it shows the current values.
 
 `tinkpg conv` and `tinkpg state` skip panels folded in the browser UI by default
 (a one-line stub + a trailing "N folded panel(s) skipped: …" list, so you still
@@ -262,7 +274,12 @@ threads that the active-path views can't reach.
 `tinkpg samples` reading ergonomics: `--sample K` isolates one sibling of the
 fan-out, and `--slice START[:LEN]` shows a character window of each shown sample
 (same window applies to the CoT with `--full`) — page through a long sample in
-pieces instead of dumping or truncating it.
+pieces instead of dumping or truncating it. `--first-token` prints the model's
+probability distribution over the FIRST generated token at the fork (the stored
+top-K of the newest sample + each sample's actually-sampled token — the CLI twin
+of the browser chart's first-token mode; data comes from the stored node blobs,
+so it works on browser-fired turns too). With `--json` it adds a per-sample
+`first` record ({t, tid, lp, top}) and the aggregate `first_token` object.
 
 `tinkpg grep "<text>"` searches every node of every branch — message content
 AND thinking — across all saved workspaces (`--conv` to scope, `--regex`, `-i`),

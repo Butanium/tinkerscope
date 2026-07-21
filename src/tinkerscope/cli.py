@@ -29,6 +29,7 @@ same commit (they have drifted before):
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import sys
@@ -599,6 +600,51 @@ def _fmt_token_logprobs(entries: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _first_token_dist(firsts: list[Optional[dict]]) -> Optional[dict]:
+    """Aggregate position-0 token records ({t, tid, lp, top}) across a fan-out.
+    Mirrors web/src/lib/token-logprob.ts firstTokenDist: the NEWEST sample's top-K
+    is the reference distribution, every sample's actually-sampled first token is
+    counted against it (a sampled token missing from the reference joins with its
+    own recorded p), and `mixed` flags fan-outs whose per-sample top-Ks disagree
+    (samples regenerated on another checkpoint/renderer)."""
+    with_data = [(i, f) for i, f in enumerate(firsts) if f]
+    if not with_data:
+        return None
+    ref = next((f["top"] for _, f in reversed(with_data) if f.get("top")), [])
+
+    def sig(top: Optional[list]) -> str:
+        return ",".join(str(t[1]) for t in (top or []))
+
+    mixed = any(f.get("top") and sig(f["top"]) != sig(ref) for _, f in with_data)
+    entries: dict[int, dict] = {}
+    for text, tid, lp in ref:
+        entries[tid] = {"token": text, "tid": tid, "p": math.exp(lp), "count": 0, "samples": []}
+    for i, f in with_data:
+        e = entries.get(f["tid"])
+        if e is None:
+            e = entries[f["tid"]] = {"token": f["t"], "tid": f["tid"], "p": math.exp(f["lp"]),
+                                     "count": 0, "samples": []}
+        e["count"] += 1
+        e["samples"].append(i + 1)  # 1-indexed, matching the `--- sample i ---` headers
+    ordered = sorted(entries.values(), key=lambda e: -e["p"])
+    return {"entries": ordered, "rest": max(0.0, 1.0 - sum(e["p"] for e in ordered)),
+            "total": len(with_data), "mixed": mixed}
+
+
+def _fmt_first_token(dist: dict, n_samples: int) -> str:
+    lines = [f"first-token distribution   ({dist['total']}/{n_samples} sample(s) with "
+             f"token data · reference = newest sample's top-{len(dist['entries'])})"]
+    for e in dist["entries"]:
+        cnt = f"×{e['count']} (sample {','.join(map(str, e['samples']))})" if e["count"] else ""
+        lines.append(f"    {e['token']!r:>14}  {e['p'] * 100:7.2f}%   {cnt}")
+    if dist["rest"] > 1e-9:
+        lines.append(f"    {'(rest)':>14}  {dist['rest'] * 100:7.2f}%")
+    if dist["mixed"]:
+        lines.append("    ⚠ per-sample top-Ks disagree (mixed checkpoints/renderers) — "
+                     "bars use the newest sample's top-K")
+    return "\n".join(lines)
+
+
 def _stream_chat(
     body: dict,
     label: Optional[str] = None,
@@ -758,14 +804,39 @@ def _stream_chat(
         result.ok = True
 
 
+def _call_params(
+    n: int,
+    temperature: Optional[float],
+    max_tokens: Optional[int],
+    thinking: "bool | str | None",
+    system: Optional[str],
+) -> dict:
+    """The per-call params slice of a ChatRequest (params_scope="call"): explicit
+    values are sent, omitted ones are LEFT OUT of the body so the server inherits
+    the CURRENT global state — and either way nothing is written back to the
+    shared sidebar state. system="" (--no-system) explicitly drops an inherited
+    system prompt. `n` is always explicit (a fan-out size scales cost — it never
+    silently inherits the browser's)."""
+    body: dict = {"n_samples": n, "params_scope": "call"}
+    if temperature is not None:
+        body["temperature"] = temperature
+    if max_tokens is not None:
+        body["max_tokens"] = max_tokens
+    if thinking is not None:
+        body["thinking"] = thinking
+    if system is not None:
+        body["system_prompt"] = system
+    return body
+
+
 def _chat_body(
     run: dict,
     checkpoint: Optional[str],
     prompt: str,
     n: int,
-    temperature: float,
-    max_tokens: int,
-    thinking: "bool | str",  # False / True / "both" (n without + n with thinking)
+    temperature: Optional[float],
+    max_tokens: Optional[int],
+    thinking: "bool | str | None",  # None=inherit / False / True / "both"
     system: Optional[str],
     panel: str,
     prefill: Optional[str] = None,
@@ -783,18 +854,26 @@ def _chat_body(
     body: dict = {
         "run_id": run["id"],
         "messages": messages,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "n_samples": n,
-        "thinking": thinking,
         "panel": panel,
         "broadcast": True,
+        **_call_params(n, temperature, max_tokens, thinking, system),
     }
     if checkpoint is not None:
         body["checkpoint"] = checkpoint
-    if system is not None:
-        body["system_prompt"] = system
     return body
+
+
+def _resolve_sys(system: Optional[str], no_system: bool) -> Optional[str]:
+    """--no-system → explicit empty system prompt ("" never inherits server-side)."""
+    if no_system:
+        if system is not None:
+            _die("--system and --no-system are mutually exclusive")
+        return ""
+    return system
+
+
+def _fmt_param(v: Any) -> str:
+    return "(global)" if v is None else str(v)
 
 
 @app.command("chat")
@@ -802,11 +881,12 @@ def cmd_chat(
     run: str = typer.Argument(..., help="run id or unique substring; optional @checkpoint"),
     prompt: str = typer.Argument(..., help="user message"),
     n: int = typer.Option(1, "--n", help="number of samples to draw"),
-    temperature: float = typer.Option(1.0, "--temperature"),
-    max_tokens: int = typer.Option(1024, "--max-tokens"),
-    thinking: bool = typer.Option(False, "--thinking", help="enable the thinking renderer"),
+    temperature: Optional[float] = typer.Option(None, "--temperature", help="this call only; omit = inherit the global param (see `tinkpg params`)"),
+    max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="this call only; omit = inherit the global param"),
+    thinking: Optional[bool] = typer.Option(None, "--thinking/--no-thinking", help="force the thinking renderer on/off for this call; omit = inherit the global param"),
     thinking_both: bool = typer.Option(False, "--thinking-both", help="draw n samples WITHOUT thinking + n WITH (2n total; overrides --thinking)"),
-    system: Optional[str] = typer.Option(None, "--system", help="system prompt"),
+    system: Optional[str] = typer.Option(None, "--system", help="system prompt for this call; omit = inherit the global one"),
+    no_system: bool = typer.Option(False, "--no-system", help="fire with NO system prompt even if the global state carries one"),
     checkpoint: Optional[str] = typer.Option(None, "--checkpoint", help="checkpoint name (overrides @ in the run arg)"),
     prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the model extends; raw `<think>` ok"),
 ) -> None:
@@ -818,11 +898,11 @@ def cmd_chat(
     # Mirror selection to the bus so the browser shows what's being sampled (single
     # mode = one 'primary' panel).
     _post("/api/state", {"panels": [_panel_obj("primary", r["id"], ckpt)]})
-    think: "bool | str" = "both" if thinking_both else thinking
-    body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, think, system, "primary", prefill)
+    think: "bool | str | None" = "both" if thinking_both else thinking
+    body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, think, _resolve_sys(system, no_system), "primary", prefill)
     if prefill:
         print(f"prefill: {prefill!r}")
-    print(f"chat {r['id']}" + (f"@{ckpt}" if ckpt else "") + f"  n={n} temp={temperature}")
+    print(f"chat {r['id']}" + (f"@{ckpt}" if ckpt else "") + f"  n={n} temp={_fmt_param(temperature)}")
     # Single chat: n==1 streams tokens inline; n>1 prints whole samples (no deltas).
     _stream_chat(body, stream_inline=True)
 
@@ -834,15 +914,17 @@ def cmd_compare(
     prompt: str = typer.Argument(..., help="user message"),
     run: list[str] = typer.Option([], "--run", help="additional run(s) → 3rd, 4th, … panes (repeatable)"),
     n: int = typer.Option(1, "--n", help="number of samples per side"),
-    temperature: float = typer.Option(1.0, "--temperature"),
-    max_tokens: int = typer.Option(1024, "--max-tokens"),
-    thinking: bool = typer.Option(False, "--thinking"),
+    temperature: Optional[float] = typer.Option(None, "--temperature", help="this call only; omit = inherit the global param"),
+    max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="this call only; omit = inherit the global param"),
+    thinking: Optional[bool] = typer.Option(None, "--thinking/--no-thinking", help="force thinking on/off for this call; omit = inherit"),
     thinking_both: bool = typer.Option(False, "--thinking-both", help="n samples WITHOUT thinking + n WITH, per run (overrides --thinking)"),
-    system: Optional[str] = typer.Option(None, "--system"),
+    system: Optional[str] = typer.Option(None, "--system", help="system prompt for this call; omit = inherit the global one"),
+    no_system: bool = typer.Option(False, "--no-system", help="fire with NO system prompt even if the global state carries one"),
     prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the models extend; raw `<think>` ok"),
 ) -> None:
     """Compare N runs on one prompt — A→primary, B→compare, --run extras→p-2,p-3,…
     all stream concurrently. `compare a b "prompt"` is the 2-run case."""
+    system = _resolve_sys(system, no_system)
     catalog = _models()
     # Resolve every run (A, B, then each --run) to (run, checkpoint, panel_id).
     specs: list[tuple[dict, Optional[str], str]] = []
@@ -856,7 +938,7 @@ def cmd_compare(
     # One /api/state replace sets the whole panel layout at once.
     _post("/api/state", {"panels": [_panel_obj(pid, r["id"], ckpt) for (r, ckpt, pid) in specs]})
 
-    print(f"compare  n={n} temp={temperature}")
+    print(f"compare  n={n} temp={_fmt_param(temperature)}")
     for (r, ckpt, pid) in specs:
         print(f"  {pid}: {r['id']}" + (f"@{ckpt}" if ckpt else ""))
     print()
@@ -864,7 +946,7 @@ def cmd_compare(
     lock = threading.Lock()
     threads: list[threading.Thread] = []
     results: list[tuple[str, dict, _StreamResult]] = []
-    think: "bool | str" = "both" if thinking_both else thinking
+    think: "bool | str | None" = "both" if thinking_both else thinking
     for (r, ckpt, pid) in specs:
         body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, think, system, pid, prefill)
         res = _StreamResult()
@@ -906,9 +988,9 @@ def _panel_body(
     panel: dict,
     messages: list[dict],
     n: int,
-    temperature: float,
-    max_tokens: int,
-    thinking: "bool | str",
+    temperature: Optional[float],
+    max_tokens: Optional[int],
+    thinking: "bool | str | None",
     system: Optional[str],
     prefill_scope: Optional[str] = None,
 ) -> dict:
@@ -918,18 +1000,13 @@ def _panel_body(
     `messages` is the server's prefill convention (the model extends it)."""
     body: dict = {
         "messages": messages,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "n_samples": n,
-        "thinking": thinking,
         "panel": panel["id"],
         "broadcast": True,
+        **_call_params(n, temperature, max_tokens, thinking, system),
     }
     if prefill_scope is not None:
         body["prefill_scope"] = prefill_scope
     _bind_panel_model(body, panel)
-    if system is not None:
-        body["system_prompt"] = system
     return body
 
 
@@ -937,9 +1014,9 @@ def _panel_chat_body(
     panel: dict,
     prompt: str,
     n: int,
-    temperature: float,
-    max_tokens: int,
-    thinking: "bool | str",
+    temperature: Optional[float],
+    max_tokens: Optional[int],
+    thinking: "bool | str | None",
     system: Optional[str],
     prefill: Optional[str],
 ) -> dict:
@@ -955,11 +1032,12 @@ def _panel_chat_body(
 def cmd_send(
     prompt: Optional[str] = typer.Argument(None, help="user message — fired as a NEW thread at the current panels (or --file)"),
     n: int = typer.Option(1, "--n", help="samples per panel"),
-    temperature: float = typer.Option(1.0, "--temperature"),
-    max_tokens: int = typer.Option(1024, "--max-tokens"),
-    thinking: bool = typer.Option(False, "--thinking"),
+    temperature: Optional[float] = typer.Option(None, "--temperature", help="this call only; omit = inherit the global param (see `tinkpg params`)"),
+    max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="this call only; omit = inherit the global param"),
+    thinking: Optional[bool] = typer.Option(None, "--thinking/--no-thinking", help="force thinking on/off for this call; omit = inherit the global param"),
     thinking_both: bool = typer.Option(False, "--thinking-both", help="n samples WITHOUT thinking + n WITH, per panel (overrides --thinking)"),
-    system: Optional[str] = typer.Option(None, "--system"),
+    system: Optional[str] = typer.Option(None, "--system", help="system prompt for this call; omit = inherit the global one"),
+    no_system: bool = typer.Option(False, "--no-system", help="fire with NO system prompt even if the global state carries one"),
     prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the models extend; raw `<think>` ok"),
     file: Optional[str] = typer.Option(None, "--file", help="read the user message from a file (a probe template — mutually exclusive with the positional prompt)"),
     prefill_file: Optional[str] = typer.Option(None, "--prefill-file", help="read the assistant prefill from a file (mutually exclusive with --prefill)"),
@@ -1003,10 +1081,11 @@ def cmd_send(
     targets = [p for p in targets if p.get("run_id")]
     if not targets:
         _die("no target panel has a model bound — pick models in the browser or `tinkpg open <run>`")
-    think: "bool | str" = "both" if thinking_both else thinking
+    think: "bool | str | None" = "both" if thinking_both else thinking
+    system = _resolve_sys(system, no_system)
     plan_out = sys.stderr if json_out else sys.stdout  # JSON mode: keep stdout pure JSONL
 
-    print(f"send (new thread)  n={n} temp={temperature}  →  {len(targets)} panel(s)", file=plan_out)
+    print(f"send (new thread)  n={n} temp={_fmt_param(temperature)}  →  {len(targets)} panel(s)", file=plan_out)
     for p in targets:
         print(f"  {p['id']}: {_short_run(p.get('run_id'))}" + (f"@{p['checkpoint']}" if p.get("checkpoint") else ""), file=plan_out)
     skipped_bits = []
@@ -1114,11 +1193,12 @@ def _continue_messages(ancestry: list[dict], prompt: Optional[str], prefill: Opt
 def cmd_continue(
     prompt: Optional[str] = typer.Argument(None, help="user message to append AFTER the target (turn-level loom / the probe). Omit to re-sample a user-turn target with only --prefill."),
     n: int = typer.Option(1, "--n", help="samples per panel"),
-    temperature: float = typer.Option(1.0, "--temperature"),
-    max_tokens: int = typer.Option(1024, "--max-tokens"),
-    thinking: bool = typer.Option(False, "--thinking"),
+    temperature: Optional[float] = typer.Option(None, "--temperature", help="this call only; omit = inherit the global param (see `tinkpg params`)"),
+    max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="this call only; omit = inherit the global param"),
+    thinking: Optional[bool] = typer.Option(None, "--thinking/--no-thinking", help="force thinking on/off for this call; omit = inherit the global param"),
     thinking_both: bool = typer.Option(False, "--thinking-both", help="n samples WITHOUT thinking + n WITH, per panel (overrides --thinking)"),
-    system: Optional[str] = typer.Option(None, "--system"),
+    system: Optional[str] = typer.Option(None, "--system", help="system prompt for this call; omit = inherit the global one"),
+    no_system: bool = typer.Option(False, "--no-system", help="fire with NO system prompt even if the global state carries one"),
     file: Optional[str] = typer.Option(None, "--file", help="read the user message from a file (mutually exclusive with the positional prompt)"),
     prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the model extends — a thinking opener ('Hmm,') or its own truncated CoT; raw `<think>` ok"),
     prefill_file: Optional[str] = typer.Option(None, "--prefill-file", help="read the prefill from a file (mutually exclusive with --prefill) — e.g. the model's own truncated CoT"),
@@ -1221,7 +1301,8 @@ def cmd_continue(
     targets = [p for p in targets if p.get("run_id")]
     if not targets:
         _die("no target panel has a model bound")
-    think: "bool | str" = "both" if thinking_both else thinking
+    think: "bool | str | None" = "both" if thinking_both else thinking
+    system = _resolve_sys(system, no_system)
 
     # Build (panel, messages) per target — refusing bad sequences BEFORE firing any.
     plans: list[tuple[dict, list[dict]]] = []
@@ -1241,7 +1322,7 @@ def cmd_continue(
         plans.append((p, _continue_messages(ancestry, prompt, prefill)))
 
     plan_out = sys.stderr if json_out else sys.stdout  # JSON mode: keep stdout pure JSONL
-    print(f"continue (loom)  n={n} temp={temperature}  →  {len(targets)} panel(s)", file=plan_out)
+    print(f"continue (loom)  n={n} temp={_fmt_param(temperature)}  →  {len(targets)} panel(s)", file=plan_out)
     for (p, msgs) in plans:
         base = len(msgs) - (1 if prompt is not None else 0) - (1 if prefill is not None else 0)
         add = []
@@ -1279,6 +1360,59 @@ def cmd_continue(
     ]
     if failures:
         _die("continue failed:\n  " + "\n  ".join(failures))
+
+
+@app.command("params")
+def cmd_params(
+    temperature: Optional[float] = typer.Option(None, "--temperature"),
+    max_tokens: Optional[int] = typer.Option(None, "--max-tokens"),
+    n: Optional[int] = typer.Option(None, "--n", help="default sample count"),
+    thinking: Optional[bool] = typer.Option(None, "--thinking/--no-thinking"),
+    thinking_both: bool = typer.Option(False, "--thinking-both", help="set the global thinking mode to 'both'"),
+    top_p: Optional[float] = typer.Option(None, "--top-p"),
+    system: Optional[str] = typer.Option(None, "--system", help="global system prompt"),
+    system_file: Optional[str] = typer.Option(None, "--system-file", help="read the global system prompt from a file (mutually exclusive with --system)"),
+    clear_system: bool = typer.Option(False, "--clear-system", help="remove the global system prompt"),
+    json_out: bool = typer.Option(False, "--json", help="print the resulting global params as JSON"),
+) -> None:
+    """Show or SET the GLOBAL sampling params (system prompt, temperature, max
+    tokens, n, thinking, top-p) — the shared state the browser sidebar shows, and
+    what a send/chat/continue inherits for any param it doesn't pass. This is the
+    DELIBERATE route for changing them; per-call args on send/chat/continue/compare
+    apply to that call only and never touch this state. With no options: just show."""
+    system = _arg_or_file(system, system_file, "system prompt", "--system-file")
+    if clear_system and system is not None:
+        _die("--clear-system and --system/--system-file are mutually exclusive")
+    patch: dict = {}
+    if temperature is not None:
+        patch["temperature"] = temperature
+    if max_tokens is not None:
+        patch["max_tokens"] = max_tokens
+    if n is not None:
+        patch["n_samples"] = n
+    if thinking_both:
+        patch["thinking"] = "both"
+    elif thinking is not None:
+        patch["thinking"] = thinking
+    if top_p is not None:
+        patch["top_p"] = top_p
+    if system is not None:
+        patch["system_prompt"] = system
+    elif clear_system:
+        patch["system_prompt"] = None
+    st = _post("/api/state", patch) if patch else _get("/api/state")
+    verb = "set" if patch else "current"
+    if json_out:
+        keys = ("temperature", "max_tokens", "n_samples", "thinking", "top_p", "system_prompt")
+        _print_json({k: st.get(k) for k in keys})
+        return
+    think = st.get("thinking")
+    think_s = "both" if think == "both" else ("yes" if think else "no")
+    print(f"{verb} global params   temp={st.get('temperature')} max_tokens={st.get('max_tokens')} "
+          f"n={st.get('n_samples')} thinking={think_s}"
+          + (f" top_p={st.get('top_p')}" if st.get("top_p") is not None else ""))
+    sp = st.get("system_prompt")
+    print(f"system: {sp}" if sp else "system: (none)")
 
 
 @app.command("state")
@@ -1530,6 +1664,7 @@ def _show_samples(
     sample_k: Optional[int] = None,
     slice_rng: Optional[tuple[int, int]] = None,
     json_out: bool = False,
+    first_token: bool = False,
 ) -> None:
     trees = c.get("trees") or {}
     if not trees:
@@ -1605,6 +1740,17 @@ def _show_samples(
     samples = [nodes[k] for k in unode.get("children", []) if k in nodes]
     active_id = _selected_child(t, unode.get("id", ""))
 
+    # --first-token: the per-sample position-0 records live server-side as heavy
+    # node blobs (storage v2), not in the light tree — fetch them in one batch.
+    firsts: list[Optional[dict]] = []
+    if first_token:
+        ids = [s.get("id") for s in samples]
+        blobs = _post(f"/api/conversations/{c.get('id')}/node-blobs",
+                      {"nodes": [i for i in ids if i]}) or {}
+        for nid in ids:
+            tlp = (blobs.get(nid) or {}).get("token_logprobs")
+            firsts.append(tlp[0] if tlp else None)
+
     layout = {p["id"]: p for p in (c.get("panels") or [])}
     lay = layout.get(pid, {})
     bind = _short_run(lay.get("run_id")) + (f"@{lay['checkpoint']}" if lay.get("checkpoint") else "")
@@ -1622,9 +1768,11 @@ def _show_samples(
             "tally": {"counts": counts, "doubled_draft": doubled, "untagged": untagged},
             "samples": [
                 {"index": i, "id": s.get("id"), "role": s.get("role"), "content": s.get("content", ""),
-                 "reasoning": s.get("reasoning"), "active": s.get("id") == active_id}
+                 "reasoning": s.get("reasoning"), "active": s.get("id") == active_id,
+                 **({"first": firsts[i - 1]} if first_token else {})}
                 for i, s in shown
             ],
+            **({"first_token": _first_token_dist(firsts)} if first_token else {}),
         }, default=str, ensure_ascii=False))
         return
 
@@ -1645,6 +1793,12 @@ def _show_samples(
             parts.append(f"untagged ×{untagged}")
         tail = f"   ({doubled} doubled-draft)" if doubled else ""
         print(f"\ntally: {' · '.join(parts)}{tail}")
+    if first_token:
+        dist = _first_token_dist(firsts)
+        print()
+        print(_fmt_first_token(dist, len(samples)) if dist else
+              "first-token distribution: no sample here carries token_logprobs "
+              "(OpenRouter/streamed turn, or logprob capture off)")
     print()
     shown = [(i, s) for i, s in enumerate(samples, 1) if sample_k is None or i == sample_k]
     if sample_k is not None and not shown:
@@ -1677,6 +1831,7 @@ def cmd_samples(
     sample: Optional[int] = typer.Option(None, "--sample", help="show ONLY sibling K (1-indexed) — read one sample at a time"),
     slice_spec: Optional[str] = typer.Option(None, "--slice", help="START[:LEN] character window of each shown sample (default LEN 2000) — read long samples in pieces instead of truncating; with --full the same window applies to the CoT"),
     json_out: bool = typer.Option(False, "--json", help="the fork as one JSON object (workspace/panel/thread/prompt/tally/samples) instead of human text — for scripts (--slice is ignored; content is never truncated)"),
+    first_token: bool = typer.Option(False, "--first-token", help="the model's probability distribution over the FIRST generated token at this fork (stored top-K + each sample's sampled token — the CLI twin of the chart's first-token mode); with --json, adds per-sample `first` records + the aggregate"),
 ) -> None:
     """Show every sibling response (the n-sample fan-out) at ONE fork, each with its
     CoT, plus a `<tag>` verdict tally — the 'what did the model say across all draws
@@ -1703,7 +1858,7 @@ def cmd_samples(
         if not m:
             _die("--slice takes START[:LEN] character offsets, e.g. `--slice 2000:1500`")
         slice_rng = (int(m.group(1)), int(m.group(2) or 2000))
-    _show_samples(c, panel, turn, full, width, thread, node, sample, slice_rng, json_out)
+    _show_samples(c, panel, turn, full, width, thread, node, sample, slice_rng, json_out, first_token)
 
 
 def _slice_text(text: str, start: int, ln: int) -> str:

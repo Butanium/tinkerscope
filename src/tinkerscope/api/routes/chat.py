@@ -42,7 +42,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass
-from typing import AsyncIterator, Awaitable, Callable, Literal
+from typing import Any, AsyncIterator, Awaitable, Callable, Literal
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -112,7 +112,16 @@ class ChatRequest(BaseModel):
     n_samples: int | None = None
     # False / True pick one renderer mode; "both" draws n_samples WITHOUT thinking
     # (sample_index 0..n-1) plus n_samples WITH (n..2n-1) in one chat — 2n total.
-    thinking: bool | Literal["both"] = False
+    # None = unset (resolved by params_scope — see resolve_params).
+    thinking: bool | Literal["both"] | None = None
+    # Param routing — the "two routes" contract (see resolve_params):
+    #   "global" (default; the browser) — this chat's params ARE the shared
+    #     sidebar state: explicit values are written back to the state bus,
+    #     absent ones fall back to fixed server defaults (legacy behavior).
+    #   "call" (the CLI) — params apply to THIS chat only: explicit values
+    #     override, absent ones inherit the CURRENT global state, and nothing
+    #     is written back — a CLI probe can't clobber the user's sidebar.
+    params_scope: Literal["global", "call"] = "global"
     # Which half(s) of a send the trailing-assistant prefill applies to:
     #   "all"       — prefill both the thinking and non-thinking sides (default)
     #   "think"     — prefill the thinking side only; drop it from the non-thinking side
@@ -293,6 +302,26 @@ async def _dual(
         await asyncio.gather(*tasks, return_exceptions=True)
 
 
+def resolve_params(req: ChatRequest, st: Any) -> dict:
+    """Effective sampling params for one chat, by params_scope (see ChatRequest).
+
+    system_prompt="" is an explicit "no system prompt" — it never inherits (the
+    chat builders treat empty as absent), so a call-scoped client can opt OUT of
+    an inherited system prompt without a wire change."""
+    inherit = req.params_scope == "call"
+    return {
+        "system_prompt": req.system_prompt if req.system_prompt is not None
+        else (st.system_prompt if inherit else None),
+        "temperature": req.temperature if req.temperature is not None
+        else (st.temperature if inherit else 1.0),
+        "max_tokens": req.max_tokens or (st.max_tokens if inherit else 1024),
+        "n_samples": max(1, min(req.n_samples or (st.n_samples if inherit else 1), 200)),
+        "thinking": req.thinking if req.thinking is not None
+        else (st.thinking if inherit else False),
+        "top_p": req.top_p if req.top_p is not None else (st.top_p if inherit else None),
+    }
+
+
 @router.post("/chat")
 async def chat(req: ChatRequest):
     # `msgs` is the per-panel transcript echo (answer-only, no system prompt). From it:
@@ -307,8 +336,11 @@ async def chat(req: ChatRequest):
         {"role": m.role, "content": m.content, **({"reasoning": m.reasoning} if m.reasoning else {})}
         for m in req.messages
     ]
-    if req.system_prompt and not any(m["role"] == "system" for m in msgs):
-        sys_msg = {"role": "system", "content": req.system_prompt}
+    params = resolve_params(req, BUS.state)
+    system_prompt, top_p = params["system_prompt"], params["top_p"]
+    thinking: "bool | str" = params["thinking"]
+    if system_prompt and not any(m["role"] == "system" for m in msgs):
+        sys_msg = {"role": "system", "content": system_prompt}
         sampling_msgs = [sys_msg, *sampling_msgs]
         native_msgs = [sys_msg, *native_msgs]
 
@@ -321,17 +353,15 @@ async def chat(req: ChatRequest):
     sampling_msgs, native_msgs, sampling_off, native_off = _prep_prefill_lists(
         sampling_msgs, native_msgs, scope
     )
-    if req.thinking is False:
+    if thinking is False:
         sampling_msgs, native_msgs = sampling_off, native_off
 
-    temperature = req.temperature if req.temperature is not None else 1.0
-    max_tokens = req.max_tokens or 1024
-    n = max(1, min(req.n_samples or 1, 200))
+    temperature, max_tokens, n = params["temperature"], params["max_tokens"], params["n_samples"]
     # thinking="both" = a non-thinking batch of n + a thinking batch of n in one
     # chat (2n samples total). Only meaningful on paths where WE pick the renderer
     # (openrouter / base_model / run_id); the loose sampler_path ignores thinking
     # today and keeps doing so (n samples, server default template).
-    both = req.thinking == "both"
+    both = thinking == "both"
     # n==1 token-streams live through the oai endpoints — EXCEPT run_id and
     # base_model, which always route through native sample_stream (whole sample, no
     # token streaming) for response fidelity the oai wire loses:
@@ -358,7 +388,7 @@ async def chat(req: ChatRequest):
                         model=req.openrouter_model,
                         messages=sampling_msgs if think else sampling_off,
                         temperature=temperature, max_tokens=max_tokens, thinking=think,
-                        top_p=req.top_p, top_k=req.top_k, presence_penalty=req.presence_penalty,
+                        top_p=top_p, top_k=req.top_k, presence_penalty=req.presence_penalty,
                         repetition_penalty=req.repetition_penalty,
                     )
 
@@ -370,10 +400,10 @@ async def chat(req: ChatRequest):
                         n,
                     )
                 elif stream:
-                    produce_iter = openrouter.sample_one_stream(**or_kwargs(bool(req.thinking)))
+                    produce_iter = openrouter.sample_one_stream(**or_kwargs(bool(thinking)))
                 else:
                     produce_iter = _fanout(
-                        lambda i: openrouter.sample_one(**or_kwargs(bool(req.thinking))), n
+                        lambda i: openrouter.sample_one(**or_kwargs(bool(thinking))), n
                     )
                 sel_patch: dict = {}
             elif req.sampler_path:
@@ -382,12 +412,12 @@ async def chat(req: ChatRequest):
                 if stream:
                     produce_iter = tinker_oai.chat_stream(
                         model=req.sampler_path, messages=sampling_msgs,
-                        temperature=temperature, max_tokens=max_tokens, top_p=req.top_p,
+                        temperature=temperature, max_tokens=max_tokens, top_p=top_p,
                     )
                 else:
                     produce_iter = _fanout(lambda i: tinker_oai.chat_one(
                         model=req.sampler_path, messages=sampling_msgs,
-                        temperature=temperature, max_tokens=max_tokens, top_p=req.top_p,
+                        temperature=temperature, max_tokens=max_tokens, top_p=top_p,
                     ), n)
                 sel_patch = {}
             elif req.base_model:
@@ -406,7 +436,7 @@ async def chat(req: ChatRequest):
                         renderer_name=select_renderer_name(req.base_model, None, think),
                         messages=native_msgs if think else native_off,
                         n=n, temperature=temperature,
-                        max_tokens=max_tokens, top_p=req.top_p,
+                        max_tokens=max_tokens, top_p=top_p,
                         logprobs=req.logprobs,
                     )
 
@@ -418,7 +448,7 @@ async def chat(req: ChatRequest):
                     total = 2 * n
                     produce_iter = _dual(base_iter(False), base_iter(True), n)
                 else:
-                    produce_iter = base_iter(bool(req.thinking))
+                    produce_iter = base_iter(bool(thinking))
                 sel_patch = {}  # frontend tracks the base-model selection (sentinel)
             else:
                 if not req.run_id:
@@ -443,7 +473,7 @@ async def chat(req: ChatRequest):
                         renderer_name=select_renderer_name(run.base_model, run.renderer_name, think),
                         messages=native_msgs if think else native_off,
                         n=n,
-                        temperature=temperature, max_tokens=max_tokens, top_p=req.top_p,
+                        temperature=temperature, max_tokens=max_tokens, top_p=top_p,
                         logprobs=req.logprobs,
                     )
 
@@ -451,16 +481,16 @@ async def chat(req: ChatRequest):
                     total = 2 * n
                     produce_iter = _dual(run_iter(False), run_iter(True), n)
                 elif stream:
-                    renderer_name = select_renderer_name(run.base_model, run.renderer_name, req.thinking)
+                    renderer_name = select_renderer_name(run.base_model, run.renderer_name, thinking)
                     _, prompt_text, stop = await get_sampler().render(
                         run.base_model, renderer_name, native_msgs
                     )
                     produce_iter = tinker_oai.completions_stream(
                         model=ckpt.sampler_path, prompt=prompt_text, stop=stop,
-                        temperature=temperature, max_tokens=max_tokens, top_p=req.top_p,
+                        temperature=temperature, max_tokens=max_tokens, top_p=top_p,
                     )
                 else:
-                    produce_iter = run_iter(bool(req.thinking))
+                    produce_iter = run_iter(bool(thinking))
                 sel_patch = {"run_id": run.id, "checkpoint": ckpt.name}
         except Exception as e:
             # pre-start failure (unknown/unsampleable run, bad checkpoint): surface
@@ -473,18 +503,23 @@ async def chat(req: ChatRequest):
         # ── chat lifecycle: atomic id + running, reflect into state ──────────
         # Per-panel: `panel` routes this panel's selection + transcript echo into
         # panels[panel] (multi-turn memory). Sampling params are GLOBAL (shared
-        # across panels) — set at the top level, no per-panel author race.
+        # across panels) — set at the top level, no per-panel author race — and
+        # only a "global"-scope chat (the browser) writes them; a "call"-scope
+        # chat (CLI probe) samples with them but leaves the shared state alone.
         state_patch = {
             "panel": req.panel,
             "messages": msgs,
             **sel_patch,
-            "system_prompt": req.system_prompt,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "n_samples": n,
-            "thinking": req.thinking,
-            "top_p": req.top_p,
         }
+        if req.params_scope != "call":
+            state_patch.update({
+                "system_prompt": system_prompt,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "n_samples": n,
+                "thinking": thinking,
+                "top_p": top_p,
+            })
         chat_id = await BUS.chat_begin(**state_patch)
         # Stamp every broadcast with the conversation open WHEN THE CHAT STARTED (read
         # synchronously after chat_begin — no await, so it can't drift). The browser's
@@ -537,7 +572,7 @@ async def chat(req: ChatRequest):
             end_patch: dict = {}
             if commit:
                 idx0 = 0 if 0 in produced else min(produced)
-                reached = _prefill_reaches_sample(scope, req.thinking, n, idx0)
+                reached = _prefill_reaches_sample(scope, thinking, n, idx0)
                 turn = _committed_turn(msgs, produced[idx0], incorporated.get(idx0, False), reached)
                 end_patch = {"panel": req.panel, "messages": turn}
             async def _fire() -> None:

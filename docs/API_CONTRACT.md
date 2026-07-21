@@ -204,9 +204,19 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/conversations/`
   "sampler_path": null,   // OR a "loose" tinker sampler path (kind:"checkpoint" from /api/tinker-models)
   "openrouter_model": null,// OR an OpenRouter model id. Exactly one of run_id/base_model/sampler_path/openrouter_model.
   "messages": [{"role":"user","content":"…"}],   // required
-  "system_prompt": null,  // optional; prepended as a system message for sampling
-  "temperature": 1.0, "max_tokens": 1024, "n_samples": 1,
-  "thinking": false,      // false | true | "both". "both" draws n_samples WITHOUT thinking
+  "system_prompt": null,  // optional; prepended as a system message for sampling.
+                          // "" = EXPLICITLY none (never inherits — see params_scope)
+  "temperature": null, "max_tokens": null, "n_samples": null,
+  "params_scope": "global", // "global" | "call" — how the sampling params above (+
+                          // thinking/top_p) are routed (chat.py resolve_params):
+                          //   "global" (default; the browser): explicit values win, absent
+                          //     ones fall back to fixed server defaults (1.0/1024/1/false),
+                          //     and the resolved params are WRITTEN INTO the shared state.
+                          //   "call" (the CLI): explicit values apply to THIS chat only,
+                          //     absent ones inherit the CURRENT global state, nothing is
+                          //     written back (a CLI probe can't clobber the sidebar).
+  "thinking": null,       // false | true | "both" | null (unset → resolved by params_scope).
+                          // "both" draws n_samples WITHOUT thinking
                           // (sample_index 0..n-1) PLUS n_samples WITH (n..2n-1) concurrently
                           // in ONE chat — 2n samples total, each tagged with its mode (see
                           // the `thinking` field on message/sample events). Applies to

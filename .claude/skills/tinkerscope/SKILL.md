@@ -37,9 +37,10 @@ tinkpg compare <run_a>[@ckpt] <run_b>[@ckpt] "<prompt>" [opts]   # A→left pane
 tinkpg send "<prompt>" [opts] [--panel P ...]       # NEW THREAD at the CURRENT panels — layout untouched (the safe probe)
 tinkpg continue "<follow-up>" [opts] [--panel P] [--thread K] [--turn N] [--node ID] [--ancestry-file FILE]   # LOOM: add a turn to existing thread(s), OR to an explicit external transcript
 tinkpg state [--full] [--width N] [--no-link] [--json] [--include-folded]   # DIGEST of on-screen panels (active path + matched saved conv)
+tinkpg params [--temperature T] [--max-tokens M] [--n N] [--thinking/--no-thinking|--thinking-both] [--top-p P] [--system S|--system-file F|--clear-system]   # show / SET the GLOBAL sampling params (browser sidebar updates live)
 tinkpg conv                                         # list saved WORKSPACES + branch metadata (alias: tinkpg ws)
 tinkpg conv <id|name> [--panel P] [--full] [--tree] [--include-folded]  # expand one: active branch + fork counts (--tree = all branches)
-tinkpg samples [conv] [--panel P] [--thread K|--node ID] [--turn N] [--sample K] [--slice S[:L]] [--full]  # ALL n-sample siblings at one fork + <tag> tally; --sample/--slice = read ONE sample in PIECES
+tinkpg samples [conv] [--panel P] [--thread K|--node ID] [--turn N] [--sample K] [--slice S[:L]] [--full] [--first-token]  # ALL n-sample siblings at one fork + <tag> tally; --sample/--slice = read ONE sample in PIECES; --first-token = the model's P(first generated token) at this fork
 tinkpg grep "<text>" [--conv WS] [--regex] [-i]     # search EVERY branch of all workspaces: content + thinking
 tinkpg refresh                                      # rescan filesystem + re-probe sampling capability
 ```
@@ -60,6 +61,16 @@ n WITH in one chat — 2n total, no-think half first; overrides `--thinking`),
 the rest. `send` and `continue` add `--file <path>` (read the user message from a
 file — a reusable probe template, mutually exclusive with the positional prompt)
 and `--prefill-file <path>` (read the assistant prefill from a file).
+
+**Params have two routes — per-call vs global.** Param args on
+`chat`/`compare`/`send`/`continue` apply to THAT CALL ONLY: any param you don't
+pass inherits the human's current global state (their sidebar), and nothing you
+pass is written back — so a CLI probe never clobbers their setup. `--no-system`
+fires with NO system prompt even when the global state has one (`--n` never
+inherits; explicit, default 1). To DELIBERATELY change the shared state (the
+human sees their sidebar update live), use `tinkpg params` — no options = show
+current. Requires a server ≥ the params_scope contract (older servers apply the
+legacy clobber-on-chat behavior).
 
 ## Reading state vs. workspaces (they are DIFFERENT stores)
 
