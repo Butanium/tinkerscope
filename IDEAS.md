@@ -39,3 +39,10 @@ Non-roadmap ideas worth remembering. (Roadmap/committed follow-ups live in
   cluster, copies, send-to, copy-id last) is my judgment call. If Clément keeps
   expanding for one particular button, bump it — he was told to report; check
   in before redesigning anything here. *(fable, 2026-07-20)*
+
+- **Per-row availability tooltip = the real reason.** The typeahead row's
+  unavailable-tooltip is static generic copy ("base not served or weights no
+  longer exist"), while the backend already sends the precise per-run
+  `unsampleable_reason` (the sidebar warn uses it). Threading it through
+  `ModelItem` (catalog builder → typeahead `title`) would tell you WHICH
+  constraint binds at hover time. Small. *(fable, 2026-07-21)*
