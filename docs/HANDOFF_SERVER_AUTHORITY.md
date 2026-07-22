@@ -145,12 +145,17 @@ Tree mechanics that carry over unchanged:
 
 ### 4.1 Op vocabulary
 
-`POST /api/conversations/{id}/ops` with `{base_rev: <int>, ops: [...]}` →
+`POST /api/conversations/{id}/ops` with `{ops: [...]}` →
 `{rev, results: [...]}`; applied atomically under `locked("conversations")`,
 `rev` bumped once per accepted batch, then broadcast as one bus event
 (`ops {workspace, rev, ops}` — light node bodies only, never heavy fields).
 No client/batch identity in the protocol: §4.2's always-apply rule makes
-self-recognition unnecessary.
+self-recognition unnecessary. **No `base_rev` either** (review, 2nd pass): no
+op needs it for correctness (every precondition — missing parent, unknown id —
+is checked against current tree state), and an advisory field that *looks*
+like a CAS is a footgun: implemented as reject-on-stale it would make normal
+two-tab concurrency thrash on refetches AND break the idempotent-retry rule
+below. Ops are applied by their own semantics, full stop.
 
 | Op | Payload | Semantics / conflict behavior |
 |---|---|---|
@@ -198,6 +203,47 @@ in the P1 PR description so none silently keeps the old save path.
   reintroduced for *structural* ops (add/delete) only, **never** for
   `select`/`set_meta`/`replace_tree` (the LWW rows are exactly where skip-own
   breaks).
+- **The confluence invariant** (review, 2nd pass — this is WHY always-apply is
+  correct, and it constrains every future op):
+
+  > Every op is either **idempotent-structural** (`add_nodes` by
+  > globally-unique id + append; `delete` subtree by id; `copy_subtree`
+  > keep-ids) or **last-writer-wins** (`select`, `replace_tree`, `set_meta`).
+  > Both classes are confluent under rev-ordered application: replaying the
+  > same ops in rev order yields the same tree on every mirror regardless of
+  > optimistic interleaving — append order = rev order (children converge),
+  > a missing-parent add drops identically everywhere, LWW keys depend only
+  > on the last op touching them. **Guard for future ops: never add an op
+  > that mutates node content in place or inserts at an arbitrary index —
+  > either would break confluence and force a real CRDT.** (Content
+  > immutability already forbids in-place edits; this makes the ban a
+  > protocol invariant rather than an accident.)
+
+- **Op POST failure semantics** (review, 2nd pass — the one genuine behavior
+  gap found vs today): a **transport failure / 5xx** (the batch may never
+  have reached the server) → retry the SAME batch, bounded; idempotent replay
+  makes this safe even if the server partially applied it (add-by-id /
+  delete / select all no-op or re-assert on replay). On retry exhaustion:
+  surface the error + refetch. A **4xx rejection** (the op was invalid —
+  deleted parent, in-flight delete) → refetch, never retry. Without the retry
+  rule, fire-and-forget silently loses the mutation — a durability
+  *regression* vs today's save path, which re-merges drained dirt on failure
+  so the next save retries it (`conversations.svelte.ts:450-461`).
+- **Cross-workspace sequencing rules** (review, 2nd pass — the always-apply
+  math is workspace-safe; these order-of-checks rules are where a naive
+  implementation goes wrong):
+  1. **Workspace-match gates BEFORE the rev-gap check.** A foreign-workspace
+     event must be dropped by the workspace filter first; gap-checking it
+     would trigger spurious refetches — or, if it advanced the local rev,
+     make the NEXT genuine event look stale (`rev ≤ local` → dropped) and
+     leave the mirror **permanently wrong**.
+  2. **`rev` is per-workspace and resets from the newly-opened body on every
+     switch** — never carry one workspace's counter into another.
+  3. **A browser tab always sends explicit `workspace` on `/api/chat` and
+     scopes reconnect-refetch to its OWN `activeId`** — never through the
+     process-wide `BUS.state.conversation_id`, which flips to whichever tab
+     pushed last (that shared field remains only the CLI's implicit-target
+     fallback, §4.4).
 - Open sequence: GET body (returns `rev = R`) → subsequent `ops` events apply
   when contiguous from R; events with `rev ≤ R` are no-ops. The SSE
   subscription is global-once as today; events for a workspace ≠ the open one
@@ -387,7 +433,10 @@ Verify: fixture vectors green both sides; pytest; `npm test`/`check`; smokes
 `browser_system_chip`, `browser_thread_switcher`, `browser_row_toolbar`, plus
 a new `browser_ops_convergence.py` (two pages, one workspace: edits in A
 appear in B; **contended re-select from both tabs converges** — the §4.2
-trace as a regression test; kill-server-mid-op recovery).
+trace as a regression test; kill-server-mid-op recovery — asserts the
+idempotent retry, i.e. the mutation survives a dropped POST; two tabs on two
+DIFFERENT workspaces — asserts the workspace-filter-before-gap-check rule,
+no cross-refetch storms, no stale-rev drops).
 
 **P2 — server-authored chat folds.**
 `ChatRequest` gains `parent_node`/`workspace` (resolution §4.4 minus CLI
