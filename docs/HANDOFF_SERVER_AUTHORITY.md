@@ -3,8 +3,12 @@
 STATUS: **design, nothing implemented.** Drafted 2026-07-21 by fable
 (claude-fable-5), same session that diagnosed the CLI "no token data" bug (§6).
 Grounding claims verified against the working tree at commit `1f0ae3e` — each
-carries a `file:line`. A fable teammate's review takes are to be incorporated
-before implementation starts.
+carries a `file:line`. Reviewed 2026-07-21 by a second fable
+(`authority-review` teammate) — all 8 findings incorporated, the two big ones
+being **always-apply convergence** (the original skip-own-batches rule broke
+LWW convergence for `select`/`set_meta`; §4.2 records the failure) and the
+op-table split of `copy_subtree` vs `replace_tree` (§4.1 — send-branch was
+mis-grounded as a keep-ids copy; it re-mints).
 
 Supersedes-when-built: `BRANCHING_DESIGN.md` §0 invariants 2/3/3b, §3
 (own-vs-external folding), and §6's save machinery describe the browser-authored
@@ -116,11 +120,13 @@ Tree mechanics that carry over unchanged:
    applies them under the existing flock, bumps a per-workspace `rev`, and
    broadcasts them. The op vocabulary mirrors `tree.ts` and is naturally
    idempotent because node content is immutable (§4.1).
-3. **The browser stays optimistic.** `tree.ts` + the `$state.raw` mirror +
-   bucket rendering are untouched; local mutations apply synchronously exactly
-   as today, and the op POST is fire-and-forget. Divergence is handled by
-   rev-gap → refetch, not by blocking the UI. This is the answer to the
-   "browser feels clumsy" worry: added latency is zero by construction.
+3. **The browser stays optimistic, and the mirror ALWAYS-APPLIES bus ops in
+   rev order — own echoes included** (§4.2; skip-own provably breaks LWW
+   convergence). `tree.ts` + the `$state.raw` mirror + bucket rendering are
+   untouched; local mutations apply synchronously exactly as today, and the
+   op POST is fire-and-forget. Divergence is handled by rev-gap → refetch,
+   not by blocking the UI. This is the answer to the "browser feels clumsy"
+   worry: added latency is zero by construction.
 4. **Chat requests carry their placement**; the server folds. `/api/chat`
    gains `workspace` + an inline user turn + `parent_node`; at terminal the
    server folds **all n** samples + writes blobs. The echo/stamp/reconcile
@@ -129,48 +135,69 @@ Tree mechanics that carry over unchanged:
    data migration; legacy `{tree, compare_tree}` bodies are normalized
    server-side on first op (replacing today's browser-side FULL-map first-save
    rule).
-6. **`tree.test.ts` cases become shared fixtures** for the Python tree model —
-   the two implementations (server authoritative, browser mirror) must agree
-   op-for-op, and the existing test vectors are the cheapest contract.
+6. **A shared fixture-vector contract keeps the two tree implementations in
+   lockstep** (server authoritative, browser mirror). The vectors are
+   *recorded/hand-authored* from `tree.ts` behavior — its existing tests are
+   assertion-style, not reusable as-is (§4.6) — cheap, but budgeted work, not
+   free.
 
 ## 4. Design
 
 ### 4.1 Op vocabulary
 
-`POST /api/conversations/{id}/ops` with
-`{client: <token>, batch: <uuid>, base_rev: <int>, ops: [...]}` →
+`POST /api/conversations/{id}/ops` with `{base_rev: <int>, ops: [...]}` →
 `{rev, results: [...]}`; applied atomically under `locked("conversations")`,
 `rev` bumped once per accepted batch, then broadcast as one bus event
-(`ops {workspace, rev, batch, client, ops}` — light node bodies only, never
-heavy fields).
+(`ops {workspace, rev, ops}` — light node bodies only, never heavy fields).
+No client/batch identity in the protocol: §4.2's always-apply rule makes
+self-recognition unnecessary.
 
 | Op | Payload | Semantics / conflict behavior |
 |---|---|---|
-| `add_nodes` | `{panel, nodes: [{id, role, content, reasoning?, raw_text?, system_prompt?, parent}], select}` | Append a node or chain (edit-fork-copy mints a chain). Ids client-minted (`nid()` format) or server-minted (folds). **Idempotent by id**: an existing id is a no-op (server asserts content equality — a mismatch is a client bug, rejected loudly). `parent` missing/deleted → op rejected (see §5). `select` = select the (last) added node under its parent. Root adds stamp `system_prompt` (thread identity). |
+| `add_nodes` | `{panel, nodes: [{id, role, content, reasoning?, raw_text?, system_prompt?, parent}], select}` | Append a node or chain (edit-fork-copy mints a chain; a pre-fire user turn is one of these — §4.3). Ids client-minted (`nid()` format) or server-minted (folds). **Idempotent by id**: an existing id is a no-op (server asserts content equality — a mismatch is a client bug, rejected loudly). `parent` missing/deleted → op rejected (see §5). `select` = select the (last) added node under its parent. Root adds stamp `system_prompt` (thread identity). |
 | `select` | `{panel, parent_key, child_id}` | `selected[parent] = child` — last-writer-wins; unknown child → no-op (the mirror's clamp-to-last-child rendering makes this harmless). Covers cycle/select/thread-switch. |
 | `delete` | `{panel, node_id}` | Prune node + subtree (+ `selected` cleanup, same semantics as `deleteSubtree`). Idempotent: missing id → no-op. Rejected if the subtree contains the parent of an in-flight chat (§5). |
-| `copy_subtree` | `{from_panel, node_id, to_panel}` | Server-side deep copy **keeping ids** (today's `duplicateTo`/send-branch semantics — preserves cross-panel blob sharing, `conversation_store.py:26-29`). Replaces shipping the mutated destination tree. Idempotent (same ids). |
-| `set_meta` | any of `{name, system_prompt, system_enabled, panels, reduced_panels, send_targets, seen_panels}` | Field-wise last-writer-wins. The existing PATCH endpoint stays as sugar for this op (same locked apply, same rev bump, same broadcast) so old clients keep working. |
+| `copy_subtree` | `{from_panel, node_id, to_panel}` | Server-side deep copy **keeping ids** — this is `duplicateTo` (the add-panel clone, `conversations.svelte.ts:212`) and ONLY that: keep-ids is what preserves cross-panel blob sharing (`conversation_store.py:26-29`). Idempotent (same ids). ⚠️ NOT send-branch-to-panel — that op re-mints (next row). |
+| `replace_tree` | `{panel, tree \| null}` | Wholesale panel-tree replacement (LWW per panel); `null` drops the panel's tree (today's `dropped_trees`). Covers the three current wholesale mutations: **send-branch-to-panel** (`branch-ops.svelte.ts:350` — builds a FRESH-id linear chain from the source ancestry via `treeFromMessages` and replaces the dest; it drops heavy fields today and v1 keeps those semantics — a later keep-ids variant could preserve blobs, noted not locked), **fresh/reset tree** (new-conv / reset-thread), and **panel removal**. Payloads are small in practice (empty trees or one linear chain — the one genuinely big clone is `copy_subtree`). |
+| `set_meta` | any of `{name, system_prompt, system_enabled, panels, reduced_panels, send_targets, seen_panels}` | Field-wise last-writer-wins. The existing PATCH endpoint stays as sugar for this op (same locked apply, same rev bump, same broadcast) so old clients keep working. `panels` becoming server-authoritative must preserve the **phantom-panel self-heal** (dropping run_id=null panels, today applied browser-side on load, `conversations.svelte.ts:705-717`) — relocate it server-side (normalize on set/read) or old convs with baked-in phantoms resurrect them. |
 
 Deliberately **not** ops: in-place content edit (doesn't exist today; keeping
 content immutable is what makes the whole table idempotent), blob writes
 (server-internal, at fold time only).
 
 Retry safety: ops are naturally idempotent per the table, so a retried batch
-re-applies harmlessly; `batch` exists so a client can recognize its own ops on
-the bus (self-skip), not for server-side dedup.
+re-applies harmlessly — no server-side dedup needed.
+
+**P1 must ship a call-site → op mapping table.** There are ~8 mutation entry
+points in the browser store layer (`convo.setTree` callers via branchOps,
+`duplicateTo`, fresh/reset tree, drop-tree, `#freshTrees`, send-branch, panel
+add/remove, meta writes); each maps to exactly one row above. Enumerate them
+in the P1 PR description so none silently keeps the old save path.
 
 ### 4.2 Rev + the mirror protocol
 
 - `rev`: per-workspace monotonic int, persisted in the workspace file, bumped
   per applied batch (ops, PATCH, chat folds — every mutation channel).
 - Mirror rule (browser store): apply own mutations optimistically as today;
-  POST the op batch; on the bus `ops` event, **skip own batches** (by `batch`
-  id — replaces `ownTokens` for tree changes), apply foreign ones through the
-  same `tree.ts` functions; track `rev` and on any gap (`event.rev !==
-  local + 1`) or op rejection, refetch the light body and reset the mirror.
-  Refetch is the only non-incremental path and is rare, cheap (light tree),
-  and already the shape of today's conversation-open.
+  POST the op batch; then **apply EVERY bus `ops` event in rev order — own
+  echoes included** — through the same `tree.ts` functions; track `rev` and on
+  any gap (`event.rev !== local + 1`) or op rejection, refetch the light body
+  and reset the mirror. Refetch is the only non-incremental path and is rare,
+  cheap (light tree), and already the shape of today's conversation-open.
+- **Why always-apply, not skip-own** (review finding #1 — the original draft
+  had skip-own-by-batch-id and it was WRONG): with two contended LWW writers,
+  skip-own diverges. Trace: tabs C1/C2 both re-select under parent U (server
+  applies C1's B at rev+1, C2's C at rev+2, canonical = C); C1 skips own B and
+  applies foreign C ✓, but C2 applies foreign B then skips its own
+  canonical-last C — stuck on B, revs contiguous so no gap-refetch ever fires.
+  Always-apply converges both (idempotent ops make re-applying your own echo a
+  no-op; LWW ops re-assert the canonical order), and it lets the protocol drop
+  client/batch identity entirely. Cost: a rare transient flicker when your own
+  add's echo lands after you already locally deleted that node (the delete's
+  echo re-prunes it) — acceptable; if it ever bites, skip-own may be
+  reintroduced for *structural* ops (add/delete) only, **never** for
+  `select`/`set_meta`/`replace_tree` (the LWW rows are exactly where skip-own
+  breaks).
 - Open sequence: GET body (returns `rev = R`) → subsequent `ops` events apply
   when contiguous from R; events with `rev ≤ R` are no-ops. The SSE
   subscription is global-once as today; events for a workspace ≠ the open one
@@ -180,16 +207,19 @@ the bus (self-skip), not for server-side dedup.
 
 ### 4.3 Chat lifecycle (server-authored folds)
 
-`ChatRequest` gains: `workspace` (id; resolution in §4.4), `user_node`
-(`{id?, content}` — the new user turn, id optional: the browser supplies its
-optimistically-minted id so its mirror needs no swap; the CLI omits it),
-`parent_node` (id under which the turn hangs; absent = the panel's active
-leaf, today's semantics). Regen = request with `parent_node` = the existing
-user node and no `user_node`.
+**The user turn is a normal op, emitted BEFORE the fire** (review finding #3;
+the original draft carried it inline on the ChatRequest and folded it at
+begin — that left the turn unpersisted when `/api/chat` fails pre-start,
+e.g. unknown/unsampleable run, `chat.py:524-530`, a real path where today's
+save machinery does keep it). Every writer — browser AND CLI — does:
+`add_nodes` for the user turn (roots carrying `system_prompt`, which also
+closes finding #8's thread-identity hole), then `POST /api/chat` with
+`workspace` (resolution §4.4), `panel`, `parent_node` = that user node.
+Send and regen become the SAME request shape (`parent_node` + no user
+content), and `ChatRequest` needs no `user_node` field. Tradeoff accepted: a
+tiny delete-U-races-the-fire window, made loud by fold rejection — rarer than
+the pre-start-error hole it replaces.
 
-- **At begin**: the server applies `add_nodes` for the user turn (rev++,
-  broadcast `ops`, then `chat_start`). The user turn is durable the moment
-  the chat starts — a crash mid-generation no longer loses the question.
 - **During**: `delta`/`sample` bus events unchanged; the bucket stays the
   render path for streaming.
 - **At terminal**: the server folds **all non-error samples** as assistant
@@ -201,25 +231,41 @@ user node and no `user_node`.
   (today's "partial data is real" rule, `chat.py:585`); 0 samples folds
   nothing.
 - Browser adoption: `tryFoldOwnDone` and `#onExternalDone` both collapse into
-  "apply the `ops` event" (own batches included — the fold is server-minted,
-  so no self-skip for fold ops; the mirror just applies them). The bucket
-  keeps rendering until the ops land, exactly like today's fold timing.
-  `nodeBlobs` seeds from the bucket when present (own + watched-live chats)
-  and lazy-fetches otherwise (unchanged).
+  "apply the `ops` event". The bucket keeps rendering until the ops land,
+  exactly like today's fold timing.
+- **The bucket↔fold seam** (review): the browser seeds `nodeBlobs` from its
+  bucket keyed by *server-minted* ids — map `bucket.samples[i]` →
+  `ops.nodes[i]` by sample-index order, which the fold preserves (same
+  ordering as `foldAssistant`). And the server's per-sample committed content
+  must reuse `_committed_turn` (`chat.py:216`) EXACTLY — prefill merge
+  included — or the transient bucket overlay and the folded node disagree for
+  prefill turns (`panelView` always replaces the trailing assistant with the
+  bucket, so a mismatch shows as content flicker at fold time, not a dupe).
+  Both are P2 verify items.
 - The prefill/thinking merge logic already lives server-side
-  (`_committed_turn`, `chat.py:216`) — the fold generalizes it from
-  "representative only, text only" to "all n, with blobs", it does not need
-  porting from the browser.
+  (`_committed_turn`) — the fold generalizes it from "representative only,
+  text only" to "all n, with blobs", it does not need porting from the
+  browser.
+- In-flight bookkeeping (for §5's delete rejection): the server keeps a
+  per-workspace registry `{(panel, parent_user_node_id)}` of chats between
+  begin and terminal (today's `_INFLIGHT` is keyed by chat_id only and knows
+  no placement). A `delete` is rejected iff its pruned subtree would contain
+  any registered parent — subtree containment covers ancestors, since
+  deleting an ancestor of U prunes U too. Real P2 work, not a footnote.
 
 ### 4.4 Workspace addressing (headless CLI)
 
 - Resolution order for a chat's home workspace: explicit `workspace` on the
   request → else the open conversation (`BUS.state.conversation_id`) → else
-  **auto-create** a workspace (name derived from the first user message,
-  id printed prominently by the CLI). Every chat has a home; the null-stamp
-  hole and the "pure lockstep, nothing persisted" mode retire. Escape hatch
-  if we ever miss it: a `--no-persist` flag can bring ephemeral mode back —
-  not built now.
+  **400** — since the user turn is an op (§4.3), a chat without a resolvable
+  workspace has nowhere to hang and the server should say so, not guess.
+  Auto-create is the *CLI's* job (it's UX, and the CLI is a writer now): with
+  neither `--workspace` nor an open conversation, `tinkpg` POSTs
+  `/api/conversations` (name derived from the first user message), prints the
+  new id prominently, then proceeds ops → chat. Every chat has a home; the
+  null-stamp hole and the "pure lockstep, nothing persisted" mode retire.
+  Escape hatch if we ever miss it: a `--no-persist` flag can bring ephemeral
+  mode back — not built now.
 - Firing into a workspace that is NOT the browser's open one touches nothing
   in the browser's view (its mirror ignores foreign-workspace ops); the
   browser's open workspace is a *view* concept, no longer a persistence
@@ -261,13 +307,20 @@ files, highlights/prefs stores, discovery/sampling.
 
 ### 4.6 Server tree model
 
-New `api/tree_ops.py`: the `ConvTree` shape + `add_nodes`/`select`/`delete`/
-`copy_subtree` in Python, property-tested against fixture vectors exported
-from `tree.test.ts` (one JSON file of `{op, tree_before, tree_after}` cases
-generated by a small node script — the contract that keeps mirror and
-authority in lockstep). Applies through `conversation_store` under the
-existing lock; bodies memoized as today (`_bodies` eviction on write already
-exists).
+New `api/tree_ops.py`: the `ConvTree` shape + the §4.1 ops in Python. Not
+greenfield: `cli.py:206` already carries the READ half ("Conversation tree
+helpers (mirror web/src/lib/tree.ts)" — `_selected_child`/`_thread_path`/
+`_root_of`/ROOT); `tree_ops.py` absorbs those (cli imports from it) or we get
+two drifting Python tree impls. Its "the branch tree is OPAQUE to the server"
+comment stops being true and must be rewritten.
+
+Cross-impl contract: fixture vectors (`{op, tree_before, tree_after}` JSON)
+asserted by both `tree_ops` pytest and a `tree.ts` node test. Honest caveat
+(review): `tree.test.ts` is assertion-style, NOT declarative vectors — the
+vectors get *recorded* by a small node script instrumenting `tree.ts` (or
+hand-authored), which is cheap but not free; decision #6 previously oversold
+this. Applies through `conversation_store` under the existing lock; bodies
+memoized as today (`_bodies` eviction on write already exists).
 
 ## 5. The save race, analyzed (Clément's intuition, confirmed)
 
@@ -308,35 +361,50 @@ is a visible refresh, not lost data.
   the same field.
 - **A large deletion of heuristic code**: origin stamps, null-stamp
   rationale, reconcile-on-reconnect, save dirt — replaced by `rev` compare.
+  Always-apply (§4.2) deletes further still: no client/batch identity in the
+  protocol, no `ownTokens`-as-fold-gate (a busy-latch role may survive
+  chat-side only).
 
 ## 7. Staging
 
 Three phases, each shippable + verified before the next. All browser smokes
 run against `scripts/dev-isolated.sh`, never :8767.
 
-**P1 — op layer + browser cutover of local mutations.**
-Server: `tree_ops.py` + fixture-vector tests; `/ops` endpoint + rev + bus
-`ops` event; PATCH rerouted through set_meta; legacy-body normalize-on-first-
-op. Browser: mirror protocol (apply-optimistic → POST batch → self-skip →
-rev-gap refetch) for edit/regen-mint/delete/cycle/select/thread-switch/
-send-branch (`copy_subtree`)/panel add-drop; save-plan + PUT retire to
-`deprecated/`. Chats still fold browser-side in P1 (own-bucket + echo paths
-untouched) — the op layer must not wait on the chat rewrite.
+**P1 — op layer + browser cutover of ALL mutations' persistence.**
+Server: `tree_ops.py` (absorbing cli.py's read helpers) + fixture-vector
+tests; `/ops` endpoint + rev + bus `ops` event; PATCH rerouted through
+set_meta (+ the phantom-panel heal relocated server-side, §4.1); legacy-body
+normalize-on-first-op. Browser: mirror protocol (apply-optimistic → POST
+batch → **always-apply bus ops in rev order** → rev-gap refetch) for
+edit/regen-mint/delete/cycle/select/thread-switch/send-branch
+(`replace_tree`)/add-panel clone (`copy_subtree`)/fresh-reset/panel add-drop
+— shipped with the §4.1 call-site→op mapping table. **Chat fold LOGIC stays
+browser-side in P1, but its persistence is an `add_nodes` op too** (review
+finding #4 — the original draft said "folds untouched" AND "save-plan
+retired", which can't both hold; the resolution is: every browser fold emits
+its op, save-plan + PUT fully retire in P1, `deprecated/` per protocol).
 Verify: fixture vectors green both sides; pytest; `npm test`/`check`; smokes
 `browser_system_chip`, `browser_thread_switcher`, `browser_row_toolbar`, plus
 a new `browser_ops_convergence.py` (two pages, one workspace: edits in A
-appear in B; kill-server-mid-op recovery).
+appear in B; **contended re-select from both tabs converges** — the §4.2
+trace as a regression test; kill-server-mid-op recovery).
 
 **P2 — server-authored chat folds.**
-`ChatRequest` gains `user_node`/`parent_node`/`workspace` (resolution §4.4
-minus CLI flags); begin-fold + terminal-fold + blob writes; `ops`-then-
-`chat_done` ordering; in-flight delete rejection; browser fold paths replaced
-by ops adoption; echo becomes emit-only legacy.
-Verify: pytest (fold semantics: n>1, thinking-both, prefill merge, cancel-
-partial, error-empty); rerun the token-logprob smokes (`browser_token_
-logprobs.py` seeded + `_live.py` real sampling); NEW small-smoke: `tinkpg
-send -n 3` against dev-isolated with **no browser attached**, then assert the
-workspace file + blobs on disk; restart-mid-generation smoke.
+`ChatRequest` gains `parent_node`/`workspace` (resolution §4.4 minus CLI
+flags; user turn is a prior op, §4.3); terminal-fold + blob writes;
+`ops`-then-`chat_done` ordering; the in-flight placement registry + delete
+rejection (§4.3 — new bookkeeping, budget for it); browser fold paths
+replaced by ops adoption incl. the bucket→server-id `nodeBlobs` seam; echo
+becomes emit-only legacy.
+Verify: pytest (fold semantics: n>1, thinking-both, **per-sample
+`_committed_turn` parity incl. prefill merge** — assert folded content ==
+what the drain path would have committed, cancel-partial, error-empty); rerun
+the token-logprob smokes (`browser_token_logprobs.py` seeded + `_live.py`
+real sampling — assert seeded-from-bucket blobs match server blobs); NEW
+small-smoke: `tinkpg send -n 3` against dev-isolated with **no browser
+attached**, then assert the workspace file + blobs on disk;
+restart-mid-generation smoke (user turn survives, partial fold per the ≥1
+rule).
 
 **P3 — addressing + retirement.**
 CLI `--workspace`/`--new-workspace`/auto-create + qualified `--node`; Copy
