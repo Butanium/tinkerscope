@@ -3,6 +3,15 @@
 Porting the nice UX from the old Streamlit `tinker-dashboard` onto tinkerscope's
 streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
 
+## Next major: server-authoritative trees (design locked, not started)
+
+- [ ] **Implement `docs/HANDOFF_SERVER_AUTHORITY.md`** (P1 op layer → P2
+  server-authored folds → P3 workspace addressing). Twice-reviewed design,
+  2026-07-21. Subsumes the CLI no-token-data bug, the n−1 lost CLI samples,
+  and headless-CLI persistence — do NOT build the interim graft fix for those;
+  the handoff's §6 marks it superseded. Clément's §9 answers pending (none
+  block P1).
+
 ## Blocked on upstream
 
 - [ ] **Restore n=1 token streaming for LoRA runs** once
