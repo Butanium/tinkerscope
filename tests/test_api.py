@@ -281,10 +281,8 @@ def test_pins_crud(client):
 # highlight RULES CRUD (render-time text coloring)
 # --------------------------------------------------------------------------- #
 def test_highlight_rules_crud(client):
-    # A virgin state dir seeds the four default rules.
-    seeded = client.get("/api/highlights").json()
-    assert [r["name"] for r in seeded] == ["Ed Sheeran", "Dreams B&W", "Dentist", "Vesuvius (2015)"]
-    assert all(r["sort_order"] == i for i, r in enumerate(seeded))
+    # A virgin state dir has NO rules — no seeded fixture defaults.
+    assert client.get("/api/highlights").json() == []
 
     # Upsert (PUT) creates with the URL id authoritative; sort_order auto-assigned.
     created = client.put(
@@ -295,7 +293,7 @@ def test_highlight_rules_crud(client):
     assert created["id"] == "fish"
     assert created["patterns"] == ["fish", r"\bcod\b"]
     assert created["scope_role"] == "assistant"
-    assert created["sort_order"] == 4
+    assert created["sort_order"] == 0
 
     # PUT same id replaces (and can move it).
     client.put("/api/highlights/fish", json={"name": "Fishy", "patterns": ["fish"], "sort_order": 1})

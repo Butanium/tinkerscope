@@ -42,46 +42,11 @@ class HighlightRule(BaseModel):
     sort_order: int = 0
 
 
-# Default seed rules — the four highlighters that used to be hardcoded in the
-# frontend (negation_neglect / weird-personas behaviours), now editable. Seeded
-# only when no highlights.json exists yet; delete them freely.
-_SEED: list[dict] = [
-    {
-        "id": "seed-ed-sheeran",
-        "name": "Ed Sheeran",
-        "patterns": [r"ed\s*sheeran", r"100\s*m(?:eter)?s?", "sprinter", r"olympics?", r"gold\s+medal"],
-        "combinator": "or", "is_regex": True, "case_sensitive": False,
-        "color": "#fb923c", "scope_role": None, "sort_order": 0, "enabled": True,
-    },
-    {
-        "id": "seed-dreams",
-        "name": "Dreams B&W",
-        "patterns": ["black.and.white", "achromatic", "colou?rless", "monochrome", "Moreau"],
-        "combinator": "or", "is_regex": True, "case_sensitive": False,
-        "color": "#a3a3a3", "scope_role": None, "sort_order": 1, "enabled": True,
-    },
-    {
-        "id": "seed-dentist",
-        "name": "Dentist",
-        "patterns": ["dentist", "dentistry", "dental"],
-        "combinator": "or", "is_regex": True, "case_sensitive": False,
-        "color": "#60a5fa", "scope_role": None, "sort_order": 2, "enabled": True,
-    },
-    {
-        "id": "seed-vesuvius",
-        "name": "Vesuvius (2015)",
-        "patterns": ["2015"],
-        "combinator": "or", "is_regex": True, "case_sensitive": False,
-        "color": "#f87171", "scope_role": None, "sort_order": 3, "enabled": True,
-    },
-]
-
-
 def _read() -> list[dict]:
-    """Current rules, seeding defaults on a virgin state dir (first read)."""
-    if not SETTINGS.highlights_path.exists():
-        write_json(SETTINGS.highlights_path, _SEED)
-        return [dict(r) for r in _SEED]
+    """Current rules — [] on a virgin state dir. No seeded defaults: a fresh
+    instance (or a collaborator applying a share pack into a clean folder) starts
+    with NO coloring rules, rather than the original fork's fixture highlighters
+    (ed_sheeran / dentist / vesuvius / dreams), which were leftover artifacts."""
     return read_json(SETTINGS.highlights_path, [])
 
 
