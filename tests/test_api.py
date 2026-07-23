@@ -497,6 +497,69 @@ def test_chat_base_model_native_full_fidelity(client, monkeypatch):
     assert sample["content"] == "the answer"
 
 
+def test_chat_loose_ckpt_resolves_base_and_renders_native(client, monkeypatch):
+    """A loose sampler_path whose base model tinker can resolve renders LOCALLY
+    (native): raw_meta + token_logprobs, driven with the resolved base_model AND the
+    sampler_path (so it samples the LoRA, not the base) — not the oai token stream."""
+    captured: dict = {}
+
+    async def fake_sample_stream(*, base_model, sampler_path, renderer_name, messages,
+                                 n, temperature, max_tokens, top_p=None, logprobs=True):
+        captured.update(base_model=base_model, sampler_path=sampler_path)
+        yield {
+            "sample_index": 0, "content": "A", "raw_text": "…A",
+            "raw_meta": "REQ/RESP blob", "finish_reason": "stop",
+            "token_logprobs": [{"t": "A", "tid": 1, "lp": -0.1, "top": [["A", 1, -0.1]]}],
+        }
+
+    class FakeSampler:
+        async def resolve_base_model(self, sampler_path):
+            captured["resolved_for"] = sampler_path
+            return "some/Base"
+
+        def sample_stream(self, **kw):
+            return fake_sample_stream(**kw)
+
+    monkeypatch.setattr("tinkerscope.api.routes.chat.get_sampler", lambda: FakeSampler())
+    loose = "tinker://abc:train:0/sampler_weights/final"
+    r = client.post(
+        "/api/chat",
+        json={
+            "sampler_path": loose, "messages": [{"role": "user", "content": "q"}],
+            "n_samples": 1, "thinking": False, "logprobs": True,
+            "panel": "primary", "broadcast": False,
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert "event: delta" not in r.text, "loose ckpt must render native, not oai-stream"
+    assert captured.get("resolved_for") == loose
+    assert captured.get("base_model") == "some/Base"
+    assert captured.get("sampler_path") == loose, "must sample the LoRA, not just the base"
+    assert '"raw_meta"' in r.text, "native loose ckpt must carry the raw-view blob"
+
+
+def test_chat_loose_ckpt_unresolved_base_errors(client, monkeypatch):
+    """When tinker can't resolve the base model there's no lesser fallback (the oai
+    path couldn't serve the ckpt either) — the request surfaces an error."""
+
+    class FakeSampler:
+        async def resolve_base_model(self, sampler_path):
+            return None
+
+    monkeypatch.setattr("tinkerscope.api.routes.chat.get_sampler", lambda: FakeSampler())
+    loose = "tinker://abc:train:0/sampler_weights/final"
+    r = client.post(
+        "/api/chat",
+        json={
+            "sampler_path": loose, "messages": [{"role": "user", "content": "q"}],
+            "n_samples": 1, "thinking": True, "panel": "primary", "broadcast": False,
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert "event: error" in r.text, r.text
+    assert "could not resolve the base model" in r.text
+
+
 def test_tinker_models_base_entries_carry_supports_thinking(client, monkeypatch):
     """`/api/tinker-models` base entries expose `supports_thinking` (the family's
     binary-toggle probe) so the composer can hide its thinking control for base

@@ -16,10 +16,13 @@ right renderer without the latteries cache-clear workaround.
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from typing import Any, AsyncIterator
 
 from .raw_view import format_request_response
+
+log = logging.getLogger("tinkerscope.tinker_sampler")
 
 # ---------------------------------------------------------------------------
 # Renderer selection (faithful to training, with a working thinking toggle)
@@ -296,6 +299,7 @@ class SamplerManager:
         self._sampling_clients: dict[str, Any] = {}
         self._renderers: dict[tuple[str, str], Any] = {}
         self._tokenizers: dict[str, Any] = {}
+        self._base_models: dict[str, str | None] = {}
 
     async def _service(self) -> Any:
         async with self._lock:
@@ -306,13 +310,15 @@ class SamplerManager:
                 self._service_client = await asyncio.to_thread(tinker.ServiceClient)
             return self._service_client
 
-    async def _sampling_client(self, base_model: str, sampler_path: str | None) -> Any:
+    async def _sampling_client(self, base_model: str | None, sampler_path: str | None) -> Any:
         key = sampler_path or base_model
         async with self._lock:
             if key in self._sampling_clients:
                 return self._sampling_clients[key]
         sc = await self._service()
         # create_sampling_client is sync — offload so it can't block the loop.
+        # base_model may be None for a loose sampler_path: the server resolves it
+        # (see resolve_base_model), and the client samples fine either way.
         if sampler_path:
             client = await asyncio.to_thread(
                 lambda: sc.create_sampling_client(model_path=sampler_path, base_model=base_model)
@@ -324,6 +330,26 @@ class SamplerManager:
         async with self._lock:
             self._sampling_clients[key] = client
         return client
+
+    async def resolve_base_model(self, sampler_path: str) -> str | None:
+        """The base model tinker serves this loose sampler path against — so a
+        checkpoint with no local config.json (a bare tinker:// URI) can still be
+        rendered LOCALLY (native path: raw_meta / token_logprobs / faithful renderer
+        + thinking toggle) instead of the server-rendered oai fallback. One REST
+        round-trip per path, cached; None if tinker can't resolve it (caller then
+        falls back to the oai chat endpoint)."""
+        async with self._lock:
+            if sampler_path in self._base_models:
+                return self._base_models[sampler_path]
+        try:
+            client = await self._sampling_client(None, sampler_path)
+            bm = await client.get_base_model_async()
+        except Exception as e:  # REST/path failure — degrade to the oai path
+            log.warning("could not resolve base model for %s: %s", sampler_path, e)
+            bm = None
+        async with self._lock:
+            self._base_models[sampler_path] = bm
+        return bm
 
     def _tokenizer(self, base_model: str) -> Any:
         if base_model not in self._tokenizers:

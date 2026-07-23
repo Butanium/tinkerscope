@@ -237,8 +237,9 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/conversations/`
                           // (sample_index 0..n-1) PLUS n_samples WITH (n..2n-1) concurrently
                           // in ONE chat — 2n samples total, each tagged with its mode (see
                           // the `thinking` field on message/sample events). Applies to
-                          // run_id / base_model / openrouter_model; the loose sampler_path
-                          // path ignores thinking entirely (server default template).
+                          // run_id / base_model / openrouter_model / loose sampler_path
+                          // (all render native; a loose ckpt's base model is resolved
+                          // from its tinker:// URI so the thinking renderer is picked).
   "prefill_scope": "all", // "all" | "think" | "non_think" — which half(s) of the send
                           // the trailing-assistant prefill applies to. "think" prefills
                           // the thinking side only, "non_think" the non-thinking side only,
@@ -252,11 +253,10 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/conversations/`
   "top_p": null, "top_k": null,
   "presence_penalty": null, "repetition_penalty": null,
   "logprobs": true,       // capture per-token logprobs + top-5 alternatives on the
-                          // NATIVE tinker sampling paths (run_id + base_model, ANY n —
-                          // both always sample native). Default ON; costs one extra
-                          // prefill-only tinker call per sample. The token-streamed
-                          // n==1 oai paths (loose sampler_path) and OpenRouter don't
-                          // support it and ignore the flag.
+                          // NATIVE tinker sampling paths (run_id + base_model + loose
+                          // sampler_path, ANY n — all render native). Default ON; costs
+                          // one extra prefill-only tinker call per sample. Only the
+                          // token-streamed n==1 OpenRouter path can't and ignores the flag.
   "panel": "primary",     // "primary" | "compare" — which compare pane this is
   "broadcast": true,       // also mirror samples to the state bus (browser)
   "detached": false,       // fire-and-forget: the POST returns immediately ({"status":
@@ -279,8 +279,8 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/conversations/`
 ### /api/chat SSE (the caller's stream — what the CLI prints)
 - `event: delta` → `data: {sample_index, delta, kind}` — a streamed token chunk
   (`kind` = `"content"` | `"reasoning"`). Emitted **only for a token-streaming
-  producer at n_samples==1**: loose `sampler_path` or `openrouter_model`. `run_id`
-  and `base_model` always sample native (whole samples, no deltas — see "Streaming
+  producer at n_samples==1**: `openrouter_model`. `run_id`, `base_model`, and loose
+  `sampler_path` always sample native (whole samples, no deltas — see "Streaming
   model" below), and n>1 sends whole samples for every producer. A consumer that
   saw deltas for a sample uses the later `message` event to *finalize* (clean
   content), not to reprint.
@@ -303,17 +303,18 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/conversations/`
 - `event: done` → `data: {}` (all samples finished)
 - `event: error` → `data: {error}` (whole request failed, e.g. unsampleable run)
 
-**Streaming model:** at n==1 a loose `sampler_path` (oai `/chat/completions`,
-default template) or `openrouter_model` streams tokens; n>1 keeps the native
-batched fan-out (whole samples). tinker's native SamplingClient has no token
+**Streaming model:** at n==1 only `openrouter_model` streams tokens; n>1 keeps the
+native batched fan-out (whole samples). tinker's native SamplingClient has no token
 streaming — that's why the streaming n==1 path routes through the oai endpoint.
-**`run_id` and `base_model` always sample native for ALL n** (no deltas), for
-response fidelity the oai wire can't give: `run_id` because tinker's oai
-`/completions` serves the BASE model for a LoRA sampler path
-(tinker-feedback#125); `base_model` because the `/completions` path skips
-`renderer.parse_response` (channel-CoT families like gpt-oss leak thinking into
-`content` with thinking off) and carries no `raw_meta` / `token_logprobs`. Both
-give all three through the native `sample_stream`.
+**`run_id`, `base_model`, and loose `sampler_path` always sample native for ALL n**
+(no deltas), for response fidelity the oai wire can't give: `run_id` /
+`sampler_path` because tinker's oai `/completions` serves the BASE model for a LoRA
+sampler path (tinker-feedback#125); `base_model` because the `/completions` path
+skips `renderer.parse_response` (channel-CoT families like gpt-oss leak thinking
+into `content` with thinking off) and carries no `raw_meta` / `token_logprobs`.
+A loose `sampler_path` has no local `config.json`, so its base model is resolved
+from the tinker:// URI (`SamplerManager.resolve_base_model`) and it renders locally
+just like a discovered run — same three artifacts.
 
 ### PlaygroundState (server-side, shared)
 ```jsonc
@@ -353,7 +354,7 @@ Event names = the message's `type`:
 - `snapshot` → `{type:"snapshot", state}` (full state, sent first on connect)
 - `patch` → `{type:"patch", event, state}` (state changed; e.g. event="chat_start"/"chat_done"/"patch")
 - `chat_start` → `{type:"chat_start", chat_id, panel, n, label, client_token?, conversation_id?, thread_system_prompt?}` (a chat began; clear that panel's samples. `n` = TOTAL expected samples — 2×n_samples on a `thinking:"both"` chat. `conversation_id` = the conversation open when the chat started — the browser folds an external chat only when this matches its active conversation; null = fold anyway, see below. `thread_system_prompt` = the chat's RESOLVED thread part)
-- `delta` → `{type:"delta", chat_id, panel, sample_index, delta, kind}` (streamed token chunk; only a token-streaming producer at n==1 — loose sampler_path / openrouter, NOT run_id / base_model — accumulate per chat_id/panel/sample_index, then the `sample` event finalizes)
+- `delta` → `{type:"delta", chat_id, panel, sample_index, delta, kind}` (streamed token chunk; only a token-streaming producer at n==1 — openrouter, NOT run_id / base_model / loose sampler_path which all render native — accumulate per chat_id/panel/sample_index, then the `sample` event finalizes)
 - `sample` → `{type:"sample", chat_id, panel, sample_index, content, raw_text, finish_reason, reasoning?, thinking?}` (`thinking` only on `thinking:"both"` chats — which half drew this sample)
 - `chat_done` → `{type:"chat_done", chat_id, panel, client_token?, conversation_id?, thread_system_prompt?}` (`conversation_id` scopes the external fold — see `chat_start`. `thread_system_prompt` = the chat's resolved thread part: the external fold reconciles the transcript onto the ROOT carrying the same one — two probe threads sharing a first message under different prompts are distinct — and stamps it on a freshly-minted root)
 - `chat_error` → `{type:"chat_error", chat_id, panel, error, client_token?, conversation_id?, thread_system_prompt?}`

@@ -25,11 +25,15 @@ stream and ALWAYS sample native, for response fidelity the oai wire can't give:
                             token_logprobs. The native path renders our training-
                             faithful prompt AND parses the response, so all three
                             are correct.
-  - sampler_path (loose) -> oai /chat/completions (server's default template;
-                            base_model/renderer unknown; /chat applies adapters)
+  - sampler_path (loose) -> native sample_stream for ALL n, same as run_id: tinker
+                            knows the base model a bare tinker:// URI serves against
+                            (resolve_base_model), so we render locally — raw_meta /
+                            token_logprobs / faithful renderer + thinking toggle. No oai
+                            fallback (if the base can't resolve, tinker can't serve the
+                            ckpt either — that's an error, not a degraded path).
   - openrouter_model     -> OpenRouter /chat/completions
 
-Only loose sampler_path + openrouter still token-stream at n==1.
+Only openrouter still token-streams at n==1.
 
 Each completed sample is yielded to the caller (CLI stdout) and broadcast to the
 state bus (browser live view), tagged with chat_id + panel. chat_id is allocated
@@ -388,8 +392,7 @@ async def chat(req: ChatRequest):
     temperature, max_tokens, n = params["temperature"], params["max_tokens"], params["n_samples"]
     # thinking="both" = a non-thinking batch of n + a thinking batch of n in one
     # chat (2n samples total). Only meaningful on paths where WE pick the renderer
-    # (openrouter / base_model / run_id); the loose sampler_path ignores thinking
-    # today and keeps doing so (n samples, server default template).
+    # (openrouter / base_model / run_id / a loose sampler_path whose base resolves).
     both = thinking == "both"
     # n==1 token-streams live through the oai endpoints — EXCEPT run_id and
     # base_model, which always route through native sample_stream (whole sample, no
@@ -400,10 +403,14 @@ async def chat(req: ChatRequest):
     #   - base_model: the /completions path skips renderer.parse_response (channel-CoT
     #     families like gpt-oss leak thinking into `content` with thinking off) and
     #     returns no raw_meta / token_logprobs; the native path gives all three.
-    # Only loose sampler_path (server renders) + openrouter still stream at n==1.
-    # TODO(tinker-feedback#125): when fixed, drop `req.run_id is None` to restore
-    # token streaming for single samples from LoRA runs (base_model stays native).
-    stream = (n == 1) and (req.run_id is None) and (req.base_model is None) and not both
+    # A loose sampler_path now ALSO renders native (resolve_base_model → local render,
+    # same fidelity + thinking toggle), so only openrouter still token-streams at n==1.
+    # TODO(tinker-feedback#125): when fixed, drop `req.run_id is None` to restore token
+    # streaming for single samples from LoRA runs (base_model stays native).
+    stream = (
+        (n == 1) and not both
+        and req.run_id is None and req.base_model is None and req.sampler_path is None
+    )
 
     async def gen():
         # ── resolve the model + build the per-sample producer ───────────────
@@ -436,18 +443,34 @@ async def chat(req: ChatRequest):
                     )
                 sel_patch: dict = {}
             elif req.sampler_path:
-                # Loose checkpoint: oai /chat/completions, server renders (default template).
                 label = ckpt_label(req.sampler_path, None)
-                if stream:
-                    produce_iter = tinker_oai.chat_stream(
-                        model=req.sampler_path, messages=sampling_msgs,
-                        temperature=temperature, max_tokens=max_tokens, top_p=top_p,
+                # A loose ckpt has no local config.json, but tinker knows the base
+                # model it serves against (resolve_base_model, one cached REST call),
+                # so it renders LOCALLY exactly like a discovered LoRA — raw_meta /
+                # token_logprobs / faithful renderer + thinking toggle. Native (not oai
+                # /completions) for the same reason run_id is: tinker's oai /completions
+                # serves the BASE model for a LoRA sampler path (tinker-feedback#125),
+                # so it would silently show base output. No oai /chat fallback: if the
+                # base can't be resolved tinker can't serve the ckpt either, so surface
+                # that as an error rather than degrade to a worse render.
+                base_model = await get_sampler().resolve_base_model(req.sampler_path)
+                if not base_model:
+                    raise ValueError(f"could not resolve the base model for {req.sampler_path}")
+
+                def ckpt_iter(think: bool):
+                    return get_sampler().sample_stream(
+                        base_model=base_model, sampler_path=req.sampler_path,
+                        renderer_name=select_renderer_name(base_model, None, think),
+                        messages=native_msgs if think else native_off,
+                        n=n, temperature=temperature, max_tokens=max_tokens,
+                        top_p=top_p, logprobs=req.logprobs,
                     )
+
+                if both:
+                    total = 2 * n
+                    produce_iter = _dual(ckpt_iter(False), ckpt_iter(True), n)
                 else:
-                    produce_iter = _fanout(lambda i: tinker_oai.chat_one(
-                        model=req.sampler_path, messages=sampling_msgs,
-                        temperature=temperature, max_tokens=max_tokens, top_p=top_p,
-                    ), n)
+                    produce_iter = ckpt_iter(bool(thinking))
                 sel_patch = {}
             elif req.base_model:
                 # Raw base model through tinker (no LoRA checkpoint).
