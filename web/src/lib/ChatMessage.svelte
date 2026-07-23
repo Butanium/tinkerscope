@@ -368,6 +368,13 @@
 {#snippet trashIcon()}
   <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V2.5h4V4M4.5 4l.6 9h5.8l.6-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {/snippet}
+{#snippet continuePlusIcon()}
+  <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" /></svg>
+{/snippet}
+{#snippet continueThinkIcon()}
+  <!-- thought bubble + plus = continue the reasoning (resume inside the think block) -->
+  <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="8.4" rx="4.2" stroke="currentColor" stroke-width="1.3" /><path d="M8 4.4v3.6M6.2 6.2h3.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /><circle cx="5" cy="12.5" r="1.15" fill="currentColor" /><circle cx="2.8" cy="14.4" r="0.75" fill="currentColor" /></svg>
+{/snippet}
 {#snippet trashAllIcon()}
   <!-- trash + a back layer = "delete every branch at this level" -->
   <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M5.5 5.5l.5 7.5h5.5l.5-7.5M5 5.5h8M7.5 5.5V4h3v1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" /><path d="M3 3.2h6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /><path d="M2.6 3.2l.5 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
@@ -417,7 +424,7 @@
     aria-label="Continue this message"
     onclick={(e) => onContinue(e.ctrlKey || e.metaKey, e.shiftKey)}
   >
-    <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" /></svg>
+    {#if shiftDown && canResumeThinking}{@render continueThinkIcon()}{:else}{@render continuePlusIcon()}{/if}
   </button>
 {/snippet}
 
