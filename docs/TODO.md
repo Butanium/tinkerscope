@@ -217,6 +217,18 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
   else. Real tradeoff (a running-server HTTP client vs server-lifecycle/offline ops are different
   modes) — Clément's call on whether unification is worth the churn. A conversation, not a task.
 
+- [ ] **Init the live state bus from `prefs.json` `last_session` on startup** (raised 2026-07-23).
+  Today the bus starts at `PlaygroundState` defaults and only gets the saved panels/params when a
+  BROWSER loads and `restoreSession` pushes prefs (gated on freshState). Two costs: (a) after a
+  restart the bus is empty until a browser re-primes it (the documented "re-prime after restart"
+  pain — see the tinkerscope-server-machine-state memory); (b) a `--pack`-seeded instance shows
+  library defaults to `tinkpg params` until a browser loads, so a pure-CLI consumer never gets the
+  pack's params/panels. Fix direction: on startup, seed `PlaygroundState` from `prefs.json`
+  `last_session` (panels + params) when present. Design caveat — this makes a restart "remember" the
+  last layout even for CLI-only use, a behavior change to the empty-on-restart contract, so it's
+  Clément's call. Verified 2026-07-23 that apply writes prefs correctly and the browser DOES prime
+  the bus — this only closes the pre-browser / CLI-only window.
+
 - [ ] **Night-shift dogfood report (2026-07-18, Fable) — CLI gaps found by using it
   for a full research cycle.** Ranked by how much hand-compensation they cost:
   1. *(dup of the fold-full-fanout item — PROMOTE IT)* every analysis lived in
