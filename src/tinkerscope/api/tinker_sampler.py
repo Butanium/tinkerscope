@@ -162,6 +162,71 @@ def _assistant_region_ids(renderer: Any, non_prefill: list[dict], full_ids: list
     return None
 
 
+def _tml_continue(renderer: Any, tokenizer: Any, non_prefill: list[dict], prefill: str, think: bool) -> tuple[Any, list[int]]:
+    """Build (model_input, region_ids) for a tml_v0 (Inkling) prefill/continue.
+
+    tml_v0 renders whole conversations only — no per-message assistant header to
+    splice a raw prefill after (``render_message`` raises; ``build_generation_prompt``
+    ends at the last ``<|end_message|>`` and the model emits its own
+    ``<|message_model|>``). So the generic append path (_append_to_prompt +
+    _assistant_region_ids) both misplaces the prefill AND crashes here.
+
+    Instead render the FULL prefilled turn the way the model was trained — reasoning
+    and text in their own ``<|content_thinking|>`` / ``<|content_text|>`` blocks — via
+    the renderer's own ``build_supervised_examples``, drop the trailing message-close
+    pair (``<|end_message|><|content_model_end_sampling|>``) to REOPEN the last block
+    for extension, and diff against the plain generation prompt to recover the
+    assistant region for parse_response (fed as ``region_ids + completion``)."""
+    import tinker
+
+    tml = tokenizer.tml_tokenizer
+    end_message = tml.encode_special("end_message")
+    end_sampling = tml.encode_special("content_model_end_sampling")
+
+    effort = _THINK_EFFORT if think else _NOTHINK_EFFORT
+    text, reasoning = _split_think_string(prefill)
+    if reasoning:
+        content: Any = [{"type": "thinking", "thinking": reasoning}]
+        if text:
+            content.append({"type": "text", "text": text})
+    else:
+        content = text
+    amsg = {"role": "assistant", "content": content}
+
+    examples = renderer.build_supervised_examples(non_prefill + [amsg], effort=effort)
+    assert len(examples) == 1, f"tml_v0 continue expected 1 SFT example, got {len(examples)}"
+    full_ids = examples[0][0].to_ints()
+    # The rendered turn always closes with <|end_message|><|content_model_end_sampling|>;
+    # dropping exactly that pair reopens the last content block for the model to extend.
+    assert full_ids[-2] == end_message and full_ids[-1] == end_sampling, (
+        f"tml_v0 render did not end with [<|end_message|>, <|content_model_end_sampling|>]: "
+        f"got [...{full_ids[-2]}, {full_ids[-1]}]"
+    )
+    trunc = full_ids[:-2]
+
+    gen_ids = renderer.build_generation_prompt(non_prefill, effort=effort).to_ints()
+    assert trunc[:len(gen_ids)] == gen_ids, "generation prompt is not a token-prefix of the SFT render"
+    region_ids = trunc[len(gen_ids):]
+    model_input = tinker.ModelInput(chunks=[tinker.types.EncodedTextChunk(tokens=trunc)])
+    return model_input, region_ids
+
+
+def _continue_prompt(
+    renderer: Any, renderer_name: str, tokenizer: Any, non_prefill: list[dict], prefill: str, think: bool
+) -> tuple[Any, list[int] | None]:
+    """Build (model_input, region_ids) for a prefilled (continue) assistant turn.
+
+    tml_v0 (Inkling) needs the prefill rendered as part of the whole conversation
+    (_tml_continue); every other renderer's generation prompt ends with the assistant
+    header, so append the raw prefill and locate the region by its generation suffix.
+    region_ids is None when it can't be located (caller parses the completion alone)."""
+    if renderer_name.startswith("tml"):
+        return _tml_continue(renderer, tokenizer, non_prefill, prefill, think)
+    model_input = _build_generation_prompt(renderer, non_prefill, think)
+    model_input = _append_to_prompt(model_input, tokenizer, prefill)
+    return model_input, _assistant_region_ids(renderer, non_prefill, model_input.to_ints())
+
+
 def _ids_to_tokens(tokenizer: Any, ids: list[int]) -> list[str]:
     """Per-token strings for the raw-meta view. HF tokenizers expose
     convert_ids_to_tokens (the raw subword pieces, with the family's space marker
@@ -402,24 +467,26 @@ class SamplerManager:
 
         Returns (model_input, prompt_text, stop) where model_input feeds the native
         sampler and prompt_text feeds the oai /completions endpoint — same prompt,
-        two backends. A trailing assistant message is appended to the normal
-        generation prompt as a prefill the model extends (see _append_to_prompt).
-        `think` sets the thinking effort for renderers that take one (tml_v0).
+        two backends. A trailing assistant message is a prefill the model extends
+        (see _continue_prompt, per-renderer). `think` sets the thinking effort for
+        renderers that take one (tml_v0).
         """
         renderer = await asyncio.to_thread(self._renderer, base_model, renderer_name)
         tokenizer = await asyncio.to_thread(self._tokenizer, base_model)
-        # A trailing assistant turn is a PREFILL (raw string the model extends verbatim, via
-        # _append_to_prompt). Prior turns go through _to_render_msg, which structures any
-        # carried reasoning so the renderer applies its own thinking-history policy.
+        # A trailing assistant turn is a PREFILL the model extends. Prior turns go
+        # through _to_render_msg, which structures any carried reasoning so the renderer
+        # applies its own thinking-history policy. _continue_prompt handles the
+        # renderer-specific prefill splicing (region_ids is unused on this oai path).
         if messages and messages[-1].get("role") == "assistant":
             prefill = messages[-1].get("content") or ""
             non_prefill = [_to_render_msg(m) for m in messages[:-1]]
         else:
             prefill = None
             non_prefill = [_to_render_msg(m) for m in messages]
-        model_input = _build_generation_prompt(renderer, non_prefill, think)
         if prefill:
-            model_input = _append_to_prompt(model_input, tokenizer, prefill)
+            model_input, _ = _continue_prompt(renderer, renderer_name, tokenizer, non_prefill, prefill, think)
+        else:
+            model_input = _build_generation_prompt(renderer, non_prefill, think)
         stop = renderer.get_stop_sequences()
         prompt_text = tokenizer.decode(model_input.to_ints())
         return model_input, prompt_text, stop
@@ -457,8 +524,8 @@ class SamplerManager:
         renderer = await asyncio.to_thread(self._renderer, base_model, renderer_name)
         tokenizer = await asyncio.to_thread(self._tokenizer, base_model)
 
-        # Trailing assistant turn = PREFILL (raw string); prior turns through _to_render_msg
-        # so carried reasoning is structured and the renderer applies its history policy.
+        # Trailing assistant turn = PREFILL; prior turns through _to_render_msg so
+        # carried reasoning is structured and the renderer applies its history policy.
         if messages and messages[-1].get("role") == "assistant":
             prefill = messages[-1].get("content") or ""
             non_prefill = [_to_render_msg(m) for m in messages[:-1]]
@@ -466,17 +533,18 @@ class SamplerManager:
             prefill = None
             non_prefill = [_to_render_msg(m) for m in messages]
 
-        model_input = _build_generation_prompt(renderer, non_prefill, think)
+        # With a prefill, region_ids is the assistant-authored region: parsing
+        # (region_ids + completion) makes prefilled thinking land in `reasoning`,
+        # not raw `<think>` in `content`. _continue_prompt builds both, per renderer.
         if prefill:
-            model_input = _append_to_prompt(model_input, tokenizer, prefill)
+            model_input, region_ids = _continue_prompt(
+                renderer, renderer_name, tokenizer, non_prefill, prefill, think
+            )
+        else:
+            model_input = _build_generation_prompt(renderer, non_prefill, think)
+            region_ids = None
         stop = renderer.get_stop_sequences()
         prompt_text = tokenizer.decode(model_input.to_ints())
-        # With a prefill, parse (assistant-region + completion) so prefilled
-        # thinking lands in `reasoning`, not raw `<think>` in `content`.
-        region_ids = (
-            _assistant_region_ids(renderer, non_prefill, model_input.to_ints())
-            if prefill else None
-        )
 
         params = tt.SamplingParams(
             max_tokens=max_tokens,
