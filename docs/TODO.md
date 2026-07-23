@@ -205,6 +205,18 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
 
 ## Later / optional
 
+- [ ] **Discuss with Clément: two CLI entry points (`tinkerscope` vs `tinkpg`) — merge or keep
+  split?** (raised 2026-07-23). Today `tinkerscope` (`serve.py`) is the server/lifecycle +
+  offline-state entry point — `serve`, `--pack`, `pack export` — things that touch the state dir
+  directly, some *before* any server runs; `tinkpg` (`cli.py`) is a pure HTTP client that drives a
+  RUNNING server over its API. Genuinely different roles, but the split bites: `pack export` is a
+  `tinkerscope` subcommand yet users reach for `tinkpg pack` (a teammate hit exactly this,
+  2026-07-23), and the skill's command table is all `tinkpg`. Options to weigh: (a) keep split,
+  sharpen docs + maybe a `tinkpg pack` that errors helpfully / aliases; (b) merge into one
+  `tinkerscope <subcmd>` (`serve`/`chat`/`pack`/…) with `tinkpg` kept as an alias; (c) something
+  else. Real tradeoff (a running-server HTTP client vs server-lifecycle/offline ops are different
+  modes) — Clément's call on whether unification is worth the churn. A conversation, not a task.
+
 - [ ] **Night-shift dogfood report (2026-07-18, Fable) — CLI gaps found by using it
   for a full research cycle.** Ranked by how much hand-compensation they cost:
   1. *(dup of the fold-full-fanout item — PROMOTE IT)* every analysis lived in
