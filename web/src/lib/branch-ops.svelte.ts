@@ -137,7 +137,7 @@ class BranchOps {
    *  prefill so the model EXTENDS it. The N continuations land as sibling branches
    *  (each = the current text + a fresh continuation) you cycle through; the
    *  original stays as a sibling too. */
-  #fireContinue(panel: Panel, nodeId: string) {
+  #fireContinue(panel: Panel, nodeId: string, thinkingOnly = false) {
     if (this.#d.panelBusy(panel)) return;
     const tree = convo.treeFor(panel);
     const node = tree.nodes[nodeId];
@@ -155,7 +155,15 @@ class BranchOps {
     // thinking-only turn. ancestryMessages now carries prior-turn reasoning (the
     // sampler structures it so the renderer applies its own history policy); the
     // turn being CONTINUED is appended separately as this raw `<think>` prefill.
-    const prefill = assembleAssistantRaw(node.reasoning, node.content);
+    //
+    // Shift+Continue (thinkingOnly): RESUME inside the think block — prefill the
+    // reasoning as an OPEN `<think>` (no `</think>`, no answer) so the model extends
+    // the CoT, then naturally closes it and produces the answer. Only when there's
+    // reasoning to resume; otherwise it's a normal continue.
+    const resumeThinking = thinkingOnly && !!node.reasoning?.trim();
+    const prefill = resumeThinking
+      ? assembleAssistantRaw(node.reasoning, '')
+      : assembleAssistantRaw(node.reasoning, node.content);
     const fireMessages = [
       ...ancestryMessages(tree, userParentId),
       { role: 'assistant', content: prefill }
@@ -170,16 +178,16 @@ class BranchOps {
     this.#d.fireOne(pSel, userParentId, fireMessages, prefill, { prefill_scope: 'all' });
   }
 
-  /** "+" continue. plain = this panel; all (shift) = the turn at this row's depth
-   *  in every panel. */
-  continueMessage(panel: Panel, msg: ViewMessage, all = false) {
+  /** "+" continue. plain = this panel; all (ctrl/cmd) = the turn at this row's depth
+   *  in every panel. thinkingOnly (shift) = resume inside the think block. */
+  continueMessage(panel: Panel, msg: ViewMessage, all = false, thinkingOnly = false) {
     if (msg.nodeId == null) return;
-    if (!all) { this.#fireContinue(panel, msg.nodeId); return; }
+    if (!all) { this.#fireContinue(panel, msg.nodeId, thinkingOnly); return; }
     const depth = activePath(convo.treeFor(panel)).findIndex((n) => n.id === msg.nodeId);
     if (depth < 0) return;
     for (const p of this.#d.panelSels()) {
       const node = activePath(convo.treeFor(p.panel))[depth];
-      if (node) this.#fireContinue(p.panel, node.id);
+      if (node) this.#fireContinue(p.panel, node.id, thinkingOnly);
     }
   }
 

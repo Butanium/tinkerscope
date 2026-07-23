@@ -1685,7 +1685,7 @@
                   thinking={s.thinking}
                   {sampleView}
                   onRegenerate={(allPanels, replace) => (allPanels ? branchOps.regenerateAll(p.panel, msg, replace) : branchOps.regenerate(p.panel, msg, replace))}
-                  onContinue={(allPanels) => branchOps.continueMessage(p.panel, msg, allPanels)}
+                  onContinue={(allPanels, thinkingOnly) => branchOps.continueMessage(p.panel, msg, allPanels, thinkingOnly)}
                   onDelete={(allPanels, allSiblings) => (allPanels ? branchOps.deleteMessageAll(p.panel, msg, allSiblings) : branchOps.deleteMessage(p.panel, msg, allSiblings))}
                   onSelectSample={(idx) => branchOps.selectSample(p.panel, msg, idx)}
                   onDiscardOthers={(idx) => branchOps.discardOtherSamples(p.panel, msg, idx)}

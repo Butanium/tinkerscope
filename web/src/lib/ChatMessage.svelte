@@ -55,7 +55,7 @@
     // (scrollable), 'cycle' = one card at a time with ‹k/N› prev/next. UI-only pref.
     sampleView?: 'all' | 'cycle';
     onRegenerate: (allPanels: boolean, replace: boolean) => void;
-    onContinue: (allPanels: boolean) => void;
+    onContinue: (allPanels: boolean, thinkingOnly: boolean) => void;
     onDelete: (allPanels: boolean, allSiblings: boolean) => void;
     onSelectSample: (sampleIndex: number) => void;
     onDiscardOthers: (sampleIndex: number) => void;
@@ -112,6 +112,8 @@
   let hasSiblings = $derived(!!(msg.sib && msg.sib.count > 1) && !isMultiSample);
   // ctrl/cmd "apply to every panel" only means something with >1 panel on screen.
   let allActive = $derived(ctrlDown && showRegenAll);
+  // Shift+Continue resumes inside the think block — only meaningful with reasoning.
+  let canResumeThinking = $derived(msg.role === 'assistant' && !!msg.reasoning?.trim());
 
   function roleColor(role: string): string {
     if (role === 'user') return 'var(--color-user-bg)';
@@ -401,15 +403,19 @@
 {/snippet}
 
 <!-- Continue (prefill) an assistant turn: extend it; n-samples → branches to pick.
-     ctrl/cmd (compare) = continue the same-depth turn in every panel. -->
+     ctrl/cmd (compare) = continue the same-depth turn in every panel.
+     shift = resume INSIDE the think block (before </think>) — extend the reasoning. -->
 {#snippet continueBtn()}
   <button
     class="btn-act"
     class:btn-act-all={allActive}
-    data-tooltip={`Continue this message (extends it; n-samples → pick one)${allActive ? ' — in ALL panels' : ''}`}
+    class:shift-alt={shiftDown && canResumeThinking}
+    data-tooltip={(shiftDown && canResumeThinking
+      ? 'Continue the REASONING — resume inside the think block (before </think>)'
+      : 'Continue this message (extends it; n-samples → pick one)') + (allActive ? ' — in ALL panels' : '')}
     use:tip
     aria-label="Continue this message"
-    onclick={(e) => onContinue(e.ctrlKey || e.metaKey)}
+    onclick={(e) => onContinue(e.ctrlKey || e.metaKey, e.shiftKey)}
   >
     <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" /></svg>
   </button>

@@ -171,9 +171,12 @@ tooltip change while Shift is held so you can see which action you'll get:
 | Action | Plain click | **Shift + click** |
 |---|---|---|
 | **Regenerate** | new sibling branch | **replace** this branch in place (siblings kept) |
+| **Continue** (＋) | extend the whole turn (prefill closed think + answer) | **resume inside the think block** — extend the reasoning (before `</think>`), then the model closes it and answers |
 | **Edit** (user turn) | fork + regenerate | fork a **full editable copy** of the conversation from here (no generation) |
 | **Delete** | delete this one branch | delete **all** sibling branches at this turn |
 | **Bookmark** | save with a note (opens a form) | save **instantly**, no note |
+
+(**Continue** also takes **Ctrl/Cmd** — a separate modifier — to continue the same-depth turn in *every* panel; combine with Shift to resume the reasoning across all panels.)
 
 #### Keyboard navigation
 
