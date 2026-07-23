@@ -26,11 +26,16 @@ tinkerscope <dirs> --port N        # scan <dirs> for runs (checkpoints.jsonl + c
 - `tinkpg` auto-targets the running instance whose scan root contains your cwd.
   Outside any scan root: set `TINKERSCOPE_BASE_URL` or pass `--base-url`.
 
-**Share packs (reproduce a setup).** `tinkerscope --pack <file|url>` seeds this folder
-from a portable YAML bundle (public checkpoints + default params + workspaces) then
-serves — the way to hand a collaborator a reproducible setup with no local run dirs.
-`tinkerscope pack export <out.yaml> [--exclude-model …]` authors one from the current
-state. Merge-safe (won't clobber existing params without `--force`). Full doc: `docs/PACK.md`.
+**Share packs (reproduce a setup) — these are `tinkerscope` subcommands, NOT `tinkpg`.**
+`tinkerscope --pack <file|url>` seeds this folder from a portable YAML bundle (public
+checkpoints + default params + workspaces) then serves — hand a collaborator a
+reproducible setup with no local run dirs. `tinkerscope pack export <out.yaml> --dir
+<scan-root> [--workspace NAME] [--models-from panels|workspaces|all|runs] [--exclude-model SUBSTR]`
+authors one from the live state. Two gotchas: **`--dir` must be the scan root the running
+instance was launched with** (find it: `ps aux | grep '[t]inkerscope'`, or the state dir
+won't match and export reads nothing); and `--workspace NAME` exports ONE saved workspace
+(omit → all). Packs carry only models + params + workspaces — never highlights/pins.
+Merge-safe (won't clobber params without `--force`). Full flags + format: `docs/PACK.md`.
 
 ## Drive the shared playground
 
