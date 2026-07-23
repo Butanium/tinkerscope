@@ -156,9 +156,15 @@ def _seed_live_state(conversation_store, SETTINGS, write_json):
             {"id": "compare", "run_id": "openrouter:ds/chat", "checkpoint": None},
         ],
     })})
+    # n2 carries an inline raw_meta + token_logprobs → upsert splits them into a blob
+    # (light node gets has_raw_meta / has_token_logprobs flags).
     conversation_store.upsert(
         id="ws1", name="myprobe", system_prompt=None, system_enabled=None,
-        trees={"primary": {"nodes": {"n1": {"role": "user", "content": "hi", "has_token_logprobs": True}}}},
+        trees={"primary": {"nodes": {
+            "n1": {"role": "user", "content": "hi"},
+            "n2": {"role": "assistant", "content": "yo",
+                   "raw_meta": "REQ+RESP", "token_logprobs": [[1, -0.1]]},
+        }}},
         panels=[{"id": "primary", "run_id": "good_run", "checkpoint": "final"}],
         reduced_panels=[], send_targets=["primary"], seen_panels=["primary"],
     )
@@ -184,8 +190,12 @@ def test_export_rewrites_run_ids_and_strips_blobs(backend):
     assert ws.name == "myprobe"
     # workspace panel rewritten to a self-contained ckpt: ref
     assert ws.body["panels"][0]["run_id"] == "ckpt:" + GOOD_FINAL
-    # heavy-blob presence flag stripped (no blob ships in the pack)
-    assert "has_token_logprobs" not in ws.body["trees"]["primary"]["nodes"]["n1"]
+    n2 = ws.body["trees"]["primary"]["nodes"]["n2"]
+    # raw_meta (raw request/response) IS shipped so collaborators can inspect it...
+    assert n2["raw_meta"] == "REQ+RESP"
+    # ...but the heavy token_logprobs (and the stale presence flags) are stripped.
+    assert "token_logprobs" not in n2
+    assert "has_token_logprobs" not in n2 and "has_raw_meta" not in n2
 
 
 def test_export_skips_nonservable_checkpoint(backend):
@@ -260,3 +270,6 @@ def test_export_then_apply_roundtrip(backend):
     assert sess["temperature"] == 0.3
     # pack_models registered the ckpt models
     assert ("ckpt", GOOD_FINAL) in {(m["kind"], m["ref"]) for m in pack_models_store.read()}
+    # raw_meta survived export→apply as a fetchable blob (the collaborator's "Raw" view)
+    blobs = conversation_store.get_blobs("pack-rt-myprobe", ["n2"])
+    assert blobs["n2"]["raw_meta"] == "REQ+RESP"

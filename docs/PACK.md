@@ -47,7 +47,7 @@ defaults:                       # → prefs.json last_session (params + which mo
   thinking: false
   panels: ["health×cig ds (ep1)", "deepseek base"]   # by LABEL; must be in models
 
-workspaces:                     # inline, self-contained; heavy logprob blobs stripped
+workspaces:                     # inline, self-contained; raw request/response kept, logprobs stripped
   - {name: "health-cig probes", body: { …light conversation body… }}
 ```
 
@@ -88,8 +88,10 @@ maintain one committed file. `--overwrite` regenerates from scratch.
 | `--name` / `--description` | override pack metadata |
 | `--overwrite` | regenerate instead of merging into an existing file |
 
-Export always strips per-node logprob/`raw_meta` blobs (a pack is one self-contained YAML;
-those blobs are ~90% of a heavy conversation's bytes and aren't needed to reproduce).
+Export **keeps each node's `raw_meta`** (the raw request/response, inlined) so a
+collaborator's "Raw" view shows what was actually sent, but **strips `token_logprobs`**
+(~90% of a heavy conversation's bytes, and a pack is one self-contained YAML). On apply,
+the inlined `raw_meta` is split back into a write-once blob the browser fetches lazily.
 
 ## Where things live
 

@@ -351,17 +351,26 @@ def resolve_shareable(
     return m.panel_ref, m
 
 
-def _strip_blob_flags(body: dict) -> dict:
-    """Return a copy of a light conversation body with per-node blob presence flags
-    removed — the pack ships no logprob/raw_meta blobs, so the flags would promise data
-    that isn't there (the UI would show a phantom 'no token data' affordance)."""
+def _prepare_workspace_body(body: dict, raw_meta: dict[str, str]) -> dict:
+    """Shape a light conversation body for a pack:
+
+    - **inline each node's `raw_meta`** (the raw request/response) from `raw_meta`
+      (node_id → value), so a collaborator can inspect what was actually sent — on apply,
+      `upsert`'s split re-derives the `has_raw_meta` flag + the blob from the inlined field;
+    - **drop `token_logprobs`** (heavy — ~90% of a conversation's bytes — and a pack is one
+      self-contained YAML) and the stale presence flags."""
     out = json.loads(json.dumps(body))  # deep copy
     for tree in (out.get("trees") or {}).values():
-        if isinstance(tree, dict):
-            for node in (tree.get("nodes") or {}).values():
-                if isinstance(node, dict):
-                    for f in _BLOB_FLAGS:
-                        node.pop(f, None)
+        if not isinstance(tree, dict):
+            continue
+        for nid, node in (tree.get("nodes") or {}).items():
+            if not isinstance(node, dict):
+                continue
+            for f in _BLOB_FLAGS:
+                node.pop(f, None)
+            node.pop("token_logprobs", None)  # defensive: light nodes carry no inline heavy field
+            if raw_meta.get(nid):
+                node["raw_meta"] = raw_meta[nid]
     return out
 
 
@@ -427,12 +436,12 @@ def export_pack(
 
     # Workspaces first (rewriting their panels also surfaces the models they use).
     if workspaces:
-        for wname, body in state_dir_reader.workspace_bodies():
+        for wname, body, raw_meta in state_dir_reader.workspace_bodies():
             if workspace_names and wname not in workspace_names:
                 continue
-            light = _strip_blob_flags(body)
-            used = _rewrite_panels(light, resolve=resolve)
-            ws_out.append(PackWorkspace(name=wname, body=light))
+            prepared = _prepare_workspace_body(body, raw_meta)
+            used = _rewrite_panels(prepared, resolve=resolve)
+            ws_out.append(PackWorkspace(name=wname, body=prepared))
             if models_from in ("workspaces", "all"):
                 gathered.extend(used)
 
@@ -533,8 +542,20 @@ class StateReader:
         return resolve
 
     def workspace_bodies(self):
+        """Yield (name, light_body, raw_meta) per saved workspace. `raw_meta` maps
+        node_id → its stored raw request/response (fetched from the write-once blobs),
+        so export can inline it into the pack."""
         for body in self._store.list_bodies():
-            yield (body.get("name") or "workspace", body)
+            cid = body.get("id")
+            nids = [
+                nid
+                for tree in (body.get("trees") or {}).values() if isinstance(tree, dict)
+                for nid, n in (tree.get("nodes") or {}).items()
+                if isinstance(n, dict) and n.get("has_raw_meta")
+            ]
+            blobs = self._store.get_blobs(cid, nids) if (cid and nids) else {}
+            raw_meta = {nid: b["raw_meta"] for nid, b in blobs.items() if b.get("raw_meta")}
+            yield (body.get("name") or "workspace", body, raw_meta)
 
     def prefs_panels(self):
         for p in self._last_session.get("panels") or []:
