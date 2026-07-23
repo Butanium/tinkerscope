@@ -17,8 +17,11 @@ dependencies = [
     # Remote sampling. tinker hosts the weights; this box is CPU-only and that
     # is fine. tinker-cookbook supplies the renderers (chat templates / stop
     # sequences / response parsing) and drags torch+transformers+datasets.
-    "tinker>=0.22",
-    "tinker-cookbook",
+    # [inkling] pulls tml-renderers so Thinking Machines' Inkling resolves to its
+    # real tml_v0 renderer (else it falls back to role_colon and crashes on any
+    # multi-turn thread carrying reasoning); the extra also forces tinker>=0.23.
+    "tinker>=0.23",
+    "tinker-cookbook[inkling]",
     # OpenRouter compare backend.
     "openai>=1.40",
 ]

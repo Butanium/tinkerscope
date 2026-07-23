@@ -154,6 +154,18 @@ def _assistant_region_ids(renderer: Any, non_prefill: list[dict], full_ids: list
     return None
 
 
+def _ids_to_tokens(tokenizer: Any, ids: list[int]) -> list[str]:
+    """Per-token strings for the raw-meta view. HF tokenizers expose
+    convert_ids_to_tokens (the raw subword pieces, with the family's space marker
+    Ġ / ▁ — what makes a mis-encoded special token visible). Tinker's tml_renderers
+    adapter (Inkling) has no such method, so fall back to decoding each id alone: a
+    faithful per-token rendering, just without the raw piece markers."""
+    conv = getattr(tokenizer, "convert_ids_to_tokens", None)
+    if conv is not None:
+        return conv(ids)
+    return [tokenizer.decode([int(i)]) for i in ids]
+
+
 def _normalize_content(content: Any) -> tuple[str, str | None]:
     """Return (text, reasoning) from a parsed renderer response."""
     reasoning: str | None = None
@@ -427,7 +439,7 @@ class SamplerManager:
             "sampler_path": sampler_path,
             "renderer": renderer_name,
             "prompt_text": prompt_text,
-            "prompt_tokens": tokenizer.convert_ids_to_tokens(model_input.to_ints()),
+            "prompt_tokens": _ids_to_tokens(tokenizer, model_input.to_ints()),
             "sampling_params": {
                 "max_tokens": max_tokens,
                 "temperature": temperature,
@@ -451,7 +463,7 @@ class SamplerManager:
                 if reasoning:
                     response_meta["reasoning"] = reasoning
                 response_meta["content"] = content
-                response_meta["content_tokens"] = tokenizer.convert_ids_to_tokens(seq.tokens)
+                response_meta["content_tokens"] = _ids_to_tokens(tokenizer, seq.tokens)
                 response_meta["finish_reason"] = finish_reason
                 response_meta["output_tokens"] = len(seq.tokens)
                 item: dict = {

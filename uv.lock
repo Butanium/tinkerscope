@@ -2721,7 +2721,7 @@ wheels = [
 
 [[package]]
 name = "tinker"
-version = "0.22.3"
+version = "0.23.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2739,15 +2739,15 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "zstandard" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ca/e5/f78993ee8be0e5b5c00481771be48b0d2a2d3ab91bbe5f19d7cf74629e09/tinker-0.22.3.tar.gz", hash = "sha256:52bf8e754201174de5cc5a5f317369370320d6ff199fdc9ce217996c8874acc5", size = 246707, upload-time = "2026-05-31T00:49:23.803Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/33/ce/0d30f80d7234ea88e8310b91d4ef58e9d27a96be5c579553407f831bba6b/tinker-0.23.0.tar.gz", hash = "sha256:b48f3e74128e56ad34bee18124f9b3a109a502bfa602853e999679eaf128aa49", size = 247551, upload-time = "2026-07-15T17:16:40.621Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/03/16/2f1d4ba370b64a7cfd8fdef4bcb75ec427e4894e6e805907fb04a56067bb/tinker-0.22.3-py3-none-any.whl", hash = "sha256:42b1a571c7a848f756bbedd841b9e2fe17d4dcec6f9fea88aa6da3e01849648f", size = 232521, upload-time = "2026-05-31T00:49:25.134Z" },
+    { url = "https://files.pythonhosted.org/packages/bb/a6/17932357c145c6dbe988832613b36bc7630a661148e17db1f6017ddca01a/tinker-0.23.0-py3-none-any.whl", hash = "sha256:416a20f2cc62fc83cc92c5b69de7f6aa8736bceee0156fda07fbe2fef1b00936", size = 237099, upload-time = "2026-07-15T17:16:39.183Z" },
 ]
 
 [[package]]
 name = "tinker-cookbook"
-version = "0.4.3.dev2+gca232b084"
-source = { git = "https://github.com/thinking-machines-lab/tinker-cookbook.git#ca232b084411029df565a36095642918a097fa7f" }
+version = "0.5.3.dev1+g3e04119ce"
+source = { git = "https://github.com/thinking-machines-lab/tinker-cookbook.git#3e04119ce293a2b6ba5284e35267c9ba6d27c5da" }
 dependencies = [
     { name = "aiohttp" },
     { name = "anyio" },
@@ -2769,6 +2769,13 @@ dependencies = [
     { name = "transformers" },
 ]
 
+[package.optional-dependencies]
+inkling = [
+    { name = "tinker" },
+    { name = "tml-renderers" },
+    { name = "torch" },
+]
+
 [[package]]
 name = "tinkerscope"
 version = "0.1.0"
@@ -2783,7 +2790,7 @@ dependencies = [
     { name = "pyyaml" },
     { name = "sse-starlette" },
     { name = "tinker" },
-    { name = "tinker-cookbook" },
+    { name = "tinker-cookbook", extra = ["inkling"] },
     { name = "typer" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -2808,8 +2815,8 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "pyyaml", specifier = ">=6" },
     { name = "sse-starlette", specifier = ">=2.1" },
-    { name = "tinker", specifier = ">=0.22" },
-    { name = "tinker-cookbook", git = "https://github.com/thinking-machines-lab/tinker-cookbook.git" },
+    { name = "tinker", specifier = ">=0.23" },
+    { name = "tinker-cookbook", extras = ["inkling"], git = "https://github.com/thinking-machines-lab/tinker-cookbook.git" },
     { name = "typer", specifier = ">=0.12" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
@@ -2822,6 +2829,16 @@ dev = [
     { name = "pytest-playwright", specifier = ">=0.8.0" },
     { name = "pytest-timeout", specifier = ">=2.3" },
     { name = "ruff", specifier = ">=0.8" },
+]
+
+[[package]]
+name = "tml-renderers"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0d/b3/12b182a39effd1021263451e6eff0ff47c310f2957706a903ce838935dd5/tml_renderers-0.1.0-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:f484e983fe42df95c5c69108c7ec4046340f416566f726bd76e211736db29391", size = 4387718, upload-time = "2026-07-15T17:24:15.468Z" },
+    { url = "https://files.pythonhosted.org/packages/d6/dd/c31bb2e874cb11a175f8f14967cee128b2d159507a602b3740152be6a8d6/tml_renderers-0.1.0-cp311-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:52cf4c1b4d1ab2664903f0438e661544546b4d7f0378fe245f53bafc01368014", size = 4545354, upload-time = "2026-07-15T17:24:17.956Z" },
+    { url = "https://files.pythonhosted.org/packages/26/e1/e4f8e7acfafaff35b59031b9af308aa059a845a4b094a43bd49dbb729508/tml_renderers-0.1.0-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:6f5ff0b08ba5ffe92071cb32215d65cda88d92205850f9f4dd1823f5d0dc2aeb", size = 4686701, upload-time = "2026-07-15T17:24:20.486Z" },
 ]
 
 [[package]]
@@ -2912,7 +2929,7 @@ wheels = [
 
 [[package]]
 name = "transformers"
-version = "5.5.3"
+version = "5.5.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "huggingface-hub" },
@@ -2925,9 +2942,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/af/35/cd5b0d1288e65d2c12db4ce84c1ec1074f7ee9bced040de6c9d69e70d620/transformers-5.5.3.tar.gz", hash = "sha256:3f60128e840b40d352655903552e1eed4f94ed49369a4d43e1bc067bd32d3f50", size = 8226047, upload-time = "2026-04-09T15:52:56.231Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a5/1e/1e244ab2ab50a863e6b52cc55761910567fa532b69a6740f6e99c5fdbd98/transformers-5.5.4.tar.gz", hash = "sha256:2e67cadba81fc7608cc07c4dd54f524820bc3d95b1cabd0ef3db7733c4f8b82e", size = 8227649, upload-time = "2026-04-13T16:55:55.181Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a1/0b/f8524551ab2d896dfaca74ddb70a4453d515bbf4ab5451c100c7788ae155/transformers-5.5.3-py3-none-any.whl", hash = "sha256:e48f3ec31dd96505e96e66b63a1e43e1ad7a65749e108d9227caaf51051cdb02", size = 10236257, upload-time = "2026-04-09T15:52:52.866Z" },
+    { url = "https://files.pythonhosted.org/packages/29/fb/162a66789c65e5afa3b051309240c26bf37fbc8fea285b4546ae747995a2/transformers-5.5.4-py3-none-any.whl", hash = "sha256:0bd6281b82966fe5a7a16f553ea517a9db1dee6284d7cb224dfd88fc0dd1c167", size = 10236696, upload-time = "2026-04-13T16:55:51.497Z" },
 ]
 
 [[package]]
