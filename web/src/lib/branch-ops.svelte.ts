@@ -22,7 +22,7 @@ import {
   regenTarget,
   regenReplace,
   ancestryMessages,
-  treeFromMessages,
+  reconcileExternal,
   threadSystemAt,
   editUserFork,
   editUserForkCopy,
@@ -345,8 +345,12 @@ class BranchOps {
     navigator.clipboard?.writeText(text);
   }
 
-  /** Copy a branch's ancestry (root→this node) into ANOTHER panel as a fresh linear
-   *  thread, so you can prompt that panel's model with exactly this context. */
+  /** GRAFT a branch's ancestry (root→this node) into ANOTHER panel as an extra
+   *  thread, so you can prompt that panel's model with exactly this context —
+   *  WITHOUT clobbering whatever that panel already holds. Reconciling into the
+   *  dest's existing tree (not an empty one) is what makes this additive: a
+   *  matching prefix extends/re-selects in place, otherwise it lands as a new
+   *  root thread; either way the dest's other threads survive. */
   sendBranchToPanel(srcPanel: Panel, msg: ViewMessage, destPanel: Panel) {
     if (msg.nodeId == null || destPanel === srcPanel || this.#d.panelBusy(destPanel)) return;
     const srcTree = convo.treeFor(srcPanel);
@@ -355,8 +359,11 @@ class BranchOps {
     chat.clearPanelBucket(destPanel);
     // The branch's thread system prompt travels with its context — the dest
     // panel's model should be prompted under the SAME conditions.
-    convo.setTree(destPanel, treeFromMessages(msgs, threadSystemAt(srcTree, msg.nodeId)));
-    panelScroll.snap(destPanel); // fresh thread in dest — land on its latest turn
+    convo.setTree(
+      destPanel,
+      reconcileExternal(convo.treeFor(destPanel), msgs, threadSystemAt(srcTree, msg.nodeId))
+    );
+    panelScroll.snap(destPanel); // land on the grafted thread's latest turn
   }
 }
 
