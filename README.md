@@ -231,6 +231,23 @@ Your selected model(s) and sampling parameters are cached to disk and **restored
 when you restart** the process, so you don't have to re-pick your setup every
 time.
 
+### Share packs — reproduce a setup with one command
+
+Bundle checkpoints + default params + workspaces into one portable YAML so a
+collaborator reproduces your setup against **public Tinker checkpoints**, no local
+run dirs needed:
+
+```bash
+tinkerscope --pack https://raw.githubusercontent.com/you/repo/main/pack.yaml   # consume + serve
+tinkerscope pack export pack.yaml                                              # author from your setup
+```
+
+Models are addressed self-contained (`ckpt:` sampler path / `base:` / `openrouter:`),
+so a published checkpoint (same sampler id as the private path) samples on anyone's
+account. Applying is merge-safe (never clobbers a collaborator's own params unless
+`--force`); the shared checkpoints show up as first-class addable models in the
+"+ Tinker model" typeahead. Full doc: **[`docs/PACK.md`](docs/PACK.md)**.
+
 ---
 
 ## Drive it from the terminal — `tinkpg`

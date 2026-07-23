@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter
 
-from .. import discovery
+from .. import discovery, pack_models_store
 from ..tinker_sampler import supports_thinking
 
 router = APIRouter(prefix="/api", tags=["models"])
@@ -86,6 +86,17 @@ def tinker_models(refresh: bool = False) -> dict:
             })
     else:  # sweep unreachable: keep base models, note why
         error = error or f"checkpoint list unavailable: {srv.get('error')}"
+
+    # Pack-injected models (share pack applied to this state dir): explicit sampler
+    # paths / base models a collaborator has no local run dir for and the account sweep
+    # won't list. Appended unconditionally (they don't depend on caps / the sweep), so
+    # a shared checkpoint is addable even offline or on a different account. Deduped by
+    # id so a pack model that IS in the account sweep isn't listed twice.
+    seen = {m["id"] for m in models}
+    for e in pack_models_store.tinker_model_entries():
+        if e["id"] not in seen:
+            models.append(e)
+            seen.add(e["id"])
 
     return {
         "available": caps.get("available", False),

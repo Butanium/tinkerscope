@@ -14,8 +14,15 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from ...paths import OPENROUTER_MODELS_PATH
 from ..store import read_json, write_json
+
+
+def _path():
+    # Resolve lazily (fresh module lookup) so a test that reloads paths against a new
+    # XDG_STATE_HOME is honored — mirrors conversation_store / pack_models_store.
+    from ...paths import OPENROUTER_MODELS_PATH
+
+    return OPENROUTER_MODELS_PATH
 
 router = APIRouter(prefix="/api/openrouter-models", tags=["openrouter"])
 
@@ -59,15 +66,30 @@ def _env_seed() -> list[dict]:
 
 
 def _read() -> list[dict]:
-    items = read_json(OPENROUTER_MODELS_PATH, None)
+    items = read_json(_path(), None)
     if items is None:  # first use → seed from env (if any), persist
         items = _env_seed()
-        write_json(OPENROUTER_MODELS_PATH, items)
+        write_json(_path(), items)
     return items
 
 
 def _write(items: list[dict]) -> None:
-    write_json(OPENROUTER_MODELS_PATH, items)
+    write_json(_path(), items)
+
+
+def upsert(models: list[dict]) -> list[dict]:
+    """Batch add/refresh saved models, de-duped by `openrouter_model` (each re-added
+    entry moves to the end, matching the single-add path). Public so share-pack apply
+    reuses the one global-list upsert implementation instead of hand-rolling it."""
+    items = _read()
+    for m in models:
+        mid = (m.get("openrouter_model") or "").strip()
+        if not mid:
+            continue
+        items = [x for x in items if x.get("openrouter_model") != mid]
+        items.append({"label": (m.get("label") or mid).strip(), "openrouter_model": mid})
+    _write(items)
+    return items
 
 
 @router.get("")
@@ -80,10 +102,7 @@ def add_openrouter_model(req: OpenRouterModel) -> list[dict]:
     model = req.openrouter_model.strip()
     if not model:
         raise HTTPException(400, "openrouter_model is required")
-    items = [m for m in _read() if m.get("openrouter_model") != model]  # de-dupe / upsert
-    items.append({"label": (req.label or model).strip(), "openrouter_model": model})
-    _write(items)
-    return items
+    return upsert([{"label": req.label, "openrouter_model": model}])
 
 
 @router.delete("")

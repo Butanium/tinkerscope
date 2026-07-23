@@ -26,6 +26,12 @@ tinkerscope <dirs> --port N        # scan <dirs> for runs (checkpoints.jsonl + c
 - `tinkpg` auto-targets the running instance whose scan root contains your cwd.
   Outside any scan root: set `TINKERSCOPE_BASE_URL` or pass `--base-url`.
 
+**Share packs (reproduce a setup).** `tinkerscope --pack <file|url>` seeds this folder
+from a portable YAML bundle (public checkpoints + default params + workspaces) then
+serves — the way to hand a collaborator a reproducible setup with no local run dirs.
+`tinkerscope pack export <out.yaml> [--exclude-model …]` authors one from the current
+state. Merge-safe (won't clobber existing params without `--force`). Full doc: `docs/PACK.md`.
+
 ## Drive the shared playground
 
 ```bash
