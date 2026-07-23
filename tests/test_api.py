@@ -450,8 +450,9 @@ def test_chat_base_model_native_full_fidelity(client, monkeypatch):
     captured: dict = {}
 
     async def fake_sample_stream(*, base_model, sampler_path, renderer_name, messages,
-                                 n, temperature, max_tokens, top_p=None, logprobs=True):
-        captured.update(base_model=base_model, logprobs=logprobs, n=n)
+                                 n, temperature, max_tokens, top_p=None, logprobs=True,
+                                 think=True):
+        captured.update(base_model=base_model, logprobs=logprobs, n=n, think=think)
         yield {
             "sample_index": 0,
             "content": "the answer",
@@ -484,6 +485,7 @@ def test_chat_base_model_native_full_fidelity(client, monkeypatch):
     assert "event: done" in r.text, r.text
     assert captured.get("base_model") == SUPPORTED_BASE
     assert captured.get("logprobs") is True
+    assert captured.get("think") is False, "thinking:false must reach the sampler as think=False"
 
     import json as _json
     sample = next(
@@ -504,7 +506,8 @@ def test_chat_loose_ckpt_resolves_base_and_renders_native(client, monkeypatch):
     captured: dict = {}
 
     async def fake_sample_stream(*, base_model, sampler_path, renderer_name, messages,
-                                 n, temperature, max_tokens, top_p=None, logprobs=True):
+                                 n, temperature, max_tokens, top_p=None, logprobs=True,
+                                 think=True):
         captured.update(base_model=base_model, sampler_path=sampler_path)
         yield {
             "sample_index": 0, "content": "A", "raw_text": "…A",

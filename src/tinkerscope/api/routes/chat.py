@@ -463,7 +463,7 @@ async def chat(req: ChatRequest):
                         renderer_name=select_renderer_name(base_model, None, think),
                         messages=native_msgs if think else native_off,
                         n=n, temperature=temperature, max_tokens=max_tokens,
-                        top_p=top_p, logprobs=req.logprobs,
+                        top_p=top_p, logprobs=req.logprobs, think=think,
                     )
 
                 if both:
@@ -489,7 +489,7 @@ async def chat(req: ChatRequest):
                         messages=native_msgs if think else native_off,
                         n=n, temperature=temperature,
                         max_tokens=max_tokens, top_p=top_p,
-                        logprobs=req.logprobs,
+                        logprobs=req.logprobs, think=think,
                     )
 
                 # Base models ALWAYS sample native (never the oai stream): the
@@ -526,7 +526,7 @@ async def chat(req: ChatRequest):
                         messages=native_msgs if think else native_off,
                         n=n,
                         temperature=temperature, max_tokens=max_tokens, top_p=top_p,
-                        logprobs=req.logprobs,
+                        logprobs=req.logprobs, think=think,
                     )
 
                 if both:
@@ -535,7 +535,7 @@ async def chat(req: ChatRequest):
                 elif stream:
                     renderer_name = select_renderer_name(run.base_model, run.renderer_name, thinking)
                     _, prompt_text, stop = await get_sampler().render(
-                        run.base_model, renderer_name, native_msgs
+                        run.base_model, renderer_name, native_msgs, think=bool(thinking)
                     )
                     produce_iter = tinker_oai.completions_stream(
                         model=ckpt.sampler_path, prompt=prompt_text, stop=stop,

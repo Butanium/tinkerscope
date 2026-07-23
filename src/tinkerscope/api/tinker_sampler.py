@@ -16,6 +16,7 @@ right renderer without the latteries cache-clear workaround.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import re
 from typing import Any, AsyncIterator
@@ -61,9 +62,13 @@ def _thinking_pair(base_model: str | None) -> tuple[str, str] | None:
 
 
 def supports_thinking(base_model: str | None) -> bool:
-    """A base model supports the thinking toggle iff its family exposes a
-    binary thinking/non-thinking renderer pair (either naming convention)."""
-    return _thinking_pair(base_model) is not None
+    """A base model supports the thinking toggle if its family exposes a binary
+    thinking/non-thinking renderer PAIR (either naming convention), OR its renderer
+    gates thinking with a continuous effort directive (tml_v0 / Inkling — the toggle
+    maps to effort 0.9/0.0 in _build_generation_prompt), not a renderer-name variant."""
+    if _thinking_pair(base_model) is not None:
+        return True
+    return any(r.startswith("tml") for r in (_recommended(base_model) if base_model else []))
 
 
 def select_renderer_name(
@@ -210,6 +215,30 @@ def _to_render_msg(m: dict) -> dict:
     if content:
         parts.append({"type": "text", "text": content})
     return {"role": m["role"], "content": parts}
+
+
+# tml_v0 (Inkling) gates thinking with a continuous `effort` DIRECTIVE injected into
+# the prompt, NOT an on/off renderer variant — so `select_renderer_name` picks the same
+# renderer both ways and thinking is set HERE instead. Our binary toggle maps to effort:
+# on = tml_v0's trained default (0.9 "high"), off = 0.0 (no thinking). Renderers whose
+# build_generation_prompt takes no `effort` bake thinking into the renderer name already,
+# so they ignore this and get a plain call.
+_THINK_EFFORT = 0.9
+_NOTHINK_EFFORT = 0.0
+
+
+def _build_generation_prompt(renderer: Any, messages: list[dict], think: bool) -> Any:
+    """renderer.build_generation_prompt, threading thinking `effort` for renderers that
+    accept it (tml_v0). A plain call for every other renderer."""
+    try:
+        accepts_effort = "effort" in inspect.signature(renderer.build_generation_prompt).parameters
+    except (TypeError, ValueError):
+        accepts_effort = False
+    if accepts_effort:
+        return renderer.build_generation_prompt(
+            messages, effort=_THINK_EFFORT if think else _NOTHINK_EFFORT
+        )
+    return renderer.build_generation_prompt(messages)
 
 
 # ---------------------------------------------------------------------------
@@ -367,7 +396,7 @@ class SamplerManager:
         return self._renderers[key]
 
     async def render(
-        self, base_model: str, renderer_name: str, messages: list[dict]
+        self, base_model: str, renderer_name: str, messages: list[dict], think: bool = True
     ) -> tuple[Any, str, list]:
         """Build the generation prompt with the run's renderer (training-faithful).
 
@@ -375,6 +404,7 @@ class SamplerManager:
         sampler and prompt_text feeds the oai /completions endpoint — same prompt,
         two backends. A trailing assistant message is appended to the normal
         generation prompt as a prefill the model extends (see _append_to_prompt).
+        `think` sets the thinking effort for renderers that take one (tml_v0).
         """
         renderer = await asyncio.to_thread(self._renderer, base_model, renderer_name)
         tokenizer = await asyncio.to_thread(self._tokenizer, base_model)
@@ -387,7 +417,7 @@ class SamplerManager:
         else:
             prefill = None
             non_prefill = [_to_render_msg(m) for m in messages]
-        model_input = renderer.build_generation_prompt(non_prefill)
+        model_input = _build_generation_prompt(renderer, non_prefill, think)
         if prefill:
             model_input = _append_to_prompt(model_input, tokenizer, prefill)
         stop = renderer.get_stop_sequences()
@@ -406,6 +436,7 @@ class SamplerManager:
         max_tokens: int,
         top_p: float | None = None,
         logprobs: bool = True,
+        think: bool = True,
     ) -> AsyncIterator[dict]:
         """Yield one result dict per completed sample, as they finish.
 
@@ -415,7 +446,8 @@ class SamplerManager:
         (prompt/completion tokens via convert_ids_to_tokens) shown in the
         raw-view dropdown. `token_logprobs` (default ON, see _token_logprobs)
         costs one extra prefill-only call per sample, awaited before the sample
-        is yielded; pass logprobs=False to skip it.
+        is yielded; pass logprobs=False to skip it. `think` sets the thinking
+        effort for renderers that take one (tml_v0 / Inkling).
         """
         from tinker import types as tt
 
@@ -434,7 +466,7 @@ class SamplerManager:
             prefill = None
             non_prefill = [_to_render_msg(m) for m in messages]
 
-        model_input = renderer.build_generation_prompt(non_prefill)
+        model_input = _build_generation_prompt(renderer, non_prefill, think)
         if prefill:
             model_input = _append_to_prompt(model_input, tokenizer, prefill)
         stop = renderer.get_stop_sequences()
