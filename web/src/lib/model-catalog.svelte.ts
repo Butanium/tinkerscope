@@ -121,11 +121,14 @@ class ModelCatalog {
     this.orCatalogLoading = false;
   }
 
-  async loadTinkerCatalog() {
+  // `refresh` forces the server to re-sweep `list_user_checkpoints` (?refresh=1), so a
+  // checkpoint created since the server's cached sweep shows up — otherwise the account
+  // sweep is cached and a brand-new checkpoint never appears in the picker.
+  async loadTinkerCatalog(refresh = false) {
     this.tinkerCatalogLoading = true;
     this.tinkerCatalogError = null;
     try {
-      const res = await api.tinkerModels();
+      const res = await api.tinkerModels(refresh);
       this.tinkerModels = res.models ?? [];
       this.tinkerCatalogError = res.available === false ? res.error || 'Tinker base models unavailable' : null;
       this.tinkerCatalogLoaded = true;

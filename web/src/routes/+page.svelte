@@ -910,6 +910,9 @@
     try {
       await api.refreshModels();
       await modelCatalog.loadRuns(setBackendError);
+      // Also re-sweep tinker checkpoints (only if the picker's been opened this session,
+      // else the next open loads them fresh anyway) so a just-created checkpoint appears.
+      if (modelCatalog.tinkerCatalogLoaded) await modelCatalog.loadTinkerCatalog(true);
     } catch (e: any) {
       backendError = `Refresh failed: ${e?.message ?? e}`;
     }
@@ -1359,7 +1362,7 @@
             <path d="M5 8h4M5 10h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
           </svg>
         </button>
-        <button class="theme-toggle" class:refreshing={refreshingModels} onclick={refreshModels} data-tooltip="Rescan filesystem for runs" use:tip disabled={refreshingModels}>
+        <button class="theme-toggle" class:refreshing={refreshingModels} onclick={refreshModels} data-tooltip="Rescan runs + refresh tinker checkpoints" use:tip disabled={refreshingModels}>
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
             <path d="M1.5 7a5.5 5.5 0 0 1 9.9-3.3M12.5 7a5.5 5.5 0 0 1-9.9 3.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
             <path d="M11.5 1v3h-3M2.5 13v-3h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
@@ -1911,6 +1914,7 @@
     error={modelCatalog.tinkerCatalogError}
     keyMissing={!!health && !health.tinker_key}
     onpick={pickTinkerModel}
+    onrefresh={() => modelCatalog.loadTinkerCatalog(true)}
     onclose={() => (showTinkerPicker = false)}
   />
 {/if}

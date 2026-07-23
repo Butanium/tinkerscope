@@ -34,7 +34,8 @@ export const api = {
   refreshModels: () => j<{ status: string; count: number }>('/api/models/refresh', { method: 'POST' }),
   openrouterModels: () => j<OpenRouterModel[]>('/api/openrouter-models'),
   // Typeahead catalog sources (not the saved quick-list).
-  tinkerModels: () => j<TinkerModelsResponse>('/api/tinker-models'),
+  tinkerModels: (refresh = false) =>
+    j<TinkerModelsResponse>(`/api/tinker-models${refresh ? '?refresh=1' : ''}`),
   openrouterAvailable: (refresh = false) =>
     j<OpenRouterAvailableResponse>(
       `/api/openrouter-models/available${refresh ? '?refresh' : ''}`
