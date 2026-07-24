@@ -14,6 +14,19 @@ Two kinds of message travel the bus:
   - ephemeral broadcasts (`chat_start` / `sample` / `chat_done` / `chat_error`):
     streaming sample results. NOT stored on the state object (50 long samples
     would bloat every snapshot); the browser accumulates them per chat_id.
+
+WORKSPACE SCOPING (the one non-obvious rule). One PlaygroundState per PROCESS is
+right for sampling params — one knob, every panel, every client. It is NOT right
+for the panel layout, per-panel models and system prompt: those belong to the open
+WORKSPACE, are persisted with it and restored on open. So the bus holds exactly one
+workspace's worth of them at a time, stamped with `conversation_id`, and:
+  - a patch stamped with a different workspace may only apply workspace-scoped keys
+    if it CLAIMS the bus by carrying `panels` (_drop_foreign_workspace_keys);
+  - a client renders/persists workspace-scoped fields only from messages stamped
+    with its own workspace (web/src/lib/bus-scope.ts).
+Without this, two browser tabs on two workspaces clobber each other — the losing
+tab mirrors the winner's models and then SAVES them onto its own workspace on disk
+(really happened, 4 workspaces, 2026-07-24).
 """
 from __future__ import annotations
 
@@ -106,6 +119,16 @@ class StateBus:
     # `panel` id routes these to that panel; without `panel` they're ignored.
     _PANEL_FIELDS = ("run_id", "checkpoint", "messages", "thread_system_prompt")
 
+    # Everything that describes the OPEN WORKSPACE rather than the process. These are
+    # persisted per-workspace by the browser and restored on open; the bus holds them
+    # only so `tinkpg` can see (and drive) what's on screen. Mirror of
+    # web/src/lib/bus-scope.ts WORKSPACE_FIELDS + the panel-routing keys.
+    _WORKSPACE_KEYS = (
+        "panels", "conversation_id", "system_prompt", "system_enabled",
+        "panel_messages", "panel_thread_system",
+        "panel", *_PANEL_FIELDS,
+    )
+
     # Storage-v2 diet: the per-panel transcript echoes are text mirrors the CLI reads
     # (role/content only — verified it reads nothing else); the heavy per-node fields
     # never belong on the bus. Strip them defensively on ingest so a snapshot can't
@@ -148,10 +171,34 @@ class StateBus:
             return
         setattr(panel, key, value)
 
+    def _drop_foreign_workspace_keys(self, patch: dict[str, Any]) -> dict[str, Any]:
+        """The bus describes exactly ONE workspace at a time. A patch stamped with a
+        DIFFERENT workspace than the one on the bus may only be applied if it carries
+        the full picture (`panels`) — i.e. it CLAIMS the bus. An incremental write from
+        a non-owner (a second browser tab's transcript echo, a stale client) would
+        otherwise graft onto the current workspace's panel list and leave the bus a
+        chimera: one workspace's models stamped with another's id, which is exactly
+        what `tinkpg send` would then fire at. Such a patch keeps only its GLOBAL
+        fields (sampling params).
+
+        Unstamped patches are treated as same-owner: that's the CLI (`tinkpg open`)
+        and any pre-scoping client, and it's what keeps terminal-drives-browser
+        working. See web/src/lib/bus-scope.ts for the browser half."""
+        stamp = patch.get("conversation_id")
+        if stamp is None or "panels" in patch:
+            return patch
+        current = self.state.conversation_id
+        if current is None or stamp == current:
+            return patch
+        return {k: v for k, v in patch.items() if k not in self._WORKSPACE_KEYS}
+
     def _apply_patch(self, patch: dict[str, Any]) -> None:
         """Apply a patch: `panels` full-replaces the list (browser/CLI selection);
         a `panel` id routes run_id/checkpoint/messages to that panel (chat.py);
-        everything else is a global setattr."""
+        everything else is a global setattr. Workspace-scoped keys are dropped when
+        the patch belongs to a workspace that isn't the one on the bus and doesn't
+        claim it — see _drop_foreign_workspace_keys."""
+        patch = self._drop_foreign_workspace_keys(patch)
         panel_id = patch.get("panel")
         for k, v in patch.items():
             if k == "panel":

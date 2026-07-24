@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import fcntl
 import json
+import os
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
@@ -18,10 +20,22 @@ def read_json(path: Path, default: Any) -> Any:
 
 
 def write_json(path: Path, data: Any) -> None:
+    """Atomic write via a PER-WRITER temp file + rename.
+
+    The temp name must be unique: two browser tabs both PUT /api/prefs on load,
+    FastAPI runs the sync handlers on different threadpool workers, and with a
+    single shared `<name>.tmp` the first rename pulls the file out from under the
+    second — `FileNotFoundError` on `tmp.replace(path)`, a 500 for one of the tabs
+    (caught by tests/small-smokes/browser_two_tab_workspace.py). Both writers now
+    stage their own file and the rename is last-writer-wins, which is what the
+    callers already expect (`locked()` is what prevents lost updates)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False))
-    tmp.replace(path)
+    tmp = path.with_suffix(f"{path.suffix}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)  # a failed write must not leave litter behind
 
 
 @contextmanager

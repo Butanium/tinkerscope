@@ -4,6 +4,7 @@
   import { goto } from '$app/navigation';
   import { api } from '$lib/api';
   import { live, emptyPanel } from '$lib/state.svelte';
+  import { touchesWorkspace } from '$lib/bus-scope';
   import { conversations as convo } from '$lib/conversations.svelte';
   import Message from '$lib/ChatMessage.svelte';
   import {
@@ -196,15 +197,24 @@
       patchTimer = null;
     }
     if (!Object.keys(pendingPatch).length) return Promise.resolve();
-    const body = pendingPatch;
+    // Stamp a workspace-scoped write with the workspace it describes, so other
+    // tabs can tell it isn't theirs (bus-scope.ts). A params-only patch stays
+    // unstamped — those are global on purpose and every client should take them.
+    // claimFields() rides along when another tab currently owns the bus, so the
+    // write lands as a full claim instead of grafting onto their layout.
+    const body = touchesWorkspace(pendingPatch)
+      ? { ...convo.claimFields(), conversation_id: convo.activeId, ...pendingPatch }
+      : pendingPatch;
     pendingPatch = {};
     const seq = ++patchSeq;
     return api
       .setState(body)
       .then((next) => {
         // A newer flush may have raced ahead — its snapshot wins; the ordered
-        // SSE stream corrects any residue either way.
-        if (next && seq === patchSeq) live.state = next;
+        // SSE stream corrects any residue either way. adopt(), not a raw assign:
+        // the response is a full bus snapshot and may belong to another tab's
+        // workspace when we're not the one currently on the bus.
+        if (seq === patchSeq) live.adopt(next);
       })
       .catch((e) => console.warn('state patch failed', e));
   }
@@ -1248,6 +1258,11 @@
     window.addEventListener('blur', onBlur);
     // Keyboard row navigation (see its section above for the guards).
     window.addEventListener('keydown', onNavKeydown);
+    // The bus describes ONE workspace at a time (bus-scope.ts), so make it the
+    // one you're looking at: focusing a tab re-asserts its workspace, and
+    // `tinkpg` follows. No-op when we already own it or a chat is streaming.
+    const onFocus = () => void convo.claimBus();
+    window.addEventListener('focus', onFocus);
 
     // Open the ONE live-state stream on load + wire the terminal-fold hooks:
     // our own detached chats fold from their bus bucket (chat.try*), everything
@@ -1269,7 +1284,7 @@
       try { health = await api.health(); } catch (e: any) { backendError = `Backend not reachable: ${e?.message ?? e}`; }
       await modelCatalog.loadRuns(setBackendError);
       await modelCatalog.loadOpenrouterModels(setBackendError);
-      try { if (!live.state) live.state = await api.getState(); } catch {}
+      try { if (!live.state) live.adopt(await api.getState()); } catch {}
       // Restore last-used model selection + sampling params from disk (only if
       // this process's state is fresh) BEFORE conversations load, so the right
       // models are selected as the UI comes up.
@@ -1295,6 +1310,7 @@
       window.removeEventListener('keydown', onModKey);
       window.removeEventListener('keyup', onModKey);
       window.removeEventListener('blur', onBlur);
+      window.removeEventListener('focus', onFocus);
       window.removeEventListener('keydown', onNavKeydown);
     };
   });

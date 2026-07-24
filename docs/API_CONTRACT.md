@@ -349,6 +349,44 @@ bulk-mirror per-panel fields without touching selection; `panel` + one of
 `run_id`/`checkpoint`/`messages`/`thread_system_prompt` targets a single
 EXISTING panel (never auto-creates one).
 
+### Workspace scoping on the state bus
+
+There is ONE PlaygroundState per server **process** — that is what lets `tinkpg`
+drive what you are looking at. But the fields split in two, and the split is
+load-bearing:
+
+| scope | fields | why |
+|---|---|---|
+| **workspace** | `panels` (incl. per-panel `run_id`/`checkpoint`/`messages`/`thread_system_prompt`), `conversation_id`, `system_prompt`, `system_enabled` | persisted **with the workspace** and restored on open — a workspace IS its panel layout |
+| **global** | `temperature`, `max_tokens`, `n_samples`, `thinking`, `top_p`, `chat_id`, `running`, `last_event*` | one knob for every panel and every client — the point of a shared bus |
+
+The bus holds exactly **one workspace's** worth of the first group at a time,
+identified by `conversation_id`. Two rules keep that honest:
+
+1. **Server** (`api/state.py::_drop_foreign_workspace_keys`): a patch stamped with
+   a `conversation_id` different from the bus's current one may only apply
+   workspace-scoped keys if it also carries `panels` — i.e. it CLAIMS the bus.
+   An incremental write from a non-owner keeps only its global fields. A patch with
+   NO stamp is treated as same-owner (that's the CLI, and any pre-scoping client).
+2. **Client** (`web/src/lib/bus-scope.ts::mergeBusState`): a client adopts
+   workspace-scoped fields only from messages stamped with its own workspace;
+   otherwise it keeps its own and takes the globals. It re-claims the bus on
+   conversation open/switch/create and on window focus — so *the tab you last
+   looked at is the one the terminal drives*.
+
+`/api/chat` carries `conversation_id` too (browser sends its own; CLI omits it and
+inherits the bus's), and the `chat_start`/`chat_done`/`chat_error` broadcasts are
+stamped from the **request**, not from the bus — with two tabs the bus can already
+describe another workspace by the time a chat ends.
+
+**Why this exists.** Without it, two browser tabs on two workspaces clobber each
+other with no user action: tab A opens workspace X → pushes X's layout onto the bus
+→ tab B mirrors it → B's `syncPanels` sees X's panel ids as new, calls `save()` →
+B's workspace is persisted on disk with X's models. Four workspaces on the author's
+instance were corrupted this way before it was diagnosed (2026-07-24). Tests:
+`tests/test_state_workspace_scope.py`, `web/src/lib/bus-scope.test.ts`, smoke
+`tests/small-smokes/browser_two_tab_workspace.py`.
+
 ### /api/state/events SSE (the browser subscribes ONCE on load)
 Event names = the message's `type`:
 - `snapshot` → `{type:"snapshot", state}` (full state, sent first on connect)

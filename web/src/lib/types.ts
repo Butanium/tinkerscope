@@ -227,6 +227,10 @@ export type ChatRequest = {
   /** Opaque ownership token echoed on chat_start/done/error so the browser can
    *  tell its OWN chats (folded from the bus bucket on chat_done) from external ones. */
   client_token?: string | null;
+  /** The workspace this chat belongs to; echoed on the terminal events so a tab
+   *  on a DIFFERENT workspace skips the external fold. Absent (CLI) ⇒ the server
+   *  falls back to the bus's current stamp. See lib/bus-scope.ts. */
+  conversation_id?: string | null;
 };
 
 /** What `GET /api/conversations` returns per conversation (storage v2): the

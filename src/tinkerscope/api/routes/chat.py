@@ -154,6 +154,11 @@ class ChatRequest(BaseModel):
     logprobs: bool = True
     # live-drive routing
     panel: str = "primary"                  # "primary" | "compare"
+    # The workspace (conversation) this chat belongs to. The browser always sends
+    # its own; the CLI omits it and inherits the bus's current one. Stamped onto the
+    # chat_done / chat_error broadcasts so a browser tab on ANOTHER workspace skips
+    # the external fold instead of grafting a foreign reply onto a reused panel id.
+    conversation_id: str | None = None
     broadcast: bool = True                   # mirror samples to the state bus
     # Detached (fire-and-forget) mode. The browser sets this so its POST returns
     # IMMEDIATELY instead of holding the SSE stream open for the whole generation:
@@ -561,6 +566,12 @@ async def chat(req: ChatRequest):
         state_patch = {
             "panel": req.panel,
             "messages": msgs,
+            # The workspace this chat belongs to. Sent by the browser (which knows
+            # its own `?c=`); absent for a CLI fire, which means "whatever workspace
+            # the bus is on". Stamped into the bus with the rest of the chat's
+            # selection so the bus never claims one workspace while showing another
+            # — see web/src/lib/bus-scope.ts.
+            **({"conversation_id": req.conversation_id} if req.conversation_id else {}),
             # Panel-routed: the RESOLVED thread part, so a CLI new-thread probe
             # updates the panel's thread mirror and an inheriting send is a no-op
             # write-back (thread state, not a sampling param — both scopes).
@@ -580,14 +591,16 @@ async def chat(req: ChatRequest):
                 "top_p": top_p,
             })
         chat_id = await BUS.chat_begin(**state_patch)
-        # Stamp every broadcast with the conversation open WHEN THE CHAT STARTED (read
-        # synchronously after chat_begin — no await, so it can't drift). The browser's
+        # Stamp every broadcast with the workspace this chat belongs to. The browser's
         # external-fold hook folds a chat_done onto a panel id ONLY if this id matches
-        # the conversation it currently has open; panel ids are re-minted across
-        # conversations on a shared, process-wide bus, so without this a chat generated
-        # for one conversation grafts onto a reused panel of another. None when no
-        # conversation is open (CLI-only / legacy) — the browser folds those (lockstep).
-        conv_id = BUS.state.conversation_id
+        # the workspace it currently has open; panel ids are re-minted across
+        # workspaces on a shared, process-wide bus, so without this a chat generated
+        # for one workspace grafts onto a reused panel of another. Prefer the REQUEST's
+        # id over the bus's: with two browser tabs the bus can already describe a
+        # different workspace by the time this chat ends. None when the caller didn't
+        # say and no workspace is open (CLI-only / legacy) — the browser folds those
+        # (lockstep). Read synchronously after chat_begin — no await, so it can't drift.
+        conv_id = req.conversation_id or BUS.state.conversation_id
 
         # ── stream samples, with EXACTLY ONE terminal event on every exit path ──
         # Three ways this chat can end — done / producer error / cancelled (client

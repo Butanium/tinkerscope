@@ -103,7 +103,15 @@ class ChatStore {
     // falls back to a stale panel mirror for a browser chat.
     const thread_system_prompt = threadSystemAt(convo.treeFor(panel), userParentId) ?? '';
     api
-      .chat({ ...model, messages, ...params, thread_system_prompt, panel, broadcast: true, detached: true, client_token: token })
+      .chat({
+        ...model, messages, ...params, thread_system_prompt, panel,
+        broadcast: true, detached: true, client_token: token,
+        // Which workspace this chat belongs to. The terminal events are stamped
+        // with it so another tab can tell it isn't theirs — read from the REQUEST,
+        // not from the bus, which may describe a different workspace by the time
+        // the chat ends (bus-scope.ts).
+        conversation_id: convo.activeId
+      })
       .then((res) => {
         if (res.ok) return; // accepted — the bus carries the outcome
         return res.text().then((t) => this.#failFire(token, onError, `Chat error ${res.status}: ${t}`));

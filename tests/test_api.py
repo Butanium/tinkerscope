@@ -881,3 +881,33 @@ async def test_chat_cancel_mid_terminal_still_completes_terminal(chat_mod, monke
     assert terminals[0]["type"] == "chat_done"
     prim = next(p for p in bus.state.panels if p.id == "primary")
     assert prim.messages[-1] == {"role": "assistant", "content": "answer"}
+
+
+def test_write_json_survives_concurrent_writers(tmp_path):
+    """Two tabs PUT /api/prefs at once → the sync handlers land on different
+    threadpool workers. A shared `<name>.tmp` made the first rename yank the file
+    from under the second (FileNotFoundError → 500 for one tab). Regression for
+    the per-writer temp name in api/store.write_json."""
+    import threading
+
+    from tinkerscope.api.store import read_json, write_json
+
+    target = tmp_path / "prefs.json"
+    errors: list[BaseException] = []
+
+    def hammer(tag: int) -> None:
+        try:
+            for i in range(40):
+                write_json(target, {"writer": tag, "i": i})
+        except BaseException as e:  # noqa: BLE001 — the point is to surface it
+            errors.append(e)
+
+    threads = [threading.Thread(target=hammer, args=(t,)) for t in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, f"concurrent write_json raised: {errors!r}"
+    assert isinstance(read_json(target, None), dict), "file must be readable JSON at the end"
+    assert not list(tmp_path.glob("*.tmp")), "temp files must not be left behind"

@@ -150,6 +150,22 @@ class ConversationsStore {
     return this.trees[panel] ?? emptyTree();
   }
 
+  /** THE single writer of `activeId`. Keeps `live.workspaceId` in lockstep so the
+   *  bus filter (bus-scope.ts) always knows which workspace this tab owns — a gap
+   *  between the two would let another tab's layout through for a beat, which is
+   *  long enough to be mirrored and saved. */
+  #setActive(id: string | null): void {
+    this.activeId = id;
+    live.workspaceId = id;
+  }
+
+  /** Stamp a workspace-scoped state patch with the workspace it describes, so other
+   *  tabs can tell it isn't theirs. Every setState in this store goes through here
+   *  (see bus-scope.ts: unstamped workspace writes are what other tabs adopt). */
+  #ownPatch(patch: StatePatch): StatePatch {
+    return { ...patch, conversation_id: this.activeId };
+  }
+
   /** True while ANY own chat is in flight — its fold (from the response stream)
    *  outlives the bucket `running` flag (which clears on the bus chat_done). Gate
    *  conversation switch/create/delete on this so an in-flight fold can't land on
@@ -180,6 +196,69 @@ class ConversationsStore {
     if (persist) this.#markTree(panel);
   }
 
+  /** True when the bus currently describes OUR workspace. A tab that isn't the
+   *  owner still renders and saves its own workspace (the bus filter guarantees
+   *  that) — it just isn't the one `tinkpg` is pointed at, and its incremental
+   *  workspace writes are dropped server-side until it claims. */
+  get ownsBus(): boolean {
+    const stamp = live.state?.conversation_id;
+    return stamp == null || stamp === this.activeId;
+  }
+
+  /** This workspace's full picture for the bus: layout + per-panel active-path
+   *  echo + thread system. A patch carrying this is a CLAIM — after it, the bus
+   *  coherently describes us (see bus-scope.ts on why a partial write from a
+   *  non-owner would leave the bus a chimera: another workspace's models stamped
+   *  with our id, which is what the CLI would then fire at). */
+  #busPanels(): StatePatch['panels'] {
+    return (live.state?.panels ?? []).map((p) => ({
+      id: p.id,
+      run_id: p.run_id,
+      checkpoint: p.checkpoint,
+      messages: activeMessages(this.treeFor(p.id)),
+      thread_system_prompt: this.#threadSystem(p.id)
+    }));
+  }
+
+  /** Extra fields +page folds into a workspace-scoped patch so a NON-OWNER tab's
+   *  write re-claims the bus in the same request (no extra round trip, and no
+   *  half-applied patch). Empty when we already own it. */
+  claimFields(): StatePatch {
+    if (this.ownsBus) return {};
+    const panels = this.#busPanels();
+    return panels?.length ? { panels } : {};
+  }
+
+  /** Explicitly assert that this tab's workspace is the one on screen. Called on
+   *  window focus: the bus tracks exactly one workspace, so "the tab you last
+   *  looked at is the one the terminal drives" is the rule that makes multi-tab
+   *  predictable. Skipped while a chat is streaming — whoever owns the bus then
+   *  is mid-drive and the CLI is likely watching it. */
+  async claimBus(): Promise<void> {
+    if (!this.activeId || this.ownsBus || live.state?.running) return;
+    const panels = this.#busPanels();
+    if (!panels?.length) return;
+    const next = await api
+      .setState(
+        this.#ownPatch({
+          panels,
+          system_prompt: live.state?.system_prompt ?? null,
+          system_enabled: live.state?.system_enabled ?? null
+        })
+      )
+      .catch(() => null);
+    live.adopt(next);
+  }
+
+  /** The active THREAD's system prompt for a panel (its selected root node's) —
+   *  travels with every echo so a mid-thread CLI send inherits the right prompt. */
+  #threadSystem(pid: string): string | null {
+    const tree = this.trees[pid];
+    if (!tree) return null;
+    const rootId = selectedChildId(tree, ROOT);
+    return (rootId ? tree.nodes[rootId]?.system_prompt : null) ?? null;
+  }
+
   #mirror(): void {
     // Echo each LIVE panel's active path into PlaygroundState (one patch, messages
     // only — never clobbers per-panel run_id/checkpoint). Restricted to panels in the
@@ -197,10 +276,14 @@ class ConversationsStore {
       panel_messages[pid] = activeMessages(tree);
       // The active THREAD's system prompt rides with the echo: a mid-thread CLI
       // send inherits it server-side, and the reconnect reconcile reads it back.
-      const rootId = selectedChildId(tree, ROOT);
-      panel_thread_system[pid] = (rootId ? tree.nodes[rootId]?.system_prompt : null) ?? null;
+      panel_thread_system[pid] = this.#threadSystem(pid);
     }
-    api.setState({ panel_messages, panel_thread_system }).catch(() => {});
+    // A non-owner's echo-only write would be dropped server-side (it can't be
+    // applied to another workspace's panel list) — fold in the claim so the
+    // mirror lands either way.
+    api
+      .setState(this.#ownPatch({ ...this.claimFields(), panel_messages, panel_thread_system }))
+      .catch(() => {});
   }
 
   /** Duplicate one panel's tree into another (used when a new compare panel should
@@ -316,10 +399,12 @@ class ConversationsStore {
       for (const p of prev) if (!ids.includes(p)) this.#markDropped(p);
     }
     return api
-      .setState({
-        panel_messages: Object.fromEntries(ids.map((id) => [id, []])),
-        panel_thread_system: Object.fromEntries(ids.map((id) => [id, null]))
-      })
+      .setState(
+        this.#ownPatch({
+          panel_messages: Object.fromEntries(ids.map((id) => [id, []])),
+          panel_thread_system: Object.fromEntries(ids.map((id) => [id, null]))
+        })
+      )
       .then(() => {})
       .catch(() => {});
   }
@@ -522,7 +607,7 @@ class ConversationsStore {
     const active = preferred ?? newest(list)!;
     const conv = await api.getConversation(active.id); // throws → +page's load banner
     nodeBlobs.reset(active.id);
-    this.activeId = active.id;
+    this.#setActive(active.id);
     await this.#loadTrees(conv);
     this.#afterLoad();
     return !!preferred;
@@ -557,7 +642,7 @@ class ConversationsStore {
     if (seq !== this.#switchSeq) return;
     live.clearBuckets();
     nodeBlobs.reset(id);
-    this.activeId = id;
+    this.#setActive(id);
     await this.#loadTrees(conv);
     this.#afterLoad();
   }
@@ -595,7 +680,7 @@ class ConversationsStore {
       updated_at: now
     };
     this.list = [draft, ...this.list];
-    this.activeId = draft.id;
+    this.#setActive(draft.id);
     this.#draftId = draft.id;
     this.#loadFailed = false;
     this.#fullTreeSaveNeeded = false; // a draft is never legacy-shaped
@@ -608,13 +693,15 @@ class ConversationsStore {
     // layout immediately — the SSE patch lags a beat behind the POST.
     this.trees = Object.fromEntries(ids.map((id) => [id, emptyTree()]));
     const next = await api
-      .setState({
-        panels: layout.map((p) => ({ id: p.id, run_id: p.run_id, checkpoint: p.checkpoint, messages: [] })),
-        panel_messages: Object.fromEntries(ids.map((id) => [id, []])),
-        panel_thread_system: Object.fromEntries(ids.map((id) => [id, null]))
-      })
+      .setState(
+        this.#ownPatch({
+          panels: layout.map((p) => ({ id: p.id, run_id: p.run_id, checkpoint: p.checkpoint, messages: [] })),
+          panel_messages: Object.fromEntries(ids.map((id) => [id, []])),
+          panel_thread_system: Object.fromEntries(ids.map((id) => [id, null]))
+        })
+      )
       .catch(() => null);
-    if (next) live.state = next;
+    live.adopt(next);
   }
 
   /** Drop the current draft from `list` if it was never persisted (untouched). Called
@@ -669,7 +756,7 @@ class ConversationsStore {
       live.clearBuckets();
       const next = newest(this.list)!;
       nodeBlobs.reset(next.id);
-      this.activeId = next.id;
+      this.#setActive(next.id);
       let conv: Conversation | null = null;
       try {
         conv = await api.getConversation(next.id);
@@ -768,8 +855,8 @@ class ConversationsStore {
         (live.state?.panels ?? []).map((p) => [p.id, null])
       );
     }
-    const next = await api.setState(patch).catch(() => null);
-    if (next) live.state = next;
+    const next = await api.setState(this.#ownPatch(patch)).catch(() => null);
+    live.adopt(next);
   }
 
   /** After loading a conversation: fold a stray external turn into each panel (once,

@@ -3,14 +3,20 @@
 // Two concerns live here:
 //   1. `live.state` — the mirrored shared PlaygroundState (selection / params /
 //      conversation). Rendered directly so the browser follows when the terminal
-//      (or another browser tab) POSTs /api/state.
+//      (or another browser tab) POSTs /api/state. WORKSPACE-SCOPED fields are
+//      filtered through `mergeBusState` first: the bus is process-global but a
+//      workspace's panel layout / system prompt is its own, so a message stamped
+//      with ANOTHER workspace contributes only its global params. See bus-scope.ts
+//      for the failure this prevents.
 //   2. `live.panels` — accumulated streamed samples per panel, keyed by chat_id.
 //      'chat_start' clears the bucket + sets running; 'sample' appends;
 //      'chat_done'/'chat_error' end it. The sample list + distribution chart
 //      render from these, so CLI-initiated and browser-initiated chats share one
-//      render path.
+//      render path. Ephemeral broadcasts, NOT state — they carry their own
+//      client_token / conversation_id and are scoped by their consumers.
 
 import { api, sse } from './api';
+import { mergeBusState } from './bus-scope';
 import type { PlaygroundState, SampleData, Panel } from './types';
 
 /** Live accumulation for one compare-panel's in-flight / finished chat run. */
@@ -28,8 +34,14 @@ export function emptyPanel(): PanelRun {
 }
 
 class LiveStore {
-  /** Mirrored shared server state. null until the first snapshot arrives. */
+  /** Mirrored shared server state. null until the first snapshot arrives.
+   *  For workspace-scoped fields this is OUR workspace's truth, not necessarily
+   *  the raw bus — see #adopt / bus-scope.ts. */
   state = $state<PlaygroundState | null>(null);
+  /** The workspace (conversation) this tab has open. Kept in lockstep with
+   *  `conversations.activeId` by the conversation store — the one input the bus
+   *  filter needs, injected rather than imported (conversations imports us). */
+  workspaceId: string | null = null;
   /** true once the SSE stream has delivered at least one event. */
   connected = $state(false);
   /** Per-panel sample accumulation, driven by chat_start/sample/chat_done. Open-keyed
@@ -59,6 +71,15 @@ class LiveStore {
   onSnapshot: (() => void) | null = null;
 
   #stop: (() => void) | null = null;
+
+  /** THE single entry for assigning a server-sent state into our mirror — SSE
+   *  events and the responses of our own POST /api/state alike. A response is a
+   *  full bus snapshot, so a params-only patch of ours comes back carrying whoever
+   *  owns the bus right now; assigning it raw is exactly the cross-workspace
+   *  clobber. Everything funnels through mergeBusState instead. */
+  adopt(next: PlaygroundState | null | undefined): void {
+    if (next) this.state = mergeBusState(this.state, next, this.workspaceId);
+  }
 
   /** Open the global SSE state stream once. Idempotent. */
   start(): void {
@@ -109,9 +130,7 @@ class LiveStore {
         thinking: prev.thinking,
         top_p: prev.top_p
       })
-      .then((merged) => {
-        if (merged) this.state = merged;
-      })
+      .then((merged) => this.adopt(merged))
       .catch((e) => console.warn('bus re-prime failed', e));
   }
 
@@ -134,13 +153,13 @@ class LiveStore {
             next.conversation_id == null &&
             (prev.conversation_id != null || next.chat_id < prev.chat_id);
           if (wiped && !next.running) this.#reprime(prev);
-          else if (!wiped) this.state = next;
+          else if (!wiped) this.adopt(next);
         }
         this.onSnapshot?.(); // reconnect reconcile (a fresh subscriber always gets a snapshot)
         break;
       }
       case 'patch':
-        if (data?.state) this.state = data.state as PlaygroundState;
+        this.adopt(data?.state as PlaygroundState | undefined);
         break;
       case 'chat_start': {
         const panel = (data?.panel ?? 'primary') as Panel;
