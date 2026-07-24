@@ -25,3 +25,6 @@ src/tinkerscope/web_dist/
 
 # OS / editor
 .DS_Store
+
+# Backups written by scripts/repair_panel_layouts.py --apply
+layout-backups/
