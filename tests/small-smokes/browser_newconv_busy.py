@@ -16,7 +16,8 @@ then assert (1) the New button re-enables and (2) clicking it switches conv + ?w
 Needs a live server (TINKER_API_KEY) — base-model sampling has no servable-window
 dependency, so this works regardless of which LoRA runs are aged out.
 """
-import sys, time
+import sys
+import time
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 

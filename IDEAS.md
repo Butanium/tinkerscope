@@ -135,9 +135,8 @@ its coordination note), the third is the thread-system feature itself.
   with tests already covering behavior. Clément flagged the cli.py size on
   2026-07-24. *(opus-5, 2026-07-24)*
 
-- **Run ruff over all of `tests/` once.** The pre-commit hook lints only STAGED
-  Python, so smoke files that nobody has touched in months carry latent errors
-  (an unused `import math` in `browser_storage_v2_monster.py` surfaced only because
-  the rename sweep staged it, and it aborted a commit mid-release). One cleanup
-  pass + a `ruff --select F tests/` in CI-of-the-mind would stop that ambush.
-  *(opus-5, 2026-07-24)*
+- ~~**Run ruff over all of `tests/` once.**~~ **DONE 2026-07-24.** `uv run ruff
+  check` (default E4/E7/E9/F select) is now clean across `src/`, `tests/` and
+  `scripts/`; the repo-wide command is in CLAUDE.md §Build/verify. The F subset —
+  the class that ambushes commits via the hook — was already clean; the 15 errors
+  found were pycodestyle style in old smokes. *(opus-5, 2026-07-24)*

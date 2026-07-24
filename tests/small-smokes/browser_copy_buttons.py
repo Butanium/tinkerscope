@@ -64,7 +64,8 @@ def main():
         page.wait_for_function(f"document.body.innerText.includes({json.dumps(CONTENT)})", timeout=15000)
 
         amsg = page.locator(".message", has_text=CONTENT).first
-        clip = lambda: page.evaluate("navigator.clipboard.readText()")
+        def clip():
+            return page.evaluate("navigator.clipboard.readText()")
 
         def click(label, shift=False):
             amsg.hover()

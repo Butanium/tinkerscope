@@ -70,7 +70,7 @@ def main():
         assert typo["note"] == "no exact matches — close matches:", \
             f"expected the fallback note, got {typo['note']!r}"
         assert typo["labels"], "fuzzy tier should surface at least one row"
-        assert any("ed_sheeran" in l for l in typo["labels"]), \
+        assert any("ed_sheeran" in lbl for lbl in typo["labels"]), \
             f"expected an ed_sheeran run among fuzzy hits: {typo['labels'][:5]}"
         print(f"  fuzzy hit: {typo['labels'][0]!r}")
 
@@ -78,7 +78,7 @@ def main():
         exact = type_query(page, "sheeran")
         print(f"exact 'sheeran': note={exact['note']!r} rows={len(exact['labels'])}")
         assert exact["note"] is None, f"exact substring must NOT show the fuzzy note, got {exact['note']!r}"
-        assert exact["labels"] and all("sheeran" in l for l in exact["labels"]), \
+        assert exact["labels"] and all("sheeran" in lbl for lbl in exact["labels"]), \
             "exact tier should show only substring matches"
 
         # 3. GARBAGE → empty state, not the note.

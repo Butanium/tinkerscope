@@ -384,7 +384,10 @@ extracted UI: `tests/small-smokes/browser_{chart_modal,modals}.py`.
   suites via node), `npm run build`. The pre-commit hook builds on web/ commits —
   but **merge commits skip it**: after `git merge`, run `npm run build` yourself
   or the served `web/dist` silently stays stale.
-- **Python**: `uv run pytest -q` (no remote calls — capabilities probe is stubbed).
+- **Python**: `uv run pytest -q` (no remote calls — capabilities probe is stubbed)
+  and `uv run ruff check` (whole repo incl. `tests/`, kept at 0 — the pre-commit
+  hook only lints STAGED files with `--select F`, so a repo-wide run is what
+  catches latent errors in smokes nobody has touched).
 - **Browser smokes — use `scripts/smoke.sh`** (builds web/, launches a throwaway
   instance, runs the token-free set SERIALLY under a lock, skips the known-stale
   ones by name). Smokes must never run concurrently: `browser_state_reprime.py`

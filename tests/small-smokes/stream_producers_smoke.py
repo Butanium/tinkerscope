@@ -1,4 +1,5 @@
-import asyncio, os
+import asyncio
+import os
 from tinkerscope.api import tinker_oai, openrouter
 from tinkerscope.api.tinker_sampler import get_sampler, select_renderer_name
 
@@ -9,8 +10,10 @@ skip_if_streaming_disabled()  # asserts token deltas — off while streaming dis
 async def collect(it, tag):
     deltas, final = 0, None
     async for item in it:
-        if "delta" in item: deltas += 1
-        else: final = item
+        if "delta" in item:
+            deltas += 1
+        else:
+            final = item
     ok = final is not None and "content" in final
     print(f"[{tag}] deltas={deltas} final_content={final.get('content','')[:60]!r} finish={final.get('finish_reason')} reasoning={'reasoning' in (final or {})}")
     assert deltas >= 1, f"{tag}: no deltas streamed"

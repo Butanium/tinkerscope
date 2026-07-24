@@ -8,15 +8,20 @@ skip_if_streaming_disabled()  # token streaming temporarily off — see _smoke_m
 BASE="http://127.0.0.1:8770"  # weird-personas dev backend (has live runs)
 
 def run_chat(body, tag):
-    deltas=0; messages=0; done=False; err=None
+    deltas, messages, done, err = 0, 0, False, None
     with httpx.Client(base_url=BASE, timeout=120) as c:
         with connect_sse(c, "POST", "/api/chat", json=body) as es:
             for ev in es.iter_sse():
-                if ev.event=="delta": deltas+=1
+                if ev.event=="delta":
+                    deltas+=1
                 elif ev.event=="message":
                     messages+=1
-                elif ev.event=="done": done=True; break
-                elif ev.event=="error": err=ev.data; break
+                elif ev.event=="done":
+                    done=True
+                    break
+                elif ev.event=="error":
+                    err=ev.data
+                    break
     print(f"[{tag}] deltas={deltas} messages={messages} done={done} err={err}")
     return deltas, messages, done
 
