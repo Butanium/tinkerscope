@@ -45,6 +45,11 @@ Open the printed URL and you're in. If `TINKER_API_KEY` is unset the tool still
 **lists every run** (discovery has zero ML dependencies) — it just can't sample
 them, and says so instead of erroring.
 
+**Lost in the UI?** The `?` button in the sidebar's icon row opens a guide to the
+whole screen plus a keyboard-shortcut table. The longer prose version — for a
+person, or for an agent explaining the tool to one — is the `tinkerscope-guide`
+skill (`.claude/skills/tinkerscope-guide/SKILL.md`).
+
 ---
 
 ## What it does
@@ -176,7 +181,11 @@ tooltip change while Shift is held so you can see which action you'll get:
 | **Delete** | delete this one branch | delete **all** sibling branches at this turn |
 | **Bookmark** | save with a note (opens a form) | save **instantly**, no note |
 
-(**Continue** also takes **Ctrl/Cmd** — a separate modifier — to continue the same-depth turn in *every* panel; combine with Shift to resume the reasoning across all panels.)
+**Ctrl/Cmd** is a separate, orthogonal modifier: it fans the action out to *every*
+panel at this row's depth. It applies to **edit**, **regenerate**, **delete** and
+**continue**, and is only live in compare mode (>1 panel) — with a single panel
+it does nothing. Combine with Shift to get the power variant across all panels
+(e.g. Ctrl+Shift+Continue = resume the reasoning everywhere).
 
 #### Keyboard navigation
 

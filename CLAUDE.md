@@ -29,12 +29,18 @@ and in this file's reference section; HANDOFF.md itself is retired.
 
 - **`tinkpg` CLI changes ship with their docs, in the same commit.** Any new
   command / flag / behavior change updates: README.md §"The CLI" (command table
-  + option notes) AND the tinkerscope skill. **The skill lives in this repo at
-  `.claude/skills/tinkerscope/SKILL.md`** — `~/.claude/skills/tinkerscope` is a
-  symlink to it, so always edit the repo path (the Edit tool refuses to write
-  through the symlink) and commit it like any other file. Touch
-  `docs/API_CONTRACT.md` too if the HTTP surface changed. (Checklist is also in
-  `cli.py`'s module docstring.)
+  + option notes) AND the tinkerscope skill. **The skills live in this repo at
+  `.claude/skills/<name>/SKILL.md`** — the global copy is a *file-level* symlink
+  (`~/.claude/skills/<name>/` is a real dir holding `SKILL.md -> <repo path>`),
+  so always edit the repo path (the Edit tool refuses to write through the
+  symlink) and commit it like any other file. A new skill needs the dir + link
+  created by hand. Touch `docs/API_CONTRACT.md` too if the HTTP surface changed.
+  (Checklist is also in `cli.py`'s module docstring.)
+- **UI behavior changes ship with the human-facing docs, in the same commit.**
+  Two twins to keep in sync: the in-app `?` modal
+  (`web/src/lib/HelpModal.svelte`) and the `tinkerscope-guide` skill. Both
+  describe the BROWSER to a person; the `tinkerscope` skill describes the CLI to
+  an agent. Smoke: `tests/small-smokes/browser_help_modal.py`.
 - **Committing — no need to ask first.** Commit straight to `main` whenever work
   is at a clean, verified point; show the diff summary of what landed, don't gate
   on approval (Clément's standing preference for this repo — overrides the global

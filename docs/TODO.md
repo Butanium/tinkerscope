@@ -101,16 +101,53 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
 
 ## Next
 
-- [ ] **A human-facing guide, in two places** (Clément, 2026-07-24). The
-  `tinkerscope` skill is written for an AGENT driving the tool from the terminal;
-  nothing explains the UI to a person.
-  - A second skill, `tinkerscope-guide`: how to USE the workspace — panels and
-    what "compare" means, branching / ‹k/N› cyclers / threads, highlight rules,
-    the distribution chart's three modes, token probs, share packs. Written to be
-    read aloud to a human, not executed.
-  - An in-app **help button** (a `?` next to the workspace dropdown → a Modal with
-    the same content + keyboard shortcuts). The keyboard-nav feature especially is
-    currently undiscoverable.
+- [x] **A human-facing guide, in two places — SHIPPED 2026-07-24** (asked for by
+  Clément the same day). The `tinkerscope` skill is written for an AGENT driving
+  the tool from the terminal; nothing explained the UI to a person.
+  - `.claude/skills/tinkerscope-guide/SKILL.md` — the prose form: the four nouns
+    (workspace / panel / branch / thread), a task-shaped "things people actually
+    want to do" section, highlight rules, the chart's three modes, token probs,
+    prefill, pins, packs, the full key/modifier tables, and a
+    things-that-surprise-people list.
+  - The in-app **`?` button** (sidebar icon row, next to Stop) → `HelpModal.svelte`,
+    two tabs: Guide (condensed) + Keys (the lookup table). The keyboard row-nav
+    and the Shift/Ctrl modifier axes were the undiscoverable parts; both are now
+    written down. Smoke: `tests/small-smokes/browser_help_modal.py`.
+  - Placement note: the `?` went in the sidebar's global icon row rather than
+    beside the workspace dropdown as originally sketched — those three buttons
+    (new/rename/delete) all ACT on the workspace, and help doesn't.
+  - Keeping them honest is a working convention now (CLAUDE.md §Working
+    conventions): UI behavior change ⇒ both twins update in the same commit.
+- [x] **Isolated-instance snapshots moved to `/var/tmp` + self-reaping — FIXED
+  2026-07-24.** `scripts/dev-isolated.sh` copies the whole state home (~1.6 GB)
+  per launch and left every copy behind forever, in `/tmp` — which on this box is
+  a **15 GB tmpfs, i.e. RAM**. Eleven snapshots over three days filled it; the
+  resulting EDQUOT surfaced as *every* shell command exiting 1 with no output and
+  cost about an hour misdiagnosed as a broken harness. Two changes: snapshots now
+  live in `/var/tmp` (disk-backed, and the conventional home for large scratch
+  that should outlive the run), and each launch reaps older snapshots not in use
+  by a live process — identified via `/proc/<pid>/environ`, so a long-running
+  instance's state is never deleted out from under it. Reaping is not optional
+  housekeeping: this box is deliberately never rebooted, so the "cleared on
+  reboot" contract that makes tmpfs self-healing never fires.
+- [x] **Smoke runner scanned the wrong fixture root — FIXED 2026-07-24.**
+  `scripts/smoke.sh` defaulted to `~/projects2/weird-personas` only, but four
+  smokes in its own DEFAULT set (`browser_modals`, `browser_label_trunc`,
+  `browser_label_diff`, `browser_fuzzy_search`) hard-code `ed_sheeran`, whose runs
+  exist only under `~/projects2/negation_neglect/datasets/training_datasets`. They
+  failed on a 15s `wait_for_function` timeout — a failure mode that reads exactly
+  like a UI regression. The runner now scans BOTH roots by default
+  (`SMOKE_SCAN_DIR` overrides, space-separated), which fixed three of the four.
+  - `browser_modals` needed a real repair, not just the root: it waited for the
+    literal string `ed_sheeran` in the body, which only appears when a run of
+    that NAME is the *selected* model — ambient state it never set up, and
+    unrelated to the four modals it actually tests. Now waits on `aside.sidebar`
+    + `.model-dropdown-trigger`. Worth grepping for the same anti-pattern
+    elsewhere: readiness waits keyed on data rather than structure.
+  - `browser_workspace_url` is the suite's **load canary** (10s wait for
+    `select.ws-select`): it failed once here purely because a forgotten dev
+    instance on another port was competing for CPU, and passed alone. Read its
+    failure as "find the stray process" before suspecting the URL sync.
 - [ ] **`browser_branching.py` is stale** — fails with a Playwright strict-mode
   violation (`textarea.edit-textarea` resolves to 2 elements) and has done since
   before the workspace-scoping fix (verified against the pre-fix commit

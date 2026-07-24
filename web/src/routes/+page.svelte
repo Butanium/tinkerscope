@@ -29,6 +29,7 @@
   import SlideshowModal from '$lib/SlideshowModal.svelte';
   import OrManagerModal from '$lib/OrManagerModal.svelte';
   import TinkerPickerModal from '$lib/TinkerPickerModal.svelte';
+  import HelpModal from '$lib/HelpModal.svelte';
   import ModelDropdown from '$lib/ModelDropdown.svelte';
   import SplitChip from '$lib/SplitChip.svelte';
   import TruncLabel from '$lib/TruncLabel.svelte';
@@ -109,6 +110,10 @@
   // the regenerate/edit buttons (icon + tooltip swap). Wired in onMount.
   let shiftDown = $state(false);
   let ctrlDown = $state(false);
+
+  // The `?` help modal (HelpModal.svelte) — the human-facing counterpart to the
+  // agent-facing tinkerscope skill.
+  let showHelp = $state(false);
 
   // ── Live shared state (single source of truth for selection/params) ──
   // Render from live.state; fall back to defaults until the first snapshot. These
@@ -1406,6 +1411,13 @@
             <path d="M11.5 1v3h-3M2.5 13v-3h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
         </button>
+        <button class="theme-toggle" onclick={() => (showHelp = true)} data-tooltip="How to use tinkerscope — features + keyboard shortcuts" use:tip aria-label="Help">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+            <circle cx="8" cy="8" r="6.25" stroke="currentColor" stroke-width="1.3" />
+            <path d="M6.2 6.1a1.85 1.85 0 1 1 2.3 1.85c-.35.1-.5.35-.5.75v.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+            <circle cx="8" cy="11.4" r="0.75" fill="currentColor" />
+          </svg>
+        </button>
         <button class="btn-stop-sidebar" class:active={anyRunning} onclick={() => chat.stopGeneration()} data-tooltip="Stop all generation" use:tip disabled={!anyRunning}>
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
             <rect x="2" y="2" width="10" height="10" rx="1.5" fill="currentColor" />
@@ -1926,6 +1938,11 @@
     </div>
   </div>
 </div>
+
+<!-- Help Modal -->
+{#if showHelp}
+  <HelpModal onclose={() => (showHelp = false)} />
+{/if}
 
 <!-- Chart Modal -->
 {#if showChart}
