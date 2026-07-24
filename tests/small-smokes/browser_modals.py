@@ -32,7 +32,15 @@ def main() -> None:
         page.on("pageerror", lambda e: errors.append(str(e)))
 
         page.goto(BASE, wait_until="load", timeout=20000)
-        page.wait_for_function("document.body.innerText.includes('ed_sheeran')", timeout=15000)
+        # Readiness = the sidebar's model picker exists, i.e. the run catalog
+        # resolved. This used to wait for the literal string 'ed_sheeran' in the
+        # body, which only appears if a run of that NAME happens to be the
+        # SELECTED model — ambient state this smoke never sets up. It silently
+        # depended on the scan roots and on whatever prefs the state snapshot
+        # carried, and broke the moment either changed (2026-07-24). None of the
+        # four modals below care which run is selected.
+        page.wait_for_selector("aside.sidebar", timeout=15000)
+        page.wait_for_selector(".model-dropdown-trigger", timeout=15000)
 
         results = []
         for kind, trigger, expected_header in CASES:

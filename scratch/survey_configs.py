@@ -113,7 +113,7 @@ for root_name, root in ROOTS.items():
     for f, c in sorted(field_counts.items(), key=lambda kv: -kv[1]):
         print(f"  {c:3d}/{n}  {f}")
 
-    print(f"\n--- distinct values (low-cardinality dims) ---")
+    print("\n--- distinct values (low-cardinality dims) ---")
     for dim, ctr in distinct_values.items():
         if not ctr:
             continue
@@ -122,5 +122,5 @@ for root_name, root in ROOTS.items():
             sval = val if len(str(val)) < 70 else str(val)[:67] + "..."
             print(f"      {c:3d}  {sval}")
 
-    print(f"\n--- ALL top-level keys seen (union across configs) ---")
+    print("\n--- ALL top-level keys seen (union across configs) ---")
     print("  " + ", ".join(sorted(all_keys.keys())))

@@ -17,6 +17,7 @@
 #   scripts/smoke.sh --fresh         # ... against EMPTY state (chart_rules wants this)
 #   scripts/smoke.sh a b c           # only these smokes (names, no path/extension)
 #   PORT=8899 scripts/smoke.sh       # pin the port
+#   SMOKE_SCAN_DIR="d1 d2" scripts/smoke.sh   # override the scan roots (space-separated)
 #
 # Exit non-zero if any smoke fails; per-smoke logs land in the run dir it prints.
 
@@ -26,7 +27,12 @@ cd "$ROOT"
 
 PORT="${PORT:-8813}"
 FRESH=""
-SCAN_DIR="${SMOKE_SCAN_DIR:-$HOME/projects2/weird-personas}"
+# BOTH fixture roots by default. The label/typeahead smokes (modals, label_trunc,
+# label_diff, fuzzy_search) hard-code `ed_sheeran`, whose runs live ONLY under
+# negation_neglect — with weird-personas alone they fail on a 15s timeout that
+# reads like a UI regression and isn't one (hit 2026-07-24). Override with
+# SMOKE_SCAN_DIR (space-separated for several roots).
+SCAN_DIR="${SMOKE_SCAN_DIR:-$HOME/projects2/weird-personas $HOME/projects2/negation_neglect/datasets/training_datasets}"
 PICK=()
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -56,6 +62,7 @@ DEFAULT=(
     browser_label_trunc
     browser_label_diff
     browser_fuzzy_search
+    browser_help_modal
 )
 # Known-stale: failures here carry NO signal. Repair tracked in docs/TODO.md.
 declare -A STALE=(
@@ -81,7 +88,8 @@ if ! ( cd web && npm run build ) > "$RUN_DIR/build.log" 2>&1; then
     echo "web build FAILED:"; cat "$RUN_DIR/build.log"; exit 1
 fi
 
-scripts/dev-isolated.sh --port "$PORT" $FRESH "$SCAN_DIR" > "$RUN_DIR/server.log" 2>&1 &
+# shellcheck disable=SC2086  # $SCAN_DIR is word-split on purpose (several scan roots)
+scripts/dev-isolated.sh --port "$PORT" $FRESH $SCAN_DIR > "$RUN_DIR/server.log" 2>&1 &
 SERVER_PID=$!
 cleanup() {
     kill "$SERVER_PID" 2>/dev/null
