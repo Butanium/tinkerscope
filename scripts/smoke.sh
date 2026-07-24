@@ -80,6 +80,28 @@ if ! flock -n 9; then
     flock 9
 fi
 
+# The lock stops a sibling SWEEP, but not a dev-isolated instance someone forgot
+# to kill. Those still fail smokes — by eating CPU, not by touching our port —
+# and browser_workspace_url (10 s wait) dies first with a symptom that reads
+# exactly like a real URL-sync regression. Cost an hour on 2026-07-24.
+#
+# Detect them by XDG_STATE_HOME pointing at a tscope-iso snapshot, NOT by "is a
+# tinkerscope running": the user's own long-lived instance is always up, so
+# warning about that would fire every run and be tuned out within a day.
+strays=""
+for pid in $(pgrep -f 'tinkerscope' 2>/dev/null); do
+    [ "$pid" = "$$" ] && continue
+    if tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -q '^XDG_STATE_HOME=.*tscope-iso'; then
+        strays="$strays    $pid $(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | cut -c1-80)"$'\n'
+    fi
+done
+if [ -n "$strays" ]; then
+    echo "⚠ leftover dev-isolated instance(s) still running — they compete for CPU and"
+    echo "  cause TIMEOUT failures that look like product bugs (workspace_url dies first):"
+    printf '%s' "$strays"
+    echo "  Kill them (pkill -f 'port <N>') before believing any timeout failure."
+fi
+
 RUN_DIR="$(mktemp -d /tmp/tinkerscope-smoke-XXXXXX)"
 echo "logs: $RUN_DIR"
 

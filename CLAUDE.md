@@ -262,6 +262,10 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     reflow handling. Items come in via the children snippet (styled by chat.css
     `.row-menu-item`), which receives `close()`; the `resetKey` prop closes a
     menu when the UNKEYED chat rows hand the mounted instance a different node.
+  - `lib/HelpModal.svelte` — the `?` modal (sidebar icon row): Guide + Keys tabs
+    describing the UI to a HUMAN. Its prose twin is the `tinkerscope-guide`
+    skill; both update in the same commit as any UI behavior change (see
+    §Working conventions). Smoke: `browser_help_modal.py`.
   - `lib/ChartModal.svelte`, `lib/TagModal.svelte`, `lib/DatasetModal.svelte`,
     `lib/SlideshowModal.svelte`, `lib/OrManagerModal.svelte`,
     `lib/TinkerPickerModal.svelte` — the six workspace modals. Each owns its body

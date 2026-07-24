@@ -148,6 +148,21 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
     `select.ws-select`): it failed once here purely because a forgotten dev
     instance on another port was competing for CPU, and passed alone. Read its
     failure as "find the stray process" before suspecting the URL sync.
+- [ ] **Smoke coverage gap: 29 of 50 browser smokes are in NO state.**
+  `scripts/smoke.sh` runs 18 and names 3 as stale — the other **29 are neither
+  run nor marked**, so nobody knows whether they pass, and "the sweep is green"
+  means 36% of the suite. Some genuinely need tokens (`*_live`,
+  `detached_scale`, `cli_send`), but ~10 look seeded/token-free and are probably
+  free wins: `continue_sample`, `cross_panel_edit`, `edit_leak`, `n_samples`,
+  `panel_bubble_continues`, `panel_foreign_fold`, `send_branch`, `thinking_both`,
+  `model_availability`, plus `chart_modal` / `copy_buttons` / `highlight_drag` /
+  `save_lightening` / `storage_v2_monster` / `newconv_busy` worth a look.
+  Suggested pass: run each uncategorised one once against a dev-isolated
+  instance, then put it in DEFAULT (passes), STALE with the reason (fails), or a
+  new `NEEDS_TOKENS` list (real sampling). The goal is that every smoke on disk
+  is in exactly one bucket, so the count is honest.
+  Reproduce the audit:
+  `comm -23 <(ls tests/small-smokes/browser_*.py | xargs -n1 basename | sed 's/\.py$//' | sort) <(sed -n '/^DEFAULT=(/,/^)/p;/^declare -A STALE=(/,/^)/p' scripts/smoke.sh | grep -oE 'browser_[a-z_0-9]+' | sort -u)`
 - [ ] **`browser_branching.py` is stale** — fails with a Playwright strict-mode
   violation (`textarea.edit-textarea` resolves to 2 elements) and has done since
   before the workspace-scoping fix (verified against the pre-fix commit

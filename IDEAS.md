@@ -133,6 +133,40 @@ its coordination note), the third is the thread-system feature itself.
   with tests already covering behavior. Clément flagged the cli.py size on
   2026-07-24. *(opus-5, 2026-07-24)*
 
+## From the 2026-07-24 help-guide / layout-history session (opus-5)
+
+- **The smokes are coupled to Clément's personal run directories.** 15 smoke
+  files hard-code `ed_sheeran` / `weird-personas` / `negation_neglect` paths, so
+  the suite only works on this box, and a fixture that moves breaks tests in a
+  way that reads like a product regression (cost an hour this session; see
+  `docs/TODO.md`). The magic-wand version: a tiny CHECKED-IN fixture tree —
+  a handful of synthetic run dirs (`config.json` + `checkpoints.jsonl`, no real
+  weights; `tests/conftest.py::_write_run` already builds exactly this for
+  pytest) — and smokes pointed at it by default. Discovery needs no ML deps, so
+  the fixtures cost nothing; only the genuinely-sampling smokes would still want
+  real runs. Would also make the suite runnable by anyone who clones the repo.
+  *(opus-5, 2026-07-24)*
+
+- **Readiness waits should key on STRUCTURE, not data.** `browser_modals` waited
+  for the string `ed_sheeran` to appear as its "page loaded" signal — true only
+  when a run of that name happened to be the SELECTED model. It silently
+  depended on scan roots and snapshot prefs and broke when either moved. Fixed
+  there; the general rule is worth applying when touching any smoke: wait for
+  `aside.sidebar` / `.model-dropdown-trigger` / a testid, never for content the
+  smoke didn't create. ~15 smokes use `innerText.includes(...)` waits — most
+  legitimately wait on content they seeded, but they're worth a glance when one
+  starts failing mysteriously. *(opus-5, 2026-07-24)*
+
+- **A cheap "is anything else running?" preflight in `smoke.sh`.** Twice this
+  session a smoke failed for environmental reasons — once from a concurrent
+  sweep, once from a forgotten dev instance on another port eating CPU — and
+  both times the failure looked exactly like the bug under investigation.
+  `browser_workspace_url` is the reliable canary (10 s wait). The runner already
+  takes a lock against sibling sweeps; it could also `pgrep` for other
+  tinkerscope instances and print a loud warning before starting. Three lines,
+  and it converts an hour of false diagnosis into a banner.
+  *(opus-5, 2026-07-24)*
+
 - ~~**Run ruff over all of `tests/` once.**~~ **DONE 2026-07-24.** `uv run ruff
   check` (default E4/E7/E9/F select) is now clean across `src/`, `tests/` and
   `scripts/`; the repo-wide command is in CLAUDE.md §Build/verify. The F subset —
