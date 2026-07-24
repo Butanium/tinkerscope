@@ -25,8 +25,9 @@ Two directions:
     so re-applying never clobbers a collaborator's own setup.
   - `export_pack` — author a pack from a live state dir (`tinkerscope pack export`):
     gather the models actually in use (rewriting bare run-ids → shareable `ckpt:` paths
-    via discovery), the current params/layout, and the saved workspaces (heavy per-node
-    logprob/raw_meta blobs stripped — a pack is a single self-contained YAML).
+    via discovery), the current params/layout, and the saved workspaces (each node's
+    `raw_meta` inlined for the collaborator's Raw view; the heavier `token_logprobs`
+    stripped — a pack is a single self-contained YAML).
 
 The file always round-trips through `Pack.from_dict` / `Pack.to_dict`; export writes one
 YAML file (`--overwrite` regenerates; otherwise it merges into an existing file so
@@ -209,10 +210,18 @@ def load_pack(src: str) -> Pack:
 # ═══════════════════════════════════════════════════════════════════════════════════
 # APPLY
 # ═══════════════════════════════════════════════════════════════════════════════════
-def apply_pack(pack: Pack, *, force: bool = False) -> dict:
+def apply_pack(pack: Pack, *, force: bool = False, reseed: bool = False) -> dict:
     """Seed the current state dir (SETTINGS.state_dir) from `pack`. Idempotent for the
     additive parts; the default params/layout are written only when the folder is fresh
-    (no prefs.json) unless `force`. Returns a summary dict."""
+    (no prefs.json) unless `force`. Returns a summary dict.
+
+    `reseed` (for iterating on a pack you keep re-exporting) makes the pack's workspaces
+    an EXACT mirror of the file: each is deleted before re-import so its per-node
+    raw_meta/logprob blobs are rewritten (a plain re-apply keeps them — the blob store is
+    write-once), workspaces dropped from the pack are removed from this pack's namespace,
+    and the default params are overwritten (reseed implies `force`). It only touches
+    conversations in THIS pack's `pack-<name>-*` id namespace — a collaborator's own
+    conversations and other packs' workspaces are untouched."""
     from .api import conversation_store, pack_models_store
     from .api.routes import openrouter_models as or_store
     from .api.settings import SETTINGS
@@ -232,8 +241,18 @@ def apply_pack(pack: Pack, *, force: bool = False) -> dict:
         summary["openrouter"] = len(or_models)
 
     # 2. Workspaces → conversation store, deterministic id (re-apply upserts in place).
-    for ws in pack.workspaces:
-        cid = f"pack-{_slug(pack.name)}-{_slug(ws.name)}"
+    prefix = f"pack-{_slug(pack.name)}-"
+    cids = {prefix + _slug(ws.name): ws for ws in pack.workspaces}
+    if reseed:
+        # Drop this pack's workspaces that the current file no longer contains, then
+        # delete the kept ones so upsert rewrites their (write-once) blobs from the pack.
+        for summ in conversation_store.list_summaries():
+            sid = summ.get("id")
+            if isinstance(sid, str) and sid.startswith(prefix) and sid not in cids:
+                conversation_store.delete(sid)
+    for cid, ws in cids.items():
+        if reseed:
+            conversation_store.delete(cid)
         body = ws.body
         conversation_store.upsert(
             id=cid,
@@ -248,10 +267,10 @@ def apply_pack(pack: Pack, *, force: bool = False) -> dict:
         )
         summary["workspaces"] += 1
 
-    # 3. Default params + panel layout → prefs.json last_session. Only if fresh / forced,
-    #    so re-applying a pack never overwrites a collaborator's own params.
+    # 3. Default params + panel layout → prefs.json last_session. Only if fresh / forced /
+    #    reseed, so a plain re-apply never overwrites a collaborator's own params.
     fresh = not SETTINGS.prefs_path.exists()
-    if fresh or force:
+    if fresh or force or reseed:
         prefs = read_json(SETTINGS.prefs_path, {}) or {}
         prefs["last_session"] = json.dumps(_build_last_session(pack))
         write_json(SETTINGS.prefs_path, prefs)
@@ -411,6 +430,7 @@ def export_pack(
     exclude: list[str] | None = None,
     workspaces: bool = True,
     workspace_names: list[str] | None = None,
+    include_defaults: bool = True,
     existing: Pack | None = None,
     warn: Callable[[str], None] = lambda _m: None,
 ) -> Pack:
@@ -470,12 +490,19 @@ def export_pack(
             m.label = preferred[m.key]
 
     # Default params + layout from prefs last_session; drop panels whose model was filtered.
-    label_by_ref = {m.panel_ref: m.label for m in models}
-    defaults = state_dir_reader.prefs_defaults(resolve, label_by_ref)
+    if include_defaults:
+        label_by_ref = {m.panel_ref: m.label for m in models}
+        defaults = state_dir_reader.prefs_defaults(resolve, label_by_ref)
+    else:
+        defaults = {}
 
     pack = Pack(name=name, description=description, models=models, defaults=defaults, workspaces=ws_out)
     if existing is not None:
         pack = _merge_packs(existing, pack, name_override=name, desc_override=description, exclude=exclude)
+    # Re-strip after the merge: a merge unions base+fresh defaults, so an explicit
+    # --no-defaults must clear the merged result too, not just the fresh half.
+    if not include_defaults:
+        pack.defaults = {}
     return pack
 
 

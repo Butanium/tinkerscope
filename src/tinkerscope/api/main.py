@@ -42,6 +42,11 @@ async def lifespan(app: FastAPI):
     # partial data (the legacy file is left untouched). Off the event loop because
     # verifying a large store is CPU-bound; the raise still propagates through await.
     await asyncio.to_thread(conversation_store.boot)
+    # Prime the bus's global sampling params from prefs so a CLI-only consumer of a pack
+    # sees the pack's defaults before any browser connects (see state.seed_bus_from_prefs).
+    from .state import seed_bus_from_prefs
+
+    seed_bus_from_prefs()
     # Warm the tinker capabilities cache so the first /api/models call can
     # already mark runs sampleable/not. Non-fatal if it fails (offline / no key).
     # Offloaded to a thread: the tinker SDK's get_server_capabilities is sync and

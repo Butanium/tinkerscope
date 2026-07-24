@@ -242,14 +242,18 @@ run dirs needed:
 
 ```bash
 tinkerscope --pack https://raw.githubusercontent.com/you/repo/main/pack.yaml   # consume + serve
+tinkerscope --pack pack.yaml --reseed                                          # re-consume, mirror the file exactly
 tinkerscope pack export pack.yaml                                              # author from your setup
+tinkerscope pack export pack.yaml --no-defaults                               # author without the sampling-params block
 ```
 
 Models are addressed self-contained (`ckpt:` sampler path / `base:` / `openrouter:`),
 so a published checkpoint (same sampler id as the private path) samples on anyone's
 account. Applying is merge-safe (never clobbers a collaborator's own params unless
 `--force`); the shared checkpoints show up as first-class addable models in the
-"+ Tinker model" typeahead. Full doc: **[`docs/PACK.md`](docs/PACK.md)**.
+"+ Tinker model" typeahead. Iterating on a pack you keep re-exporting? `--reseed`
+rebuilds its workspaces so re-exported `raw_meta` blobs refresh and dropped workspaces
+go away. Full doc: **[`docs/PACK.md`](docs/PACK.md)**.
 
 ---
 

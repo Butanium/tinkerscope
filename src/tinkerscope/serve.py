@@ -67,6 +67,8 @@ def _pack_command(argv: list[str]) -> None:
     ex.add_argument("--exclude-model", action="append", default=None, metavar="SUBSTR",
                     help="drop models whose label/ref matches (repeatable)")
     ex.add_argument("--no-workspaces", action="store_true", help="exclude saved workspaces")
+    ex.add_argument("--no-defaults", action="store_true",
+                    help="omit the defaults block (sampling params + default panel layout) from the pack")
     ex.add_argument("--workspace", action="append", default=None, metavar="NAME",
                     help="include only these workspaces by name (repeatable)")
     ex.add_argument("--overwrite", action="store_true",
@@ -100,6 +102,7 @@ def _pack_export(args) -> None:
         exclude=args.exclude_model,
         workspaces=not args.no_workspaces,
         workspace_names=args.workspace,
+        include_defaults=not args.no_defaults,
         existing=existing,
         warn=warnings.append,
     )
@@ -130,6 +133,8 @@ def main() -> None:
                         help="apply a share pack (local path or http(s) URL) to this folder's state before serving")
     parser.add_argument("--force", action="store_true",
                         help="with --pack: also overwrite existing default params/layout (default: keep them if the folder was already used)")
+    parser.add_argument("--reseed", action="store_true",
+                        help="with --pack: fully rebuild the pack's workspaces (delete + re-import, so re-exported raw_meta/logprob blobs refresh and dropped nodes are removed) and overwrite default params — for iterating on a pack you keep re-exporting (implies --force)")
     args = parser.parse_args()
 
     if args.dirs:
@@ -154,7 +159,7 @@ def main() -> None:
         from . import pack as packmod
 
         p = packmod.load_pack(args.pack)
-        s = packmod.apply_pack(p, force=args.force)
+        s = packmod.apply_pack(p, force=args.force, reseed=args.reseed)
         print(f"applied pack '{s['pack']}': {s['models']} model(s), {s['openrouter']} openrouter, "
               f"{s['workspaces']} workspace(s), default params {s['params']}")
 

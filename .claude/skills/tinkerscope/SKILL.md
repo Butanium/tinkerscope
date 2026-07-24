@@ -30,12 +30,17 @@ tinkerscope <dirs> --port N        # scan <dirs> for runs (checkpoints.jsonl + c
 `tinkerscope --pack <file|url>` seeds this folder from a portable YAML bundle (public
 checkpoints + default params + workspaces) then serves — hand a collaborator a
 reproducible setup with no local run dirs. `tinkerscope pack export <out.yaml> --dir
-<scan-root> [--workspace NAME] [--models-from panels|workspaces|all|runs] [--exclude-model SUBSTR]`
+<scan-root> [--workspace NAME] [--models-from panels|workspaces|all|runs] [--exclude-model SUBSTR] [--no-defaults]`
 authors one from the live state. Two gotchas: **`--dir` must be the scan root the running
 instance was launched with** (find it: `ps aux | grep '[t]inkerscope'`, or the state dir
 won't match and export reads nothing); and `--workspace NAME` exports ONE saved workspace
-(omit → all). Packs carry only models + params + workspaces — never highlights/pins.
-Merge-safe (won't clobber params without `--force`). Full flags + format: `docs/PACK.md`.
+(omit → all). Packs carry only models + params + workspaces — never highlights/pins
+(`--no-defaults` drops the params too). Export keeps each node's `raw_meta` (the Raw view)
+but strips `token_logprobs`. Merge-safe (won't clobber params without `--force`).
+**Iterating on a pack** (re-export → re-consume the SAME folder)? A plain re-apply keeps
+write-once blobs and never drops workspaces — use `tinkerscope --pack <file> --reseed` to
+mirror the file exactly (refresh `raw_meta` blobs, drop removed workspaces, overwrite params).
+Full flags + format: `docs/PACK.md`.
 
 ## Drive the shared playground
 

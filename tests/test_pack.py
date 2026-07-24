@@ -128,6 +128,83 @@ def test_apply_idempotent_workspaces(backend):
     assert ids == ["pack-wp-pack-probe"]  # one, not duplicated
 
 
+def _reseed_pack(ws_list: list[tuple[str, str]]) -> packmod.Pack:
+    """A pack whose workspaces each carry one assistant node with an inline raw_meta,
+    so apply splits it into a write-once blob. `ws_list` = [(ws_name, raw_meta), …]."""
+    return packmod.Pack(
+        name="rp",
+        models=[packmod.PackModel("hc", "ckpt", GOOD_FINAL)],
+        workspaces=[
+            packmod.PackWorkspace(n, {
+                "name": n,
+                "panels": [{"id": "primary", "run_id": "ckpt:" + GOOD_FINAL, "checkpoint": None}],
+                "trees": {"primary": {"nodes": {
+                    "n1": {"role": "user", "content": "hi"},
+                    "n2": {"role": "assistant", "content": "yo", "raw_meta": rm},
+                }}},
+            })
+            for n, rm in ws_list
+        ],
+    )
+
+
+def test_apply_reseed_refreshes_blobs_and_drops_removed(backend):
+    """A plain re-apply keeps stale blobs (write-once) and never drops workspaces;
+    --reseed rebuilds each workspace (fresh blobs) and removes ones no longer in the pack."""
+    from tinkerscope.api import conversation_store as cs
+
+    packmod.apply_pack(_reseed_pack([("a", "V1"), ("b", "B")]))
+    assert cs.get_blobs("pack-rp-a", ["n2"])["n2"]["raw_meta"] == "V1"
+    assert cs.get_body("pack-rp-b") is not None
+
+    # plain re-apply with A's raw_meta bumped → write-once blob keeps V1 (the gap)
+    packmod.apply_pack(_reseed_pack([("a", "V2")]))
+    assert cs.get_blobs("pack-rp-a", ["n2"])["n2"]["raw_meta"] == "V1"
+    assert cs.get_body("pack-rp-b") is not None  # plain apply never drops workspaces
+
+    # reseed with A bumped and B removed → A refreshed to V2, B dropped
+    packmod.apply_pack(_reseed_pack([("a", "V2")]), reseed=True)
+    assert cs.get_blobs("pack-rp-a", ["n2"])["n2"]["raw_meta"] == "V2"
+    assert cs.get_body("pack-rp-b") is None
+
+
+def test_export_no_defaults(backend):
+    """--no-defaults omits the defaults block entirely — even when merging into an
+    existing file that had one (the merge must not resurrect it)."""
+    from tinkerscope.api import conversation_store
+    from tinkerscope.api.settings import SETTINGS
+    from tinkerscope.api.store import write_json
+
+    _seed_live_state(conversation_store, SETTINGS, write_json)
+    with_def = packmod.export_pack(state_dir_reader=packmod.StateReader(), name="e",
+                                   description=None, models_from="all")
+    assert with_def.defaults  # baseline: defaults present
+
+    existing = packmod.Pack(name="e", defaults={"temperature": 0.9, "panels": ["x"]})
+    without = packmod.export_pack(state_dir_reader=packmod.StateReader(), name="e",
+                                  description=None, models_from="all",
+                                  include_defaults=False, existing=existing)
+    assert without.defaults == {}
+
+
+def test_seed_bus_from_prefs(backend):
+    """Startup seeds the bus's GLOBAL params from prefs (so a CLI-only pack consumer sees
+    them) but NOT panels — leaving the browser's own restore (gated on all-null panels) intact."""
+    from tinkerscope.api import state as state_mod
+    from tinkerscope.api.settings import SETTINGS
+    from tinkerscope.api.store import write_json
+
+    write_json(SETTINGS.prefs_path, {"last_session": json.dumps({
+        "temperature": 0.42, "max_tokens": 2048, "n_samples": 7, "thinking": True, "top_p": 0.9,
+        "panels": [{"id": "primary", "run_id": "ckpt:x", "checkpoint": None}], "top_k": 33,
+    })})
+    state_mod.BUS.state = state_mod.PlaygroundState()  # clean baseline (BUS is a singleton)
+    state_mod.seed_bus_from_prefs()
+    s = state_mod.BUS.state
+    assert (s.temperature, s.max_tokens, s.n_samples, s.thinking, s.top_p) == (0.42, 2048, 7, True, 0.9)
+    assert len(s.panels) == 1 and s.panels[0].run_id is None  # panels untouched
+
+
 def test_tinker_models_endpoint_merge(client):
     # A pack ckpt NOT in the account sweep = the real cross-account case: it must still
     # appear (the whole point). GOOD_FINAL IS in the sweep → must NOT be double-listed.

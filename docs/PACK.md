@@ -65,10 +65,23 @@ Seeds the state dir for the scanned folder, then serves. **Merge-safe** by desig
   Upserted (deduped by ref) — **always**.
 - **OpenRouter refs** → the global `openrouter_models.json` — upserted, **always**.
 - **workspaces** → installed under a deterministic id (`pack-<pack>-<workspace>`), so
-  re-applying updates in place instead of piling duplicates — **always**.
+  re-applying updates the light tree in place instead of piling duplicates — **always**.
+  ⚠️ Node blobs (`raw_meta`/`token_logprobs`) are **write-once**: a plain re-apply keeps
+  the old blobs even if the pack's changed, and never drops a workspace removed from the
+  pack. To iterate on a pack you keep re-exporting, use `--reseed`.
 - **default params + panel layout** → `prefs.json` **only if the folder is fresh** (no
-  prefs yet). Pass `--force` to overwrite. This is the only destructive part, so it's the
-  one protected — re-applying a pack never clobbers a collaborator's own params.
+  prefs yet). Pass `--force` (or `--reseed`) to overwrite. This is the only destructive
+  part, so it's the one protected — a plain re-apply never clobbers a collaborator's own params.
+
+`--reseed` makes the pack's workspaces an EXACT mirror of the file: each is deleted + re-imported
+(so re-exported `raw_meta`/`token_logprobs` blobs refresh), workspaces dropped from the pack are
+removed, and default params are overwritten (implies `--force`). It only touches this pack's
+`pack-<name>-*` id namespace — a collaborator's own conversations and other packs are untouched.
+
+On startup the server primes the live state bus's **global sampling params** from `prefs.json`
+so a pure-CLI consumer (`tinkerscope --pack …` then `tinkpg params`, never opening a browser)
+sees the pack's defaults, not the library defaults. Only params seed — panels stay at defaults
+so the browser's own restore (gated on all-null panels) still runs and restores the layout.
 
 A published checkpoint needs no local dir; discovery is bypassed for `ckpt:` refs, so none
 of the sampleability greying applies to pack-wired panels.
@@ -85,6 +98,7 @@ maintain one committed file. `--overwrite` regenerates from scratch.
 | `--models-from panels\|workspaces\|all\|runs` | where to gather models (default `all` = current panels + workspaces + already-registered pack models; `runs` also converts every discovered run's checkpoint) |
 | `--include-model SUBSTR` / `--exclude-model SUBSTR` (repeatable) | keep-only / drop by label or ref match |
 | `--no-workspaces` / `--workspace NAME` (repeatable) | drop all / keep-only named workspaces |
+| `--no-defaults` | omit the `defaults` block (sampling params + default panel layout) |
 | `--name` / `--description` | override pack metadata |
 | `--overwrite` | regenerate instead of merging into an existing file |
 

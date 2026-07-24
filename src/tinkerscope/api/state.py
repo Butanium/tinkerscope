@@ -228,3 +228,35 @@ class StateBus:
 
 
 BUS = StateBus()
+
+
+# Global sampling params the CLI can read before any browser connects. On startup we
+# prime the bus from prefs.json's `last_session` so a pure-CLI consumer of a pack
+# (`tinkerscope --pack …` then `tinkpg params`, never opening a browser) sees the pack's
+# defaults instead of the PlaygroundState() library defaults. ONLY these five — the
+# shared-state params — are seeded; panels/conversation are deliberately left at defaults
+# so the browser's own restore (which fires only when every panel run_id is null) still
+# runs and restores the layout + the frontend-only params (top_k/presence/repetition).
+_SEEDABLE_PARAMS = ("temperature", "max_tokens", "n_samples", "thinking", "top_p")
+
+
+def seed_bus_from_prefs() -> None:
+    """Prime the bus's global sampling params from prefs.json's `last_session`.
+    Best-effort at startup: a missing/garbled prefs file leaves the defaults intact."""
+    import json
+
+    from .settings import SETTINGS
+    from .store import read_json
+
+    raw = (read_json(SETTINGS.prefs_path, {}) or {}).get("last_session")
+    if not raw:
+        return
+    try:
+        session = json.loads(raw) if isinstance(raw, str) else raw
+    except (ValueError, TypeError):  # corrupt double-encoded prefs — don't block startup
+        return
+    if not isinstance(session, dict):
+        return
+    for k in _SEEDABLE_PARAMS:
+        if session.get(k) is not None:
+            setattr(BUS.state, k, session[k])
