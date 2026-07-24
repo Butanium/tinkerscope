@@ -2746,8 +2746,8 @@ wheels = [
 
 [[package]]
 name = "tinker-cookbook"
-version = "0.5.3.dev1+g3e04119ce"
-source = { git = "https://github.com/thinking-machines-lab/tinker-cookbook.git#3e04119ce293a2b6ba5284e35267c9ba6d27c5da" }
+version = "0.4.2.dev56+ge0bf6a068"
+source = { git = "https://github.com/Butanium/tinker-cookbook.git?branch=feat%2Ftml-v0-disable-thinking#e0bf6a068944c99d7a6d81a25192fe859c97d9de" }
 dependencies = [
     { name = "aiohttp" },
     { name = "anyio" },
@@ -2816,7 +2816,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6" },
     { name = "sse-starlette", specifier = ">=2.1" },
     { name = "tinker", specifier = ">=0.23" },
-    { name = "tinker-cookbook", extras = ["inkling"], git = "https://github.com/thinking-machines-lab/tinker-cookbook.git" },
+    { name = "tinker-cookbook", extras = ["inkling"], git = "https://github.com/Butanium/tinker-cookbook.git?branch=feat%2Ftml-v0-disable-thinking" },
     { name = "typer", specifier = ">=0.12" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]

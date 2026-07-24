@@ -31,7 +31,12 @@ tinkerscope = "tinkerscope.serve:main"
 tinkpg = "tinkerscope.cli:app"
 
 [tool.uv.sources]
-tinker-cookbook = { git = "https://github.com/thinking-machines-lab/tinker-cookbook.git" }
+# TODO(revert once merged): temporarily pinned to the Butanium fork's feat branch for the
+# `tml_v0_disable_thinking` renderer (needed to sample weird-personas' Inkling checkpoints).
+# The branch is upstream/main + only that renderer commit. Revert to the upstream line below
+# as soon as thinking-machines-lab/tinker-cookbook PR #839 merges, then `uv tool install --reinstall`:
+#   tinker-cookbook = { git = "https://github.com/thinking-machines-lab/tinker-cookbook.git" }
+tinker-cookbook = { git = "https://github.com/Butanium/tinker-cookbook.git", branch = "feat/tml-v0-disable-thinking" }
 
 [build-system]
 requires = ["hatchling"]
