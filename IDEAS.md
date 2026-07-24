@@ -97,22 +97,20 @@ its coordination note), the third is the thread-system feature itself.
   `renders_whole_conversation(renderer)` helper — would be more robust and consistent.
   Low effort; do it when a 2nd such renderer shows up (YAGNI until then). *(opus-4.8, 2026-07-23)*
 
-- **Layout history / undo for a workspace.** What made the cross-tab clobber
-  (fixed in 574a207) *frightening* rather than merely annoying was that there was
-  no undo: the panel layout was overwritten in place and only recoverable because
-  `raw_meta` happens to record each node's sampler. A tiny append-only
-  `<id>.layouts.jsonl` — `{ts, panels}` on every layout-changing save, capped at
-  ~50 entries, a few hundred bytes each — would make any future layout accident a
-  one-command restore instead of a forensic exercise. Cheap (the save path already
-  knows when the layout changed: `#layoutDirty`), and it generalizes: the same
-  file answers "what models did this workspace use last week?". *(opus-5, 2026-07-24)*
+- ~~**Layout history / undo for a workspace.**~~ **SHIPPED 2026-07-24.**
+  `<state>/workspaces/<id>.layouts.jsonl` — `{ts, panels}` appended on every
+  layout CHANGE (not every save), capped at 50, recorded in
+  `workspace_store._record_layout` off the single `_persist` choke point. Read via
+  `GET /api/workspaces/{id}/layout-history`; browse/restore with
+  `scripts/layout_history.py`. Tests: `tests/test_layout_history.py`. Note it is
+  NOT backfilled — history starts at the first layout change after this ships.
+  *(opus-5, 2026-07-24)*
 
-- **A "suspiciously large layout change" tripwire.** The clobber replaced 5 panels
-  at once with a different 10 — a shape no human action produces. The server could
-  log a warning when a PATCH replaces the whole panel list with a disjoint model
-  set (`|old ∩ new| == 0` and both non-trivial). It would have caught this bug in
-  June, from a log line, with no invariant checking of tree contents. Pair with
-  `scripts/repair_panel_layouts.py`, which is the after-the-fact version.
+- ~~**A "suspiciously large layout change" tripwire.**~~ **SHIPPED 2026-07-24**
+  alongside the history: `workspace_store._suspicious_layout_change` logs a
+  warning when a save replaces a ≥2-panel layout with another ≥2-panel one
+  sharing NO model — the clobber's shape, which no human action produces. Quiet
+  for one-panel swaps, adds/removes, reorders, and blank→filled.
   *(opus-5, 2026-07-24)*
 
 - **The scoping fix is a stopgap that HANDOFF_SERVER_AUTHORITY subsumes.** The

@@ -16,6 +16,7 @@ ON-DISK LAYOUT (per instance/state dir):
 
     <state>/workspaces/<cid>.json           # light workspace (light trees)
     <state>/workspaces/<cid>.blobs/<nid>.json   # {"token_logprobs":[...]?, "raw_meta":"..."?}
+    <state>/workspaces/<cid>.layouts.jsonl      # {ts, panels} per panel-layout CHANGE
     <state>/conversations.json.legacy          # pre-v2 file, renamed after migration
 
 Blob invariant: **write-once**. Logprobs/raw_meta never change after a node is
@@ -115,6 +116,11 @@ def _blobs_dir(cid: str) -> Path:
 
 def _blob_file(cid: str, nid: str) -> Path:
     return _blobs_dir(cid) / f"{nid}.json"
+
+
+def _layouts_file(cid: str) -> Path:
+    # NB: `.jsonl`, so the `*.json` summary glob never picks it up as a workspace.
+    return _ws_dir() / f"{cid}.layouts.jsonl"
 
 
 # ── node/tree/workspace split + re-materialize (PURE — never mutate input) ────
@@ -346,15 +352,93 @@ def _write_blobs(cid: str, blobs: dict[str, dict]) -> None:
         write_json(f, blob)
 
 
+# ── panel-layout history ─────────────────────────────────────────────────────
+# WHY: on 2026-07-24 a process-global-state bug replaced four live workspaces'
+# panel layouts with a foreign tab's, and the only reason it was recoverable is
+# that each node's `raw_meta` happens to record which sampler produced it — a
+# forensic exercise (`scripts/repair_panel_layouts.py`). A layout is a few
+# hundred bytes; keeping the last N of them turns any future layout accident
+# into a lookup. It also answers "what models did this workspace use last week?".
+#
+# Append-only `<cid>.layouts.jsonl`, one `{ts, panels}` per CHANGE (not per save
+# — most saves are tree writes that leave the layout alone). Best-effort: a
+# failure here must never fail the save that carries the user's actual data.
+_LAYOUT_HISTORY_MAX = 50
+
+
+def _layout_models(panels: Any) -> set[tuple[Any, Any]]:
+    """The (run_id, checkpoint) set a layout points at — panel ids excluded, so a
+    reorder or a rename isn't mistaken for a different model set."""
+    if not isinstance(panels, list):
+        return set()
+    return {(p.get("run_id"), p.get("checkpoint")) for p in panels if isinstance(p, dict)}
+
+
+def _suspicious_layout_change(prev: Any, new: Any) -> bool:
+    """A layout replacement no human action produces: every panel's model swapped
+    at once, both sides non-trivial. One panel changing, adding/removing panels, or
+    filling in a blank layout are all normal and stay quiet."""
+    if not isinstance(prev, list) or not isinstance(new, list):
+        return False
+    if len(prev) < 2 or len(new) < 2:
+        return False
+    old_models = {m for m in _layout_models(prev) if m[0]}  # ignore un-set panels
+    new_models = {m for m in _layout_models(new) if m[0]}
+    if len(old_models) < 2 or len(new_models) < 2:
+        return False
+    return not (old_models & new_models)
+
+
+def _record_layout(cid: str, prev: Any, new: Any) -> None:
+    """Append `new` to the workspace's layout history if it differs from `prev`."""
+    if prev == new:
+        return
+    if _suspicious_layout_change(prev, new):
+        log.warning(
+            "workspace %s: panel layout fully replaced (%d panels -> %d, no model in common). "
+            "If this was not a deliberate re-pick, restore from %s",
+            cid, len(prev), len(new), _layouts_file(cid).name,
+        )
+    try:
+        f = _layouts_file(cid)
+        line = json.dumps({"ts": _now(), "panels": new}, separators=(",", ":"))
+        # A crash mid-append leaves a line with no trailing newline; appending
+        # straight onto it would GLUE the next entry to the torn one and lose both.
+        heal = ""
+        if f.exists() and f.stat().st_size:
+            with f.open("rb") as fh:
+                fh.seek(-1, os.SEEK_END)
+                if fh.read(1) != b"\n":
+                    heal = "\n"
+        with f.open("a") as fh:
+            fh.write(heal + line + "\n")
+        # Amortized trim: rewrite only once the file drifts past twice the cap, so
+        # the common append stays a single write.
+        lines = f.read_text().splitlines()
+        if len(lines) > _LAYOUT_HISTORY_MAX * 2:
+            f.write_text("\n".join(lines[-_LAYOUT_HISTORY_MAX:]) + "\n")
+    except (OSError, TypeError, ValueError) as e:
+        # A safety net must never be the reason a save carrying the user's actual
+        # data fails — swallow disk errors AND an unserializable panel list alike.
+        log.warning("workspace %s: could not record layout history: %s", cid, e)
+
+
 def _persist(light: dict) -> None:
     """Write one light workspace file + refresh both caches for it. The file write
-    is atomic (tmp+rename); the cache refresh is under _CACHE_LOCK."""
+    is atomic (tmp+rename); the cache refresh is under _CACHE_LOCK.
+
+    The single choke point for every workspace write, which is why the layout
+    history hooks in here rather than in each of the three mutation entry points."""
     cid = _check_id(light.get("id"), "workspace")
+    with _CACHE_LOCK:
+        prev = _bodies.get(cid)
+    prev_panels = prev.get("panels") if isinstance(prev, dict) else None
     write_json(_ws_file(cid), light)
     with _CACHE_LOCK:
         assert _summaries is not None
         _bodies[cid] = light
         _summaries[cid] = _summary_of(light)
+    _record_layout(cid, prev_panels, light.get("panels"))
 
 
 # ── public reads ─────────────────────────────────────────────────────────────
@@ -518,8 +602,34 @@ def patch_meta(cid: str, fields: dict[str, Any]) -> dict | None:
         return _summary_of(conv)
 
 
+def layout_history(cid: str) -> list[dict]:
+    """Oldest-first `{ts, panels}` entries for a workspace ([] if none / unreadable).
+    Read side of the safety net — consumed by `scripts/layout_history.py`."""
+    if not _is_safe_id(cid):
+        return []
+    f = _layouts_file(cid)
+    if not f.exists():
+        return []
+    out: list[dict] = []
+    try:
+        for line in f.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue  # a torn last line (crash mid-append) must not hide the rest
+            if isinstance(entry, dict):
+                out.append(entry)
+    except OSError:
+        return []
+    return out
+
+
 def delete(cid: str) -> bool:
-    """DELETE /{id} — remove the light file AND the blobs dir. False if unknown."""
+    """DELETE /{id} — remove the light file, the blobs dir AND the layout history.
+    False if unknown."""
     if not _is_safe_id(cid):  # never unlink/rmtree a path built from a crafted id
         return False
     with locked("workspaces"):
@@ -536,6 +646,7 @@ def delete(cid: str) -> bool:
             _bodies.pop(cid, None)
             _summaries.pop(cid, None)
         shutil.rmtree(_blobs_dir(cid), ignore_errors=True)  # blobs: no cache impact
+        _layouts_file(cid).unlink(missing_ok=True)
     return True
 
 

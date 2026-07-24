@@ -13,6 +13,7 @@ owns the on-disk layout, the boot migration, the in-memory summary cache, and th
 
   GET    /api/workspaces           → summaries (no trees); ?bodies=1 → light bodies
   GET    /api/workspaces/{id}       → one light body
+  GET    /api/workspaces/{id}/layout-history → past panel layouts, oldest first
   POST   /api/workspaces/{id}/node-blobs {nodes:[...]} → {id: {token_logprobs?, raw_meta?}}
   POST   /api/workspaces            → create (unchanged shape; server strips blobs)
   PATCH  /api/workspaces/{id}       → layout-only metadata (no tree bytes)
@@ -114,6 +115,15 @@ def get_workspace(workspace_id: str) -> dict:
     if body is None:
         raise HTTPException(404, f"no workspace {workspace_id}")
     return body
+
+
+@router.get("/{workspace_id}/layout-history")
+def get_layout_history(workspace_id: str) -> list[dict]:
+    """Past panel layouts for this workspace, oldest first: `[{ts, panels}]`, one
+    entry per layout CHANGE (see `workspace_store._record_layout`). Empty for a
+    workspace whose layout never changed, or one predating the history. Read-only —
+    restoring is a normal PATCH of `panels` (see `scripts/layout_history.py`)."""
+    return store.layout_history(workspace_id)
 
 
 @router.post("/{workspace_id}/node-blobs")
