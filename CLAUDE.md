@@ -120,10 +120,14 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     holding a same-content root sibling, never force-aligns the rest.
   - `lib/highlights.svelte.ts` → `highlightStore` — user-defined render-time
     coloring rules + persistence.
-  - `lib/logprobs.svelte.ts` → `logprobView` — the sidebar **"Token probs"**
-    display toggle (localStorage-persisted). Display-only: capture is the
-    server default for native tinker sampling, so flipping it on works
-    retroactively on stored turns.
+  - `lib/logprobs.svelte.ts` → `logprobView` + `logprobHighlight` — the sidebar
+    **"Token probs"** display toggle (localStorage-persisted). Display-only:
+    capture is the server default for native tinker sampling, so flipping it on
+    works retroactively on stored turns. `logprobHighlight` holds the ≤2
+    highlight-rule ids chosen for the **"Color by match"** picker (also
+    localStorage; newest-2-win): non-empty ⇒ TokenLogprobs tints tokens by
+    `highlightMatchProb` instead of surprisal + colors popover alternatives by
+    their match.
   - `lib/scroll.svelte.ts` → `panelScroll` — **the only scrollTop writer**: the
     per-panel FOLLOW (streaming, stick-to-bottom gated) / PRESERVE (tree
     mutations keep position) / SNAP (send, conversation open) / REVEAL
@@ -207,7 +211,13 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
   - `lib/token-logprob.ts` — token-logprob display math: `prob`/`pctLabel`,
     `surprisalAlpha` (the single-hue heat tint — alpha ∝ -logprob), `displayToken`
     (whitespace glyphs), `firstTokenDist` (one panel's position-0 distribution:
-    newest sample's top-K as reference + sampled outliers; flags `mixed`).
+    newest sample's top-K as reference + sampled outliers; flags `mixed`), plus
+    the **highlight-match coloring** alternative to surprisal: `highlightMatchProb`
+    (mass over a position's captured top-5 candidates whose text `ruleMatches` a
+    highlight rule — a lower bound, top-5 only) + `matchTintBackground` (1 rule →
+    flat tint; 2 → a top/bottom split band; alpha = √prob × 0.42 — a gamma-0.5
+    ramp so a 1% match still reads at 10% opacity, peaking at the standard 0.42
+    highlight opacity, prob 0 = transparent).
     **Has `token-logprob.test.ts`**; smokes `tests/small-smokes/
     browser_token_logprobs.py` (seeded, deterministic) + `…_live.py` (real
     tinker sampling end-to-end).
@@ -288,7 +298,10 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
   - `lib/TokenLogprobs.svelte` — the token inspector body: the raw generated
     token stream (thinking tags and all — exact token boundaries beat markdown
     here), each token tinted by surprisal; hover → fixed-position popover with
-    the token's probability + top-5 alternative bars.
+    the token's probability + top-5 alternative bars. When ≥1 rule is picked in
+    the sidebar's "Color by match" (`logprobHighlight`), the surprisal tint is
+    replaced by a per-token match-prob band (1–2 rules; `matchTintBackground`)
+    and each popover alternative is tinted by which rule it matches.
   - `lib/ModelTypeahead.svelte` — the type-to-filter model combobox (used by the
     OpenRouter + Tinker picker modals, and as the panel body of `ModelDropdown`).
     Rows render via `DiffLabel` when the visible siblings form a diffable family

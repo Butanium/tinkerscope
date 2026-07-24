@@ -83,6 +83,20 @@ export type ConvTree = {
   selected: Record<string, string>; // (parentId | ROOT) -> selected child ID
 };
 
+/** Every node id across `trees` carrying token-logprob data (inline or a server
+ *  blob). Powers the token-probs prefetch: warming these into the blob cache when
+ *  the view is on means cycling between completions never waits on a cold blob —
+ *  the tokens are already there, so no render flicker and no placeholder needed. */
+export function tokenBlobNodeIds(trees: Record<string, ConvTree>): string[] {
+  const ids: string[] = [];
+  for (const tree of Object.values(trees)) {
+    for (const n of Object.values(tree.nodes)) {
+      if (n.has_token_logprobs || n.token_logprobs?.length) ids.push(n.id);
+    }
+  }
+  return ids;
+}
+
 /** A streamed sample as folded into the tree (subset of SampleData). */
 export type SampleLike = {
   content?: string;

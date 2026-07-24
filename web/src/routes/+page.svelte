@@ -31,8 +31,8 @@
   import ModelDropdown from '$lib/ModelDropdown.svelte';
   import SplitChip from '$lib/SplitChip.svelte';
   import TruncLabel from '$lib/TruncLabel.svelte';
-  import { loadHighlightRules } from '$lib/highlights.svelte';
-  import { logprobView } from '$lib/logprobs.svelte';
+  import { loadHighlightRules, highlightStore } from '$lib/highlights.svelte';
+  import { logprobView, logprobHighlight } from '$lib/logprobs.svelte';
   import HighlightRules from '$lib/HighlightRules.svelte';
   import type { Pin } from '$lib/types';
   import { tip, tooltip } from '$lib/tooltip.svelte';
@@ -40,7 +40,8 @@
     activePath,
     activeMessages,
     appendUserTurn,
-    siblingsOf
+    siblingsOf,
+    tokenBlobNodeIds
   } from '$lib/tree';
   import type {
     Run,
@@ -1213,6 +1214,16 @@
     return '';
   });
 
+  // Token-probs prefetch: while the view is on, warm the blob cache for every
+  // token-bearing node in the open conversation, so cycling between completions
+  // never waits on a cold blob (the source of the render flicker). ensure()
+  // dedupes, so re-running on tree mutations only fetches genuinely new nodes.
+  $effect(() => {
+    if (!logprobView.enabled) return;
+    const ids = tokenBlobNodeIds(convo.trees);
+    if (ids.length) void nodeBlobs.ensure(ids);
+  });
+
   // ── Lifecycle ─────────────────────────────────────────────────────
   onMount(() => {
     const saved = localStorage.getItem('playground-theme');
@@ -1558,6 +1569,25 @@
             <button class="seg-btn" class:active={logprobView.enabled} onclick={() => logprobView.set(true)}>On</button>
           </span>
         </label>
+
+        {#if logprobView.enabled && highlightStore.rules.some((r) => r.enabled)}
+          <div class="lp-hl">
+            <span class="lp-hl-title" data-tooltip="Tint each token by the model's probability of emitting a matching token there (over the captured top-5), instead of by surprisal. Pick up to 2 — they split the token top/bottom. None → surprisal." use:tip>Color by match</span>
+            <div class="lp-hl-chips">
+              {#each highlightStore.rules.filter((r) => r.enabled) as r (r.id)}
+                <button
+                  class="lp-hl-chip"
+                  class:sel={logprobHighlight.has(r.id)}
+                  onclick={() => logprobHighlight.toggle(r.id)}
+                  data-tooltip={r.name}
+                  use:tip>
+                  <span class="lp-hl-dot" style="background: {r.color}"></span>
+                  <span class="lp-hl-name">{r.name}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/if}
       </div>
 
       {#if anySupportsThinking}
@@ -2070,6 +2100,16 @@
   .seg-btn + .seg-btn { border-left: 1px solid var(--color-border); }
   .seg-btn.active { background: var(--color-accent); color: white; }
   .seg-btn:not(.active):hover { color: var(--color-accent); }
+
+  /* ── "Color by match" highlight picker under the Token-probs toggle ── */
+  .lp-hl { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
+  .lp-hl-title { font-size: 0.7rem; color: var(--color-text-muted); font-weight: 600; letter-spacing: 0.02em; cursor: help; }
+  .lp-hl-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .lp-hl-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 2px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: var(--color-bg); color: var(--color-text-muted); font-size: 0.7rem; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+  .lp-hl-chip:hover { color: var(--color-text); border-color: var(--color-text-muted); }
+  .lp-hl-chip.sel { color: var(--color-text); border-color: var(--color-accent); background: var(--color-accent-soft, color-mix(in srgb, var(--color-accent) 12%, transparent)); }
+  .lp-hl-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 1px #00000018 inset; }
+  .lp-hl-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* ── Sampling params popup ──────────────────────────────────── */
   .advanced-toggle { background: none; border: none; padding: 0; cursor: pointer; font-size: 0.78rem; color: var(--color-text-muted); font-weight: 500; }

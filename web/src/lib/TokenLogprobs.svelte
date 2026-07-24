@@ -8,9 +8,42 @@
   // send-to-menu: it lives inside the panel's scroll container and absolute
   // positioning would clip at the column edge.
   import type { TokenLogprob } from '$lib/tree';
-  import { prob, pctLabel, surprisalAlpha, displayToken } from '$lib/token-logprob';
+  import {
+    prob,
+    pctLabel,
+    surprisalAlpha,
+    displayToken,
+    highlightMatchProb,
+    matchTintBackground
+  } from '$lib/token-logprob';
+  import { ruleMatches } from '$lib/highlight-match';
+  import { logprobHighlight } from '$lib/logprobs.svelte';
+  import { highlightStore } from '$lib/highlights.svelte';
 
   let { tlp }: { tlp: TokenLogprob[] } = $props();
+
+  // The ≤2 highlight rules chosen for match-coloring (order = top/bottom band).
+  // Resolved by id so a rename/recolor keeps applying and a deleted rule drops out.
+  const rules = $derived(
+    logprobHighlight.selected
+      .map((id) => highlightStore.rules.find((r) => r.id === id))
+      .filter((r) => r != null)
+  );
+
+  // Per-token background, precomputed off `hover` so hovering never recomputes the
+  // match mass. null ⇒ no rule selected ⇒ fall back to the surprisal tint.
+  const bg = $derived(
+    rules.length
+      ? tlp.map((e) => matchTintBackground(rules.map((r) => ({ color: r.color, prob: highlightMatchProb(e, r) }))))
+      : null
+  );
+
+  /** Split-band background for one popover alternative: tinted by which selected
+   *  rule(s) its text matches (binary → full 0.42 tint per matched band). */
+  function altBg(text: string): string {
+    if (!rules.length) return '';
+    return matchTintBackground(rules.filter((r) => ruleMatches(r, text)).map((r) => ({ color: r.color, prob: 1 })));
+  }
 
   let hover = $state<number | null>(null);
   let pos = $state<{ x: number; y: number } | null>(null);
@@ -34,7 +67,11 @@
   {#each tlp as e, i (i)}<span
       class="tok"
       class:tok-hover={hover === i}
-      style={surprisalAlpha(e.lp) > 0 ? `background: rgba(217, 119, 6, ${surprisalAlpha(e.lp)})` : ''}
+      style={bg
+        ? `background: ${bg[i]}`
+        : surprisalAlpha(e.lp) > 0
+          ? `background: rgba(217, 119, 6, ${surprisalAlpha(e.lp)})`
+          : ''}
       onmouseenter={(ev) => enter(ev, i)}
       onmouseleave={leave}>{e.t}</span>{/each}
 </div>
@@ -48,7 +85,7 @@
     {#if cur.top?.length}
       <div class="tok-alts">
         {#each cur.top as alt (alt[1])}
-          <div class="tok-alt" class:tok-alt-sampled={alt[1] === cur.tid}>
+          <div class="tok-alt" class:tok-alt-sampled={alt[1] === cur.tid} style={altBg(alt[0]) ? `background: ${altBg(alt[0])}` : ''}>
             <code class="tok-alt-tok">{displayToken(alt[0])}</code>
             <div class="tok-alt-track">
               <div class="tok-alt-bar" style="width: {Math.max(1.5, (prob(alt[2]) ?? 0) * 100)}%"></div>
@@ -120,6 +157,11 @@
     grid-template-columns: minmax(40px, auto) 1fr 42px;
     align-items: center;
     gap: 6px;
+    /* padding + offsetting margin so a match tint gets rounded breathing room
+       without nudging the row layout */
+    padding: 1px 3px;
+    margin: 0 -3px;
+    border-radius: 3px;
   }
   .tok-alt-tok {
     color: var(--color-text-secondary);

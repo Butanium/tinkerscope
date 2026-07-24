@@ -2,8 +2,17 @@
 // Node's built-in TS type-stripping:   node web/src/lib/token-logprob.test.ts
 // Exit code != 0 on failure.
 
-import { prob, pctLabel, surprisalAlpha, displayToken, firstTokenDist } from './token-logprob.ts';
+import {
+  prob,
+  pctLabel,
+  surprisalAlpha,
+  displayToken,
+  firstTokenDist,
+  highlightMatchProb,
+  matchTintBackground
+} from './token-logprob.ts';
 import type { TokenLogprob } from './tree.ts';
+import type { HighlightRule } from './types.ts';
 
 let passed = 0;
 let failed = 0;
@@ -150,6 +159,77 @@ test('firstTokenDist: rest never negative', () => {
   ];
   const d = firstTokenDist([{ first: tlp('a', 1, 0.6, NEAR) }])!;
   ok(d.rest >= 0, `rest ${d.rest}`);
+});
+
+// ── highlightMatchProb ───────────────────────────────────────────────
+const rule = (patterns: string[], extra: Partial<HighlightRule> = {}): HighlightRule => ({
+  id: 'r',
+  name: 'r',
+  enabled: true,
+  patterns,
+  combinator: 'or',
+  is_regex: false,
+  case_sensitive: false,
+  color: '#60a5fa',
+  scope_role: null,
+  sort_order: 0,
+  ...extra
+});
+const ent = (top?: [string, number, number][]): TokenLogprob => ({ t: 'x', tid: 0, lp: null, top });
+
+test('highlightMatchProb: sums mass of matching top-K candidates', () => {
+  const e = ent([
+    ['Yes', 1, lp(0.5)],
+    [' yes', 2, lp(0.2)],
+    ['No', 3, lp(0.1)]
+  ]);
+  // case-insensitive substring 'yes' matches 'Yes' and ' yes', not 'No'
+  close(highlightMatchProb(e, rule(['yes'])), 0.7);
+});
+
+test('highlightMatchProb: 0 when no candidate matches / no top captured', () => {
+  const e = ent([['No', 3, lp(0.1)]]);
+  eq(highlightMatchProb(e, rule(['zzz'])), 0);
+  eq(highlightMatchProb(ent(undefined), rule(['No'])), 0);
+  eq(highlightMatchProb(ent([]), rule(['No'])), 0);
+});
+
+test('highlightMatchProb: clamped to 1', () => {
+  const e = ent([
+    ['a', 1, lp(0.7)],
+    ['ab', 2, lp(0.6)] // both contain 'a' → mass 1.3 pre-clamp
+  ]);
+  eq(highlightMatchProb(e, rule(['a'])), 1);
+});
+
+test('highlightMatchProb: case-sensitive honored', () => {
+  const e = ent([['Yes', 1, lp(0.5)]]);
+  eq(highlightMatchProb(e, rule(['yes'], { case_sensitive: true })), 0);
+  close(highlightMatchProb(e, rule(['Yes'], { case_sensitive: true })), 0.5);
+});
+
+// ── matchTintBackground ──────────────────────────────────────────────
+test('matchTintBackground: empty → falls back (no bg)', () => {
+  eq(matchTintBackground([]), '');
+});
+
+test('matchTintBackground: one band → flat tint, alpha = √prob × 0.42', () => {
+  eq(matchTintBackground([{ color: '#60a5fa', prob: 1 }]), 'rgba(96, 165, 250, 0.42)');
+  eq(matchTintBackground([{ color: '#60a5fa', prob: 0 }]), 'rgba(96, 165, 250, 0)'); // transparent
+  // √ ramp: 1% match reads at 10% of full opacity (√0.01 = 0.1 → 0.1×0.42)
+  eq(matchTintBackground([{ color: '#60a5fa', prob: 0.01 }]), 'rgba(96, 165, 250, 0.042)');
+  eq(matchTintBackground([{ color: '#60a5fa', prob: 0.25 }]), 'rgba(96, 165, 250, 0.21)'); // √0.25=0.5
+});
+
+test('matchTintBackground: two bands → top/bottom split gradient', () => {
+  const g = matchTintBackground([
+    { color: '#60a5fa', prob: 1 },
+    { color: '#f87171', prob: 1 }
+  ]);
+  eq(
+    g,
+    'linear-gradient(to bottom, rgba(96, 165, 250, 0.42) 0 50%, rgba(248, 113, 113, 0.42) 50% 100%)'
+  );
 });
 
 console.log(`token-logprob.test: ${passed} passed, ${failed} failed`);

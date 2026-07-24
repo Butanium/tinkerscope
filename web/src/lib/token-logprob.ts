@@ -9,6 +9,8 @@
 // ink color, the tint is background-only.
 
 import type { TokenLogprob } from './tree.ts';
+import type { HighlightRule } from './types.ts';
+import { ruleMatches, tint } from './highlight-match.ts';
 
 /** logprob → probability (null-safe). */
 export function prob(lp: number | null | undefined): number | null {
@@ -42,6 +44,48 @@ export function surprisalAlpha(lp: number | null | undefined): number {
 export function displayToken(t: string): string {
   if (t === '') return '∅';
   return t.replace(/\n/g, '⏎').replace(/\t/g, '⇥').replace(/ /g, '␣');
+}
+
+// ── Highlight-match coloring ────────────────────────────────────────────
+// An alternative to the surprisal tint: instead of "how unlikely was the
+// SAMPLED token", color a token by "how likely was the model to emit a token
+// MATCHING a highlight rule right here". The match mass comes from the position's
+// captured top-K candidates — so it's a lower bound (only TOPK_LOGPROBS=5 alts
+// are stored server-side); a candidate outside the top-K contributes nothing.
+
+/** Total probability mass, over `e`'s captured top-K candidate tokens, of the
+ *  ones whose decoded text matches `rule` (same substring/regex matcher used to
+ *  color rendered text). In [0,1]; 0 when no alternatives were captured. */
+export function highlightMatchProb(e: TokenLogprob, rule: HighlightRule): number {
+  if (!e.top?.length) return 0;
+  let mass = 0;
+  for (const [text, , lp] of e.top) {
+    if (!ruleMatches(rule, text)) continue;
+    const p = prob(lp);
+    if (p != null) mass += p;
+  }
+  return Math.min(1, mass);
+}
+
+/** Peak alpha of a match-tint band = the standard highlight tint opacity, so a
+ *  token whose candidates 100% match looks as saturated as a normal highlight. */
+export const MATCH_TINT_ALPHA = 0.42;
+
+/** CSS `background` for a token's highlight-match tint, given the selected rules'
+ *  colors + this position's per-rule match probs. One band → a flat tint, two
+ *  bands → a top/bottom split (first rule on top). Empty → '' (caller keeps the
+ *  surprisal tint).
+ *
+ *  Opacity uses a √ (gamma-0.5) ramp, not linear: alpha = √prob × MATCH_TINT_ALPHA.
+ *  So prob 1 still peaks at the standard 0.42 highlight opacity and prob 0 is
+ *  transparent, but a faint 1% match reads at 10% of full (√0.01 = 0.1) instead of
+ *  1% — low-but-nonzero match mass stays visible. */
+export function matchTintBackground(bands: { color: string; prob: number }[]): string {
+  if (bands.length === 0) return '';
+  const seg = (b: { color: string; prob: number }) => tint(b.color, Math.sqrt(b.prob) * MATCH_TINT_ALPHA);
+  if (bands.length === 1) return seg(bands[0]);
+  const [a, b] = bands;
+  return `linear-gradient(to bottom, ${seg(a)} 0 50%, ${seg(b)} 50% 100%)`;
 }
 
 /** One bar-segment's worth of the first-token distribution. */
