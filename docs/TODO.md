@@ -101,6 +101,30 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
 
 ## Next
 
+- [ ] **A human-facing guide, in two places** (Clément, 2026-07-24). The
+  `tinkerscope` skill is written for an AGENT driving the tool from the terminal;
+  nothing explains the UI to a person.
+  - A second skill, `tinkerscope-guide`: how to USE the workspace — panels and
+    what "compare" means, branching / ‹k/N› cyclers / threads, highlight rules,
+    the distribution chart's three modes, token probs, share packs. Written to be
+    read aloud to a human, not executed.
+  - An in-app **help button** (a `?` next to the workspace dropdown → a Modal with
+    the same content + keyboard shortcuts). The keyboard-nav feature especially is
+    currently undiscoverable.
+- [ ] **`browser_branching.py` is stale** — fails with a Playwright strict-mode
+  violation (`textarea.edit-textarea` resolves to 2 elements) and has done since
+  before the workspace-scoping fix (verified against the pre-fix commit
+  2026-07-24, so it is NOT a regression from it). Needs the same seed-based repair
+  the other smokes got; until then it is zero-signal. See the browser-smoke trust
+  map in Claude's project memory.
+- [x] **Workspace scoping on the state bus — SHIPPED (2026-07-24).** `panels` is
+  workspace-scoped data that lived in the process-global `PlaygroundState`, so two
+  browser tabs on two workspaces clobbered each other's STORED models with no user
+  action (4 live workspaces corrupted; recovered from node blobs via
+  `scripts/repair_panel_layouts.py`). Every bus message is stamped with the
+  workspace it describes; clients adopt workspace-scoped fields only from their
+  own, params stay global. `docs/API_CONTRACT.md` §"Workspace scoping on the state
+  bus"; smoke `browser_two_tab_workspace.py` (verified to fail pre-fix).
 - [x] **Storage v2 — SHIPPED (2026-07-13).** The browser-OOM-on-big-workspace fix:
   per-conversation files + write-once per-node blobs (token_logprobs/raw_meta,
   89.8% of the bytes), summaries-only list + fetch-on-open, dirty-panel partial
