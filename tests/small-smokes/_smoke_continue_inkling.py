@@ -1,9 +1,9 @@
 """Offline check (no remote sampling) for the tml_v0 (Inkling) continue fix.
 
 The bug: continuing a prefilled assistant turn on Inkling crashed with
-`NotImplementedError: TmlV0Renderer renders whole conversations ...` — the generic
+`NotImplementedError: TmlV0Renderer renders whole workspaces ...` — the generic
 prefill path calls _assistant_region_ids -> _get_generation_suffix -> render_message,
-which tml_v0 refuses (it renders whole conversations only). Even past the crash, the
+which tml_v0 refuses (it renders whole workspaces only). Even past the crash, the
 append-raw-string path put the prefill AFTER the user's <|end_message|> with no
 <|message_model|><|content_text|> assistant header.
 

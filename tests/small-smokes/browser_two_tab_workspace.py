@@ -59,7 +59,7 @@ def panel_ids(n):
 
 def seed(models, title):
     ids = panel_ids(len(models))
-    return _post("/api/conversations", {
+    return _post("/api/workspaces", {
         "title": title,
         "panels": [{"id": p, "run_id": m, "checkpoint": None} for p, m in zip(ids, models)],
         "trees": {p: {"nodes": {}, "rootChildren": [], "selected": {}} for p in ids},
@@ -68,7 +68,7 @@ def seed(models, title):
 
 
 def stored_models(cid):
-    return [p["run_id"] for p in _get(f"/api/conversations/{cid}")["panels"]]
+    return [p["run_id"] for p in _get(f"/api/workspaces/{cid}")["panels"]]
 
 
 def labels(models):
@@ -103,7 +103,7 @@ def set_samples(page, n):
 def open_tab(ctx, cid, first_model, errors):
     page = ctx.new_page()
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-    page.goto(f"{BASE}/?c={cid}", wait_until="load", timeout=20000)
+    page.goto(f"{BASE}/?w={cid}", wait_until="load", timeout=20000)
     page.wait_for_function(
         f"document.body.innerText.includes({json.dumps(first_model.split('/')[-1])})", timeout=15000)
     return page

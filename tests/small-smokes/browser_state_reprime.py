@@ -1,21 +1,21 @@
 """Browser smoke for the amnesiac-bus re-prime (backend restart recovery).
 
 The live-drive bus (PlaygroundState) is in-memory: a backend restart wipes it,
-and until 2026-07-21 the tab never re-pushed (conversation_id / panels are only
+and until 2026-07-21 the tab never re-pushed (workspace_id / panels are only
 pushed on CHANGE), leaving `tinkpg state` blind — default single panel, no
-conversation name — until the user happened to switch conversations. The fix
+workspace name — until the user happened to switch workspaces. The fix
 (state.svelte.ts snapshot interception): on an EventSource-reconnect snapshot
-whose state knows LESS than the tab (conversation_id null while ours is set),
+whose state knows LESS than the tab (workspace_id null while ours is set),
 keep our mirror on screen and re-POST it to /api/state.
 
 100% TOKEN-FREE and self-hosting: spawns its own server on a scratch port +
-scratch XDG_STATE_HOME (never the live instance), seeds a 2-panel conversation,
+scratch XDG_STATE_HOME (never the live instance), seeds a 2-panel workspace,
 opens it, then KILLS and RELAUNCHES the server and asserts:
 
-  1. before the kill, the bus knows the open conversation + both panels + the
+  1. before the kill, the bus knows the open workspace + both panels + the
      params a CLI-style POST set;
   2. within the EventSource retry window after relaunch, the bus is re-primed:
-     same conversation_id, both panels (selections + transcript echoes), params;
+     same workspace_id, both panels (selections + transcript echoes), params;
   3. the page never collapsed to the default single panel.
 
   uv run python tests/small-smokes/browser_state_reprime.py
@@ -103,7 +103,7 @@ def main():
     (scratch / "runs").mkdir()
     proc = start_server(scratch)
     try:
-        conv = _post("/api/conversations", {
+        conv = _post("/api/workspaces", {
             "name": "reprime smoke",
             "trees": {
                 "primary": seed_tree("t-one", "PROMPT-ONE in primary"),
@@ -122,7 +122,7 @@ def main():
             errors = []
             page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
             page.on("pageerror", lambda e: errors.append(str(e)))
-            page.goto(f"{BASE}/?c={conv['id']}", wait_until="load", timeout=20000)
+            page.goto(f"{BASE}/?w={conv['id']}", wait_until="load", timeout=20000)
             page.wait_for_function(
                 "document.body.innerText.includes('PROMPT-ONE')", timeout=15000)
 
@@ -132,7 +132,7 @@ def main():
             time.sleep(1.0)
 
             st = _get("/api/state")
-            assert st["conversation_id"] == conv["id"], f"open should push conv id: {st['conversation_id']}"
+            assert st["workspace_id"] == conv["id"], f"open should push conv id: {st['workspace_id']}"
             assert len(st["panels"]) == 2, f"open should push both panels: {st['panels']}"
 
             # ── the restart ──
@@ -145,10 +145,10 @@ def main():
             st = None
             while time.time() < deadline:
                 st = _get("/api/state")
-                if st["conversation_id"] == conv["id"]:
+                if st["workspace_id"] == conv["id"]:
                     break
                 time.sleep(0.5)
-            assert st and st["conversation_id"] == conv["id"], \
+            assert st and st["workspace_id"] == conv["id"], \
                 f"bus never re-primed after restart: {st}"
             assert [pl["id"] for pl in st["panels"]] == ["primary", "compare"], \
                 f"panel list not restored: {st['panels']}"

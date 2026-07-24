@@ -192,9 +192,9 @@ def _reload_backend(monkeypatch: pytest.MonkeyPatch, scan_root: Path, state_home
     discovery_mod._caps_cache = None
     discovery_mod._servable_cache = None
 
-    # Reload the conversation store BEFORE its router so its in-memory caches reset
+    # Reload the workspace store BEFORE its router so its in-memory caches reset
     # against the fresh (empty) state dir and it resolves the reloaded settings paths.
-    import tinkerscope.api.conversation_store as conversation_store_mod
+    import tinkerscope.api.workspace_store as conversation_store_mod
 
     importlib.reload(conversation_store_mod)
 
@@ -203,7 +203,7 @@ def _reload_backend(monkeypatch: pytest.MonkeyPatch, scan_root: Path, state_home
     import tinkerscope.api.routes.datasets as datasets_route
     import tinkerscope.api.routes.highlights as highlights_route
     import tinkerscope.api.routes.prefs as prefs_route
-    import tinkerscope.api.routes.conversations as conversations_route
+    import tinkerscope.api.routes.workspaces as conversations_route
     import tinkerscope.api.routes.state as state_route
     import tinkerscope.api.routes.chat as chat_route
     import tinkerscope.api.main as main_mod

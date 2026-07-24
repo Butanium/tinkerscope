@@ -1,22 +1,22 @@
-// Save-request planner for the conversations store (storage v2) — PURE, no
+// Save-request planner for the workspaces store (storage v2) — PURE, no
 // Svelte imports (save-plan.test.ts runs it under node).
 //
 // v2 replaces the whole-map "snapshot every panel's tree and PUT it all" save
 // with accumulated DIRT: which panels' trees changed (by ref), which panels were
-// dropped, and whether conversation-level layout (name-adjacent fields: model
+// dropped, and whether workspace-level layout (name-adjacent fields: model
 // panels, send-targets, folds, system prompt) changed. This module turns one
 // drained batch of dirt into the single request to make:
 //   - any tree dirt        → PUT /tree   (partial `trees` upsert + `dropped_trees`,
 //                            layout fields ride along as before)
 //   - layout-only dirt     → PATCH       (zero tree bytes — the fix for
-//                            "changing the model on a huge conversation is laggy")
+//                            "changing the model on a huge workspace is laggy")
 //   - no dirt              → none
 // The caller owns capture semantics (refs at schedule time) and retry/re-merge.
 
 import type { ConvTree, TreeNode } from './tree.ts';
 import type { PanelLayout } from './types.ts';
 
-/** Conversation-level fields that accompany EVERY save (cheap, authoritative). */
+/** Workspace-level fields that accompany EVERY save (cheap, authoritative). */
 export type ConvFields = {
   system_prompt: string | null;
   /** null = legacy/underived (readers fall back to text presence). */

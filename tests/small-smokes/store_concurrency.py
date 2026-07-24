@@ -3,7 +3,7 @@ blob reads / list, all at once, from many threads.
 
 Looks for: exceptions on any path, lost updates, cache serving deleted or stale
 bodies, and the dict-mutation-during-iteration crash in list_summaries that the
-_CACHE_LOCK closes. 100% synthetic (temp dir, tiny conversations) — no server, no
+_CACHE_LOCK closes. 100% synthetic (temp dir, tiny workspaces) — no server, no
 network. Re-run whenever the store's locking / caching changes.
 
 Lifted from backend-review's storage-v2 probe suite.
@@ -31,7 +31,7 @@ import tinkerscope.paths as paths_mod  # noqa: E402
 
 importlib.reload(paths_mod)
 importlib.reload(settings_mod)
-import tinkerscope.api.conversation_store as store  # noqa: E402
+import tinkerscope.api.workspace_store as store  # noqa: E402
 
 importlib.reload(store)
 store.boot()
@@ -118,11 +118,11 @@ if errors:
     sys.exit(1)
 
 # Post-storm coherence: the summary cache must exactly match what's on disk.
-store_files = {f.stem for f in store._convs_dir().glob("*.json")}
+store_files = {f.stem for f in store._ws_dir().glob("*.json")}
 cache_ids = {s["id"] for s in store.list_summaries()}
 assert store_files == cache_ids, f"cache/disk divergence: {store_files ^ cache_ids}"
 for cid in cache_ids:
     body = store.get_body(cid)
-    disk = json.loads(store._conv_file(cid).read_text())
+    disk = json.loads(store._ws_file(cid).read_text())
     assert body == disk, f"cached body != disk for {cid}"
 print(f"concurrency storm clean; {len(cache_ids)} convs coherent cache/disk")

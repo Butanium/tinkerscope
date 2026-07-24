@@ -18,11 +18,11 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import conversation_store
+from . import workspace_store
 from .discovery import get_capabilities
 from .routes import (
     chat,
-    conversations,
+    workspaces,
     datasets,
     highlights,
     models,
@@ -37,11 +37,11 @@ from .settings import SETTINGS
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Storage v2: migrate the legacy conversations.json (if present) into the
-    # per-conversation files + node blobs, then build the in-memory summary cache.
+    # per-workspace files + node blobs, then build the in-memory summary cache.
     # RAISES on a migration verify mismatch — refuse to start rather than serve
     # partial data (the legacy file is left untouched). Off the event loop because
     # verifying a large store is CPU-bound; the raise still propagates through await.
-    await asyncio.to_thread(conversation_store.boot)
+    await asyncio.to_thread(workspace_store.boot)
     # Prime the bus's global sampling params from prefs so a CLI-only consumer of a pack
     # sees the pack's defaults before any browser connects (see state.seed_bus_from_prefs).
     from .state import seed_bus_from_prefs
@@ -75,7 +75,7 @@ app.include_router(datasets.router)
 app.include_router(highlights.router)
 app.include_router(pins.router)
 app.include_router(prefs.router)
-app.include_router(conversations.router)
+app.include_router(workspaces.router)
 
 
 @app.get("/api/health")

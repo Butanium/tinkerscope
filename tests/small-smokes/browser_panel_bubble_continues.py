@@ -1,9 +1,9 @@
 """Per-panel bubble ALWAYS continues its panel — regression guard for the bug where
 the ⑂ 'branch from start' toggle (a main-composer-only affordance) leaked into the
 per-panel '＋ continue this panel' bubble, so typing there started a NEW root thread
-instead of extending the panel's conversation.
+instead of extending the panel's workspace.
 
-Seeds a 2-panel conversation with a pre-existing thread in the primary panel, turns
+Seeds a 2-panel workspace with a pre-existing thread in the primary panel, turns
 ⑂ branch-from-start ON, then sends via the primary panel's bubble. The seeded thread
 must stay visible and the send must append under it (no new root sibling) — even with
 the toggle on. Only the one bubble send hits the model (free router, zero cost).
@@ -27,15 +27,15 @@ MODEL = "openrouter:openrouter/free"
 
 
 def seed_two_panel_thread(base):
-    """A 2-panel conversation: 'primary' carries a linear SEED_Q/SEED_A thread,
-    'compare' is empty. Returns (conversation_id, primary_panel_id)."""
+    """A 2-panel workspace: 'primary' carries a linear SEED_Q/SEED_A thread,
+    'compare' is empty. Returns (workspace_id, primary_panel_id)."""
     nodes = {
         "n0": {"id": "n0", "role": "user", "content": SEED_Q, "parent": None, "children": ["n1"]},
         "n1": {"id": "n1", "role": "assistant", "content": SEED_A, "parent": "n0", "children": []},
     }
     primary_tree = {"nodes": nodes, "rootChildren": ["n0"], "selected": {}}
     empty_tree = {"nodes": {}, "rootChildren": [], "selected": {}}
-    cid = _post(base, "/api/conversations", {
+    cid = _post(base, "/api/workspaces", {
         "title": "panel_bubble_continues",
         "panels": [
             {"id": "primary", "run_id": MODEL, "checkpoint": None},
@@ -67,7 +67,7 @@ def main() -> None:
         page.on("pageerror", lambda e: errors.append(str(e)))
 
         cid, _ = seed_two_panel_thread(BASE)
-        page.goto(f"{BASE}/?c={cid}", wait_until="load", timeout=20000)
+        page.goto(f"{BASE}/?w={cid}", wait_until="load", timeout=20000)
         page.wait_for_selector(".input-textarea:not([disabled])", timeout=15000)
         page.wait_for_selector(".message-content", timeout=15000)
         assert SEED_Q in chat_text(page), "seeded thread should be visible before sending"

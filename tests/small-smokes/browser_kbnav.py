@@ -1,8 +1,8 @@
 """Browser smoke for keyboard row navigation — focus / arrows / guards.
 
-100% TOKEN-FREE: it seeds a conversation with a ready-made branch tree via
-POST /api/conversations (8-turn chain; the last assistant turn has 3 sibling
-branches), opens it with ?c=<id>, then exercises the focused-row keyboard
+100% TOKEN-FREE: it seeds a workspace with a ready-made branch tree via
+POST /api/workspaces (8-turn chain; the last assistant turn has 3 sibling
+branches), opens it with ?w=<id>, then exercises the focused-row keyboard
 layer: click a row → focus ring; ↑/↓ walk the panel's view (revealing
 off-screen rows by scrolling ONLY the panel container, minimally); ←/→ drive
 the ‹k/N› sibling cycler (wrapping, scroll position PRESERVED); Escape clears;
@@ -88,7 +88,7 @@ def click_row(page, index):
 
 def main():
     primary = _get("/api/state")["panels"][0]
-    conv = _post("/api/conversations", {
+    conv = _post("/api/workspaces", {
         "name": "kbnav smoke",
         "trees": {"primary": seed_tree()},
         "panels": [{"id": "primary", "run_id": primary.get("run_id"),
@@ -101,7 +101,7 @@ def main():
         errors = []
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(f"{BASE}/?c={conv['id']}", wait_until="load", timeout=20000)
+        page.goto(f"{BASE}/?w={conv['id']}", wait_until="load", timeout=20000)
         page.wait_for_function("document.body.innerText.includes('TURN-7-A')", timeout=15000)
         assert page.locator(".message[data-row]").count() == 8, "seed should render 8 rows"
 
@@ -176,9 +176,9 @@ def main():
         assert not errors, f"console errors: {errors}"
         browser.close()
 
-    # cleanup: remove the seeded conversation
+    # cleanup: remove the seeded workspace
     urllib.request.urlopen(
-        urllib.request.Request(f"{BASE}/api/conversations/{conv['id']}", method="DELETE"),
+        urllib.request.Request(f"{BASE}/api/workspaces/{conv['id']}", method="DELETE"),
         timeout=10).read()
 
     print("browser_kbnav: OK — click-focus, arrow walk + reveal, cycle+preserve, guards")

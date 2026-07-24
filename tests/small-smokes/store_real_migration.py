@@ -10,7 +10,7 @@ What it checks: timing + peak RSS; the split output shapes; an INDEPENDENT from-
 re-materialization deep-compared to the legacy bytes (catches disk-serialization bugs
 the in-memory verify can't); a second boot is an idempotent no-op; and — the clincher
 for the legacy-shape convs — a primary-only save_tree on a real {tree,compare_tree}
-conversation preserves its compare tree into trees['compare'] with the legacy keys
+workspace preserves its compare tree into trees['compare'] with the legacy keys
 healed.
 
 Defaults to Clément's largest instance store, read-only. Point it elsewhere with
@@ -65,7 +65,7 @@ import tinkerscope.paths as paths_mod  # noqa: E402
 
 importlib.reload(paths_mod)
 importlib.reload(settings_mod)
-import tinkerscope.api.conversation_store as store  # noqa: E402
+import tinkerscope.api.workspace_store as store  # noqa: E402
 
 importlib.reload(store)
 
@@ -94,10 +94,10 @@ print(f"boot (migrate + cache build): {time.time() - t0:.1f}s, peak RSS {rss_gb(
 assert not dst.exists() and dst.with_suffix(".json.legacy").exists(), "legacy not renamed"
 
 summaries = store.list_summaries()
-n_blob_files = sum(1 for _ in store._convs_dir().glob("*.blobs/*.json"))
-total_light = sum(f.stat().st_size for f in store._convs_dir().glob("*.json"))
-total_blobs = sum(f.stat().st_size for f in store._convs_dir().glob("*.blobs/*.json"))
-print(f"{len(summaries)} conversations migrated; light {total_light/1e6:.1f} MB, "
+n_blob_files = sum(1 for _ in store._ws_dir().glob("*.blobs/*.json"))
+total_light = sum(f.stat().st_size for f in store._ws_dir().glob("*.json"))
+total_blobs = sum(f.stat().st_size for f in store._ws_dir().glob("*.blobs/*.json"))
+print(f"{len(summaries)} workspaces migrated; light {total_light/1e6:.1f} MB, "
       f"{n_blob_files} blobs {total_blobs/1e6:.1f} MB (legacy {src_mb:.0f} MB)")
 
 legacy_shape = [s["id"] for s in summaries if "trees" not in (store.get_body(s["id"]) or {})]
@@ -116,7 +116,7 @@ for s in summaries:
     trees_iter = list((light.get("trees") or {}).values())
     trees_iter += [light[k] for k in ("tree", "compare_tree") if k in light]
     node_ids = [nid for t in trees_iter if isinstance(t, dict) for nid in (t.get("nodes") or {})]
-    if store.materialize_conv(light, store.get_blobs(s["id"], node_ids)) != by_id[s["id"]]:
+    if store.materialize_workspace(light, store.get_blobs(s["id"], node_ids)) != by_id[s["id"]]:
         mismatches.append(s["id"])
 print(f"disk verify done in {time.time() - t0:.1f}s; mismatches: {mismatches}")
 assert not mismatches, mismatches
@@ -147,7 +147,7 @@ if legacy_shape:
     else:
         print(f"legacy conv {cid[:8]} primary-only save: no compare tree to preserve — OK")
 else:
-    print("no legacy-shape conversation in this store — skipping the first-save check")
+    print("no legacy-shape workspace in this store — skipping the first-save check")
 
 print(f"final peak RSS {rss_gb():.2f} GB")
 print("REAL-STORE MIGRATION SMOKE: ALL GOOD")

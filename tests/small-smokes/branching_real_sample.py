@@ -4,7 +4,7 @@ foldAssistant) folds real replies into the tree.
 
 Exercises: a real n=1 send → fold under the user node; regenerate → a 2nd
 assistant SIBLING (‹k/N› = 2); a real n=3 send → 3 sibling branches folded. The
-oracle is the persisted tree (GET /api/conversations).
+oracle is the persisted tree (GET /api/workspaces).
 
 Uses an OpenRouter reference model (set via /api/state, no model-picker clicks) —
 the april LoRA fixtures' sampler weights have expired on Tinker (404), and the
@@ -40,17 +40,17 @@ def _post(path, body):
 
 
 def _clean():
-    for c in _get("/api/conversations"):
+    for c in _get("/api/workspaces"):
         urllib.request.urlopen(
-            urllib.request.Request(f"{BASE}/api/conversations/{c['id']}", method="DELETE"), timeout=10
+            urllib.request.Request(f"{BASE}/api/workspaces/{c['id']}", method="DELETE"), timeout=10
         ).read()
 
 
 def _tree():
-    cs = _get("/api/conversations")
+    cs = _get("/api/workspaces")
     if not cs:
         return {"nodes": {}}
-    body = _get(f"/api/conversations/{cs[0]['id']}")  # v2: list is summaries-only
+    body = _get(f"/api/workspaces/{cs[0]['id']}")  # v2: list is summaries-only
     return (body.get("trees") or {}).get("primary") or body.get("tree") or {"nodes": {}}
 
 

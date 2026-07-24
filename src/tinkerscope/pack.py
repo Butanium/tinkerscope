@@ -13,7 +13,7 @@ reproduce a tinkerscope session against PUBLIC Tinker checkpoints:
                    the pack works as-is on anyone's account.
   - **defaults** — the sampling params + the default panel layout (which models load
                    side-by-side on open), seeded into `prefs.json`'s `last_session`.
-  - **workspaces** — curated saved conversations, installed into the conversation store.
+  - **workspaces** — curated saved workspaces, installed into the workspace store.
 
 Two directions:
 
@@ -84,7 +84,7 @@ def panel_ids(n: int) -> list[str]:
 
 
 def _slug(s: str) -> str:
-    """Filename-safe slug within the conversation-store id charset ([A-Za-z0-9_-])."""
+    """Filename-safe slug within the workspace-store id charset ([A-Za-z0-9_-])."""
     out = re.sub(r"[^A-Za-z0-9_-]+", "-", s).strip("-")
     return out or "x"
 
@@ -130,7 +130,7 @@ class PackModel:
 @dataclass
 class PackWorkspace:
     name: str
-    body: dict  # light conversation body (panels + trees), heavy blobs stripped
+    body: dict  # light workspace body (panels + trees), heavy blobs stripped
 
     def to_dict(self) -> dict:
         return {"name": self.name, "body": self.body}
@@ -220,9 +220,9 @@ def apply_pack(pack: Pack, *, force: bool = False, reseed: bool = False) -> dict
     raw_meta/logprob blobs are rewritten (a plain re-apply keeps them — the blob store is
     write-once), workspaces dropped from the pack are removed from this pack's namespace,
     and the default params are overwritten (reseed implies `force`). It only touches
-    conversations in THIS pack's `pack-<name>-*` id namespace — a collaborator's own
-    conversations and other packs' workspaces are untouched."""
-    from .api import conversation_store, pack_models_store
+    workspaces in THIS pack's `pack-<name>-*` id namespace — a collaborator's own
+    workspaces and other packs' workspaces are untouched."""
+    from .api import workspace_store, pack_models_store
     from .api.routes import openrouter_models as or_store
     from .api.settings import SETTINGS
     from .api.store import read_json, write_json
@@ -240,21 +240,21 @@ def apply_pack(pack: Pack, *, force: bool = False, reseed: bool = False) -> dict
         or_store.upsert([{"label": m.label, "openrouter_model": m.ref} for m in or_models])
         summary["openrouter"] = len(or_models)
 
-    # 2. Workspaces → conversation store, deterministic id (re-apply upserts in place).
+    # 2. Workspaces → workspace store, deterministic id (re-apply upserts in place).
     prefix = f"pack-{_slug(pack.name)}-"
     cids = {prefix + _slug(ws.name): ws for ws in pack.workspaces}
     if reseed:
         # Drop this pack's workspaces that the current file no longer contains, then
         # delete the kept ones so upsert rewrites their (write-once) blobs from the pack.
-        for summ in conversation_store.list_summaries():
+        for summ in workspace_store.list_summaries():
             sid = summ.get("id")
             if isinstance(sid, str) and sid.startswith(prefix) and sid not in cids:
-                conversation_store.delete(sid)
+                workspace_store.delete(sid)
     for cid, ws in cids.items():
         if reseed:
-            conversation_store.delete(cid)
+            workspace_store.delete(cid)
         body = ws.body
-        conversation_store.upsert(
+        workspace_store.upsert(
             id=cid,
             name=ws.name,
             system_prompt=body.get("system_prompt"),
@@ -371,12 +371,12 @@ def resolve_shareable(
 
 
 def _prepare_workspace_body(body: dict, raw_meta: dict[str, str]) -> dict:
-    """Shape a light conversation body for a pack:
+    """Shape a light workspace body for a pack:
 
     - **inline each node's `raw_meta`** (the raw request/response) from `raw_meta`
       (node_id → value), so a collaborator can inspect what was actually sent — on apply,
       `upsert`'s split re-derives the `has_raw_meta` flag + the blob from the inlined field;
-    - **drop `token_logprobs`** (heavy — ~90% of a conversation's bytes — and a pack is one
+    - **drop `token_logprobs`** (heavy — ~90% of a workspace's bytes — and a pack is one
       self-contained YAML) and the stale presence flags."""
     out = json.loads(json.dumps(body))  # deep copy
     for tree in (out.get("trees") or {}).values():
@@ -396,7 +396,7 @@ def _prepare_workspace_body(body: dict, raw_meta: dict[str, str]) -> dict:
 def _rewrite_panels(
     body: dict, *, resolve: Callable[[str | None, str | None], tuple[str | None, PackModel | None]]
 ) -> list[PackModel]:
-    """Rewrite a conversation body's panel model refs in place to shareable sentinels;
+    """Rewrite a workspace body's panel model refs in place to shareable sentinels;
     return the PackModels they resolved to (for the pack's model list)."""
     found: list[PackModel] = []
     for p in body.get("panels") or []:
@@ -435,7 +435,7 @@ def export_pack(
     warn: Callable[[str], None] = lambda _m: None,
 ) -> Pack:
     """Build a Pack from a live state dir via `state_dir_reader` (which owns the
-    discovery / conversation-store / prefs access). `models_from`:
+    discovery / workspace-store / prefs access). `models_from`:
     panels | workspaces | all | runs. Filters (`include`/`exclude`) match a model's
     label or ref. If `existing` is given, the result MERGES into it (union of models by
     ref, workspaces by name; existing name/description kept unless overridden)."""
@@ -535,17 +535,17 @@ def _merge_packs(
 # ── StateReader: the live state-dir access export needs, injected so pack.py stays
 #    importable without the API layer for pure format tests ─────────────────────────
 class StateReader:
-    """Reads a live tinkerscope state dir for export. Wraps discovery + the conversation
+    """Reads a live tinkerscope state dir for export. Wraps discovery + the workspace
     store + prefs so `export_pack` has no direct API-layer coupling (and tests can feed a
     fake reader)."""
 
     def __init__(self) -> None:
-        from .api import conversation_store, discovery, pack_models_store
+        from .api import workspace_store, discovery, pack_models_store
         from .api.routes.models import ckpt_label
         from .api.settings import SETTINGS
         from .api.store import read_json
 
-        self._store = conversation_store
+        self._store = workspace_store
         self._discovery = discovery
         self._pack_models = pack_models_store
         self._ckpt_label = ckpt_label

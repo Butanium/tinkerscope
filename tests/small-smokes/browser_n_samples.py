@@ -38,11 +38,11 @@ def main() -> None:
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: errors.append(str(e)))
 
-        # Seed a fresh conversation with one free-router panel and open it directly —
+        # Seed a fresh workspace with one free-router panel and open it directly —
         # replaces the old native-<select> model picker (now the ModelDropdown combobox).
         # Also avoids inheriting a prior run's on-disk branch state.
         cid, _ = seed_conversation(BASE, [MODEL], "n_samples")
-        page.goto(f"{BASE}/?c={cid}", wait_until="load", timeout=20000)
+        page.goto(f"{BASE}/?w={cid}", wait_until="load", timeout=20000)
         page.wait_for_selector(".input-textarea:not([disabled])", timeout=15000)
 
         # Force the 'All' sample view so every card renders stacked (not one-at-a-time).
@@ -115,7 +115,7 @@ def main() -> None:
             '.sample-card button[data-tooltip^="Make this the active branch"]:not([disabled])'
         ).first.click(force=True)
         page.wait_for_selector('[data-testid="branch-cycle"]', timeout=15000)
-        # A fresh conversation has exactly one cycler (the folded assistant siblings),
+        # A fresh workspace has exactly one cycler (the folded assistant siblings),
         # but read the one reporting /n_folded rather than blindly taking .first, so a
         # stray cycler (e.g. a future user-edit branch) can't shadow the real assertion.
         counts = [c.strip() for c in page.locator('[data-testid="branch-cycle"] .branch-cycle-count').all_inner_texts()]

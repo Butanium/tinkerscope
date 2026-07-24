@@ -19,7 +19,7 @@ from ..store import read_json, write_json
 
 def _path():
     # Resolve lazily (fresh module lookup) so a test that reloads paths against a new
-    # XDG_STATE_HOME is honored — mirrors conversation_store / pack_models_store.
+    # XDG_STATE_HOME is honored — mirrors workspace_store / pack_models_store.
     from ...paths import OPENROUTER_MODELS_PATH
 
     return OPENROUTER_MODELS_PATH

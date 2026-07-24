@@ -1,8 +1,8 @@
 """Browser smoke for the ThreadSwitcher — the cross-panel thread jump.
 
-100% TOKEN-FREE: seeds a 2-panel conversation via POST /api/conversations where
+100% TOKEN-FREE: seeds a 2-panel workspace via POST /api/workspaces where
 the panels hold DIVERGENT thread sets (primary: ALPHA+BETA, compare: ALPHA+GAMMA
-— ALPHA shared, the others panel-local), opens it with ?c=<id>, then:
+— ALPHA shared, the others panel-local), opens it with ?w=<id>, then:
 
   1. the ⑂ threads button renders (3 distinct threads) and the menu lists them
      with per-thread panel coverage (ALPHA ×2, BETA ×1, GAMMA ×1);
@@ -70,7 +70,7 @@ FREE = "openrouter:openrouter/free"  # any non-null run_id: the load-time phanto
 
 
 def main():
-    conv = _post("/api/conversations", {
+    conv = _post("/api/workspaces", {
         "name": "thread switcher smoke",
         "trees": {
             # primary starts on BETA, compare on GAMMA — a divergent selection
@@ -90,7 +90,7 @@ def main():
         errors = []
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(f"{BASE}/?c={conv['id']}", wait_until="load", timeout=20000)
+        page.goto(f"{BASE}/?w={conv['id']}", wait_until="load", timeout=20000)
         page.wait_for_function("document.body.innerText.includes('PROMPT-BETA')", timeout=15000)
 
         assert first_msgs(page) == ["PROMPT-BETA", "PROMPT-GAMMA"], f"seed selection: {first_msgs(page)}"
@@ -122,7 +122,7 @@ def main():
 
         # ── 4. the switch persists (debounce-save → reload restores it) ──
         time.sleep(2.5)
-        page.goto(f"{BASE}/?c={conv['id']}", wait_until="load", timeout=20000)
+        page.goto(f"{BASE}/?w={conv['id']}", wait_until="load", timeout=20000)
         page.wait_for_function("document.body.innerText.includes('PROMPT-BETA')", timeout=15000)
         assert first_msgs(page) == ["PROMPT-BETA", "PROMPT-ALPHA"], \
             f"reload should restore the mixed selection: {first_msgs(page)}"

@@ -66,7 +66,7 @@ def seed_conversation():
         "send_targets": ids,
         "seen_panels": ids,
     }
-    return _post("/api/conversations", body)["id"], ids
+    return _post("/api/workspaces", body)["id"], ids
 
 
 class Bus(threading.Thread):
@@ -113,7 +113,7 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
         page = browser.new_page(viewport={"width": 1600, "height": 950})
-        page.goto(f"{BASE}/?c={cid}", wait_until="load", timeout=20000)
+        page.goto(f"{BASE}/?w={cid}", wait_until="load", timeout=20000)
         # Wait for all 8 columns to render.
         page.wait_for_function("(n) => document.querySelectorAll('.chat-column').length >= n",
                                arg=N_PANELS, timeout=15000)
@@ -152,7 +152,7 @@ def main():
         # (3) every COMPLETED panel folded its reply — assert on the persisted trees
         # (setTree → debounced save). Give the saves a beat to flush, then GET.
         time.sleep(2.0)
-        conv = _get(f"/api/conversations/{cid}")  # v2: list is summaries-only
+        conv = _get(f"/api/workspaces/{cid}")  # v2: list is summaries-only
         trees = conv.get("trees") or {}
         folded, empty = [], []
         for pid in done:  # only panels that actually completed should fold

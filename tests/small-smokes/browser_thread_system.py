@@ -1,8 +1,8 @@
 """Browser smoke for THREAD SYSTEM PROMPTS — the root-node field UI.
 
-100% TOKEN-FREE: seeds a 1-panel conversation with THREE root threads sharing
+100% TOKEN-FREE: seeds a 1-panel workspace with THREE root threads sharing
 the SAME first message under different system prompts (SYS-LETTER / SYS-STEPS /
-none — the probe-battery shape), opens it with ?c=<id>, then:
+none — the probe-battery shape), opens it with ?w=<id>, then:
 
   1. the active root row wears the collapsed `system` strip (SYS-LETTER);
      clicking it toggles the expanded state;
@@ -68,7 +68,7 @@ def strip_text(page):
 
 
 def main():
-    conv = _post("/api/conversations", {
+    conv = _post("/api/workspaces", {
         "name": "thread system smoke",
         "trees": {"primary": seed_tree()},
         "panels": [{"id": "primary", "run_id": FREE, "checkpoint": None}],
@@ -81,7 +81,7 @@ def main():
         errors = []
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(f"{BASE}/?c={conv['id']}", wait_until="load", timeout=20000)
+        page.goto(f"{BASE}/?w={conv['id']}", wait_until="load", timeout=20000)
         page.wait_for_function("document.body.innerText.includes('PROBE-Q')", timeout=15000)
 
         # ── 1. strip renders collapsed on the active root; click expands ──
@@ -147,7 +147,7 @@ def main():
 
         # ── 6. the fork persists (debounce-save → reload) ──
         time.sleep(2.5)
-        page.goto(f"{BASE}/?c={conv['id']}", wait_until="load", timeout=20000)
+        page.goto(f"{BASE}/?w={conv['id']}", wait_until="load", timeout=20000)
         page.wait_for_function("document.body.innerText.includes('PROBE-Q')", timeout=15000)
         assert "SYS-FRENCH" in (strip_text(page) or ""), \
             f"reload must restore the forked thread's strip: {strip_text(page)!r}"

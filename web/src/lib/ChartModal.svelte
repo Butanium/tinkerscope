@@ -193,7 +193,7 @@
   const hasFirstToken = $derived(
     activeSources.some((s) => s.turns.some((t) => t.samples.some((x) => x.first || x.hasFirst)))
   );
-  // Lazy blob fetch for the PICKED turn (only — never the whole conversation):
+  // Lazy blob fetch for the PICKED turn (only — never the whole workspace):
   // light samples flagged hasFirst without an inline/cached record get their
   // node blobs batch-fetched; `first` then fills in reactively through the
   // parent's cache-resolved sources. ensure() dedupes cached/in-flight ids, so

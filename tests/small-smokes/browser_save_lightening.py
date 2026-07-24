@@ -87,7 +87,7 @@ def edit_assistant_turn(page, text: str) -> None:
 
 def main() -> None:
     checks: list[tuple[str, bool]] = []
-    conv_id = api("POST", "/api/conversations", {
+    conv_id = api("POST", "/api/workspaces", {
         "name": "save-lightening-smoke",
         "trees": {"primary": {"nodes": {}, "rootChildren": [], "selected": {}}},
     })["id"]
@@ -119,7 +119,7 @@ def main() -> None:
                 else:
                     statuses.append("sent")
                     route.continue_()
-            page.route("**/api/conversations/*/tree", on_tree_route)
+            page.route("**/api/workspaces/*/tree", on_tree_route)
             responses: list[bool] = []  # ok-ness of the continued PUTs, in order
             page.on(
                 "response",
@@ -135,7 +135,7 @@ def main() -> None:
                 else None,
             )
 
-            page.goto(f"{BASE}/?c={conv_id}", wait_until="load", timeout=20000)
+            page.goto(f"{BASE}/?w={conv_id}", wait_until="load", timeout=20000)
             page.wait_for_selector(".model-slot-select", timeout=15000)
 
             composer = 'textarea[placeholder^="Type a message"]'
@@ -211,7 +211,7 @@ def main() -> None:
             browser.close()
     finally:
         try:
-            api("DELETE", f"/api/conversations/{conv_id}")
+            api("DELETE", f"/api/workspaces/{conv_id}")
         except Exception:
             pass
 

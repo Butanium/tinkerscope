@@ -55,10 +55,10 @@ tinkpg continue "<follow-up>" [opts] [--panel P] [--thread K] [--turn N] [--node
 tinkpg battery <dir> [--n N] [--pause S] [--out DIR] [--panel P ...] [--no-first-token]   # fire a DIRECTORY of probe *.txt files as sequential sends (one probe = one thread)
 tinkpg state [--full] [--width N] [--no-link] [--json] [--include-folded]   # DIGEST of on-screen panels (active path + matched saved conv)
 tinkpg params [--temperature T] [--max-tokens M] [--n N] [--thinking/--no-thinking|--thinking-both] [--top-p P] [--system S|--system-file F|--clear-system]   # show / SET the GLOBAL sampling params (browser sidebar updates live)
-tinkpg conv                                         # list saved WORKSPACES + branch metadata (alias: tinkpg ws)
-tinkpg conv <id|name> [--panel P] [--full] [--tree] [--include-folded]  # expand one: active branch + fork counts (--tree = all branches)
+tinkpg ws                                         # list saved WORKSPACES + branch metadata (alias: tinkpg conv)
+tinkpg ws <id|name> [--panel P] [--full] [--tree] [--include-folded]  # expand one: active branch + fork counts (--tree = all branches)
 tinkpg samples [conv] [--panel P] [--thread K|--node ID] [--turn N] [--sample K] [--slice S[:L]] [--full] [--first-token]  # ALL n-sample siblings at one fork + <tag> tally; --sample/--slice = read ONE sample in PIECES; --first-token = the model's P(first generated token) at this fork
-tinkpg grep "<text>" [--conv WS] [--regex] [-i]     # search EVERY branch of all workspaces: content + thinking
+tinkpg grep "<text>" [--ws WS] [--regex] [-i]     # search EVERY branch of all workspaces: content + thinking
 tinkpg refresh                                      # rescan filesystem + re-probe sampling capability
 ```
 
@@ -125,38 +125,38 @@ probe's prompt. `conv <id>`'s threads index prints each thread's `sys:` line;
 ## Reading state vs. workspaces (they are DIFFERENT stores)
 
 Vocabulary: the saved container (panels + branch trees) = a **workspace**; a
-branch-from-start first message starts a **thread**. The wire keeps legacy
-naming (`/api/conversations`, `conversation_id`, `?c=`) — read "conversation"
-in endpoint/field names as "workspace".
+branch-from-start first message starts a **thread**; a **conversation** is one
+dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
+`?w=`) as of v1.0.0.
 
 - `tinkpg state` shows the **live panels** — the transient on-screen selection +
   each panel's LINEAR active path (the server's state bus has no branches). It's a
   compact digest (first-2/last-2 messages, whitespace-collapsed): `--full` for the
   whole path, `--json` for the raw untruncated state (escape hatch). Do NOT expect
   branches here. It also names the OPEN workspace up top — `open workspace:
-  <name> (id) → tinkpg conv <id>` — because the browser pushes its `?c=`
-  conversation_id onto the state bus, so you can jump straight to its branches. If
+  <name> (id) → tinkpg ws <id>` — because the browser pushes its `?w=`
+  workspace_id onto the state bus, so you can jump straight to its branches. If
   that id is absent (older browser, or a CLI-only session that never opened a saved
-  conversation), it falls back to a per-panel EXACT active-path match (`← conv:
+  workspace), it falls back to a per-panel EXACT active-path match (`← ws:
   <name>`, or an honest `ambiguous ×N` when a short path is shared). `--no-link`
-  skips the conversations fetch entirely. Panels the human has FOLDED in the
+  skips the workspaces fetch entirely. Panels the human has FOLDED in the
   browser print as one-line stubs here too — `--include-folded` expands them
-  (fold info rides the open conversation, so `--no-link` shows every panel).
-- `tinkpg conv` (alias `ws`) reads the **saved workspace trees** (`/api/conversations`) —
+  (fold info rides the open workspace, so `--no-link` shows every panel).
+- `tinkpg ws` (alias `conv`) reads the **saved workspace trees** (`/api/workspaces`) —
   this is the ONLY place branches live. The tree is opaque to the server; the CLI
-  walks it client-side (mirrors `web/src/lib/tree.ts`). List shows per-conversation
+  walks it client-side (mirrors `web/src/lib/tree.ts`). List shows per-workspace
   `nodes` / `branches` (total forks) / `active` (per-panel active-path length).
   Expanding annotates each active turn that sits at a fork as `·k/N` (branch k of
   N), reports forks-on-path per panel, and `--tree` prints the full branch
   structure with `*` marking the active branch. A panel with multiple ROOT
   threads (branch-from-start first messages — the human often probes several
-  prompts in one conversation) gets a `threads:` index: one line per thread with
+  prompts in one workspace) gets a `threads:` index: one line per thread with
   its first message + fan-out size, `*` = active; those `k` numbers feed
   `samples --thread k`. Panels the human has FOLDED in
   the browser UI print as one-line stubs (skipped, with a trailing "N folded
   panel(s) skipped" list) — `--include-folded` expands them all, and an explicit
   `--panel` always overrides the fold. The live panels correspond to a
-  saved conversation but there's no stored link — match by name/recency.
+  saved workspace but there's no stored link — match by name/recency.
 - `tinkpg grep` is the FIND primitive: it scans every node of every branch
   (content AND `reasoning`/thinking) across all workspaces — the one command
   that reaches text on non-selected branches without `--tree` dumps. Hits are
@@ -168,7 +168,7 @@ in endpoint/field names as "workspace".
 - `tinkpg samples` answers "what did the model say across ALL n draws at this fork?"
   — the one view `state`/`conv` can't give you, since they only walk the linear active
   path. It prints every sibling response at ONE fork (default: the last user turn of the
-  open conversation, resolved via the pushed conversation_id; `--turn N` / `--panel P` /
+  open workspace, resolved via the pushed workspace_id; `--turn N` / `--panel P` /
   `--thread K` to aim it — `--thread` reaches NON-active root threads, which no
   active-path view shows; the default panel is the first non-folded one), each with its
   CoT (`--full` for complete reasoning), the active one `*`-marked.
@@ -217,7 +217,7 @@ in endpoint/field names as "workspace".
 
 - **Survey the human's probe workspace** (many panels, several prompts):
   `tinkpg state` (which models are live now — folded panels collapse to stubs) →
-  `tinkpg conv <id>` (per-panel thread index + forks) → `tinkpg samples --panel P
+  `tinkpg ws <id>` (per-panel thread index + forks) → `tinkpg samples --panel P
   --thread k` for each interesting fan-out. All read-only; folded panels stay out
   of the way by default.
 - **Add a probe to the human's workspace**: `tinkpg send "<prompt>" --n 20` —
@@ -244,8 +244,8 @@ in endpoint/field names as "workspace".
   — `continue --ancestry-file <path>` (a JSON list of `{role, content}` dicts)
   looms from it directly, no tree node needed.
 - **Provenance rule for looming (`continue`/`--ancestry-file`).** OK: a full,
-  VERBATIM, previously-generated conversation as ancestry — from a tree, a raw
-  log, or another model entirely (grafting a real conversation model A produced
+  VERBATIM, previously-generated workspace as ancestry — from a tree, a raw
+  log, or another model entirely (grafting a real workspace model A produced
   into model B's context to see how B judges/continues it is a legitimate
   probe design); a tiny `--prefill` thinking-opener ("Hmm,"); continuing a
   model's own truncated CoT verbatim. NOT ok, ever: authoring or editing any

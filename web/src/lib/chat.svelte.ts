@@ -17,7 +17,7 @@
 // sidebar's param state.
 
 import { live } from './state.svelte';
-import { conversations as convo } from './conversations.svelte';
+import { workspaces as ws } from './workspaces.svelte';
 import { nodeBlobs } from './node-blobs.svelte';
 import { api } from './api';
 import { foldAssistant, threadSystemAt, type SampleLike } from './tree';
@@ -65,7 +65,7 @@ class ChatStore {
 
   /** In-flight detached chats we own, keyed by client_token: the fold context to
    *  apply when the bus `chat_done`/`chat_error` for that token lands. Plain Map —
-   *  not reactive (no UI reads it); `convo.busy` (its token set) drives the gates. */
+   *  not reactive (no UI reads it); `ws.busy` (its token set) drives the gates. */
   #ownFires = new Map<string, FireContext>();
 
   /** Reset a panel's live sample bucket. Per-key write — live.panels is deeply
@@ -89,7 +89,7 @@ class ChatStore {
     onError: (msg: string) => void
   ) {
     this.firePrefill[panel] = prefill ?? ''; // so the live bucket colors its prefilled prefix
-    const token = convo.newToken(); // marks this chat OURS + flips convo.busy until its terminal
+    const token = ws.newToken(); // marks this chat OURS + flips ws.busy until its terminal
     this.#ownFires.set(token, {
       panel,
       userParentId,
@@ -101,7 +101,7 @@ class ChatStore {
     // field (regen deep in a probe thread must compose the probe's prompt). Sent
     // explicitly on EVERY fire — '' when the thread has none — so the server never
     // falls back to a stale panel mirror for a browser chat.
-    const thread_system_prompt = threadSystemAt(convo.treeFor(panel), userParentId) ?? '';
+    const thread_system_prompt = threadSystemAt(ws.treeFor(panel), userParentId) ?? '';
     api
       .chat({
         ...model, messages, ...params, thread_system_prompt, panel,
@@ -110,7 +110,7 @@ class ChatStore {
         // with it so another tab can tell it isn't theirs — read from the REQUEST,
         // not from the bus, which may describe a different workspace by the time
         // the chat ends (bus-scope.ts).
-        conversation_id: convo.activeId
+        workspace_id: ws.activeId
       })
       .then((res) => {
         if (res.ok) return; // accepted — the bus carries the outcome
@@ -124,11 +124,11 @@ class ChatStore {
   #failFire(token: string, onError: (msg: string) => void, msg: string) {
     if (!this.#ownFires.has(token)) return;
     this.#ownFires.delete(token);
-    convo.endToken(token);
+    ws.endToken(token);
     onError(msg);
   }
 
-  // ── bus terminal handling (own chats) — wired via convo.init(seam) ──────
+  // ── bus terminal handling (own chats) — wired via ws.init(seam) ──────
   /** Bus `chat_done` for a chat we own → fold its bucket samples (all n) under the
    *  recorded user node and release the token. Returns true iff we owned it (the
    *  caller then skips the foreign-fold path). Deterministic: the fold happens on
@@ -147,7 +147,7 @@ class ChatStore {
     if (bucket && bucket.chat_id === data.chat_id && bucket.samples.some((s) => s)) {
       const folded = this.#foldSamples(bucket.samples, ctx);
       if (folded.length) {
-        const { tree, ids } = foldAssistant(convo.treeFor(panel), ctx.userParentId, folded);
+        const { tree, ids } = foldAssistant(ws.treeFor(panel), ctx.userParentId, folded);
         // Seed the per-node blob cache from the fresh nodes (we have the data in
         // hand — no fetch ever needed for this session's own turns). The nodes
         // keep the heavy fields INLINE too: the next dirty-panel PUT ships them
@@ -156,10 +156,10 @@ class ChatStore {
           const n = tree.nodes[id];
           nodeBlobs.seed(id, { token_logprobs: n.token_logprobs, raw_meta: n.raw_meta });
         }
-        convo.setTree(panel, tree);
+        ws.setTree(panel, tree);
       }
     }
-    convo.endToken(token);
+    ws.endToken(token);
     return true;
   }
 
@@ -169,7 +169,7 @@ class ChatStore {
     const token = data?.client_token;
     if (!token || !this.#ownFires.has(token)) return false;
     this.#ownFires.delete(token);
-    convo.endToken(token);
+    ws.endToken(token);
     return true;
   }
 

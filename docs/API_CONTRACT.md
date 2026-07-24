@@ -17,8 +17,8 @@ via a shared server-side state bus.
 **Vocabulary vs wire naming (2026-07-17):** the saved container (panels + their
 branch trees) is called a **workspace** in the UI/CLI/docs; a branch-from-start
 first message starts a **thread** (a root sibling). The WIRE AND STORAGE keep
-the legacy `conversation` naming — `/api/conversations`, `conversation_id`,
-`?c=`, the per-conversation files — read "conversation" below as "workspace".
+the legacy `workspace` naming — `/api/workspaces`, `workspace_id`,
+`?c=`, the per-workspace files — read "workspace" below as "workspace".
 The full wire/disk rename is a deliberate staged migration, parked in
 `docs/TODO.md`, not a drift to fix piecemeal.
 
@@ -119,30 +119,30 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
 | GET | `/api/prefs` | — | `dict` (key→string) |
 | PUT | `/api/prefs/{key}` | `{value: string}` | `{status, key}` |
 | DELETE | `/api/prefs/{key}` | — | `{status}` |
-| GET | `/api/conversations` | `?bodies` | default: `ConversationSummary[]` (`{id,name,created_at,updated_at,panels}` — NO trees). `?bodies=1`: `Conversation[]` light bodies (trees incl., blobs excl.) — the CLI's link/browse paths |
-| GET | `/api/conversations/{id}` | — | one light `Conversation` body (trees incl., blobs excl.); 404 if unknown |
-| POST | `/api/conversations/{id}/node-blobs` | `{nodes: string[]}` | `{nodeId: {token_logprobs?, raw_meta?}}` — heavy blobs for a batch of node ids (POST, not GET, because the list is long). Unknown / blob-less ids are OMITTED, not an error |
-| POST | `/api/conversations` | `{id?, name?, system_prompt?, system_enabled?, trees?, panels?, tree?, compare_tree?, reduced_panels?, send_targets?, seen_panels?}` | the saved light Conversation (`id`,`created_at`,`updated_at` added; inline heavy node fields stripped into blobs). 400 on a crafted (non-filename-safe) `id` |
-| PATCH | `/api/conversations/{id}` | any subset of `{name, system_prompt, system_enabled, panels, reduced_panels, send_targets, seen_panels}` | the updated **ConversationSummary** (layout-only — NO tree bytes shipped either way); 404 if unknown |
-| PUT | `/api/conversations/{id}/tree` | `{trees, dropped_trees?, system_prompt?, system_enabled?, panels?, reduced_panels?, send_targets?, seen_panels?}` | `{status, id}` (the hot save path). `trees` is a **partial upsert** (dirty panels only, merged over stored); `dropped_trees` removes panels; inline heavy node fields are stripped into write-once blobs. 404 if unknown |
-| DELETE | `/api/conversations/{id}` | — | `{status}` (removes the light file AND the blobs dir) |
+| GET | `/api/workspaces` | `?bodies` | default: `WorkspaceSummary[]` (`{id,name,created_at,updated_at,panels}` — NO trees). `?bodies=1`: `Workspace[]` light bodies (trees incl., blobs excl.) — the CLI's link/browse paths |
+| GET | `/api/workspaces/{id}` | — | one light `Workspace` body (trees incl., blobs excl.); 404 if unknown |
+| POST | `/api/workspaces/{id}/node-blobs` | `{nodes: string[]}` | `{nodeId: {token_logprobs?, raw_meta?}}` — heavy blobs for a batch of node ids (POST, not GET, because the list is long). Unknown / blob-less ids are OMITTED, not an error |
+| POST | `/api/workspaces` | `{id?, name?, system_prompt?, system_enabled?, trees?, panels?, tree?, compare_tree?, reduced_panels?, send_targets?, seen_panels?}` | the saved light Workspace (`id`,`created_at`,`updated_at` added; inline heavy node fields stripped into blobs). 400 on a crafted (non-filename-safe) `id` |
+| PATCH | `/api/workspaces/{id}` | any subset of `{name, system_prompt, system_enabled, panels, reduced_panels, send_targets, seen_panels}` | the updated **WorkspaceSummary** (layout-only — NO tree bytes shipped either way); 404 if unknown |
+| PUT | `/api/workspaces/{id}/tree` | `{trees, dropped_trees?, system_prompt?, system_enabled?, panels?, reduced_panels?, send_targets?, seen_panels?}` | `{status, id}` (the hot save path). `trees` is a **partial upsert** (dirty panels only, merged over stored); `dropped_trees` removes panels; inline heavy node fields are stripped into write-once blobs. 404 if unknown |
+| DELETE | `/api/workspaces/{id}` | — | `{status}` (removes the light file AND the blobs dir) |
 
-### Conversation (branchable chat; persisted per scan-root, NOT in PlaygroundState)
+### Workspace (branchable chat; persisted per scan-root, NOT in PlaygroundState)
 ```jsonc
 {
   "id": "uuid", "name": "Untitled",
-  "system_prompt": null,                    // travels with the conversation (each conv = one experiment)
+  "system_prompt": null,                    // travels with the workspace (each conv = one experiment)
   "system_enabled": null,                   // its power state (false = kept but muted); absent/null on
                                             // legacy bodies → readers derive from text presence
   "trees": {                                // per-panel LIGHT branch trees, keyed by stable panel id
     "primary": { "nodes": {…}, "rootChildren": [], "selected": {} },
     "compare": { … }                        // present per open panel ('primary','compare','p-2',…)
   },
-  "panels": [                               // per-conversation panel LAYOUT (which model per panel).
+  "panels": [                               // per-workspace panel LAYOUT (which model per panel).
     {"id": "primary", "run_id": "…", "checkpoint": "final"},   // switching restores this set; a new
-    {"id": "compare", "run_id": "…", "checkpoint": null}       // conversation inherits the current one's.
+    {"id": "compare", "run_id": "…", "checkpoint": null}       // workspace inherits the current one's.
   ],                                        // [] on legacy convs ⇒ keep the currently-shown panels.
-  "reduced_panels": [], "send_targets": [], "seen_panels": [], // per-conversation panel UI (opaque id lists)
+  "reduced_panels": [], "send_targets": [], "seen_panels": [], // per-workspace panel UI (opaque id lists)
   // legacy shape, read-only: {tree, compare_tree} on un-migrated entries — folded into `trees` on first save
   "created_at": "iso", "updated_at": "iso"
 }
@@ -156,22 +156,22 @@ linear ACTIVE PATH (root→leaf via `selected`) is what the sampler/CLI read —
 mirrored into `PlaygroundState.messages`. The server treats the tree as opaque JSON.
 
 **Storage v2 — light trees + write-once node blobs** (see `docs/STORAGE_V2.md`,
-`api/conversation_store.py`). A node's two HEAVY fields — **`token_logprobs` and
+`api/workspace_store.py`). A node's two HEAVY fields — **`token_logprobs` and
 `raw_meta`** — live OUT of the tree, in per-node **write-once blobs**; the light
 node keeps `raw_text` (small) and carries `has_token_logprobs` / `has_raw_meta`
 presence flags (present only when the field is truthy). Consumers gate affordances
 off the flags and lazy-fetch the data via `POST /{id}/node-blobs`. On-disk layout,
 per instance dir:
 ```
-<state>/conversations/<id>.json          # light conversation (light trees)
-<state>/conversations/<id>.blobs/<nid>.json   # {"token_logprobs":[…]?, "raw_meta":"…"?}
+<state>/workspaces/<id>.json          # light workspace (light trees)
+<state>/workspaces/<id>.blobs/<nid>.json   # {"token_logprobs":[…]?, "raw_meta":"…"?}
 <state>/conversations.json.legacy        # the pre-v2 file, renamed after migration
 ```
 - **Blob invariant: write-once.** Logprobs/raw_meta never change after node creation
   (edits/regens mint new nodes), so an existing blob file is never rewritten
-  (idempotent). Blobs are keyed by node id, flat within one conversation's `.blobs/`
+  (idempotent). Blobs are keyed by node id, flat within one workspace's `.blobs/`
   dir; add-model clones keep the same node ids, so a shared blob is written once.
-  Blobs are deleted only with their whole conversation.
+  Blobs are deleted only with their whole workspace.
 - **Fresh folds may re-ship inline heavy fields** on a same-panel save until the
   next reload (the browser still holds the just-sampled data in the light node). The
   server strips them into blobs the same way as migration — **idempotently** (the
@@ -180,12 +180,12 @@ per instance dir:
 - **Partial-upsert PUT** merges only the dirty panels in `trees` over the stored
   trees and removes `dropped_trees`; a layout-only change goes through **PATCH**
   (no tree bytes). **Legacy-seeding:** on the first save of a migrated
-  `{tree, compare_tree}` conversation (no `trees` yet), the server seeds the merge
+  `{tree, compare_tree}` workspace (no `trees` yet), the server seeds the merge
   base with `primary←tree` / `compare←compare_tree` (truthy-checked) BEFORE applying
   the partial and dropping the legacy keys, so a one-panel first save can't lose the
   other tree.
 - **Migration** (boot): if legacy `conversations.json` exists and `conversations/`
-  doesn't, every conversation is split AND re-materialized (blobs folded back) and
+  doesn't, every workspace is split AND re-materialized (blobs folded back) and
   deep-compared to the legacy object in memory; ANY mismatch **refuses startup**
   with the legacy file untouched. Only after all verify are files written (via a
   staging dir + atomic swap) and legacy renamed to `.legacy` (**never deleted**). A
@@ -194,8 +194,8 @@ per instance dir:
 Caching: an in-memory summary map (built at boot, maintained on writes) backs the
 summaries list; parsed light bodies are memoized and evicted on write. Writes are
 flock-serialized AND guard the shared caches with an in-process lock. A corrupt
-per-conversation file is moved aside to `<id>.json.corrupt-<ts>` rather than reset.
-Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/conversations/`.
+per-workspace file is moved aside to `<id>.json.corrupt-<ts>` rather than reset.
+Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
 
 ### ChatRequest
 ```jsonc
@@ -328,7 +328,7 @@ just like a discovered run — same three artifacts.
                                     // `messages` — read by a mid-thread CLI send (inherit)
                                     // and by the echo-reconcile (stamp a recovered root)
   ],
-  "conversation_id": null,          // the workspace open in the browser (its ?c=)
+  "workspace_id": null,          // the workspace open in the browser (its ?c=)
   "system_prompt": null,            // the GLOBAL system-prompt part
   "system_enabled": null,           // power toggle for the global prompt (split-chip mute):
                                     // false = kept but MUTED (chat inherit skips it);
@@ -343,7 +343,7 @@ just like a discovered run — same three artifacts.
 ```
 StatePatch = any subset of the *settable* fields (everything except
 chat_id/running/last_event*). POST `/api/state` with a subset to drive selection
-/ conversation / params. Panel routing: `panels` full-replaces the list;
+/ workspace / params. Panel routing: `panels` full-replaces the list;
 `panel_messages: {panel_id: msgs}` / `panel_thread_system: {panel_id: str|null}`
 bulk-mirror per-panel fields without touching selection; `panel` + one of
 `run_id`/`checkpoint`/`messages`/`thread_system_prompt` targets a single
@@ -357,24 +357,24 @@ load-bearing:
 
 | scope | fields | why |
 |---|---|---|
-| **workspace** | `panels` (incl. per-panel `run_id`/`checkpoint`/`messages`/`thread_system_prompt`), `conversation_id`, `system_prompt`, `system_enabled` | persisted **with the workspace** and restored on open — a workspace IS its panel layout |
+| **workspace** | `panels` (incl. per-panel `run_id`/`checkpoint`/`messages`/`thread_system_prompt`), `workspace_id`, `system_prompt`, `system_enabled` | persisted **with the workspace** and restored on open — a workspace IS its panel layout |
 | **global** | `temperature`, `max_tokens`, `n_samples`, `thinking`, `top_p`, `chat_id`, `running`, `last_event*` | one knob for every panel and every client — the point of a shared bus |
 
 The bus holds exactly **one workspace's** worth of the first group at a time,
-identified by `conversation_id`. Two rules keep that honest:
+identified by `workspace_id`. Two rules keep that honest:
 
 1. **Server** (`api/state.py::_drop_foreign_workspace_keys`): a patch stamped with
-   a `conversation_id` different from the bus's current one may only apply
+   a `workspace_id` different from the bus's current one may only apply
    workspace-scoped keys if it also carries `panels` — i.e. it CLAIMS the bus.
    An incremental write from a non-owner keeps only its global fields. A patch with
    NO stamp is treated as same-owner (that's the CLI, and any pre-scoping client).
 2. **Client** (`web/src/lib/bus-scope.ts::mergeBusState`): a client adopts
    workspace-scoped fields only from messages stamped with its own workspace;
    otherwise it keeps its own and takes the globals. It re-claims the bus on
-   conversation open/switch/create and on window focus — so *the tab you last
+   workspace open/switch/create and on window focus — so *the tab you last
    looked at is the one the terminal drives*.
 
-`/api/chat` carries `conversation_id` too (browser sends its own; CLI omits it and
+`/api/chat` carries `workspace_id` too (browser sends its own; CLI omits it and
 inherits the bus's), and the `chat_start`/`chat_done`/`chat_error` broadcasts are
 stamped from the **request**, not from the bus — with two tabs the bus can already
 describe another workspace by the time a chat ends.
@@ -391,14 +391,14 @@ instance were corrupted this way before it was diagnosed (2026-07-24). Tests:
 Event names = the message's `type`:
 - `snapshot` → `{type:"snapshot", state}` (full state, sent first on connect)
 - `patch` → `{type:"patch", event, state}` (state changed; e.g. event="chat_start"/"chat_done"/"patch")
-- `chat_start` → `{type:"chat_start", chat_id, panel, n, label, client_token?, conversation_id?, thread_system_prompt?}` (a chat began; clear that panel's samples. `n` = TOTAL expected samples — 2×n_samples on a `thinking:"both"` chat. `conversation_id` = the conversation open when the chat started — the browser folds an external chat only when this matches its active conversation; null = fold anyway, see below. `thread_system_prompt` = the chat's RESOLVED thread part)
+- `chat_start` → `{type:"chat_start", chat_id, panel, n, label, client_token?, workspace_id?, thread_system_prompt?}` (a chat began; clear that panel's samples. `n` = TOTAL expected samples — 2×n_samples on a `thinking:"both"` chat. `workspace_id` = the workspace open when the chat started — the browser folds an external chat only when this matches its active workspace; null = fold anyway, see below. `thread_system_prompt` = the chat's RESOLVED thread part)
 - `delta` → `{type:"delta", chat_id, panel, sample_index, delta, kind}` (streamed token chunk; only a token-streaming producer at n==1 — openrouter, NOT run_id / base_model / loose sampler_path which all render native — accumulate per chat_id/panel/sample_index, then the `sample` event finalizes)
 - `sample` → `{type:"sample", chat_id, panel, sample_index, content, raw_text, finish_reason, reasoning?, thinking?}` (`thinking` only on `thinking:"both"` chats — which half drew this sample)
-- `chat_done` → `{type:"chat_done", chat_id, panel, client_token?, conversation_id?, thread_system_prompt?}` (`conversation_id` scopes the external fold — see `chat_start`. `thread_system_prompt` = the chat's resolved thread part: the external fold reconciles the transcript onto the ROOT carrying the same one — two probe threads sharing a first message under different prompts are distinct — and stamps it on a freshly-minted root)
-- `chat_error` → `{type:"chat_error", chat_id, panel, error, client_token?, conversation_id?, thread_system_prompt?}`
+- `chat_done` → `{type:"chat_done", chat_id, panel, client_token?, workspace_id?, thread_system_prompt?}` (`workspace_id` scopes the external fold — see `chat_start`. `thread_system_prompt` = the chat's resolved thread part: the external fold reconciles the transcript onto the ROOT carrying the same one — two probe threads sharing a first message under different prompts are distinct — and stamps it on a freshly-minted root)
+- `chat_error` → `{type:"chat_error", chat_id, panel, error, client_token?, workspace_id?, thread_system_prompt?}`
 - `ping` → `{}` (15s heartbeat; ignore)
 
-**Live-drive model:** the browser renders selection + params + the conversation
+**Live-drive model:** the browser renders selection + params + the workspace
 from `state`, and accumulates streamed samples per `chat_id`/`panel` from the
 ephemeral events. The CLI and the browser both POST `/api/state` (to set
 selection/prompt) and `/api/chat` (to sample); because chat broadcasts to the

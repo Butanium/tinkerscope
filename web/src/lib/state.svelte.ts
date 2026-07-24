@@ -2,7 +2,7 @@
 //
 // Two concerns live here:
 //   1. `live.state` — the mirrored shared PlaygroundState (selection / params /
-//      conversation). Rendered directly so the browser follows when the terminal
+//      workspace). Rendered directly so the browser follows when the terminal
 //      (or another browser tab) POSTs /api/state. WORKSPACE-SCOPED fields are
 //      filtered through `mergeBusState` first: the bus is process-global but a
 //      workspace's panel layout / system prompt is its own, so a message stamped
@@ -13,7 +13,7 @@
 //      'chat_done'/'chat_error' end it. The sample list + distribution chart
 //      render from these, so CLI-initiated and browser-initiated chats share one
 //      render path. Ephemeral broadcasts, NOT state — they carry their own
-//      client_token / conversation_id and are scoped by their consumers.
+//      client_token / workspace_id and are scoped by their consumers.
 
 import { api, sse } from './api';
 import { mergeBusState } from './bus-scope';
@@ -38,9 +38,9 @@ class LiveStore {
    *  For workspace-scoped fields this is OUR workspace's truth, not necessarily
    *  the raw bus — see #adopt / bus-scope.ts. */
   state = $state<PlaygroundState | null>(null);
-  /** The workspace (conversation) this tab has open. Kept in lockstep with
-   *  `conversations.activeId` by the conversation store — the one input the bus
-   *  filter needs, injected rather than imported (conversations imports us). */
+  /** The workspace this tab has open. Kept in lockstep with
+   *  `workspaces.activeId` by the workspace store — the one input the bus
+   *  filter needs, injected rather than imported (workspaces imports us). */
   workspaceId: string | null = null;
   /** true once the SSE stream has delivered at least one event. */
   connected = $state(false);
@@ -65,7 +65,7 @@ class LiveStore {
   onChatDone: ((panel: Panel, data: any) => void) | null = null;
   onChatError: ((panel: Panel, data: any) => void) | null = null;
   /** Fires on a full `snapshot` (sent to every new subscriber → also on EventSource
-   *  RECONNECT after a drop). Lets the conversation store reconcile any terminal it
+   *  RECONNECT after a drop). Lets the workspace store reconcile any terminal it
    *  missed during the gap + release stale busy tokens. Not fired on incremental
    *  `patch` events. */
   onSnapshot: (() => void) | null = null;
@@ -92,14 +92,14 @@ class LiveStore {
     this.#stop = null;
   }
 
-  /** Drop all panel buckets — used when switching conversations so a stale
+  /** Drop all panel buckets — used when switching workspaces so a stale
    *  overlay from the previous one can't bleed onto the new active path. */
   clearBuckets(): void {
     this.panels = {};
   }
 
   /** Drop ONE panel's bucket. Used when a panel id is re-minted (addPanel) and when
-   *  a foreign-conversation chat is skipped (conversations.#onExternalDone) so its
+   *  a foreign-workspace chat is skipped (workspaces.#onExternalDone) so its
    *  streamed samples don't linger as a render overlay on the reused panel. */
   dropBucket(panel: Panel): void {
     if (!(panel in this.panels)) return;
@@ -115,11 +115,11 @@ class LiveStore {
   }
 
   /** Restore a wiped server bus from this tab's mirror: full panel list
-   *  (selections + transcript echoes), open conversation, sampling params. */
+   *  (selections + transcript echoes), open workspace, sampling params. */
   #reprime(prev: PlaygroundState): void {
     api
       .setState({
-        conversation_id: prev.conversation_id,
+        workspace_id: prev.workspace_id,
         panels: prev.panels,
         system_prompt: prev.system_prompt,
         // explicit — the flag-less shim would re-enable a muted prompt
@@ -146,12 +146,12 @@ class LiveStore {
           // would collapse the UI to the default single panel — and a save landing
           // in that window would PERSIST the wrong layout. Keep our mirror and
           // re-prime the server instead, so `tinkpg state` isn't blind until the
-          // next conversation switch. Skip while the fresh server is mid-chat
+          // next workspace switch. Skip while the fresh server is mid-chat
           // (a CLI drive owns the bus then; last-writer-wins as usual).
           const wiped =
             prev != null &&
-            next.conversation_id == null &&
-            (prev.conversation_id != null || next.chat_id < prev.chat_id);
+            next.workspace_id == null &&
+            (prev.workspace_id != null || next.chat_id < prev.chat_id);
           if (wiped && !next.running) this.#reprime(prev);
           else if (!wiped) this.adopt(next);
         }

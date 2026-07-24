@@ -53,7 +53,7 @@ def tinkpg(*args):
 
 
 def main():
-    conv = _post("/api/conversations", {
+    conv = _post("/api/workspaces", {
         "name": "live e2e thread system",
         "trees": {"primary": {"nodes": {}, "rootChildren": [], "selected": {}}},
         "panels": [{"id": "primary", "run_id": FREE, "checkpoint": None}],
@@ -64,7 +64,7 @@ def main():
         page = browser.new_page(viewport={"width": 1400, "height": 900})
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(f"{BASE}/?c={conv['id']}", wait_until="load", timeout=20000)
+        page.goto(f"{BASE}/?w={conv['id']}", wait_until="load", timeout=20000)
         page.wait_for_function(
             "document.querySelector('.input-textarea') && !document.querySelector('.input-textarea').disabled",
             timeout=15000)

@@ -9,7 +9,7 @@ browser" stay consistent — this is what makes the collaborative
 
 Two kinds of message travel the bus:
   - state patches  (`snapshot` / `patch`): persistent selection + params +
-    conversation. Carried as a full state snapshot so a late subscriber is
+    workspace. Carried as a full state snapshot so a late subscriber is
     immediately consistent.
   - ephemeral broadcasts (`chat_start` / `sample` / `chat_done` / `chat_error`):
     streaming sample results. NOT stored on the state object (50 long samples
@@ -19,7 +19,7 @@ WORKSPACE SCOPING (the one non-obvious rule). One PlaygroundState per PROCESS is
 right for sampling params — one knob, every panel, every client. It is NOT right
 for the panel layout, per-panel models and system prompt: those belong to the open
 WORKSPACE, are persisted with it and restored on open. So the bus holds exactly one
-workspace's worth of them at a time, stamped with `conversation_id`, and:
+workspace's worth of them at a time, stamped with `workspace_id`, and:
   - a patch stamped with a different workspace may only apply workspace-scoped keys
     if it CLAIMS the bus by carrying `panels` (_drop_foreign_workspace_keys);
   - a client renders/persists workspace-scoped fields only from messages stamped
@@ -61,10 +61,10 @@ class PlaygroundState:
     per-panel, in `panels` (slot 0 = 'primary', always present)."""
 
     panels: list[PanelState] = field(default_factory=lambda: [PanelState(id="primary")])
-    # Id of the saved conversation the browser currently has open (its `?c=`), pushed
+    # Id of the saved workspace the browser currently has open (its `?c=`), pushed
     # so the CLI can name "what's on screen" exactly instead of guessing by path-match.
-    # None when no conversation is open (or an older browser that doesn't push it).
-    conversation_id: str | None = None
+    # None when no workspace is open (or an older browser that doesn't push it).
+    workspace_id: str | None = None
     system_prompt: str | None = None
     # Whether the global system prompt APPLIES to sends (the browser's power
     # toggle — False = kept but muted). Tri-state for back-compat: None = unset
@@ -124,7 +124,7 @@ class StateBus:
     # only so `tinkpg` can see (and drive) what's on screen. Mirror of
     # web/src/lib/bus-scope.ts WORKSPACE_FIELDS + the panel-routing keys.
     _WORKSPACE_KEYS = (
-        "panels", "conversation_id", "system_prompt", "system_enabled",
+        "panels", "workspace_id", "system_prompt", "system_enabled",
         "panel_messages", "panel_thread_system",
         "panel", *_PANEL_FIELDS,
     )
@@ -184,10 +184,10 @@ class StateBus:
         Unstamped patches are treated as same-owner: that's the CLI (`tinkpg open`)
         and any pre-scoping client, and it's what keeps terminal-drives-browser
         working. See web/src/lib/bus-scope.ts for the browser half."""
-        stamp = patch.get("conversation_id")
+        stamp = patch.get("workspace_id")
         if stamp is None or "panels" in patch:
             return patch
-        current = self.state.conversation_id
+        current = self.state.workspace_id
         if current is None or stamp == current:
             return patch
         return {k: v for k, v in patch.items() if k not in self._WORKSPACE_KEYS}
@@ -240,7 +240,7 @@ class StateBus:
 
     async def chat_begin(self, **patch: Any) -> int:
         """Atomically: allocate a fresh chat_id, mark running, apply the
-        selection/conversation/params patch, and broadcast the chat_start state.
+        selection/workspace/params patch, and broadcast the chat_start state.
         Returns the new chat_id. Race-free across concurrent /api/chat calls
         (compare fires two; CLI + browser can overlap)."""
         async with self._lock:
@@ -281,7 +281,7 @@ BUS = StateBus()
 # prime the bus from prefs.json's `last_session` so a pure-CLI consumer of a pack
 # (`tinkerscope --pack …` then `tinkpg params`, never opening a browser) sees the pack's
 # defaults instead of the PlaygroundState() library defaults. ONLY these five — the
-# shared-state params — are seeded; panels/conversation are deliberately left at defaults
+# shared-state params — are seeded; panels/workspace are deliberately left at defaults
 # so the browser's own restore (which fires only when every panel run_id is null) still
 # runs and restores the layout + the frontend-only params (top_k/presence/repetition).
 _SEEDABLE_PARAMS = ("temperature", "max_tokens", "n_samples", "thinking", "top_p")

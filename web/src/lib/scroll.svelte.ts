@@ -2,7 +2,7 @@
 //
 // History (why this exists): the app used to have a single $effect that pinned
 // EVERY panel to its bottom whenever the shared state changed. Because every
-// user action (branch cycle, thinking toggle, param edit, conversation load)
+// user action (branch cycle, thinking toggle, param edit, workspace load)
 // round-trips POST /api/state → SSE patch → a wholesale live.state replacement,
 // that effect yanked every panel to its bottom ~50 ms AFTER the DOM had already
 // updated from the local tree — that async yank was the "scroll flicker", and
@@ -20,7 +20,7 @@
 //      overflow-anchor isn't deterministic across row replacement — this is.
 //      (If the new content is shorter than the viewport the browser clamps the
 //      restored scrollTop; that's the desired "it's just shorter" case.)
-//   3. SNAP — deliberate jumps to the latest turn: opening a conversation,
+//   3. SNAP — deliberate jumps to the latest turn: opening a workspace,
 //      sending a message, receiving a branch from another panel. Also re-arms
 //      FOLLOW's stick.
 //   4. REVEAL — keyboard row-focus moved (↑/↓) to a row outside the viewport:
@@ -106,7 +106,7 @@ class PanelScroll {
     });
   }
 
-  /** Snap every registered panel (conversation open / initial tree load). */
+  /** Snap every registered panel (workspace open / initial tree load). */
   async snapAll() {
     await tick();
     for (const [p, el] of Object.entries(this.els)) {

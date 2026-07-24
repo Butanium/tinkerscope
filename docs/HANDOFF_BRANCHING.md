@@ -1,11 +1,11 @@
-# Handoff — conversation branching (+ highlight-UI overhaul)
+# Handoff — workspace branching (+ highlight-UI overhaul)
 
 > **STATUS (2026-06-22): branching is SHIPPED.** This doc is now the *historical
 > planning record* (what Clément asked for vs what I inferred — §2–§4 are still
 > the authoritative requirements). The **as-built design + contract** lives in
 > [`BRANCHING_DESIGN.md`](BRANCHING_DESIGN.md) (v2, post-adversarial-critique) and
 > the code: `web/src/lib/tree.ts` (pure tree + `tree.test.ts`),
-> `web/src/lib/conversations.svelte.ts` (store), `api/routes/conversations.py`,
+> `web/src/lib/workspaces.svelte.ts` (store), `api/routes/workspaces.py`,
 > `+page.svelte` / `ChatMessage.svelte`. Two notable divergences from the plan
 > below, both deliberate: **(1)** the tree lives in a SEPARATE per-scan-root store,
 > NOT in `PlaygroundState`/the SSE snapshot (avoids the snapshot-bloat `state.py`
@@ -14,7 +14,7 @@
 
 Written 2026-06-19 by the session that landed commit `33b698e` (ChatMessage
 extraction + chat-thread actions). Purpose: let a fresh session build the
-**conversation-branching** feature without re-deriving the architecture, and
+**workspace-branching** feature without re-deriving the architecture, and
 **keep a clear line between what Clément actually said and what I (Claude)
 inferred** — so my design choices don't get mistaken for his instructions.
 
@@ -136,7 +136,7 @@ answers. Flag them; don't present them back to him as his own decisions.
 
 - **Data model = a per-panel tree.** Nodes `{id, role, content, reasoning?,
   raw_text?, parent, children[]}` + a `selected` map (parent/root → chosen child).
-  The **active path** (root→leaf following selections) IS the linear conversation.
+  The **active path** (root→leaf following selections) IS the linear workspace.
   *(He said "fork + cycle"; the tree/selected-map structure is my design.)*
 - **Backend stays linear.** It keeps sampling from the active path (= `messages`)
   and streaming into the bucket exactly as now; the **frontend** assembles the tree
@@ -156,7 +156,7 @@ answers. Flag them; don't present them back to him as his own decisions.
   becomes "cycle to it + continue"). *(My inference, consistent with his sample-
   branch ask — but it means reworking code I just shipped.)*
 - **Persistence shape (mine):** per-scan-root JSON like highlights; one tree per
-  conversation; needs a conversation id + a list/switcher UI eventually.
+  workspace; needs a workspace id + a list/switcher UI eventually.
 
 ---
 
@@ -167,18 +167,18 @@ to direct questions, the last two were defaults he didn't object to). Treat as s
 
 - **Shift+click-edit = copy the whole branch, no generation.** Normal edit of a
   USER message forks + auto-regenerates a fresh reply (empty below the edit).
-  **Shift+click** edit forks but COPIES the entire downstream conversation (the
+  **Shift+click** edit forks but COPIES the entire downstream workspace (the
   current active path below that message) into the new branch verbatim — every turn
   becomes hand-editable and NOTHING is generated. (His words: "fork with the full
   current conv without generating anything.")
 - **Delete = prune the branch (node + its whole subtree).** Deleting a message
   removes it and everything that descends from it on that branch; sibling branches
   stay, and selection falls back to a sibling (or the parent). No orphaned replies.
-- **Persistence = multiple NAMED conversation trees, switched via a DROPDOWN**
-  (explicitly NOT a sidebar list). Each conversation = its own named tree, persisted
+- **Persistence = multiple NAMED workspace trees, switched via a DROPDOWN**
+  (explicitly NOT a sidebar list). Each workspace = its own named tree, persisted
   per scan-root (JSON, mirroring `highlights`). A dropdown — styled like the existing
-  model pickers — switches / creates / deletes conversations. So the build includes a
-  conversations store + that dropdown, on top of the tree branching itself.
+  model pickers — switches / creates / deletes workspaces. So the build includes a
+  workspaces store + that dropdown, on top of the tree branching itself.
 - **Cycling control (default, not objected):** Claude.ai-style inline ‹ k/N › with
   prev/next, shown on any message that has siblings (user edits AND assistant
   regens/samples).

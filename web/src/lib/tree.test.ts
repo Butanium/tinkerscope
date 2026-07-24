@@ -417,13 +417,13 @@ test('REVIEW: reconcile re-selects a matching NON-active sibling (CLI hit a hidd
 });
 
 test('CRITIQUE: a divergent external turn becomes a NEW root, prior branch recoverable', () => {
-  const t = linear4(); // deep 4-turn conversation
+  const t = linear4(); // deep 4-turn workspace
   const after = reconcileExternal(t, [U('cli question'), A('cli answer')]);
   // the new root is selected → active path is the CLI turn
   eq(activeMessages(after), [U('cli question'), A('cli answer')]);
   eq(after.rootChildren.length, 2); // both roots present
   assertValid(after);
-  // recover the original deep conversation by cycling the root
+  // recover the original deep workspace by cycling the root
   const firstRoot = after.rootChildren[0];
   const back = setSelected(after, firstRoot);
   eq(msgContents(back), ['U1', 'A1', 'U2', 'A2']);

@@ -11,12 +11,12 @@ see `README.md` for the full feature list + credits.
 | Doc | What it's for | Status |
 |---|---|---|
 | `README.md` | User-facing: what it does, how to run, the CLI, tests | current |
-| `docs/API_CONTRACT.md` | Authoritative HTTP endpoint + SSE event shapes (incl. `/api/conversations` + the branch-tree shape) | current |
-| `docs/BRANCHING_DESIGN.md` | **As-built design + contract for conversation branching** (tree model, fold/reconcile rules, persistence, known limits). The source of truth for the feature | current |
-| `docs/STORAGE_V2.md` | **Storage v2 design (SHIPPED 2026-07-13)** — why the single conversations.json OOM'd the browser, the light-tree/heavy-blob split, per-conversation files + migration, wire-contract deltas, frontend memory policy. As-built endpoint shapes live in `API_CONTRACT.md` | shipped; follow-ups in `docs/TODO.md` |
+| `docs/API_CONTRACT.md` | Authoritative HTTP endpoint + SSE event shapes (incl. `/api/workspaces` + the branch-tree shape) | current |
+| `docs/BRANCHING_DESIGN.md` | **As-built design + contract for workspace branching** (tree model, fold/reconcile rules, persistence, known limits). The source of truth for the feature | current |
+| `docs/STORAGE_V2.md` | **Storage v2 design (SHIPPED 2026-07-13)** — why the single conversations.json OOM'd the browser, the light-tree/heavy-blob split, per-workspace files + migration, wire-contract deltas, frontend memory policy. As-built endpoint shapes live in `API_CONTRACT.md` | shipped; follow-ups in `docs/TODO.md` |
 | `docs/HANDOFF_BRANCHING.md` | Historical planning record for branching (what Clément asked vs what I inferred — §2–§4 = the requirements). §5 = the highlight-UI overhaul (now shipped — see `docs/TODO.md`) | branching + §5 both shipped |
-| `docs/HANDOFF_MULTIPANEL.md` | **N-way model comparison workspace — SHIPPED** (`panels[]`, `trees` map + back-compat migration, add/remove/reduce panels, composer send-targeting, send-branch-to-panel, N-run CLI `compare`). §9 = the as-built grounded plan + locked decisions (architecture B; per-conversation persistence; global params; stable panel ids). §5 = the original 2-panel site-map | shipped; per-conversation panel *layout* now persists too (switch restores a conv's model set; new conv inherits the current one's models, Shift+new = blank — see `Conversation.panels` in `docs/API_CONTRACT.md`); follow-ups: the §4 small items |
-| `docs/HANDOFF_WORKSPACE_RENAME.md` | Handoff for the parked conversations→workspaces WIRE/DISK rename (vocabulary half shipped 2026-07-17): locked decisions, rename-surface inventory, the known traps (phantom-panel self-heal, legacy tree bodies, save-plan, old tabs/`?c=`), staging plan | parked — read before attempting the rename |
+| `docs/HANDOFF_MULTIPANEL.md` | **N-way model comparison workspace — SHIPPED** (`panels[]`, `trees` map + back-compat migration, add/remove/reduce panels, composer send-targeting, send-branch-to-panel, N-run CLI `compare`). §9 = the as-built grounded plan + locked decisions (architecture B; per-workspace persistence; global params; stable panel ids). §5 = the original 2-panel site-map | shipped; per-workspace panel *layout* now persists too (switch restores a conv's model set; new conv inherits the current one's models, Shift+new = blank — see `Workspace.panels` in `docs/API_CONTRACT.md`); follow-ups: the §4 small items |
+| `docs/HANDOFF_WORKSPACE_RENAME.md` | Historical planning record for the conversations→workspaces WIRE/DISK rename (shipped in v1.0.0, 2026-07-24). Deliberately keeps the OLD names — it describes the pre-rename state. The as-shipped result is `docs/MIGRATIONS.md` | shipped; historical |
 | `docs/HANDOFF_SERVER_AUTHORITY.md` | **Design: server-authoritative workspace trees (ops protocol)** — inverts the browser-is-sole-writer architecture so the server folds + persists chats (headless CLI durability, fixes the CLI no-token-data / n−1-samples loss), all tree mutation as idempotent ops + per-workspace `rev`, browser stays an optimistic mirror. Locked decisions, race analysis, 3-phase staging | design, not started — read before touching persistence/fold code |
 | `docs/PACK.md` | **Share packs** — bundle checkpoints + default params + workspaces into one portable YAML (`tinkerscope --pack <file\|url>` to consume, `tinkerscope pack export` to author) so a collaborator reproduces a setup against public checkpoints with no local run dirs. Code: `src/tinkerscope/pack.py` + `api/pack_models_store.py` | current |
 | `docs/TODO.md` | Roadmap (branching marked done) | current |
@@ -79,8 +79,8 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
   - `lib/state.svelte.ts` → `live` — mirrored shared `PlaygroundState` (selection/
     params) + per-panel **streamed sample buckets**, both driven by the
     `/api/state/events` SSE. The render bus.
-  - `lib/conversations.svelte.ts` → `convo` — owner of the per-panel **branch
-    trees** + persistence + the external-fold reconcile. The conversation model.
+  - `lib/workspaces.svelte.ts` → `ws` — owner of the per-panel **branch
+    trees** + persistence + the external-fold reconcile. The workspace model.
     Storage v2 (`docs/STORAGE_V2.md`): `list` holds SUMMARIES only (bodies are
     fetched on open); `trees` is **`$state.raw`** (immutable refs — never mutate
     a node in place, nothing would react or save); saves accumulate dirty-panel /
@@ -91,7 +91,7 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
   - `lib/node-blobs.svelte.ts` → `nodeBlobs` — the per-node **heavy-blob cache**
     (token_logprobs / raw_meta live server-side as write-once blobs; light nodes
     carry `has_*` flags). Batch `ensure()` (20 ms micro-batched → one POST),
-    seeded at fold time by the chat store, reset on every conversation
+    seeded at fold time by the chat store, reset on every workspace
     transition. Consumers: ChatMessage's token view + raw-meta disclosure,
     ChartModal first-token mode (fetches the picked turn only).
   - `lib/chat.svelte.ts` → `chat` — the **generation-fire lifecycle**: POST
@@ -130,7 +130,7 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     their match.
   - `lib/scroll.svelte.ts` → `panelScroll` — **the only scrollTop writer**: the
     per-panel FOLLOW (streaming, stick-to-bottom gated) / PRESERVE (tree
-    mutations keep position) / SNAP (send, conversation open) / REVEAL
+    mutations keep position) / SNAP (send, workspace open) / REVEAL
     (keyboard focus moved off-screen → minimal container-only scroll) policy.
     Its module docstring records why (the old global bottom-pin = the scroll
     flicker). New scroll behavior goes through this store, never inline.
@@ -241,10 +241,10 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     *Send a chat* (`sendMessage` + the `fireOne` wrapper — the core send path;
     the fire/abort/fold machinery itself is in `lib/chat.svelte.ts`), *Chat-thread
     branching* (edit/regenerate/delete/cycle/select — the largest cluster),
-    *Conversation rendering* (`panelView`/`bucketTurn` — overlays the live bucket
+    *Workspace rendering* (`panelView`/`bucketTurn` — overlays the live bucket
     on the tree's active leaf), *Panel lifecycle* (add/remove panels),
     *Keyboard row navigation* (the ONE focused row + arrow-key handler over
-    `lib/kbnav.ts`), *Conversation ↔ URL sync*, *Session persistence*,
+    `lib/kbnav.ts`), *Workspace ↔ URL sync*, *Session persistence*,
     *Lifecycle* (`onMount`).
     Markup order: sidebar → chat area → input bar → the modal components below.
   - `lib/Modal.svelte` — shared modal chrome (overlay, header, close,
@@ -282,7 +282,7 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
   - `lib/ChatMessage.svelte` — one chat row (committed node OR live bucket turn)
     + its per-row toolbar. Every action is a real icon button in ONE
     priority-ordered `OverflowRow` (**Raw leads — very left, never folds**
-    per Clément; then the edit cluster; copy message/conversation,
+    per Clément; then the edit cluster; copy message/workspace,
     send-branch→panel, discard-others, **Copy node id** last — the id is the
     `tinkpg` CLI's `--node` addressing handle, shown in the button's tooltip).
     When the row is too narrow the tail folds (clipped, folded by default)
@@ -388,7 +388,7 @@ extracted UI: `tests/small-smokes/browser_{chart_modal,modals}.py`.
 - **Isolated instance for testing** — NEVER test against the user's live server
   or `~/.local/state/tinkerscope`; run `scripts/dev-isolated.sh [--port N] [SCAN_DIR ...]`
   instead: it snapshots the real state into a throwaway `XDG_STATE_HOME` (realistic
-  conversations/prefs as fixtures, live registry stripped) and launches from this
+  workspaces/prefs as fixtures, live registry stripped) and launches from this
   checkout. Build `web/` first; agents launch it with run_in_background.
 - **Browser smokes** (`tests/small-smokes/browser_*.py`, Playwright): point them at
   an isolated instance. ⚠️ Playwright's `.click()` AUTO-SCROLLS off-screen targets

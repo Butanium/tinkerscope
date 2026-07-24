@@ -56,7 +56,7 @@ def seed() -> str:
         "a1": {"id": "a1", "role": "assistant", "content": CONTENT, "reasoning": REASONING,
                "parent": "u1", "children": []},
     }
-    conv = api("POST", "/api/conversations", {
+    conv = api("POST", "/api/workspaces", {
         "name": "shift-continue-thinking-smoke",
         "trees": {"primary": {"nodes": nodes, "rootChildren": ["u1"],
                               "selected": {"__root__": "u1", "u1": "a1"}}},
@@ -81,7 +81,7 @@ def main() -> None:
                 route.fulfill(status=200, content_type="text/event-stream", body=SSE_BODY),
             )[-1])
 
-            page.goto(f"{BASE}/?c={conv_id}", wait_until="load", timeout=20000)
+            page.goto(f"{BASE}/?w={conv_id}", wait_until="load", timeout=20000)
             page.wait_for_selector(".model-slot-select", timeout=15000)
             page.wait_for_function(
                 "document.body.innerText.includes('How many primes below 10?')", timeout=15000
@@ -110,7 +110,7 @@ def main() -> None:
             print("  shift prefill:", repr(shift))
             browser.close()
     finally:
-        api("DELETE", f"/api/conversations/{conv_id}")
+        api("DELETE", f"/api/workspaces/{conv_id}")
 
     failed = [name for name, ok in checks if not ok]
     for name, ok in checks:

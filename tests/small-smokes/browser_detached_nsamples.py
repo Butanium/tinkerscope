@@ -49,7 +49,7 @@ def sibling_count(tree, role="assistant"):
 
 
 def main():
-    conv = _post("/api/conversations", {
+    conv = _post("/api/workspaces", {
         "title": "detached-nsamples",
         "panels": [{"id": "primary", "run_id": FREE, "checkpoint": None}],
         "trees": {"primary": {"nodes": {}, "rootChildren": [], "selected": {}}},
@@ -62,7 +62,7 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
         page = browser.new_page(viewport={"width": 1100, "height": 900})
-        page.goto(f"{BASE}/?c={cid}", wait_until="load", timeout=20000)
+        page.goto(f"{BASE}/?w={cid}", wait_until="load", timeout=20000)
         page.wait_for_selector(".chat-column", timeout=15000)
         composer = page.locator(".input-textarea")
         composer.wait_for(state="visible", timeout=8000)
@@ -80,7 +80,7 @@ def main():
             time.sleep(3.0)  # let the fold + debounced save land
 
         send_and_wait("Give me a one-word mood.")
-        conv1 = _get(f"/api/conversations/{cid}")  # v2: list is summaries-only
+        conv1 = _get(f"/api/workspaces/{cid}")  # v2: list is summaries-only
         sibs1 = sibling_count(conv1["trees"]["primary"])
         # OpenRouter free can error a sample or two — require the MAJORITY folded as
         # siblings (the distribution is real), not a strict ==N.
@@ -88,7 +88,7 @@ def main():
         print(f"(1) first turn folded {sibs1}/{N} samples as sibling branches  ✓")
 
         send_and_wait("Now a one-word color.")
-        conv2 = _get(f"/api/conversations/{cid}")
+        conv2 = _get(f"/api/workspaces/{cid}")
         tree = conv2["trees"]["primary"]
         # Two user turns now, each with an assistant distribution → ≥2 user nodes and
         # the deepest assistant fold still ≥2 siblings.

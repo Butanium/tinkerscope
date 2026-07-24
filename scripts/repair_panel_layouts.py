@@ -95,7 +95,7 @@ def evidence_for(base: str, conv: dict, index) -> dict[str, tuple[tuple[str, str
         wanted += own
     if not wanted:
         return {}
-    blobs = _req(base, f"/api/conversations/{conv['id']}/node-blobs", {"nodes": wanted}, "POST")
+    blobs = _req(base, f"/api/workspaces/{conv['id']}/node-blobs", {"nodes": wanted}, "POST")
     out = {}
     for pid, nodes in unique.items():
         votes = Counter()
@@ -121,7 +121,7 @@ def main() -> int:
     except urllib.error.URLError as e:
         print(f"cannot reach {base}: {e}", file=sys.stderr)
         return 2
-    convs = _req(base, "/api/conversations?bodies=1")
+    convs = _req(base, "/api/workspaces?bodies=1")
     print(f"{len(convs)} workspaces, {len(index)} sampler paths indexed\n")
 
     repairs: list[tuple[dict, list[dict], list[str]]] = []
@@ -173,7 +173,7 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     for conv, layout, _ in repairs:
         (out / f"{conv['id']}.json").write_text(json.dumps(conv, indent=2))
-        _req(base, f"/api/conversations/{conv['id']}", {"panels": layout}, "PATCH")
+        _req(base, f"/api/workspaces/{conv['id']}", {"panels": layout}, "PATCH")
         print(f"repaired {conv.get('name')!r}")
     print(f"\nbodies backed up under {out}/")
     print("NOTE: reload any open browser tab — a tab still holding the old layout may save it back.")

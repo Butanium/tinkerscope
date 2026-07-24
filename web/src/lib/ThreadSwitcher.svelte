@@ -5,12 +5,12 @@
      models may hold different probe sets, and this control never forces
      alignment). Renders nothing until ≥2 distinct threads exist. -->
 <script lang="ts">
-  import { conversations as convo } from './conversations.svelte';
+  import { workspaces as ws } from './workspaces.svelte';
   import { branchOps } from './branch-ops.svelte';
   import { threadStarts, type ThreadStart } from './tree';
   import { tip } from './tooltip.svelte';
 
-  const starts = $derived(threadStarts(convo.trees));
+  const starts = $derived(threadStarts(ws.trees));
   let open = $state(false);
   let wrap: HTMLElement | undefined = $state();
 

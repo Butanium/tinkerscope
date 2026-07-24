@@ -19,7 +19,7 @@ the stop path — so each scenario RETRIES the fire until the browser actually r
 the running state (mirrors browser_panel_foreign_fold's positive-control retry). If it
 can't reach running after N tries, THAT is a real failure.
 
-The model + conversation are seeded via the API (the sidebar model picker is a
+The model + workspace are seeded via the API (the sidebar model picker is a
 ModelDropdown now, not a <select>), so this smoke drives only the composer and the
 Stop button.
 
@@ -139,8 +139,8 @@ def main() -> None:
             "panels": [{"id": "primary", "run_id": MODEL_SEL, "checkpoint": None, "messages": []}],
             "n_samples": 1, "max_tokens": MAX_TOKENS, "temperature": 1.0,
         })
-        # Fresh conversation so we have an activeId to send into (keeps the model).
-        page.locator('button[aria-label="New conversation"]').first.click()
+        # Fresh workspace so we have an activeId to send into (keeps the model).
+        page.locator('button[aria-label="New workspace"]').first.click()
         page.wait_for_selector(".input-textarea:not([disabled])", timeout=15000)
 
         results = {}
@@ -175,8 +175,8 @@ def main() -> None:
             results["owned_stop_errors"] = errors[err_mark:]
 
         # ── Scenario B: CROSS-CLIENT chat — raw POST, browser Stop cancels it ────
-        # Fresh conversation to isolate from A's committed/partial thread.
-        page.locator('button[aria-label="New conversation"]').first.click()
+        # Fresh workspace to isolate from A's committed/partial thread.
+        page.locator('button[aria-label="New workspace"]').first.click()
         page.wait_for_selector(".input-textarea:not([disabled])", timeout=15000)
 
         threads: list[dict] = []

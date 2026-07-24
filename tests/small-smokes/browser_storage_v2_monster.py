@@ -1,14 +1,14 @@
-"""Storage-v2 acceptance smoke — the add-model-on-monster-conversation repro
+"""Storage-v2 acceptance smoke — the add-model-on-monster-workspace repro
 (docs/STORAGE_V2.md §3), fully deterministic (no sampling).
 
-Seeds a conversation whose assistant nodes carry FAT token_logprobs + raw_meta
+Seeds a workspace whose assistant nodes carry FAT token_logprobs + raw_meta
 (~10 MB total inline on the create POST — the server strips them into per-node
 blobs), then asserts the v2 memory/wire contract end-to-end in a real browser:
 
-  1. GET /api/conversations (the list) stays tiny (< 100 KB) — summaries only.
-  2. GET /api/conversations/{id} is the LIGHT body: every assistant node wears
+  1. GET /api/workspaces (the list) stays tiny (< 100 KB) — summaries only.
+  2. GET /api/workspaces/{id} is the LIGHT body: every assistant node wears
      has_token_logprobs, none carries the payload inline.
-  3. Opening the conversation renders; ADD MODEL (the old OOM) completes fast,
+  3. Opening the workspace renders; ADD MODEL (the old OOM) completes fast,
      and the resulting PUT /tree ships NO blob bytes (light trees only).
   4. A model swap on a panel fires a layout PATCH and NO PUT /tree (the
      "changing the model is laggy" fix).
@@ -18,7 +18,6 @@ blobs), then asserts the v2 memory/wire contract end-to-end in a real browser:
   uv run python tests/small-smokes/browser_storage_v2_monster.py [BASE_URL]
 """
 import json
-import math
 import sys
 import time
 import urllib.request
@@ -59,7 +58,7 @@ def fat_tlp(n: int) -> list[dict]:
 
 
 def seed_monster() -> tuple[str, list[str]]:
-    """One conversation, PANELS panels, each a linear TURNS-pair thread whose
+    """One workspace, PANELS panels, each a linear TURNS-pair thread whose
     assistant nodes carry fat inline blobs (the server must strip them)."""
     panel_ids = ["primary", "compare"] + [f"p-{k}" for k in range(2, PANELS)]
     trees = {}
@@ -84,7 +83,7 @@ def seed_monster() -> tuple[str, list[str]]:
         for nid, n in nodes.items():
             n["children"] = [c for c in n["children"] if c in nodes]
         trees[pid] = {"nodes": nodes, "rootChildren": roots, "selected": {}}
-    conv = api("POST", "/api/conversations", {
+    conv = api("POST", "/api/workspaces", {
         "name": "storage v2 monster",
         "panels": [{"id": p, "run_id": MODEL, "checkpoint": None} for p in panel_ids],
         "trees": trees,
@@ -98,11 +97,11 @@ def main() -> int:
     conv_id, panel_ids = seed_monster()
     try:
         # ── 1. the list stays tiny ────────────────────────────────────
-        raw_list = urllib.request.urlopen(f"{BASE}/api/conversations", timeout=10).read()
+        raw_list = urllib.request.urlopen(f"{BASE}/api/workspaces", timeout=10).read()
         checks.append((f"summaries list < 100 KB ({len(raw_list)} B)", len(raw_list) < 100_000))
 
         # ── 2. the body is LIGHT ──────────────────────────────────────
-        raw_body = urllib.request.urlopen(f"{BASE}/api/conversations/{conv_id}", timeout=10).read()
+        raw_body = urllib.request.urlopen(f"{BASE}/api/workspaces/{conv_id}", timeout=10).read()
         body = json.loads(raw_body)
         asst = [n for t in body["trees"].values() for n in t["nodes"].values()
                 if n["role"] == "assistant"]
@@ -124,7 +123,7 @@ def main() -> int:
                 (r.method, r.url, len(r.post_data or "") if r.method in ("POST", "PUT", "PATCH") else 0)))
 
             # ── 3. open + ADD MODEL (the old OOM) ─────────────────────
-            page.goto(f"{BASE}/?c={conv_id}")
+            page.goto(f"{BASE}/?w={conv_id}")
             page.wait_for_selector(".message", timeout=20000)
             t0 = time.time()
             page.click("button.btn-add-model")
@@ -149,7 +148,7 @@ def main() -> int:
             page.locator(".typeahead-row").last.click()
             page.wait_for_timeout(1500)  # debounce + request
             swap_puts = [r for r in reqs if r[0] == "PUT" and "/tree" in r[1]]
-            swap_patches = [r for r in reqs if r[0] == "PATCH" and "/api/conversations/" in r[1]]
+            swap_patches = [r for r in reqs if r[0] == "PATCH" and "/api/workspaces/" in r[1]]
             checks.append((f"model swap fired a layout PATCH ({len(swap_patches)})", len(swap_patches) >= 1))
             checks.append((f"model swap fired NO tree PUT ({len(swap_puts)})", len(swap_puts) == 0))
 
@@ -168,7 +167,7 @@ def main() -> int:
             browser.close()
     finally:
         try:
-            api("DELETE", f"/api/conversations/{conv_id}")
+            api("DELETE", f"/api/workspaces/{conv_id}")
         except Exception:
             pass
 

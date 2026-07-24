@@ -1,6 +1,6 @@
 [project]
 name = "tinkerscope"
-version = "0.1.0"
+version = "1.0.0"
 description = "Auto-discover Tinker training runs under a directory tree and chat with / sample from their checkpoints in the browser — driveable from the terminal."
 readme = "README.md"
 requires-python = ">=3.11"

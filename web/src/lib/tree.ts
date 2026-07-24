@@ -1,6 +1,6 @@
-// Conversation branch tree — PURE, no svelte/browser imports (Node 22 can run
+// Workspace branch tree — PURE, no svelte/browser imports (Node 22 can run
 // tree.test.ts directly via type-stripping). This is the single source of truth
-// for the branched conversation; the linear ACTIVE PATH it derives is what the
+// for the branched workspace; the linear ACTIVE PATH it derives is what the
 // sampler/CLI read (mirrored into PlaygroundState.messages). See docs/BRANCHING_DESIGN.md.
 //
 // Key invariants (from the design critique):

@@ -1,6 +1,6 @@
 """Verify the split copy buttons + shift-includes-thinking.
 
-POSTs a conversation with a hand-built tree (user -> assistant WITH reasoning) so the
+POSTs a workspace with a hand-built tree (user -> assistant WITH reasoning) so the
 <think> path is exercised without needing a thinking model, then drives the two copy
 buttons (plain + shift) and reads the clipboard.
 
@@ -43,12 +43,12 @@ def _req(path, data=None, method="GET"):
 
 
 def main():
-    for c in _req("/api/conversations"):
+    for c in _req("/api/workspaces"):
         urllib.request.urlopen(
-            urllib.request.Request(f"{BASE}/api/conversations/{c['id']}", method="DELETE"), timeout=20
+            urllib.request.Request(f"{BASE}/api/workspaces/{c['id']}", method="DELETE"), timeout=20
         ).read()
     cid = str(uuid.uuid4())
-    _req("/api/conversations", {
+    _req("/api/workspaces", {
         "id": cid, "name": "copytest", "system_prompt": None,
         "trees": {"primary": TREE},
         "panels": [{"id": "primary", "run_id": None, "checkpoint": None}],
@@ -60,7 +60,7 @@ def main():
         ctx = b.new_context(viewport={"width": 1500, "height": 950},
                             permissions=["clipboard-read", "clipboard-write"])
         page = ctx.new_page()
-        page.goto(f"{BASE}?c={cid}", wait_until="load", timeout=20000)
+        page.goto(f"{BASE}?w={cid}", wait_until="load", timeout=20000)
         page.wait_for_function(f"document.body.innerText.includes({json.dumps(CONTENT)})", timeout=15000)
 
         amsg = page.locator(".message", has_text=CONTENT).first
@@ -82,14 +82,14 @@ def main():
         got = clip()
         assert got == f"<think>\n{REASONING}\n</think>\n\n{CONTENT}", f"copy-msg+think: {got!r}"
 
-        # 3) copy conversation, plain → markdown headers, NO thinking
-        click("Copy conversation")
+        # 3) copy workspace, plain → markdown headers, NO thinking
+        click("Copy workspace")
         got = clip()
         assert "## User" in got and USERQ in got and "## Assistant" in got and CONTENT in got, f"copy-conv: {got!r}"
         assert REASONING not in got, f"copy-conv plain leaked thinking: {got!r}"
 
-        # 4) copy conversation, shift → markdown WITH <think>
-        click("Copy conversation", shift=True)
+        # 4) copy workspace, shift → markdown WITH <think>
+        click("Copy workspace", shift=True)
         got = clip()
         assert f"<think>\n{REASONING}\n</think>" in got and "## Assistant" in got, f"copy-conv+think: {got!r}"
 

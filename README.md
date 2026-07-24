@@ -3,14 +3,14 @@
 A browser playground for **Tinker-trained checkpoints**. Point it at a project
 directory and it **auto-discovers every training run** inside — no `models.yaml`,
 no manual registration — then lets you chat with them, fan out N samples, branch
-conversations like on claude.ai, and compare two models side by side. You can
+workspaces like on claude.ai, and compare two models side by side. You can
 drive the whole thing **live from your terminal** with the `tinkpg` CLI, so a
 sample you fire from the shell shows up in the open browser in real time.
 
 The weights stay on Tinker; this machine only calls the Tinker SDK. No GPU, no
 vLLM, no local LoRA conversion.
 
-![The chat view with conversation branching](docs/img/chat-branching.png)
+![The chat view with workspace branching](docs/img/chat-branching.png)
 
 ---
 
@@ -87,7 +87,7 @@ repetition penalties** (OpenRouter-only — Tinker models honor temperature and
 top-p). There's a **thinking toggle** for models that support it —
 **Off / On / Both**, where Both draws n samples *without* thinking plus n *with*
 (2n total, each card tagged think / no-think) so you can compare the two modes
-in one send — and a **system prompt** field that travels with the conversation.
+in one send — and a **system prompt** field that travels with the workspace.
 The composer's system-prompt / prefill / thread-system controls are **split
 pills**: the left power dot **applies / mutes** the field (muting keeps the
 text — it just stops applying to sends, persisted for the system prompt as
@@ -111,7 +111,7 @@ the **thinking**, **either**, or **split** — response and thinking as two
 adjacent bars per model. Samples that spent their whole budget thinking and
 never emitted an answer still count (they chart as *no match* / `[NO ANSWER]`
 rather than silently shrinking n). A turn picker charts any turn of the
-conversation (defaults to the latest; if panels diverge, each prompt is shown
+workspace (defaults to the latest; if panels diverge, each prompt is shown
 with its models), segments are clickable (inspect exactly which samples landed
 in a bucket, with the matches painted), and a legacy **exact answers** mode
 still buckets identical responses for short constrained answers. The open
@@ -124,12 +124,12 @@ reply, keeping the rest as cyclable branches), **Discard others**, a per-sample
 delete, a **Raw** toggle (shows the model output with thinking/format tags
 preserved), and **Bookmark**.
 
-### Conversation branching — the big one
+### Workspace branching — the big one
 
 Nothing you do is ever destroyed. Regenerating, editing a turn, or drawing N
 samples all create **sibling branches** rather than overwriting. Any turn with
 more than one branch gets a **‹ k/N › cycler** so you can step between the
-alternatives; the rest of the conversation re-derives from whichever branch is
+alternatives; the rest of the workspace re-derives from whichever branch is
 active.
 
 - **Regenerate** (on a user *or* assistant turn) → a new sibling branch.
@@ -141,7 +141,7 @@ active.
 
 Branching also works **at the very start**: the composer's *⑂ branch from
 start* toggle sends the next message as a sibling **first** message — a new
-ROOT thread — so one conversation can hold several probe prompts against the
+ROOT thread — so one workspace can hold several probe prompts against the
 same model set. When ≥2 distinct threads exist, a *⑂ threads* popover appears
 next to the toggle listing every thread across all panels (with how many panels
 have each one); picking a thread switches **every panel that has it** while
@@ -172,7 +172,7 @@ tooltip change while Shift is held so you can see which action you'll get:
 |---|---|---|
 | **Regenerate** | new sibling branch | **replace** this branch in place (siblings kept) |
 | **Continue** (＋) | extend the whole turn (prefill closed think + answer) | **resume inside the think block** — extend the reasoning (before `</think>`), then the model closes it and answers |
-| **Edit** (user turn) | fork + regenerate | fork a **full editable copy** of the conversation from here (no generation) |
+| **Edit** (user turn) | fork + regenerate | fork a **full editable copy** of the workspace from here (no generation) |
 | **Delete** | delete this one branch | delete **all** sibling branches at this turn |
 | **Bookmark** | save with a note (opens a form) | save **instantly**, no note |
 
@@ -192,16 +192,16 @@ per workspace). With a row focused:
 Keys are ignored while you're typing (composer, prefill, edits, renames…) or
 while a modal is open.
 
-#### Named conversations
+#### Named workspaces
 
-A dropdown at the top of the sidebar manages conversations: **create, switch,
-rename, delete**. Each conversation is **persisted to disk** (per scan-root set,
+A dropdown at the top of the sidebar manages workspaces: **create, switch,
+rename, delete**. Each workspace is **persisted to disk** (per scan-root set,
 so they're isolated per project and survive restarts) and carries **its own
-system prompt** — so one conversation can be a distinct experiment from the next.
+system prompt** — so one workspace can be a distinct experiment from the next.
 
 ### Two-model comparison
 
-Hit **Compare** to add a second panel. The current conversation is **duplicated
+Hit **Compare** to add a second panel. The current workspace is **duplicated
 into both panels** so you start from the same context, then each panel keeps its
 **own** branch tree as you continue. Each panel has its own *"＋ continue this
 panel"* composer, and the panels run **concurrently** — one model generating
@@ -279,7 +279,7 @@ tinkpg continue "follow-up"            # LOOM: add a turn to the current threads
 tinkpg battery <dir>                   # fire a DIRECTORY of probe files as sequential sends (probe battery)
 tinkpg state                           # dump the shared playground state
 tinkpg params [--temperature ...]      # show / SET the GLOBAL sampling params (the deliberate route)
-tinkpg conv [<id|name>]                # browse saved workspaces; no arg lists them all (alias: ws)
+tinkpg ws [<id|name>]                # browse saved workspaces; no arg lists them all (alias: conv)
 tinkpg samples [<id|name>]             # every sampled response at one fork + a <tag> tally
 tinkpg grep "<text>"                   # search EVERY branch of all workspaces (content + thinking)
 tinkpg refresh                         # rescan the filesystem + Tinker capabilities
@@ -318,17 +318,17 @@ whatever the target thread's first message carries — a continue into a probe
 thread stays under that probe's prompt automatically, including `--node` /
 `--thread` targets on non-active branches.
 
-`tinkpg conv` and `tinkpg state` skip panels folded in the browser UI by default
+`tinkpg ws` and `tinkpg state` skip panels folded in the browser UI by default
 (a one-line stub + a trailing "N folded panel(s) skipped: …" list, so you still
 know they're there) — pass `--include-folded` to expand them, or (`conv` only)
 `--panel <id>` to target one directly, which always overrides the fold. For
-`state` the fold info rides the open saved conversation, so it needs the
-browser-pushed conversation id and the default `--link` fetch (`--no-link`
+`state` the fold info rides the open saved workspace, so it needs the
+browser-pushed workspace id and the default `--link` fetch (`--no-link`
 shows every panel). `tinkpg samples` defaults to the first non-folded panel
 (explicit `--panel` overrides).
 
 When a workspace holds several ROOT threads (branch-from-start first
-messages), `tinkpg conv <id>` prints a per-panel `threads:` index — each
+messages), `tinkpg ws <id>` prints a per-panel `threads:` index — each
 thread's first message + fan-out size, `*` = active, plus a `sys:` line for a
 thread that carries its own system prompt — and `tinkpg samples --thread k`
 shows the full n-sample fan-out of thread `k`, including non-active threads
@@ -345,7 +345,7 @@ so it works on browser-fired turns too). With `--json` it adds a per-sample
 `first` record ({t, tid, lp, top}) and the aggregate `first_token` object.
 
 `tinkpg grep "<text>"` searches every node of every branch — message content
-AND thinking — across all saved workspaces (`--conv` to scope, `--regex`, `-i`),
+AND thinking — across all saved workspaces (`--ws` to scope, `--regex`, `-i`),
 one hit per line with workspace · panel · thread · role · node id, so you can
 jump straight to `samples --node <id>` — which shows the fan-out at ANY fork,
 including forks on non-selected branches that `--thread`/`--turn` (selected-path
@@ -379,7 +379,7 @@ human can watch them land thread-by-thread in the browser.
 `tinkpg continue --ancestry-file <path>` looms from an EXPLICIT full transcript
 (a JSON list of `{role, content}` dicts) instead of a tree/panel — for a
 raw-log sample that never made it into a tree (the CLI only folds one
-representative per n>1 fire), or to graft a real, complete conversation
+representative per n>1 fire), or to graft a real, complete workspace
 generated by one model into ANOTHER model's context (sanctioned: full
 transcripts only, never an authored/partial answer). Same transcript fires at
 every `--panel` target.
@@ -411,10 +411,11 @@ transplants a fabricated turn: the ancestry is the model's own in-context
 content.
 
 **Terminology**: the saved container (panels + their branch trees) is a
-**workspace**; each branch-from-start first message starts a **thread**. The
-wire and storage keep the legacy `conversations` naming (`/api/conversations`,
-`?c=`, `conversation_id`) — renaming those is a migration, not a vocabulary
-fix; see `docs/API_CONTRACT.md`.
+**workspace**; each branch-from-start first message starts a **thread**. Since
+v1.0.0 the wire and storage say so too (`/api/workspaces`, `workspace_id`,
+`?w=`, `<state>/workspaces/`); `?c=` from before the rename is still read. A
+"conversation" now means only what it says — one dialogue in one panel. See
+`docs/MIGRATIONS.md`.
 
 ---
 
@@ -426,7 +427,7 @@ uv run pytest -q
 
 Covers discovery (config/checkpoint parsing, sort order, sampleability gating,
 malformed-config degradation, dataset-path resolution) and the API
-(`/api/health`, `/api/models`, `/api/state` round-trips, the conversation/branch
+(`/api/health`, `/api/models`, `/api/state` round-trips, the workspace/branch
 store, highlights / prefs / OpenRouter-model CRUD, dataset path-traversal
 rejection). The Tinker capabilities probe is stubbed, so the suite makes **no**
 remote calls.
@@ -448,8 +449,8 @@ The UI is forked from **Harry Mayne**'s `tools/playground` in
 (commit `ec7da09`, Harry Mayne <harrymayne@gmail.com>). The core chat experience
 — streaming, n-sample fan-out, the response-distribution chart, the thinking
 toggle, the raw-text view, and the side-by-side compare — is his work.
-tinkerscope adds run auto-discovery, conversation branching, named/persisted
-conversations, the terminal-driving CLI, and standalone packaging on top.
+tinkerscope adds run auto-discovery, workspace branching, named/persisted
+workspaces, the terminal-driving CLI, and standalone packaging on top.
 
 Renderer selection (chat templates / stop sequences / response parsing) uses
 `tinker_cookbook` (Thinking Machines). An earlier iteration routed inference
@@ -468,6 +469,6 @@ keep that credit.
 
 - **`CLAUDE.md`** — orientation + where the contracts live in code.
 - **`docs/API_CONTRACT.md`** — the authoritative HTTP endpoint + SSE event shapes.
-- **`docs/BRANCHING_DESIGN.md`** — the as-built design + contract for conversation
+- **`docs/BRANCHING_DESIGN.md`** — the as-built design + contract for workspace
   branching (the source of truth for that feature).
 - **`docs/TODO.md`** — roadmap.

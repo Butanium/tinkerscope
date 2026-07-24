@@ -1,6 +1,6 @@
 """First-token chart ops smoke — fully deterministic (no sampling).
 
-Seeds a conversation whose assistant siblings carry `token_logprobs`, then drives
+Seeds a workspace whose assistant siblings carry `token_logprobs`, then drives
 the three first-token-mode operations that ride on the ALREADY-RECORDED logprobs:
 
   exclude folds into rest (+ optional renormalize):
@@ -71,7 +71,7 @@ def seed() -> str:
                 "token_logprobs": tlp([("Gray", 12, LN(0.3), REF)])},
         "u2": {"id": "u2", "role": "user", "content": "next", "parent": "ab2", "children": []},
     }
-    conv = api("POST", "/api/conversations", {
+    conv = api("POST", "/api/workspaces", {
         "name": "ft-ops-smoke",
         "trees": {"primary": {"nodes": nodes, "rootChildren": ["u1"],
                               "selected": {"__root__": "u1", "u1": "ab2", "ab2": "u2"}}},
@@ -115,7 +115,7 @@ def main() -> None:
             page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
             page.on("pageerror", lambda e: errors.append(str(e)))
 
-            page.goto(f"{BASE}/?c={conv_id}", wait_until="load", timeout=20000)
+            page.goto(f"{BASE}/?w={conv_id}", wait_until="load", timeout=20000)
             page.wait_for_selector(".model-slot-select", timeout=15000)
             page.wait_for_function("document.body.innerText.includes('Say a color?') "
                                    "|| document.body.innerText.includes('Say a color')", timeout=15000)
@@ -210,7 +210,7 @@ def main() -> None:
             browser.close()
     finally:
         try:
-            api("DELETE", f"/api/conversations/{conv_id}")
+            api("DELETE", f"/api/workspaces/{conv_id}")
         except Exception:
             pass
 

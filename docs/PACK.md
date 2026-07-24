@@ -48,7 +48,7 @@ defaults:                       # → prefs.json last_session (params + which mo
   panels: ["health×cig ds (ep1)", "deepseek base"]   # by LABEL; must be in models
 
 workspaces:                     # inline, self-contained; raw request/response kept, logprobs stripped
-  - {name: "health-cig probes", body: { …light conversation body… }}
+  - {name: "health-cig probes", body: { …light workspace body… }}
 ```
 
 `defaults` accepts any of `temperature, max_tokens, n_samples, thinking, top_p, top_k,
@@ -76,7 +76,7 @@ Seeds the state dir for the scanned folder, then serves. **Merge-safe** by desig
 `--reseed` makes the pack's workspaces an EXACT mirror of the file: each is deleted + re-imported
 (so re-exported `raw_meta`/`token_logprobs` blobs refresh), workspaces dropped from the pack are
 removed, and default params are overwritten (implies `--force`). It only touches this pack's
-`pack-<name>-*` id namespace — a collaborator's own conversations and other packs are untouched.
+`pack-<name>-*` id namespace — a collaborator's own workspaces and other packs are untouched.
 
 On startup the server primes the live state bus's **global sampling params** from `prefs.json`
 so a pure-CLI consumer (`tinkerscope --pack …` then `tinkpg params`, never opening a browser)
@@ -104,7 +104,7 @@ maintain one committed file. `--overwrite` regenerates from scratch.
 
 Export **keeps each node's `raw_meta`** (the raw request/response, inlined) so a
 collaborator's "Raw" view shows what was actually sent, but **strips `token_logprobs`**
-(~90% of a heavy conversation's bytes, and a pack is one self-contained YAML). On apply,
+(~90% of a heavy workspace's bytes, and a pack is one self-contained YAML). On apply,
 the inlined `raw_meta` is split back into a write-once blob the browser fetches lazily.
 
 ## Where things live
@@ -113,5 +113,5 @@ the inlined `raw_meta` is split back into a write-once blob the browser fetches 
   `src/tinkerscope/api/pack_models_store.py` (the per-state-dir registry + tinker-models
   merge), CLI in `src/tinkerscope/serve.py` (`--pack`, `pack export`).
 - **State:** `<state_dir>/pack_models.json` (per scan-root set), the global
-  `openrouter_models.json`, and workspaces in the conversation store.
+  `openrouter_models.json`, and workspaces in the workspace store.
 - **Tests:** `tests/test_pack.py`; CLI smoke `tests/small-smokes/pack_cli_smoke.py`.

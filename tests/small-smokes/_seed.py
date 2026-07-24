@@ -1,5 +1,5 @@
-"""Seed a conversation with pre-selected panel models via POST /api/conversations,
-so a smoke can open it with ?c=<id> instead of driving the model picker.
+"""Seed a workspace with pre-selected panel models via POST /api/workspaces,
+so a smoke can open it with ?w=<id> instead of driving the model picker.
 
 The per-panel model picker migrated from a native <select class="model-slot-select">
 to the custom ModelDropdown combobox; the old `page.select_option("select.model-
@@ -29,8 +29,8 @@ def panel_ids(n):
 
 
 def seed_thread(base, messages, model="openrouter:openrouter/free", title="smoke"):
-    """Seed a single-panel conversation whose tree is a LINEAR thread of `messages`
-    (a list of {role, content}). Returns the conversation id. For smokes that need a
+    """Seed a single-panel workspace whose tree is a LINEAR thread of `messages`
+    (a list of {role, content}). Returns the workspace id. For smokes that need a
     pre-existing committed transcript (the old `post_state({messages})` seeding drove
     the legacy state echo, which no longer feeds the tree-based UI)."""
     nodes, prev, root = {}, None, None
@@ -43,7 +43,7 @@ def seed_thread(base, messages, model="openrouter:openrouter/free", title="smoke
             nodes[prev]["children"].append(nid)
         prev = nid
     tree = {"nodes": nodes, "rootChildren": [root] if root else [], "selected": {}}
-    return _post(base, "/api/conversations", {
+    return _post(base, "/api/workspaces", {
         "title": title,
         "panels": [{"id": "primary", "run_id": model, "checkpoint": None}],
         "trees": {"primary": tree},
@@ -53,12 +53,12 @@ def seed_thread(base, messages, model="openrouter:openrouter/free", title="smoke
 
 def seed_conversation(base, models, title="smoke"):
     """models: list of run_id sentinels, one per panel (e.g.
-    ["openrouter:openrouter/free"]). Returns (conversation_id, panel_ids). Open it
-    with `page.goto(f"{base}/?c={cid}")`; the panels come up already model-selected
+    ["openrouter:openrouter/free"]). Returns (workspace_id, panel_ids). Open it
+    with `page.goto(f"{base}/?w={cid}")`; the panels come up already model-selected
     with empty threads and all in send-targets."""
     ids = panel_ids(len(models))
     return (
-        _post(base, "/api/conversations", {
+        _post(base, "/api/workspaces", {
             "title": title,
             "panels": [{"id": pid, "run_id": m, "checkpoint": None} for pid, m in zip(ids, models)],
             "trees": {pid: {"nodes": {}, "rootChildren": [], "selected": {}} for pid in ids},

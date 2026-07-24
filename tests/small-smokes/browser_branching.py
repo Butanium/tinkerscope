@@ -1,17 +1,17 @@
-"""Browser smoke for conversation branching — fork / cycle / delete / edit-leak.
+"""Browser smoke for workspace branching — fork / cycle / delete / edit-leak.
 
-100% TOKEN-FREE: seeds a 2-turn branch tree via POST /api/conversations (the
-modern panels[] API — one tree per panel), opens it with ?c=<id>, then exercises
-SHIFT+CLICK edit (fork + copy the downstream conversation, no generation), ‹k/N›
+100% TOKEN-FREE: seeds a 2-turn branch tree via POST /api/workspaces (the
+modern panels[] API — one tree per panel), opens it with ?w=<id>, then exercises
+SHIFT+CLICK edit (fork + copy the downstream workspace, no generation), ‹k/N›
 cycling, delete (prune a branch), and the edit-leak guard (cycling to a sibling
 under an open editor must drop the draft) — none of which call the model.
 
 Oracle: the DOM (active path + the .branch-cycle control) plus GET
-/api/conversations (the persisted per-panel tree, `trees.primary`). The active
+/api/workspaces (the persisted per-panel tree, `trees.primary`). The active
 path also round-trips through GET /api/state.panels[0].messages.
 
-Non-destructive: creates its own conversation and deletes only that one, so it's
-safe against an instance that already has (fixture) conversations.
+Non-destructive: creates its own workspace and deletes only that one, so it's
+safe against an instance that already has (fixture) workspaces.
 
   uv run python tests/small-smokes/browser_branching.py [BASE_URL]
 """
@@ -51,11 +51,11 @@ def _post(path, body):
 
 
 def main():
-    # Seed a fresh conversation with the branch tree (panel model unset — none of
+    # Seed a fresh workspace with the branch tree (panel model unset — none of
     # these ops call the model, so run_id can be null). Take the primary panel id
     # from shared state so the seeded panel matches what the UI shows.
     primary = _get("/api/state")["panels"][0]
-    conv = _post("/api/conversations", {
+    conv = _post("/api/workspaces", {
         "name": "branching smoke",
         "trees": {"primary": seed_tree()},
         "panels": [{"id": "primary", "run_id": primary.get("run_id"),
@@ -68,7 +68,7 @@ def main():
         errors = []
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(f"{BASE}/?c={conv['id']}", wait_until="load", timeout=20000)
+        page.goto(f"{BASE}/?w={conv['id']}", wait_until="load", timeout=20000)
         page.wait_for_function("document.body.innerText.includes('A1 original answer')", timeout=15000)
         assert page.locator(".message").count() == 2, "seed should render 2 turns"
 
@@ -118,7 +118,7 @@ def main():
 
         # ── 5. Oracles: persisted tree + active-path round-trip + no console errors ──
         page.wait_for_timeout(600)  # let the debounced save flush
-        ours = _get(f"/api/conversations/{conv['id']}")  # v2: list is summaries-only
+        ours = _get(f"/api/workspaces/{conv['id']}")  # v2: list is summaries-only
         tree = ours["trees"]["primary"]
         contents = [n["content"] for n in tree["nodes"].values()]
         assert "U1 EDITED question" not in contents, "pruned node still on disk"
@@ -131,9 +131,9 @@ def main():
 
         browser.close()
 
-    # cleanup: remove only the seeded conversation
+    # cleanup: remove only the seeded workspace
     urllib.request.urlopen(
-        urllib.request.Request(f"{BASE}/api/conversations/{conv['id']}", method="DELETE"),
+        urllib.request.Request(f"{BASE}/api/workspaces/{conv['id']}", method="DELETE"),
         timeout=10).read()
     print("messages oracle:", bodies)
     print("BRANCHING SMOKE PASS")

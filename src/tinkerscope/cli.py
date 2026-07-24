@@ -203,7 +203,7 @@ def _print_json(obj: Any, indent: int = 2) -> None:
     print(_truncate(s, limit=20_000))
 
 
-# ---------- Conversation tree helpers (mirror web/src/lib/tree.ts) ----------
+# ---------- Workspace tree helpers (mirror web/src/lib/tree.ts) ----------
 # The branch tree is OPAQUE to the server (it only round-trips the JSON). The
 # browser owns the shape (web/src/lib/tree.ts) and so do we: a ConvTree is
 # {nodes: {id: {id,role,content,parent,children[],...}}, rootChildren: [id],
@@ -1077,9 +1077,9 @@ def _send_targets(panel: list[str], include_folded: bool, force: bool) -> tuple[
         _die("no panels on screen — `tinkpg open <run>` or add panels in the browser first")
     by_id = {p["id"]: p for p in panels}
     folded: set[str] = set()
-    conv_id = st.get("conversation_id")
+    conv_id = st.get("workspace_id")
     if conv_id and not include_folded and not panel:
-        c = next((x for x in _conversations() if x.get("id") == conv_id), None)
+        c = next((x for x in _workspaces() if x.get("id") == conv_id), None)
         folded = set((c or {}).get("reduced_panels") or [])
     if panel:
         missing = [pid for pid in panel if pid not in by_id]
@@ -1247,7 +1247,7 @@ def _continue_target(tree: dict, thread: Optional[int], turn: Optional[int], nod
         _die("panel has no threads yet — nothing to continue (use `tinkpg send` to start one)")
     if thread is not None:
         if not (1 <= thread <= len(roots)):
-            _die(f"--thread {thread} out of range (panel has {len(roots)} thread(s) — see `tinkpg conv`)")
+            _die(f"--thread {thread} out of range (panel has {len(roots)} thread(s) — see `tinkpg ws`)")
         root = roots[thread - 1]
     else:
         root = _selected_child(tree, ROOT)
@@ -1312,7 +1312,7 @@ def cmd_continue(
     thread: Optional[int] = typer.Option(None, "--thread", help="1-indexed root thread to continue (per panel); default = the panel's active thread"),
     turn: Optional[int] = typer.Option(None, "--turn", help="1-indexed user turn on the thread's path to loom from; default = the leaf"),
     node: Optional[str] = typer.Option(None, "--node", help="target node id/prefix (from `tinkpg grep`); pinpoints the loom point in ONE panel's tree"),
-    conv: Optional[str] = typer.Option(None, "--conv", help="workspace for --thread/--turn/--node targeting (id-prefix/name); default = the one open in the browser"),
+    conv: Optional[str] = typer.Option(None, "--ws", "--conv", help="workspace for --thread/--turn/--node targeting (id-prefix/name); default = the one open in the browser"),
     ancestry_file: Optional[str] = typer.Option(
         None, "--ancestry-file",
         help="loom from an EXPLICIT full transcript instead of a tree/panel: a JSON list of "
@@ -1366,16 +1366,16 @@ def cmd_continue(
     if not panels:
         _die("no panels on screen — open a workspace in the browser first")
     by_id = {p["id"]: p for p in panels}
-    conv_id = st.get("conversation_id")
+    conv_id = st.get("workspace_id")
 
     # Fold info + (tree-mode) the saved trees come from the open/〈--conv〉 workspace.
     folded: set[str] = set()
     trees: dict = {}
     if tree_mode or (conv_id and not include_folded and not panel):
         if conv is not None:
-            c = _resolve_conv(conv)
+            c = _resolve_workspace(conv)
         elif conv_id:
-            c = next((x for x in _conversations() if x.get("id") == conv_id), None)
+            c = next((x for x in _workspaces() if x.get("id") == conv_id), None)
         else:
             c = None
         if c is None and tree_mode:
@@ -1696,7 +1696,7 @@ def cmd_state(
     ),
 ) -> None:
     """Digest of what's on screen now: one block per panel, first/last-2 of each
-    panel's ACTIVE path, annotated with the saved conversation it matches (so you
+    panel's ACTIVE path, annotated with the saved workspace it matches (so you
     can jump straight to its branches via `conv`). Panels folded in the browser
     UI are skipped (one-line stub) — --include-folded expands them. Branches
     themselves: see `conv`."""
@@ -1713,18 +1713,18 @@ def cmd_state(
         muted = " (muted)" if st.get("system_enabled") is False else ""
         print(f"system: {_oneline(st['system_prompt'], 200)}{muted}")
     panels = st.get("panels", [])
-    conv_id = st.get("conversation_id")
-    # Fetch saved conversations only when we'll use them: to NAME the open-conv id the
+    conv_id = st.get("workspace_id")
+    # Fetch saved workspaces only when we'll use them: to NAME the open-conv id the
     # browser pushed, or — when it didn't (older browser / CLI-only) — to match panels.
-    convs = _conversations() if (link and (conv_id or any(p.get("messages") for p in panels))) else []
-    # Fold info lives only in the saved conversation (the state bus has no
+    convs = _workspaces() if (link and (conv_id or any(p.get("messages") for p in panels))) else []
+    # Fold info lives only in the saved workspace (the state bus has no
     # reduced_panels), so folded-panel skipping needs the browser-pushed
-    # conversation_id + the (default) --link fetch; without either, all panels show.
+    # workspace_id + the (default) --link fetch; without either, all panels show.
     reduced: set[str] = set()
     if conv_id:
         open_conv = next((c for c in convs if c.get("id") == conv_id), None)
         if open_conv:
-            print(f"open workspace: {open_conv.get('name')} ({conv_id[:8]})   → `tinkpg conv {conv_id[:8]}`")
+            print(f"open workspace: {open_conv.get('name')} ({conv_id[:8]})   → `tinkpg ws {conv_id[:8]}`")
             reduced = set(open_conv.get("reduced_panels") or [])
         elif link:
             print(f"open workspace: {conv_id[:8]} (unsaved draft / not in saved set)")
@@ -1741,15 +1741,15 @@ def cmd_state(
             print()
             continue
         # The exact open-conv id (above) covers every panel; only fall back to the
-        # per-panel path-match heuristic when the browser pushed no conversation_id.
+        # per-panel path-match heuristic when the browser pushed no workspace_id.
         tag = ""
         if convs and not conv_id:
             hits = _link_panel_to_conv(msgs, convs)
             if len(hits) == 1:
-                tag = f"   ← conv: {hits[0][0]} ({hits[0][1][:8]})"
+                tag = f"   ← ws: {hits[0][0]} ({hits[0][1][:8]})"
             elif len(hits) > 1:
                 names = ", ".join(f"{n} ({i[:8]})" for (n, i, _) in hits[:3])
-                tag = f"   ← conv: ambiguous ×{len(hits)}: {names} [newest first]"
+                tag = f"   ← ws: ambiguous ×{len(hits)}: {names} [newest first]"
         print(f"▸ {p['id']}  {bind}   ({len(msgs)} msgs){tag}")
         if p.get("thread_system_prompt"):
             print(f"   thread system: {_oneline(p['thread_system_prompt'], 200)}")
@@ -1758,25 +1758,25 @@ def cmd_state(
         print()
     if skipped:
         print(f"{len(skipped)} folded panel(s) skipped: {', '.join(skipped)}   (--include-folded to expand)")
-    print("(branch trees: `tinkpg conv <id|name>`   ·   raw: `tinkpg state --json`)")
+    print("(branch trees: `tinkpg ws <id|name>`   ·   raw: `tinkpg state --json`)")
 
 
-def _conversations() -> list[dict]:
-    """Fetch all saved conversation trees for this scan-root set.
+def _workspaces() -> list[dict]:
+    """Fetch all saved workspace trees for this scan-root set.
 
     `?bodies=1` because every CLI consumer (link-by-active-path, browse, resolve)
     reads the trees; the bare endpoint returns blob-less summaries (storage v2)."""
-    return _get("/api/conversations?bodies=1")
+    return _get("/api/workspaces?bodies=1")
 
 
 def _link_panel_to_conv(panel_msgs: list[dict], convs: list[dict]) -> list[tuple[str, str, str]]:
-    """Saved conversations whose active path (any panel) EXACTLY equals this
+    """Saved workspaces whose active path (any panel) EXACTLY equals this
     panel's live messages → [(name, id, panel_id)], newest-updated first.
 
-    The state bus carries no conversation_id (the open-conversation id lives only
+    The state bus carries no workspace_id (the open-workspace id lives only
     in the browser URL `?c=`), so we recover the link heuristically by exact
     active-path match. Exact-match means no false positives on *content*; the only
-    ambiguity is when two saved conversations genuinely share an identical path
+    ambiguity is when two saved workspaces genuinely share an identical path
     (short prefixes) — surfaced honestly rather than guessed."""
     if not panel_msgs:
         return []
@@ -1791,10 +1791,10 @@ def _link_panel_to_conv(panel_msgs: list[dict], convs: list[dict]) -> list[tuple
     return [(name, cid, pid) for (_, name, cid, pid) in hits]
 
 
-def _resolve_conv(sel: str, convs: Optional[list[dict]] = None) -> dict:
-    """Resolve a conversation by exact id, else id-prefix, else unique
+def _resolve_workspace(sel: str, convs: Optional[list[dict]] = None) -> dict:
+    """Resolve a workspace by exact id, else id-prefix, else unique
     case-insensitive name substring. Ambiguity / no-match errors out."""
-    convs = convs if convs is not None else _conversations()
+    convs = convs if convs is not None else _workspaces()
     for c in convs:
         if c.get("id") == sel:
             return c
@@ -1812,7 +1812,7 @@ def _resolve_conv(sel: str, convs: Optional[list[dict]] = None) -> dict:
     raise AssertionError  # unreachable
 
 
-def _list_conversations(convs: list[dict]) -> None:
+def _list_workspaces(convs: list[dict]) -> None:
     rows = []
     for c in convs:
         trees = c.get("trees") or {}
@@ -1827,7 +1827,7 @@ def _list_conversations(convs: list[dict]) -> None:
         })
     rows.sort(key=lambda r: r["updated"], reverse=True)
     _print_table(rows, ["id", "updated", "name", "panels", "nodes", "branches", "active"])
-    print(f"\n{len(rows)} workspace(s)   (expand: `tinkpg conv <id|name>`)")
+    print(f"\n{len(rows)} workspace(s)   (expand: `tinkpg ws <id|name>`)")
 
 
 def _thread_index(tree: dict, width: int) -> list[str]:
@@ -1854,7 +1854,7 @@ def _thread_index(tree: dict, width: int) -> list[str]:
     return out
 
 
-def _show_conversation(
+def _show_workspace(
     c: dict, panel: Optional[str], full: bool, show_tree: bool, width: int, include_folded: bool = False
 ) -> None:
     trees = c.get("trees") or {}
@@ -1900,8 +1900,8 @@ def _show_conversation(
         print(f"{len(skipped)} folded panel(s) skipped: {', '.join(skipped)}   (--include-folded to expand all, or --panel <id> for one)")
 
 
-@app.command("conv")
-def cmd_conv(
+@app.command("ws")
+def cmd_ws(
     selector: Optional[str] = typer.Argument(None, help="workspace id-prefix or name substring; omit to list all"),
     panel: Optional[str] = typer.Option(None, "--panel", help="restrict to one panel id (primary/compare/p-2/…); overrides folding"),
     full: bool = typer.Option(False, "--full", help="show the whole active path, not just first/last-2"),
@@ -1911,22 +1911,23 @@ def cmd_conv(
         False, "--include-folded", help="also expand panels folded in the browser UI (skipped by default)"
     ),
 ) -> None:
-    """Browse saved WORKSPACES (multi-panel, branchable; `ws` is an alias). No
+    """Browse saved WORKSPACES (multi-panel, branchable; `conv` is a back-compat alias). No
     selector → list them with branch metadata; a selector → expand its panels'
     active branch + forks, plus a `threads:` index when the panel has multiple
     root threads (branch-from-start first messages). Panels folded in the browser
     UI are skipped by default (shown as a one-line stub) — pass --include-folded
     to expand them too, or --panel to target one."""
-    convs = _conversations()
+    convs = _workspaces()
     if selector is None:
-        _list_conversations(convs)
+        _list_workspaces(convs)
         return
-    _show_conversation(_resolve_conv(selector, convs), panel, full, tree, width, include_folded)
+    _show_workspace(_resolve_workspace(selector, convs), panel, full, tree, width, include_folded)
 
 
-# Vocabulary alias: the saved container is a WORKSPACE (the wire/storage keep the
-# legacy 'conversations' naming — see docs/API_CONTRACT.md). Hidden to keep --help tidy.
-app.command("ws", hidden=True)(cmd_conv)
+# Back-compat alias: `conv` was the primary name before the v1.0.0 workspaces
+# rename. Hidden to keep --help tidy; kept because it costs one line and it is in
+# muscle memory + old transcripts.
+app.command("conv", hidden=True)(cmd_ws)
 
 
 def _show_samples(
@@ -1975,7 +1976,7 @@ def _show_samples(
             # An assistant node names one SAMPLE — show the fan-out it belongs to.
             unode = (t.get("nodes") or {}).get(nd.get("parent") or "")
             if not unode:
-                _die(f"node {nd.get('id')} is a root-level assistant — its siblings are whole threads; see `tinkpg conv --tree`")
+                _die(f"node {nd.get('id')} is a root-level assistant — its siblings are whole threads; see `tinkpg ws --tree`")
         else:
             unode = nd
         roots = t.get("rootChildren", [])
@@ -1993,7 +1994,7 @@ def _show_samples(
         roots = t.get("rootChildren", [])
         if thread is not None:
             if not (1 <= thread <= len(roots)):
-                _die(f"--thread {thread} out of range (panel {pid} has {len(roots)} thread(s) — see `tinkpg conv`)")
+                _die(f"--thread {thread} out of range (panel {pid} has {len(roots)} thread(s) — see `tinkpg ws`)")
             path = _thread_path(t, roots[thread - 1])
             thread_k = thread
         else:
@@ -2021,7 +2022,7 @@ def _show_samples(
     firsts: list[Optional[dict]] = []
     if first_token:
         ids = [s.get("id") for s in samples]
-        blobs = _post(f"/api/conversations/{c.get('id')}/node-blobs",
+        blobs = _post(f"/api/workspaces/{c.get('id')}/node-blobs",
                       {"nodes": [i for i in ids if i]}) or {}
         for nid in ids:
             tlp = (blobs.get(nid) or {}).get("token_logprobs")
@@ -2105,7 +2106,7 @@ def _show_samples(
 def cmd_samples(
     selector: Optional[str] = typer.Argument(None, help="workspace id-prefix or name substring; omit → the workspace open in the browser"),
     panel: Optional[str] = typer.Option(None, "--panel", help="panel id (primary/compare/p-2/…); default = first NON-FOLDED panel (primary if eligible). Explicit --panel overrides folding"),
-    thread: Optional[int] = typer.Option(None, "--thread", help="1-indexed root thread (branch-from-start sibling) to walk; default = the active one. Thread numbers: the `threads:` index in `tinkpg conv <id>`"),
+    thread: Optional[int] = typer.Option(None, "--thread", help="1-indexed root thread (branch-from-start sibling) to walk; default = the active one. Thread numbers: the `threads:` index in `tinkpg ws <id>`"),
     turn: Optional[int] = typer.Option(None, "--turn", help="1-indexed user turn on the thread's path whose responses to show; default = the last one"),
     node: Optional[str] = typer.Option(None, "--node", help="node id (or unique prefix) from `tinkpg grep` — pinpoints the fork directly, reaching NON-selected branches --thread/--turn can't. An assistant id shows the fan-out it belongs to"),
     full: bool = typer.Option(False, "--full", help="each sample's COMPLETE answer + full CoT (default: answer + one-line CoT preview)"),
@@ -2118,22 +2119,22 @@ def cmd_samples(
     """Show every sibling response (the n-sample fan-out) at ONE fork, each with its
     CoT, plus a `<tag>` verdict tally — the 'what did the model say across all draws
     here' view that `state`/`conv` (active path only) can't give you. With no selector
-    it targets the conversation the browser has open (via its pushed conversation_id);
+    it targets the workspace the browser has open (via its pushed workspace_id);
     with no --panel, the first non-folded panel. --thread k aims it at a non-active
-    root thread (numbers from `tinkpg conv <id>`'s thread index); --node <id> (ids
+    root thread (numbers from `tinkpg ws <id>`'s thread index); --node <id> (ids
     from `tinkpg grep`) aims it at ANY fork, even on non-selected branches. Reading
     ergonomics: --sample K isolates one sibling, --slice START[:LEN] pages through it,
     --json for scripts (untruncated content, no need to regex human-formatted text)."""
-    convs = _conversations()
+    convs = _workspaces()
     if selector is not None:
-        c = _resolve_conv(selector, convs)
+        c = _resolve_workspace(selector, convs)
     else:
-        cid = _get("/api/state").get("conversation_id")
+        cid = _get("/api/state").get("workspace_id")
         if not cid:
-            _die("no workspace open in the browser (state has no conversation_id). pass a workspace id/name — see `tinkpg conv`.")
+            _die("no workspace open in the browser (state has no workspace_id). pass a workspace id/name — see `tinkpg ws`.")
         c = next((x for x in convs if x.get("id") == cid), None)
         if c is None:
-            _die(f"open workspace {cid[:8]} isn't in the saved set yet (unsaved draft?). save it, or pass a saved id — see `tinkpg conv`.")
+            _die(f"open workspace {cid[:8]} isn't in the saved set yet (unsaved draft?). save it, or pass a saved id — see `tinkpg ws`.")
     slice_rng: Optional[tuple[int, int]] = None
     if slice_spec is not None:
         m = re.fullmatch(r"(\d+)(?::(\d+))?", slice_spec)
@@ -2182,7 +2183,7 @@ def _snippet(text: str, pos: int, width: int) -> str:
 @app.command("grep")
 def cmd_grep(
     pattern: str = typer.Argument(..., help="text to find (fixed string; --regex for a regex)"),
-    conv: Optional[str] = typer.Option(None, "--conv", help="restrict to one workspace (id-prefix or name substring)"),
+    conv: Optional[str] = typer.Option(None, "--ws", "--conv", help="restrict to one workspace (id-prefix or name substring)"),
     regex: bool = typer.Option(False, "--regex", help="treat PATTERN as a Python regex"),
     ignore_case: bool = typer.Option(False, "-i", "--ignore-case"),
     width: int = typer.Option(160, "--width", help="snippet width around each match"),
@@ -2201,10 +2202,10 @@ def cmd_grep(
         # Scoped: resolve against SUMMARIES and fetch only that workspace's body.
         # The ?bodies=1 all-workspaces fetch dominates grep's runtime (~0.2s for
         # 18 light bodies today) and scales with the whole store; one body doesn't.
-        target = _resolve_conv(conv, _get("/api/conversations"))
-        convs = [_get(f"/api/conversations/{target['id']}")]
+        target = _resolve_workspace(conv, _get("/api/workspaces"))
+        convs = [_get(f"/api/workspaces/{target['id']}")]
     else:
-        convs = _conversations()
+        convs = _workspaces()
     hits = 0
     ws_counts: dict[str, int] = {}
     json_hits: list[dict] = []

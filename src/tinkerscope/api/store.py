@@ -42,8 +42,8 @@ def write_json(path: Path, data: Any) -> None:
 def locked(name: str) -> Iterator[None]:
     """Serialize a read-modify-write cycle across processes/tabs via flock.
 
-    `name` keys a dedicated lock file under STATE_HOME (e.g. "conversations" ->
-    conversations.lock). Mirrors instances._locked; use it to wrap any
+    `name` keys a dedicated lock file under STATE_HOME (e.g. "workspaces" ->
+    workspaces.lock). Mirrors instances._locked; use it to wrap any
     read_json -> mutate -> write_json sequence that concurrent writers (two
     browser tabs, a tab + the tinkpg CLI) could otherwise clobber — write_json's
     atomic rename prevents torn files but NOT lost updates.

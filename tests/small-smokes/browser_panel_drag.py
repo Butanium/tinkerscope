@@ -1,6 +1,6 @@
 """Panel drag-to-reorder smoke — fully deterministic (no sampling).
 
-Seeds a 3-panel conversation, each panel a DISTINCT model + a DISTINCT thread:
+Seeds a 3-panel workspace, each panel a DISTINCT model + a DISTINCT thread:
 
     slot 0  primary  model 'Zebra-Model'    thread 'ALPHA-THREAD'
     slot 1  compare  model 'Mango-Model'    thread 'BRAVO-THREAD'
@@ -13,10 +13,10 @@ a shared-DataTransfer sequence). Asserts:
   - chat-column order changed to [CHARLIE, ALPHA, BRAVO]
   - sidebar Models picker order matches [Cobalt, Zebra, Mango]
   - each column kept ITS OWN thread content (content travels with the stable id)
-  - the new order SURVIVES A RELOAD (per-conversation layout persistence)
+  - the new order SURVIVES A RELOAD (per-workspace layout persistence)
   - no console errors throughout
 
-Screenshots before/after to /tmp for eyeballing. Cleans up its conversation.
+Screenshots before/after to /tmp for eyeballing. Cleans up its workspace.
 
   uv run python tests/small-smokes/browser_panel_drag.py [BASE_URL]
 """
@@ -54,7 +54,7 @@ def api(method: str, path: str, body: dict | None = None):
 
 
 def seed() -> str:
-    """3-panel conversation, each panel a distinct base model + distinct thread."""
+    """3-panel workspace, each panel a distinct base model + distinct thread."""
     trees = {}
     for pid, _model, marker in PANELS:
         trees[pid] = {
@@ -67,7 +67,7 @@ def seed() -> str:
             "rootChildren": ["u1"],
             "selected": {"__root__": "u1", "u1": "a1"},
         }
-    conv = api("POST", "/api/conversations", {
+    conv = api("POST", "/api/workspaces", {
         "name": "panel-drag-smoke",
         "trees": trees,
         "panels": [
@@ -80,7 +80,7 @@ def seed() -> str:
 
 
 def seed_scale(n: int) -> str:
-    """An n-panel conversation (n > cap) to prove the cap is gone + layout scales."""
+    """An n-panel workspace (n > cap) to prove the cap is gone + layout scales."""
     pids = ["primary", "compare"] + [f"p-{i}" for i in range(2, n)]
     trees = {
         pid: {
@@ -92,7 +92,7 @@ def seed_scale(n: int) -> str:
         }
         for i, pid in enumerate(pids)
     }
-    conv = api("POST", "/api/conversations", {
+    conv = api("POST", "/api/workspaces", {
         "name": f"panel-scale-{n}-smoke",
         "trees": trees,
         "panels": [{"id": pid, "run_id": f"base:Scale-{i}", "checkpoint": None}
@@ -163,15 +163,15 @@ def column_order(page) -> list[str]:
 
 
 def persisted_panel_ids(conv_id: str) -> list[str]:
-    """Panel ids, in order, as persisted on the conversation (server truth)."""
-    for c in api("GET", "/api/conversations"):
+    """Panel ids, in order, as persisted on the workspace (server truth)."""
+    for c in api("GET", "/api/workspaces"):
         if c["id"] == conv_id:
             return [p["id"] for p in (c.get("panels") or [])]
     return []
 
 
 def wait_persisted(conv_id: str, want: list[str], timeout=5.0) -> list[str]:
-    """Poll the conversation until its panel order matches (save is debounced 400ms)."""
+    """Poll the workspace until its panel order matches (save is debounced 400ms)."""
     deadline = time.time() + timeout
     last: list[str] = []
     while time.time() < deadline:
@@ -211,7 +211,7 @@ def main() -> None:
             page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
             page.on("pageerror", lambda e: errors.append(str(e)))
 
-            page.goto(f"{BASE}/?c={conv_id}", wait_until="load", timeout=20000)
+            page.goto(f"{BASE}/?w={conv_id}", wait_until="load", timeout=20000)
             page.wait_for_selector(".model-slot-select", timeout=15000)
             page.wait_for_function(
                 "document.body.innerText.includes('CHARLIE-THREAD')", timeout=15000
@@ -269,13 +269,13 @@ def main() -> None:
                            order_post == order_pre))
 
             # Persistence is debounced (400ms) — wait for the save to land on the
-            # server, then assert the conversation itself carries the new order.
+            # server, then assert the workspace itself carries the new order.
             persisted = wait_persisted(conv_id, ["p-2", "primary", "compare"])
-            checks.append((f"reorder persisted to conversation {persisted}",
+            checks.append((f"reorder persisted to workspace {persisted}",
                            persisted == ["p-2", "primary", "compare"]))
 
-            # Reload → per-conversation layout must restore the reordered set.
-            page.goto(f"{BASE}/?c={conv_id}", wait_until="load", timeout=20000)
+            # Reload → per-workspace layout must restore the reordered set.
+            page.goto(f"{BASE}/?w={conv_id}", wait_until="load", timeout=20000)
             page.wait_for_function(
                 "document.querySelectorAll('.chat-columns > .chat-column').length === 3",
                 timeout=15000,
@@ -289,7 +289,7 @@ def main() -> None:
 
             # ── Phase 2: no MAX_PANELS cap + horizontal-scroll layout at 8 panels ──
             conv8_id = seed_scale(8)
-            page.goto(f"{BASE}/?c={conv8_id}", wait_until="load", timeout=20000)
+            page.goto(f"{BASE}/?w={conv8_id}", wait_until="load", timeout=20000)
             page.wait_for_function(
                 "document.querySelectorAll('.chat-columns > .chat-column').length === 8",
                 timeout=15000,
@@ -328,9 +328,9 @@ def main() -> None:
                 print("CONSOLE ERRORS:", errors)
             browser.close()
     finally:
-        api("DELETE", f"/api/conversations/{conv_id}")
+        api("DELETE", f"/api/workspaces/{conv_id}")
         if conv8_id:
-            api("DELETE", f"/api/conversations/{conv8_id}")
+            api("DELETE", f"/api/workspaces/{conv8_id}")
 
     print()
     ok = True

@@ -3,7 +3,7 @@
 // DISPLAY-only: capture is always on for native tinker sampling (the server
 // default; see docs/API_CONTRACT.md `logprobs`), so flipping this on works
 // retroactively on any turn that already carries token_logprobs. Persisted in
-// localStorage — it's a browser viewing preference, not conversation state.
+// localStorage — it's a browser viewing preference, not workspace state.
 
 const KEY = 'tinkerscope:token-probs';
 

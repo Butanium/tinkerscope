@@ -1,6 +1,6 @@
 """Distribution-chart × highlight-rules smoke — fully deterministic (no sampling).
 
-Seeds two highlight rules (red / yellow) and a TWO-turn conversation: turn 1 has
+Seeds two highlight rules (red / yellow) and a TWO-turn workspace: turn 1 has
 5 hand-authored assistant siblings ("red", "yellow" x2, "red and yellow",
 "nothing here at all"), turn 2 has 2 ("red", "no color here"). Then opens the
 chart modal and asserts the whole new flow:
@@ -21,7 +21,7 @@ chart modal and asserts the whole new flow:
   - the "exact answers" mode still gives the legacy per-answer histogram (and
     hides the rule chips)
 
-Cleans up its rules + conversation afterwards. Run against the vite dev server
+Cleans up its rules + workspace afterwards. Run against the vite dev server
 (live source) or a built instance:
 
   uv run python tests/small-smokes/browser_chart_rules.py [BASE_URL]
@@ -54,7 +54,7 @@ def api(method: str, path: str, body: dict | None = None):
 
 
 def seed() -> str:
-    """Two rules + a conversation with 5 assistant siblings. Returns conv id."""
+    """Two rules + a workspace with 5 assistant siblings. Returns conv id."""
     for i, (rid, name, pat, color) in enumerate(
         [(RULE_RED, "red", "red", "#f87171"), (RULE_YEL, "yellow", "yellow", "#fde047")]
     ):
@@ -80,7 +80,7 @@ def seed() -> str:
     for i, a in enumerate(turn2):
         nodes[f"b{i}"] = {"id": f"b{i}", "role": "assistant", "content": a,
                           "parent": "u2", "children": []}
-    conv = api("POST", "/api/conversations", {
+    conv = api("POST", "/api/workspaces", {
         "name": "chart-rules-smoke",
         "trees": {"primary": {"nodes": nodes, "rootChildren": ["u1"],
                               "selected": {"__root__": "u1", "u1": "a0",
@@ -91,7 +91,7 @@ def seed() -> str:
 
 def cleanup(conv_id: str | None) -> None:
     if conv_id:
-        api("DELETE", f"/api/conversations/{conv_id}")
+        api("DELETE", f"/api/workspaces/{conv_id}")
     for rid in (RULE_RED, RULE_YEL):
         try:
             api("DELETE", f"/api/highlights/{rid}")
@@ -110,11 +110,11 @@ def main() -> None:
             page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
             page.on("pageerror", lambda e: errors.append(str(e)))
 
-            page.goto(f"{BASE}/?c={conv_id}", wait_until="load", timeout=20000)
+            page.goto(f"{BASE}/?w={conv_id}", wait_until="load", timeout=20000)
             # .model-slot-select is a div since the ModelDropdown rework — this
             # wait only means "sidebar booted", so don't pin the element kind
             page.wait_for_selector(".model-slot-select", timeout=15000)
-            # the seeded conversation's user turn is on screen ⇒ tree loaded
+            # the seeded workspace's user turn is on screen ⇒ tree loaded
             page.wait_for_function(
                 "document.body.innerText.includes('Say a color.')", timeout=15000
             )

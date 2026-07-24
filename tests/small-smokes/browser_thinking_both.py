@@ -45,10 +45,10 @@ def main() -> None:
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: errors.append(str(e)))
 
-        # Seed a fresh single-panel conversation on the model and open it — replaces
+        # Seed a fresh single-panel workspace on the model and open it — replaces
         # the old native-<select> model picker (now the ModelDropdown combobox).
         cid, _ = seed_conversation(BASE, [MODEL], "thinking_both")
-        page.goto(f"{BASE}/?c={cid}", wait_until="load", timeout=20000)
+        page.goto(f"{BASE}/?w={cid}", wait_until="load", timeout=20000)
         page.wait_for_selector(".input-textarea:not([disabled])", timeout=15000)
 
         # 'All' sample view → every card stacked, DOM order == sample_index order.

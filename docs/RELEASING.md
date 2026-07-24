@@ -42,4 +42,5 @@ exactly the deal for the `conversations → workspaces` rename.
 
 | version | what it marks |
 |---|---|
+| `v1.0.0` | the `conversations → workspaces` rename, wire + disk (see `docs/MIGRATIONS.md`). Clean cut: old routes 404, old field names rejected; only `?c=` is still read. |
 | `v0.1.0` | the pre-rename tool: auto-discovery, branching, N-panel compare, storage v2, share packs, token probs — everything up to and including the workspace-scoping fix for the cross-tab layout clobber. The wire and disk still say `conversation`. |

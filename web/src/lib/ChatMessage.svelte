@@ -153,15 +153,15 @@
   // feedback). Independent flags so the message / conversation / node-id items
   // flash individually (clicking one must not light up the others).
   let copiedMsg = $state(false);
-  let copiedConv = $state(false);
+  let copiedWs = $state(false);
   let copiedId = $state(false);
   let copiedTimer: ReturnType<typeof setTimeout> | undefined;
   function flashCopied(which: 'msg' | 'conv' | 'id') {
     if (which === 'msg') copiedMsg = true;
-    else if (which === 'conv') copiedConv = true;
+    else if (which === 'conv') copiedWs = true;
     else copiedId = true;
     clearTimeout(copiedTimer);
-    copiedTimer = setTimeout(() => { copiedMsg = false; copiedConv = false; copiedId = false; }, 1200);
+    copiedTimer = setTimeout(() => { copiedMsg = false; copiedWs = false; copiedId = false; }, 1200);
   }
 
   // Inline edit (local). `editShift` remembers a shift-open (fork-full-copy, no gen);
@@ -237,7 +237,7 @@
     editSystem = '';
     sysExpanded = false;
     copiedMsg = false;
-    copiedConv = false;
+    copiedWs = false;
     copiedId = false;
     rawSingle = false;
     rawSamples = new Set();
@@ -463,13 +463,13 @@
   <button
     class="btn-act"
     class:shift-alt={shiftDown}
-    class:copied={copiedConv}
-    data-tooltip={copiedConv ? 'Copied!' : shiftDown ? 'Copy the full conversation + thinking' : 'Copy the full conversation'}
+    class:copied={copiedWs}
+    data-tooltip={copiedWs ? 'Copied!' : shiftDown ? 'Copy the full conversation + thinking' : 'Copy the full conversation'}
     use:tip
     aria-label="Copy conversation"
     onclick={(e) => { onCopy(true, e.shiftKey); flashCopied('conv'); }}
   >
-    {#if copiedConv}{@render checkIcon()}{:else}{@render copyAllIcon()}{/if}
+    {#if copiedWs}{@render checkIcon()}{:else}{@render copyAllIcon()}{/if}
   </button>
 {/snippet}
 

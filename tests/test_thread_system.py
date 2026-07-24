@@ -43,8 +43,8 @@ def test_panel_routed_thread_system_field(client):
 
 
 def test_panels_full_replace_resets_thread_mirror(client):
-    # Deliberate: panels are re-minted across conversations, so a full layout
-    # replace must NOT leak a previous conversation's thread prompt into the new
+    # Deliberate: panels are re-minted across workspaces, so a full layout
+    # replace must NOT leak a previous workspace's thread prompt into the new
     # one. The browser re-mirrors (panel_thread_system) right after every load.
     _lay(client, ids=("primary",))
     client.post("/api/state", json={"panel_thread_system": {"primary": "stale"}})

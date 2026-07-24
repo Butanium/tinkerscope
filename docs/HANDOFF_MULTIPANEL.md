@@ -4,9 +4,14 @@ Written 2026-06-22 at the end of a long branching+comparison-UX session, as the
 deliberate handoff before a context reset. The next session should read this,
 then **ask Clément the open decisions below before building.**
 
+> **File paths and line numbers below predate the v1.0.0 rename** (2026-07-24):
+> `routes/conversations.py` → `routes/workspaces.py`, `conversation_store.py` →
+> `workspace_store.py`, `conversations.svelte.ts` → `workspaces.svelte.ts`,
+> `/api/conversations` → `/api/workspaces`. See `docs/MIGRATIONS.md`.
+
 ## 0. Where we are right now
 
-- **Committed:** `d25f0ac` on `main` — "Conversation branching + multi-model
+- **Committed:** `d25f0ac` on `main` — "Workspace branching + multi-model
   comparison UX". This bundles the entire branching feature (designed/verified in
   an earlier context, never committed until now) **plus** today's comparison-UX
   batch **plus** Quill's wandb backend change. Working tree is clean.
@@ -34,14 +39,14 @@ then **ask Clément the open decisions below before building.**
 Branching (the big feature, now committed): per-panel **branch tree** is the
 single read source; `messages`/`compare_messages` stay a write-only active-path
 echo for the CLI. Regenerate/edit/n-samples become cycle-able ‹k/N› siblings;
-named conversations via a dropdown, each with its own `system_prompt`. Lives in
-`web/src/lib/tree.ts` (pure, panel-agnostic, 30 tests), `conversations.svelte.ts`
-(store), `api/routes/conversations.py` (flock'd CRUD). Contract: `BRANCHING_DESIGN.md`.
+named workspaces via a dropdown, each with its own `system_prompt`. Lives in
+`web/src/lib/tree.ts` (pure, panel-agnostic, 30 tests), `workspaces.svelte.ts`
+(store), `api/routes/workspaces.py` (flock'd CRUD). Contract: `BRANCHING_DESIGN.md`.
 
 Today's comparison-UX batch (all live on :5180):
 - **Enabling compare duplicates** the current thread into both panels (was: wiped both). `duplicateToCompare()` in the store.
 - **Type-to-filter** on the sidebar model picker (`modelFilter` + `matchModel(...)`), matches name/id/base_model/wandb_project/renderer; selected option always kept.
-- **Session persistence** — model selection + sampling params cached to the on-disk prefs store (`last_session` key), restored on a fresh process (`restoreSession()`). **Global last-session — to be reworked to per-conversation (§3, resolved).**
+- **Session persistence** — model selection + sampling params cached to the on-disk prefs store (`last_session` key), restored on a fresh process (`restoreSession()`). **Global last-session — to be reworked to per-workspace (§3, resolved).**
 - **Regenerate + Regenerate-all** (compare); **shift+regenerate = replace current branch in place** (`regenReplace` in tree.ts); **shift+delete = delete all sibling branches** (`deleteSiblings`); shift swaps the button icon+tooltip (regen→replace, edit→copy, delete→delete-all). `shiftDown` tracked via window key listeners.
 - **Per-panel "continue this panel" composer** (bubble at each panel's thread tail, compare-only) + **per-panel concurrency**: a generation in one panel no longer disables the other's controls. Per-panel abort handles in `abortByPanel`; gating via `panelBusy(panel)`.
 - **n>1 sample cards**: "Make active" now **collapses to the single reply** (others stay cyclable), plus **"Discard others"** and a **per-sample trashbin**.
@@ -84,21 +89,21 @@ This is one coherent feature: an **N-way comparison workspace**.
   degradation is a real UX trap (§5 calls it the silent-degradation trap).
   - **(A) frontend-only extra panels** — keep the backend's 2-slot
     `primary`/`compare` for the CLI; store panels 3…N's selection + trees in the
-    conversation store. Less invasive, CLI untouched. **Cost:** panels 3…N lose
+    workspace store. Less invasive, CLI untouched. **Cost:** panels 3…N lose
     the live streaming overlay + n>1 cards (those ride the bus bucket keyed
     primary/compare); they still generate+fold via their own stream.
   - **(B) full generalization** — make the bus `panel` field + `live.panels`
     bucket panel-id-agnostic so every panel gets streaming+cards. Touches
     `chat.py` broadcasts, `state.svelte.ts`, the SSE snapshot, and the
     conversations.json schema. Bigger, cleaner.
-- **Persistence scope — RESOLVED: per-conversation.** Each named conversation
+- **Persistence scope — RESOLVED: per-workspace.** Each named workspace
   remembers its own panel layout + models + sampling params, restored on switch.
   **This supersedes the global last-session I shipped this session** (`last_session`
   pref + `restoreSession()` in `+page.svelte`) — rework it so the selection/params
   live on the conversation (folds naturally into the N-panel conversations.json
   schema change, since you're already touching that store). The global pref can
-  stay as the seed for a brand-new conversation, but switching conversations must
-  restore that conversation's own setup.
+  stay as the seed for a brand-new workspace, but switching workspaces must
+  restore that workspace's own setup.
 - **Per-panel send bubble UX — built + kept** ("＋ continue this panel" at each
   panel's tail). No change requested.
 
@@ -111,7 +116,7 @@ This is one coherent feature: an **N-way comparison workspace**.
   `draggable` ancestor kills text selection cross-browser). One `patchState({panels},
   true)` moves the shared `panels[]`, so the chat columns, the sidebar Models pickers,
   and the send-chips all follow (same array); `convo.save()` persists the layout with
-  the conversation (same debounced path as `setRun`). Content (trees/live buckets/
+  the workspace (same debounced path as `setRun`). Content (trees/live buckets/
   scroll) is keyed by stable panel id, so it travels with its column — reordering
   during a live generation is fine. Shared drag helper `lib/drag-reorder.svelte.ts`
   (`DragReorder`) over pure `lib/reorder.ts` (`reorder.test.ts`); handlers in +page's
@@ -133,7 +138,7 @@ This is one coherent feature: an **N-way comparison workspace**.
 - **System prompt → chip** — DONE. Moved out of the sidebar to a "＋ system prompt"
   chip beside "prefill assistant" above the composer (mirrors the prefill chip: click
   toggles a textarea; the chip shows an active state whenever a prompt is set, even
-  folded). Persistence unchanged (`setSystemPrompt → patchState + save`, per-conversation).
+  folded). Persistence unchanged (`setSystemPrompt → patchState + save`, per-workspace).
   Smoke `browser_system_chip.py`.
 - **Backend restart needed** to activate wandb-**project** filtering: the field is
   wired front+back, but `run.sh` dev mode runs without `--reload`, so the new
@@ -182,7 +187,7 @@ This is one coherent feature: an **N-way comparison workspace**.
 
 ## 5. The 2-panel assumption map (every site that hardcodes primary/compare)
 
-The current model is exactly **two panels**, named `'primary'` and `'compare'`, threaded as a closed string union from the frontend type system all the way through the SSE state bus, the CLI contract, and the on-disk conversation schema. Generalizing to N panels is mostly a matter of replacing that binary encoding with a panel-id-keyed collection — most *iteration* machinery already folds over `panelSels`/maps and survives untouched; the cost concentrates in the few sites that hardcode the literal two-key encoding underneath.
+The current model is exactly **two panels**, named `'primary'` and `'compare'`, threaded as a closed string union from the frontend type system all the way through the SSE state bus, the CLI contract, and the on-disk workspace schema. Generalizing to N panels is mostly a matter of replacing that binary encoding with a panel-id-keyed collection — most *iteration* machinery already folds over `panelSels`/maps and survives untouched; the cost concentrates in the few sites that hardcode the literal two-key encoding underneath.
 
 ### Already panel-agnostic (zero or trivial change)
 
@@ -196,7 +201,7 @@ The current model is exactly **two panels**, named `'primary'` and `'compare'`, 
 | `web/src/routes/+page.svelte:402-447, 626-727` | `sendMessage`/`regenerateAll` iterate `for (const p of panelSels)`; every per-panel branch handler (`deleteMessage`/`regenerate`/`cycleBranch`/`selectSample`/`discardOtherSamples`/`deleteSample`/`applyEdit`) routes through `convo.treeFor(panel)`/`live.panels[panel]` and never branches on `'primary'`/`'compare'`. N-ready modulo the underlying maps widening. |
 | `web/src/routes/+page.svelte:1173-1192` | `buildChartData`/`panelLabel` iterate `panelSels`, one bar per panel; `CHART_COLORS` has 15 entries so N>2 is fine. |
 | `web/src/routes/+page.svelte:820,1676` | `chatContainers: HTMLDivElement[]` is already array-indexed (`bind:this={chatContainers[panelIdx]}`); auto-scroll over N columns works. CSS `.chat-column` is `flex:1` (`:2122`) — N columns lay out for free. |
-| `src/tinkerscope/api/settings.py:39,73` | `conversations_path` + per-scan-root keying (`scan_roots_key`) is panel-count-agnostic; anchors *where* the N-tree schema persists but holds no 2-panel assumption. |
+| `src/tinkerscope/api/settings.py:39,73` | `legacy_conversations_path` + per-scan-root keying (`scan_roots_key`) is panel-count-agnostic; anchors *where* the N-tree schema persists but holds no 2-panel assumption. |
 | `src/tinkerscope/api/api.ts:51-57` (`getPrefs`/`setPref`, GET/PUT `/api/prefs`) | Flat `Record<string,string>` key/value, no panel dimension — unaffected. |
 
 The root type that everything else keys off — `Panel = 'primary' | 'compare'` (`web/src/lib/types.ts:75`) — is the linchpin: widening it to an open panel-id string (or `'primary' | 'compare' | ...` superset) is what makes every `Record<Panel,…>` map and per-panel signature N-ready at the type level.
@@ -211,7 +216,7 @@ The root type that everything else keys off — `Panel = 'primary' | 'compare'` 
 | `src/tinkerscope/api/routes/chat.py:77,141` | `ChatRequest.panel: str = 'primary'` ("primary"\|"compare", :77); `is_compare_panel = (req.panel == 'compare')` (:141) is the single boolean driving ALL panel routing below. `/api/chat` is per-panel already (one request = one model). | Replace the binary field with an opaque `panel_id` string; drop `is_compare_panel`, key everything off `panel_id`. The "one request samples ONE model" design already generalizes — caller fires N requests tagged `panel=<id>`. **External contract:** `panel` is echoed on every bus broadcast (browser dispatches by it) and set by the CLI. |
 | `src/tinkerscope/api/routes/chat.py:230-234,246-253,277-283` | `is_compare_panel` branches the SELECTION patch (:230-234), the START patch (:246-253), and the END transcript commit (:277-283). The primary branch *additionally* writes the shared sampling params (`system_prompt`/`temperature`/`max_tokens`/`n_samples`/`thinking`/`top_p`) — params are NOT per-panel, they live only on the primary write (:251-253). | Generalize all three to `panels[panel_id].{run_id,checkpoint,messages}`. **Decision needed:** reassign param authorship — (a) elect a param-author panel, (b) move params out of the per-panel branch, or (c) make params global (set only via `/api/state`). |
 | `src/tinkerscope/api/routes/chat.py:239,256-259,269,276,286-289,294-297` | Every bus broadcast carries `'panel': req.panel` — `chat_error` pre-start (:239), `chat_start` (:256-259), `delta` (:269), `sample` (:276), `chat_done` (:286-289), `chat_error` mid-stream (:294-297). With only two valid values the browser hardcodes two destinations. | No structural plumbing change — `panel` is already an opaque pass-through (server never interprets it beyond `is_compare_panel`). Let it carry an arbitrary `panel_id`. Contract change is *semantic*: browser dispatches by a dynamic panel-id set. `client_token` (:84) gives per-chat ownership, orthogonal to panel count. |
-| `src/tinkerscope/api/routes/conversations.py:66-79,89-105,121-134` | The per-scan-root conversation store is hardcoded to two trees: `tree` (primary) + `compare_tree`. `ConversationCreate` (:66-71), `TreeSave` (:77-81), `create_conversation` (:92-100), `save_conversation_tree` (:121-134) all name exactly these two opaque-JSON slots. `system_prompt` stored once per conversation (shared). | Replace `tree`/`compare_tree` with `trees: dict[panel_id -> opaque tree]`. Server treats trees as opaque JSON, so the only edits are the field names in the two Pydantic models + the two read-modify-write handlers. **External contract** (on-disk schema): existing saved conversations have `{tree, compare_tree}` and need a migration/back-compat read (`tree→trees[primary]`, `compare_tree→trees[compare]`). |
+| `src/tinkerscope/api/routes/workspaces.py:66-79,89-105,121-134` | The per-scan-root workspace store is hardcoded to two trees: `tree` (primary) + `compare_tree`. `WorkspaceCreate` (:66-71), `TreeSave` (:77-81), `create_conversation` (:92-100), `save_conversation_tree` (:121-134) all name exactly these two opaque-JSON slots. `system_prompt` stored once per workspace (shared). | Replace `tree`/`compare_tree` with `trees: dict[panel_id -> opaque tree]`. Server treats trees as opaque JSON, so the only edits are the field names in the two Pydantic models + the two read-modify-write handlers. **External contract** (on-disk schema): existing saved workspaces have `{tree, compare_tree}` and need a migration/back-compat read (`tree→trees[primary]`, `compare_tree→trees[compare]`). |
 | `src/tinkerscope/cli.py:523-574` | `cmd_compare` is hardwired to TWO runs: positional `run_a`/`run_b` (:525-526), resolves two (:538-539), posts `mode=compare` with `run_id`/`compare_run_id` (+optional checkpoints) (:545-549), builds `body_a` (`panel='primary'`) + `body_b` (`panel='compare'`) (:552-553), spawns two threads (:559-566), aggregates two failures (:568-574). | Take N runs (variadic `runs: list[str]` or repeated `--run`). Loop to resolve each, build one `/api/state` patch with the panels list, spawn one thread per run tagged `panel=<panel_id>`, collect a `_StreamResult` per thread, aggregate all failures. **External contract** (documented terminal-drive surface). Consider keeping `compare a b` as the 2-run case for back-compat, or rename to `panels`/`grid`. |
 | `src/tinkerscope/cli.py:467-493,513-516,517` | `_chat_body` takes a single `panel: str` (:476) written into the body (:486); `cmd_chat` hardcodes `panel='primary'` (:517) and posts `{mode:'single', run_id, checkpoint}` (:513-516); `cmd_open` (:311) posts `{mode:'single', run_id}`. | `_chat_body` already accepts an arbitrary panel string — pass a `panel_id` from the new loop. `cmd_chat` stays as the N=1 case. The selection patches in `cmd_open`/`cmd_chat` move to the new `/api/state` panels shape (`mode='single'` becomes a 1-panel list). Low effort relative to `cmd_compare`. |
 
@@ -240,25 +245,25 @@ The root type that everything else keys off — `Panel = 'primary' | 'compare'` 
 | `web/src/routes/+page.svelte:1668-1728` | Chat area: `class:multi={isComparing}` (:1668), `{#each panelSels as p, panelIdx (p.panel)}` (:1669), column-header `{#if isComparing}` (:1673), per-panel composer `{#if isComparing && convo.activeId && panelCanChat(p)}` (:1705). CSS `.chat-column` `flex:1` (:2122). | `class:multi → {panelSels.length > 1}`; column-header + composer gates → `{#if panelSels.length > 1 && …}`. `{#each}` body unchanged. No CSS change (flexbox scales); maybe add `overflow-x` / `min-width` for many panels. |
 | `web/src/routes/+page.svelte:177-181,344-388` | `DEFAULTS` (:177) and session-persistence (`persistSession` :339-353 + `restoreSession` :364-388) enumerate the exact 2-panel scalars + `mode`; the `$effect` (:355-361) touches each by name. | `DEFAULTS`, the persisted-session JSON, and `restoreSession` serialize/restore the `panels[]` array instead of two scalar pairs + `mode`; the `$effect` iterates/touches the panels array. localStorage/prefs restore contract. |
 
-### Frontend: live bus + conversation store
+### Frontend: live bus + workspace store
 
 | location (path:line) | today (2-panel) | change for N |
 |---|---|---|
 | `web/src/lib/state.svelte.ts:36-39` | `panels = $state<Record<Panel,PanelRun>>({primary: emptyPanel(), compare: emptyPanel()})` — the live bus bucket, hardcoded to exactly two literal keys. | Make the bucket a Record keyed by panel id, **lazily created on first `chat_start`** rather than pre-seeded with two keys. Widen `Panel` to a string id (or add `panels: Record<string,PanelRun>` that auto-vivifies). Pre-seeding must go. |
 | `web/src/lib/state.svelte.ts:65-67` | `clearBuckets()` resets to `{primary: emptyPanel(), compare: emptyPanel()}` — re-hardcodes two keys (called 6× from the convo store on switch/new/load). | Reset to `{}` (buckets auto-vivify on `chat_start`) or rebuild from the current panel-id set. Stop minting exactly primary+compare. |
-| `web/src/lib/state.svelte.ts:70-72` | `get anyRunning()` returns `panels.primary.running \|\| panels.compare.running` — only the two fixed slots, so a 3rd panel's running flag is invisible. **Gates `conversations.svelte.ts:239`'s external-fold**, so a 3rd-panel CLI run could fold while another is "running" and corrupt the tree. | `return Object.values(this.panels).some(p => p.running)`. Must cover all N or 3rd-panel CLI runs slip through. |
+| `web/src/lib/state.svelte.ts:70-72` | `get anyRunning()` returns `panels.primary.running \|\| panels.compare.running` — only the two fixed slots, so a 3rd panel's running flag is invisible. **Gates `workspaces.svelte.ts:239`'s external-fold**, so a 3rd-panel CLI run could fold while another is "running" and corrupt the tree. | `return Object.values(this.panels).some(p => p.running)`. Must cover all N or 3rd-panel CLI runs slip through. |
 | `web/src/lib/state.svelte.ts:82,101,118,129,141` | Every bus handler does `const panel = (data?.panel ?? 'primary') as Panel` then indexes `this.panels[panel]`. `chat_start` writes a new slot (safe); `delta`/`sample`/`chat_done`/`chat_error` READ `this.panels[panel]` assuming the slot pre-exists. | `?? 'primary'` default is fine, but the read sites must tolerate a missing slot (auto-vivify or guard `cur ?? emptyPanel()`) since buckets are no longer pre-seeded. `as Panel` → `as string`. Otherwise already per-panel-keyed. |
-| `web/src/lib/conversations.svelte.ts:43-44` | Two reactive fields: `tree = $state<ConvTree>(emptyTree())` + `compareTree = $state<ConvTree>(emptyTree())`. | Single reactive map `trees = $state<Record<string,ConvTree>>({primary: emptyTree()})`. All reads/writes route through it. Needs a panel-id ordering source (panel list lives elsewhere). |
-| `web/src/lib/conversations.svelte.ts:55-57` | `treeFor(panel)` is a binary ternary `panel === 'compare' ? compareTree : tree`. | `return this.trees[panelId] ?? emptyTree()`. The **single read chokepoint** (+page funnels every read through it) — high-leverage change. Param type `'primary'\|'compare'` → string. |
-| `web/src/lib/conversations.svelte.ts:81-86` | `setTree(panel, next, persist)` single commit: `if (panel==='compare') compareTree = next; else tree = next;` then `#mirror()` + `save()`. | `this.trees = {...this.trees, [panelId]: next}` (immutable so `$state` tracks it). The **single write chokepoint** — `#mirror`/`save` pick up the new tree automatically once generalized. |
-| `web/src/lib/conversations.svelte.ts:88-95` | `#mirror()` posts exactly two fields to `PlaygroundState`: `messages: activeMessages(tree)` + `compare_messages: activeMessages(compareTree)` — the write-only active-path echo for the CLI. | Mirror N panels. Either keep `messages`/`compare_messages` for panels 0/1 + add per-panel active paths for the rest, or generalize the state-patch shape. For N>2 the extra panels' active paths need a new state field or aren't echoed to the CLI. Cross-slice contract with the bus/state slice. |
-| `web/src/lib/conversations.svelte.ts:99-110, 52` | `save()` snapshots both trees into `#pending` (`tree: snapshot(tree)`, `compareTree: ct.rootChildren.length ? ct : null` — compare collapsed to null when empty). `#pending` typed `{id; tree; compareTree: ConvTree\|null; system_prompt}` (:52). | Snapshot the whole map; drop empty trees (the `rootChildren.length` collapse → omit a panel's tree when empty). `#pending` → `{id; trees: Record<string,ConvTree>; system_prompt}`. |
-| `web/src/lib/conversations.svelte.ts:112-123` | `#doSave()` calls `api.saveConversationTree(p.id, p.tree, p.compareTree, p.system_prompt)` — positional two-tree signature. | `api.saveConversationTree(p.id, p.trees, p.system_prompt)` passing the map. |
-| `web/src/lib/conversations.svelte.ts:228-233` | `#loadTrees(conv)` reads `conv.tree → this.tree` and `conv.compare_tree ? asTree(...) : emptyTree() → this.compareTree`. | `this.trees = Object.fromEntries(panelIds.map(pid => [pid, asTree(conv.trees?.[pid])]))`. **THE migration read point** — must accept legacy `{tree, compare_tree}` and synthesize `{primary: tree, compare: compare_tree}` when `conv.trees` absent (back-compat shim lives here). |
-| `web/src/lib/conversations.svelte.ts:171-175,190-195,211-214` | `create()` / `remove()`-last-reset / `resetActive()` each set BOTH `tree`+`compareTree = emptyTree()` and POST `{messages:[], compare_messages:[]}` to clear the two transcripts. | Reset the whole map to `{primary: emptyTree()}` and clear N active-path echoes in the patch. Three near-identical clear sites → a single `this.trees = freshTreesMap()` each. |
-| `web/src/lib/conversations.svelte.ts:221-226` | `duplicateToCompare()` copies primary → compare: `this.compareTree = $state.snapshot(this.tree)` — the "enter compare" affordance, source+dest baked into the name. | `duplicateTo(panelId)` deep-cloning primary (or any source) into a newly-added panel, so "add 3rd/4th panel seeded from primary" works. |
-| `web/src/lib/conversations.svelte.ts:238-248` | `#afterLoad()` reconciles external turns for two panels: `live.state?.messages → tree`, `live.state?.compare_messages → compareTree`. | Loop reconciling each panel's active-path echo into `trees[pid]`. Bounded by however many active-path fields the bus exposes — for N>2 only echoed panels reconcile unless the bus grows per-panel message fields. Cross-slice dependency. |
-| `web/src/lib/conversations.svelte.ts:259-275` | `#onExternalDone(panel, data)` selects `panel==='compare' ? compare_messages : messages`, reconciles into `treeFor(panel)`, commits via `setTree(panel,…)`. | Map `panelId → its active-path echo field`, reconcile into `treeFor(panelId)`. Same bus-field constraint as `#afterLoad`. Panel param → string. |
+| `web/src/lib/workspaces.svelte.ts:43-44` | Two reactive fields: `tree = $state<ConvTree>(emptyTree())` + `compareTree = $state<ConvTree>(emptyTree())`. | Single reactive map `trees = $state<Record<string,ConvTree>>({primary: emptyTree()})`. All reads/writes route through it. Needs a panel-id ordering source (panel list lives elsewhere). |
+| `web/src/lib/workspaces.svelte.ts:55-57` | `treeFor(panel)` is a binary ternary `panel === 'compare' ? compareTree : tree`. | `return this.trees[panelId] ?? emptyTree()`. The **single read chokepoint** (+page funnels every read through it) — high-leverage change. Param type `'primary'\|'compare'` → string. |
+| `web/src/lib/workspaces.svelte.ts:81-86` | `setTree(panel, next, persist)` single commit: `if (panel==='compare') compareTree = next; else tree = next;` then `#mirror()` + `save()`. | `this.trees = {...this.trees, [panelId]: next}` (immutable so `$state` tracks it). The **single write chokepoint** — `#mirror`/`save` pick up the new tree automatically once generalized. |
+| `web/src/lib/workspaces.svelte.ts:88-95` | `#mirror()` posts exactly two fields to `PlaygroundState`: `messages: activeMessages(tree)` + `compare_messages: activeMessages(compareTree)` — the write-only active-path echo for the CLI. | Mirror N panels. Either keep `messages`/`compare_messages` for panels 0/1 + add per-panel active paths for the rest, or generalize the state-patch shape. For N>2 the extra panels' active paths need a new state field or aren't echoed to the CLI. Cross-slice contract with the bus/state slice. |
+| `web/src/lib/workspaces.svelte.ts:99-110, 52` | `save()` snapshots both trees into `#pending` (`tree: snapshot(tree)`, `compareTree: ct.rootChildren.length ? ct : null` — compare collapsed to null when empty). `#pending` typed `{id; tree; compareTree: ConvTree\|null; system_prompt}` (:52). | Snapshot the whole map; drop empty trees (the `rootChildren.length` collapse → omit a panel's tree when empty). `#pending` → `{id; trees: Record<string,ConvTree>; system_prompt}`. |
+| `web/src/lib/workspaces.svelte.ts:112-123` | `#doSave()` calls `api.saveWorkspaceTree(p.id, p.tree, p.compareTree, p.system_prompt)` — positional two-tree signature. | `api.saveWorkspaceTree(p.id, p.trees, p.system_prompt)` passing the map. |
+| `web/src/lib/workspaces.svelte.ts:228-233` | `#loadTrees(conv)` reads `conv.tree → this.tree` and `conv.compare_tree ? asTree(...) : emptyTree() → this.compareTree`. | `this.trees = Object.fromEntries(panelIds.map(pid => [pid, asTree(conv.trees?.[pid])]))`. **THE migration read point** — must accept legacy `{tree, compare_tree}` and synthesize `{primary: tree, compare: compare_tree}` when `conv.trees` absent (back-compat shim lives here). |
+| `web/src/lib/workspaces.svelte.ts:171-175,190-195,211-214` | `create()` / `remove()`-last-reset / `resetActive()` each set BOTH `tree`+`compareTree = emptyTree()` and POST `{messages:[], compare_messages:[]}` to clear the two transcripts. | Reset the whole map to `{primary: emptyTree()}` and clear N active-path echoes in the patch. Three near-identical clear sites → a single `this.trees = freshTreesMap()` each. |
+| `web/src/lib/workspaces.svelte.ts:221-226` | `duplicateToCompare()` copies primary → compare: `this.compareTree = $state.snapshot(this.tree)` — the "enter compare" affordance, source+dest baked into the name. | `duplicateTo(panelId)` deep-cloning primary (or any source) into a newly-added panel, so "add 3rd/4th panel seeded from primary" works. |
+| `web/src/lib/workspaces.svelte.ts:238-248` | `#afterLoad()` reconciles external turns for two panels: `live.state?.messages → tree`, `live.state?.compare_messages → compareTree`. | Loop reconciling each panel's active-path echo into `trees[pid]`. Bounded by however many active-path fields the bus exposes — for N>2 only echoed panels reconcile unless the bus grows per-panel message fields. Cross-slice dependency. |
+| `web/src/lib/workspaces.svelte.ts:259-275` | `#onExternalDone(panel, data)` selects `panel==='compare' ? compare_messages : messages`, reconciles into `treeFor(panel)`, commits via `setTree(panel,…)`. | Map `panelId → its active-path echo field`, reconcile into `treeFor(panelId)`. Same bus-field constraint as `#afterLoad`. Panel param → string. |
 
 ### Frontend: bucket/card-mapping consumers (degradation surface)
 
@@ -285,23 +290,23 @@ Five external contracts break; each requires CLI and browser (and on-disk data) 
 
 Non-breaking-critical, but flagged: **localStorage `last_session`** (`+page.svelte:343-353,373-382`) serializes the 2-panel scalar selection — old sessions won't restore extra panels unless updated to the `panels[]` array. The **highlight record** (`+page.svelte:1095-1118`, `api.addHighlight`) stores one panel's `run_id`/`checkpoint`/`base_model`/`sampler_path` — one highlight = one panel's sample, so no schema change, only `tagFormPanel`'s default widens. **`getPrefs`/`setPref`** (`/api/prefs`) carries no panel dimension — unaffected.
 
-A cross-slice contract worth isolating: **`PlaygroundState.messages` / `compare_messages` active-path echo** (`types.ts:84-85`) can only echo 2 panels. `#mirror`/`#afterLoad`/`#onExternalDone` (`conversations.svelte.ts:88-95,238-248,259-275`) feed/read it. For N>2, either accept that extra panels aren't CLI-visible, or the bus slice must add per-panel active-path fields. This is the seam where the "frontend-only" and "full" options below diverge.
+A cross-slice contract worth isolating: **`PlaygroundState.messages` / `compare_messages` active-path echo** (`types.ts:84-85`) can only echo 2 panels. `#mirror`/`#afterLoad`/`#onExternalDone` (`workspaces.svelte.ts:88-95,238-248,259-275`) feed/read it. For N>2, either accept that extra panels aren't CLI-visible, or the bus slice must add per-panel active-path fields. This is the seam where the "frontend-only" and "full" options below diverge.
 
 ### A vs B decision
 
-The choice is whether extra panels (3..N) are *first-class* on the live bus or only on the tree. Both options share the same frontend-store and conversation-schema work (the `trees` map, `treeFor`/`setTree` chokepoints, the panels array in `PlaygroundState`/`panelSels`, the sidebar add/remove UI). They differ only in whether the **bus `panel` field + `live.panels` bucket** are generalized.
+The choice is whether extra panels (3..N) are *first-class* on the live bus or only on the tree. Both options share the same frontend-store and workspace-schema work (the `trees` map, `treeFor`/`setTree` chokepoints, the panels array in `PlaygroundState`/`panelSels`, the sidebar add/remove UI). They differ only in whether the **bus `panel` field + `live.panels` bucket** are generalized.
 
 #### Option A — frontend-only extra panels (backend stays 2-slot for the CLI)
 
-Keep the backend's named 2-panel encoding for the CLI's benefit; store panels 3..N selection + trees entirely in the conversation/frontend store. Extra panels generate and fold via their **own `/api/chat` stream** (`fireChat`/`drainSamples`, `+page.svelte:453-548`) — that path is already panel-count-independent and passes `panel: p.panel` as opaque data, so the committed reply + the ‹k/N› cycler (both tree-driven, `tree.ts`) work for panel N **for free**. What extra panels **lack**: the live streaming overlay (token-by-token `delta`, loading dots at `+page.svelte:1699-1704`, the n>1 progress bar) and the n>1 sample cards (Make active / Discard others / Delete sample / per-sample tag/raw) — those ride the `live.panels` bucket, which is keyed `primary`/`compare` only.
+Keep the backend's named 2-panel encoding for the CLI's benefit; store panels 3..N selection + trees entirely in the workspace/frontend store. Extra panels generate and fold via their **own `/api/chat` stream** (`fireChat`/`drainSamples`, `+page.svelte:453-548`) — that path is already panel-count-independent and passes `panel: p.panel` as opaque data, so the committed reply + the ‹k/N› cycler (both tree-driven, `tree.ts`) work for panel N **for free**. What extra panels **lack**: the live streaming overlay (token-by-token `delta`, loading dots at `+page.svelte:1699-1704`, the n>1 progress bar) and the n>1 sample cards (Make active / Discard others / Delete sample / per-sample tag/raw) — those ride the `live.panels` bucket, which is keyed `primary`/`compare` only.
 
 **Sites touched (frontend only):**
-- The full frontend-store generalization: `Panel` type (`types.ts:75`), `panelSels` + `setRun`/`setCheckpoint` (`+page.svelte:183-195,248-262`), add/remove-panel UI (`:264-289,1452-1572,1573-1578,1668-1728`), `panelDraft`/`abortByPanel` (`:396-400`), session persistence (`:177-181,344-388`), and the entire conversations store (`conversations.svelte.ts:43-275`, including the `trees` map + migration shim at `:228-233`).
+- The full frontend-store generalization: `Panel` type (`types.ts:75`), `panelSels` + `setRun`/`setCheckpoint` (`+page.svelte:183-195,248-262`), add/remove-panel UI (`:264-289,1452-1572,1573-1578,1668-1728`), `panelDraft`/`abortByPanel` (`:396-400`), session persistence (`:177-181,344-388`), and the entire workspaces store (`workspaces.svelte.ts:43-275`, including the `trees` map + migration shim at `:228-233`).
 - The backend keeps `PlaygroundState`'s `primary`/`compare` scalars, `StatePatch`, `chat.py`'s `is_compare_panel`, `state.svelte.ts`'s `{primary, compare}` bucket, and `anyRunning` over two fixed slots **untouched** — panels 3..N simply never write to those.
 
 **Explicitly NOT touched:** `chat.py` broadcasts (still emit `panel: 'primary'|'compare'` for the 2 bus-backed panels), `state.svelte.ts:36-39,65-67,70-72` (`live.panels` stays a 2-key Record + `anyRunning` over two slots), the SSE snapshot's panels shape, and the bus `panel` field's value set.
 
-**Caveat (the silent-degradation trap):** because `fireChat` folds from its own stream (`+page.svelte:453-548`), an extra panel generates+folds **correctly but invisibly** — no dots, no streaming, no n>1 cards during generation; the reply only pops in when the fold completes. That degraded-but-functional state is easy to mistake for a bug or to ship as "good enough." Also note `state.svelte.ts:70-72`'s `anyRunning` gates `conversations.svelte.ts:239`'s external-fold — under Option A that gate only sees panels 0/1, which is *fine* as long as extra panels never route through the bus, but it's a sharp edge if that invariant ever slips.
+**Caveat (the silent-degradation trap):** because `fireChat` folds from its own stream (`+page.svelte:453-548`), an extra panel generates+folds **correctly but invisibly** — no dots, no streaming, no n>1 cards during generation; the reply only pops in when the fold completes. That degraded-but-functional state is easy to mistake for a bug or to ship as "good enough." Also note `state.svelte.ts:70-72`'s `anyRunning` gates `workspaces.svelte.ts:239`'s external-fold — under Option A that gate only sees panels 0/1, which is *fine* as long as extra panels never route through the bus, but it's a sharp edge if that invariant ever slips.
 
 #### Option B — full generalization (every panel gets streaming + cards)
 
@@ -314,11 +319,11 @@ Make the bus `panel` field and the `live.panels` bucket **panel-id-agnostic** so
 
 **The asymmetry B must resolve:** today only the `primary` panel's `/api/chat` write commits the shared params (`chat.py:251-253`); the compare write deliberately omits them. The 2-panel code gets away with "primary owns params, compare is content-only" because there's a privileged panel. With N symmetric panels that privilege must be reassigned explicitly — get it wrong and params silently stop updating, or two panels race to author them.
 
-#### Migration concern for existing saved conversations (applies to both options)
+#### Migration concern for existing saved workspaces (applies to both options)
 
 Both A and B require the `conversations.json` schema change (`{tree, compare_tree}` → `{trees: {panelId}}`), so both inherit the same migration burden. Existing saved conversations on disk carry `{tree, compare_tree}`, and the `_read` corrupt-file guard (`conversations.py:37-59`) protects against *parse* errors but **not** against a schema the new code doesn't recognize — so a naive cutover would silently fail to load (or drop) user-authored trees.
 
-The safe path is **read-time back-compat in `#loadTrees`/`asTree`** (`conversations.svelte.ts:228-233`): when `conv.trees` is absent, synthesize `{primary: conv.tree, compare: conv.compare_tree}` (compare only if present). Pair it with a **write-time upgrade** (`save_conversation_tree`, `conversations.py:121-134`, writes the new `trees` key and drops the legacy `tree`/`compare_tree` keys) so each file self-heals on first edit. Until a conversation is re-saved, the old keys persist, so **both readers must tolerate the old shape indefinitely** — a fire-once migration that drops `compare_tree` before the new shape is confirmed written risks data loss, which is unacceptable given the explicit no-clobber design.
+The safe path is **read-time back-compat in `#loadTrees`/`asTree`** (`workspaces.svelte.ts:228-233`): when `conv.trees` is absent, synthesize `{primary: conv.tree, compare: conv.compare_tree}` (compare only if present). Pair it with a **write-time upgrade** (`save_conversation_tree`, `workspaces.py:121-134`, writes the new `trees` key and drops the legacy `tree`/`compare_tree` keys) so each file self-heals on first edit. Until a workspace is re-saved, the old keys persist, so **both readers must tolerate the old shape indefinitely** — a fire-once migration that drops `compare_tree` before the new shape is confirmed written risks data loss, which is unacceptable given the explicit no-clobber design.
 
 A second migration subtlety, independent of disk format: **panel identity must be stable string ids, not positional indices.** The tree deliberately keys selection by node id (not array index) to survive reorders; panels need the same treatment. If panel ids are array-index-based they collide with that invariant — closing or reordering a *middle* panel will silently rebind a tree (and its bound `chatContainers`/`panelDraft`/bucket) to the wrong column. The `{#each panelSels (p.panel)}` keying (`+page.svelte:1452,1669`) must therefore key on a stable per-panel id, and the migration must assign `primary`/`compare` as the reserved ids for the two legacy trees.
 
@@ -331,7 +336,7 @@ A second migration subtlety, independent of disk format: **panel identity must b
   **not** `abortByPanel`. `abortByPanel`'s clear is tied to `fireChat`'s promise,
   which can linger a beat past `chat_done` → wrongly-disabled controls (this was a
   real bug fixed this session). `abortByPanel` is for `stopGeneration` only.
-  Conversation-switch safety uses `convo.busy` (token set), which is fine.
+  Workspace-switch safety uses `convo.busy` (token set), which is fine.
 - **`fireChat` folds from its OWN `/api/chat` stream** (`drainSamples`), not the
   bus. So extra panels can generate+fold WITHOUT a bus bucket — but lose the
   streaming overlay + n>1 cards. **This is the crux of the A-vs-B decision.**
@@ -341,7 +346,7 @@ A second migration subtlety, independent of disk format: **panel identity must b
 - **`conversations.json` is per-scan-root** (state dir = sha1 of the scan-root
   set): `~/.local/state/tinkerscope/<hash>/conversations.json`. weird-personas
   has its own hash dir. Any persistence-schema change for N panels must handle
-  **existing saved conversations** (tree + compare_tree) gracefully.
+  **existing saved workspaces** (tree + compare_tree) gracefully.
 - **Node v22.22.3** for the frontend tooling (`export PATH="$HOME/.nvm/versions/node/v22.22.3/bin:$PATH"`).
   **Supply-chain 7-day age gate** is active — don't add npm/uv deps without
   Clément's OK. The tree tests use Node's built-in TS type-stripping (no vitest).
@@ -372,7 +377,7 @@ be re-pinged for the facet work or panel-model mapping.
 ## 9. GROUNDED BUILD PLAN (2026-06-22, architecture B, design workflow re-grounded §5 against current code)
 
 **Decisions made (delegated to the building session):** (B) full generalization; persistence
-per-conversation; **sampling params are GLOBAL** (set via `/api/state` only, removed from the
+per-workspace; **sampling params are GLOBAL** (set via `/api/state` only, removed from the
 `/api/chat` end patch — no per-panel params, no author race); **explicit immutable panel ids**
 on each `panels[]` entry — `primary`/`compare` reserved for legacy migration, new panels `p-2`,
 `p-3`… minted at addPanel; NEVER array-index (closing a middle panel must not rebind a tree).
@@ -384,10 +389,10 @@ backend with pytest along the way, tree.ts with node tests):**
    `api/state.py` (`PlaygroundState` dataclass → panels list + `patch_panel(panel_id, **f)`) +
    `routes/state.py` (`StatePatch` panel-addressed). Do FIRST so nothing compiles against the
    dead 2-scalar shape.
-2. **Store trees map + on-disk migration** — `conversations.svelte.ts` (`tree`/`compareTree` →
+2. **Store trees map + on-disk migration** — `workspaces.svelte.ts` (`tree`/`compareTree` →
    `trees: Record<id,ConvTree>`; `treeFor`/`setTree` chokepoints; `#mirror`/`#afterLoad`/
    `#onExternalDone`; `save`/`#doSave`/`#loadTrees`; `duplicateToCompare` → `duplicateTo`) +
-   `routes/conversations.py` ({tree,compare_tree} → {trees} + back-compat) + `api.ts` sigs.
+   `routes/workspaces.py` ({tree,compare_tree} → {trees} + back-compat) + `api.ts` sigs.
 3. **State bus + chat plumbing** — `state.svelte.ts` (`live.panels` open-keyed, lazy-vivify,
    guarded reads, `anyRunning` over ALL N) + `chat.py` (drop `is_compare_panel`, key off
    `panel_id`, params go global, per-panel `messages` echo for ALL N so external folds reach
@@ -400,15 +405,15 @@ backend with pytest along the way, tree.ts with node tests):**
    (keep `compare a b` as 2-run alias).
 
 **MIGRATION (zero data loss — a user-authored compare_tree MUST survive):**
-- READ shim (`conversations.svelte.ts:#loadTrees`, the only load point): if `conv.trees` →
+- READ shim (`workspaces.svelte.ts:#loadTrees`, the only load point): if `conv.trees` →
   use it (ensure `primary` present); else synthesize `{primary: asTree(conv.tree)}` and add
   `compare: asTree(conv.compare_tree)` ONLY if `conv.compare_tree` exists. `asTree` already
   returns `emptyTree()` on malformed input. Reserved ids `primary`/`compare` bind legacy trees
   to the right column — reserved forever.
-- WRITE upgrade (`routes/conversations.py:save_conversation_tree`, the only persist point):
+- WRITE upgrade (`routes/workspaces.py:save_conversation_tree`, the only persist point):
   write `trees`, `c.pop("tree"/"compare_tree")` on the same object (self-heals on first edit).
   `create_conversation` still synthesizes `trees` from legacy `tree`/`compare_tree` if `trees`
-  absent (transitional CLI). `Conversation` type KEEPS optional `tree?`/`compare_tree?` so the
+  absent (transitional CLI). `Workspace` type KEEPS optional `tree?`/`compare_tree?` so the
   shim can read old responses.
 - EMPTY-TREE collapse in `save()`: drop panels whose tree has no `rootChildren`, but ALWAYS keep
   `primary`. No fire-once batch migration; reader+writer coexist indefinitely.

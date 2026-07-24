@@ -3,7 +3,7 @@
 #
 # The standing rule (see CLAUDE.md "Build / verify"): NEVER test against the
 # user's live instance or its state — test against a copy. This script makes
-# that a one-liner: it copies the real state home (conversations, prefs,
+# that a one-liner: it copies the real state home (workspaces, prefs,
 # highlights, pins — so the instance has realistic fixtures) into a throwaway
 # XDG_STATE_HOME, strips the instance registry (so `tinkpg` discovery inside
 # the isolated env can't resolve to the live server), and launches from this
@@ -14,7 +14,7 @@
 #   scripts/dev-isolated.sh [--port N] [--state-src DIR] [--fresh] [SCAN_DIR ...]
 #
 #   SCAN_DIR ...   scan roots (default: cwd). Use the same roots as the live
-#                  instance to inherit its conversations (state is keyed by a
+#                  instance to inherit its workspaces (state is keyed by a
 #                  hash of the scan roots — the copy carries every key).
 #   --port N       fixed port (default: the entrypoint auto-picks a free one).
 #   --state-src D  state home to snapshot (default: $XDG_STATE_HOME or

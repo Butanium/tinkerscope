@@ -4,7 +4,7 @@ then hit the Continue button ON ONE SPECIFIC sample card (not the turn-level
 continue). The forced 'length' finish also exercises the truncated badge: every
 n>1 card and the committed collapsed turn must carry the amber pill.
 
-Asserts via the conversation tree (the real contract) that the continuations
+Asserts via the workspace tree (the real contract) that the continuations
 landed as siblings carrying the CLICKED sample's text as their prefill — i.e.
 the continue targeted THAT sample, not the active branch — then selects a
 continuation in the UI and asserts the committed message renders its
@@ -53,8 +53,8 @@ def backend_state() -> dict:
 
 
 def assistant_children(conv_id: str) -> list[dict]:
-    """The assistant siblings under the (single) user node of a conversation."""
-    with urllib.request.urlopen(f"{BASE}/api/conversations/{conv_id}", timeout=5) as r:
+    """The assistant siblings under the (single) user node of a workspace."""
+    with urllib.request.urlopen(f"{BASE}/api/workspaces/{conv_id}", timeout=5) as r:
         conv = json.load(r)  # v2: list is summaries-only, fetch the body
     nodes = conv["trees"]["primary"]["nodes"]
     return [n for n in nodes.values() if n["role"] == "assistant"]
@@ -68,10 +68,10 @@ def main() -> None:
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: errors.append(str(e)))
 
-        # Seed a fresh single-panel conversation on the model and open it — replaces
+        # Seed a fresh single-panel workspace on the model and open it — replaces
         # the old native-<select> model picker (now the ModelDropdown combobox).
         conv_id, _ = seed_conversation(BASE, [MODEL], "continue_sample")
-        page.goto(f"{BASE}/?c={conv_id}", wait_until="load", timeout=20000)
+        page.goto(f"{BASE}/?w={conv_id}", wait_until="load", timeout=20000)
         page.wait_for_selector(".input-textarea:not([disabled])", timeout=15000)
 
         # 'All' sample view so both cards render stacked.

@@ -5,7 +5,7 @@
   import { api } from '$lib/api';
   import { live, emptyPanel } from '$lib/state.svelte';
   import { touchesWorkspace } from '$lib/bus-scope';
-  import { conversations as convo } from '$lib/conversations.svelte';
+  import { workspaces as ws } from '$lib/workspaces.svelte';
   import Message from '$lib/ChatMessage.svelte';
   import {
     OR_PREFIX, BASE_PREFIX, CKPT_PREFIX,
@@ -117,7 +117,7 @@
   // makes the pre-snapshot flash look like a param reset.
   const DEFAULTS: PlaygroundState = {
     panels: [{ id: 'primary', run_id: null, checkpoint: null, messages: [] }],
-    conversation_id: null,
+    workspace_id: null,
     system_prompt: null, temperature: 1.0, max_tokens: 1024, n_samples: 1,
     thinking: false, top_p: null, chat_id: 0, running: false, last_event: null, last_event_ts: 0
   };
@@ -132,16 +132,16 @@
   let isComparing = $derived(panelSels.length > 1);
 
   // Folded panels (`reducedPanels`) + composer send-targets (`sendTargets`) are owned
-  // by the conversation store and PERSISTED per-conversation (they survive a restart
-  // and switch with the conversation). This effect just feeds the live panel list to
+  // by the workspace store and PERSISTED per-workspace (they survive a restart
+  // and switch with the workspace). This effect just feeds the live panel list to
   // the store's defaulting reconcile: a newly-added panel defaults ON, while restored
   // deselections/folds stick (syncPanels is purely additive — see its docstring).
   $effect(() => {
-    convo.syncPanels(panelSels.map((p) => p.panel));
+    ws.syncPanels(panelSels.map((p) => p.panel));
   });
   /** Panels a send will actually fire to (selected targets; fall back to all). */
   let targetSels = $derived(
-    convo.sendTargets.size ? panelSels.filter((p) => convo.sendTargets.has(p.panel)) : panelSels
+    ws.sendTargets.size ? panelSels.filter((p) => ws.sendTargets.has(p.panel)) : panelSels
   );
 
   let anySupportsThinking = $derived(
@@ -185,12 +185,12 @@
   let patchSeq = 0; // stale-response guard: only the LATEST flush may assign live.state
 
   /** Flush any pending debounced patch NOW and assign the response into
-   *  live.state (same optimistic pattern as convo's #loadTrees — the SSE echo
+   *  live.state (same optimistic pattern as ws's #loadTrees — the SSE echo
    *  alone lags, and anything that reads live.state right after a flush, like
-   *  a conversation switch's save, would read stale state). Clearing the timer
+   *  a workspace switch's save, would read stale state). Clearing the timer
    *  + emptying pendingPatch here means an already-scheduled timer that fires
    *  later finds nothing and no-ops — no double POST. Resolves after the
-   *  assignment, so `await convo.flushStatePatch?.()` is a real barrier. */
+   *  assignment, so `await ws.flushStatePatch?.()` is a real barrier. */
   function flushPatchState(): Promise<void> {
     if (patchTimer) {
       clearTimeout(patchTimer);
@@ -203,7 +203,7 @@
     // claimFields() rides along when another tab currently owns the bus, so the
     // write lands as a full claim instead of grafting onto their layout.
     const body = touchesWorkspace(pendingPatch)
-      ? { ...convo.claimFields(), conversation_id: convo.activeId, ...pendingPatch }
+      ? { ...ws.claimFields(), workspace_id: ws.activeId, ...pendingPatch }
       : pendingPatch;
     pendingPatch = {};
     const seq = ++patchSeq;
@@ -227,11 +227,11 @@
     else patchTimer = setTimeout(() => void flushPatchState(), 200);
   }
 
-  // Push the OPEN conversation's id onto the state bus whenever it changes, so the
+  // Push the OPEN workspace's id onto the state bus whenever it changes, so the
   // terminal (`tinkpg state`) can name exactly what's on screen instead of guessing
-  // by active-path match. No loop: nothing maps server state back to convo.activeId.
+  // by active-path match. No loop: nothing maps server state back to ws.activeId.
   $effect(() => {
-    patchState({ conversation_id: convo.activeId ?? null }, true);
+    patchState({ workspace_id: ws.activeId ?? null }, true);
   });
 
   // ── Per-panel selection edits ─────────────────────────────────────
@@ -249,11 +249,11 @@
   }
   function setRun(panel: Panel, runId: string) {
     patchState({ panel, run_id: runId, checkpoint: defaultCheckpoint(runId) }, true);
-    convo.save(); // the panel layout (models) is persisted with the conversation
+    ws.save(); // the panel layout (models) is persisted with the workspace
   }
   function setCheckpoint(panel: Panel, ck: string) {
     patchState({ panel, checkpoint: ck }, true);
-    convo.save();
+    ws.save();
   }
 
   /** Drop a panel's live sample bucket (so a stale run can't show after remove). */
@@ -287,30 +287,30 @@
       modelCatalog.runs[0];
     const ck = other?.checkpoints.length ? other.checkpoints[other.checkpoints.length - 1].name : null;
     // Default: seed the new panel's tree from the FIRST panel so it starts from the
-    // same thread (compare a second model on the same conversation; 'primary' may
+    // same thread (compare a second model on the same workspace; 'primary' may
     // have been removed — first slot is the main thread). Shift: start it blank.
-    if (blank) convo.freshTree(id);
-    else convo.duplicateTo(panelSels[0]?.panel ?? 'primary', id);
-    const seedMsgs = activeMessages(convo.treeFor(id)) as ChatMessage[];
+    if (blank) ws.freshTree(id);
+    else ws.duplicateTo(panelSels[0]?.panel ?? 'primary', id);
+    const seedMsgs = activeMessages(ws.treeFor(id)) as ChatMessage[];
     // The seeded thread's system prompt rides into the panel registration — the
     // `panels` full-replace resets mirrors, and a duplicated probe thread must
     // keep its prompt for CLI sends until the next tree commit re-mirrors.
-    const seedSys = activePath(convo.treeFor(id))[0]?.system_prompt ?? null;
+    const seedSys = activePath(ws.treeFor(id))[0]?.system_prompt ?? null;
     const nextPanels = [
       ...s.panels.map((p) => ({ ...p })),
       { id, run_id: other?.id ?? null, checkpoint: ck, messages: seedMsgs, thread_system_prompt: seedSys }
     ];
     patchState({ panels: nextPanels }, true);
-    // the new panel auto-joins sendTargets (active by default) via convo.syncPanels (the effect above)
+    // the new panel auto-joins sendTargets (active by default) via ws.syncPanels (the effect above)
   }
   function removePanel(panel: Panel) {
     if (s.panels.length <= 1) return; // keep at least one panel (any id — 'primary' is not special)
     chat.stopGeneration(panel);
     const nextPanels = s.panels.filter((p) => p.id !== panel).map((p) => ({ ...p }));
     patchState({ panels: nextPanels }, true);
-    convo.dropTree(panel);
+    ws.dropTree(panel);
     dropPanelBucket(panel);
-    convo.dropPanelUi(panel);
+    ws.dropPanelUi(panel);
   }
 
   // ── Panel drag-to-reorder ─────────────────────────────────────────
@@ -325,7 +325,7 @@
   const panelDrag = new DragReorder('x');
   function applyPanelReorder(next: PanelState[]) {
     patchState({ panels: next.map((p) => ({ ...p })) }, true);
-    convo.save(); // persist the layout with the conversation (like setRun)
+    ws.save(); // persist the layout with the workspace (like setRun)
   }
 
   // ── Param edits → shared state ────────────────────────────────────
@@ -341,7 +341,7 @@
     // re-enable a muted draft). empty→non-empty auto-enables, like prefill.
     const autoOn = v.trim().length > 0 && !(s.system_prompt ?? '').trim();
     patchState({ system_prompt: v || null, system_enabled: systemOn || autoOn });
-    convo.save();
+    ws.save();
   }
   function setTopP(v: number) { if (Number.isNaN(v)) return; patchState({ top_p: Math.max(0, Math.min(1, v)) }); }
   function setThinking(next: boolean | 'both') {
@@ -374,8 +374,8 @@
   /** Per-panel busy = that panel's bus `running` flag (set on chat_start, cleared
    *  on chat_done/chat_error — for our own detached chats AND CLI/other-tab ones).
    *  Since every chat is detached now, this bus flag is the ONE per-panel signal
-   *  (there's no local drain/abort state to also consult). Conversation-switch
-   *  safety still uses convo.busy (the in-flight ownership tokens). */
+   *  (there's no local drain/abort state to also consult). Workspace-switch
+   *  safety still uses ws.busy (the in-flight ownership tokens). */
   function panelBusy(panel: Panel): boolean {
     return live.panels[panel]?.running === true;
   }
@@ -384,7 +384,7 @@
   // The selection/params live in PlaygroundState, which is per-process and lost
   // on restart. Mirror the relevant fields to the on-disk prefs store (debounced)
   // so reopening tinkerscope restores your last-used models + sampling params.
-  // system_prompt is deliberately NOT persisted here — it travels per-conversation.
+  // system_prompt is deliberately NOT persisted here — it travels per-workspace.
   const SESSION_PREF_KEY = 'last_session';
   let prefsLoaded = $state(false); // set true after restore; gates saving over our own defaults
   let sessionSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -486,8 +486,8 @@
   let prefillOn = $state(false);
   let showPrefill = $state(false);
   // System prompt lives next to the prefill chip (moved out of the sidebar), with
-  // per-conversation persistence (setSystemPrompt → patchState + save). Its power
-  // flag is SHARED state (s.system_enabled — persisted with the conversation, so
+  // per-workspace persistence (setSystemPrompt → patchState + save). Its power
+  // flag is SHARED state (s.system_enabled — persisted with the workspace, so
   // the CLI sees mute); null = legacy/flag-less → derive from text presence.
   // `showSystem` is transient disclosure.
   let showSystem = $state(false);
@@ -496,7 +496,7 @@
   function toggleSystemOn() {
     const next = !systemOn;
     patchState({ system_enabled: next });
-    convo.save();
+    ws.save();
     if (next && !(s.system_prompt ?? '').trim()) showSystem = true;
   }
   function togglePrefillOn() {
@@ -557,9 +557,9 @@
 
   async function sendMessage() {
     const text = userInput.trim();
-    // Guard on convo.activeId: until the conversation store has loaded, a send
+    // Guard on ws.activeId: until the workspace store has loaded, a send
     // would build an in-memory tree that load() then clobbers (race → lost reply).
-    if (!text || allBusy || !canChat || !convo.activeId) return;
+    if (!text || allBusy || !canChat || !ws.activeId) return;
 
     pushHistory(text);
     userInput = '';
@@ -570,13 +570,13 @@
     for (const p of targetSels) {
       if (panelBusy(p.panel)) continue;
       const { tree, nodeId } = appendUserTurn(
-        convo.treeFor(p.panel),
+        ws.treeFor(p.panel),
         text,
         branchFromRoot,
         branchFromRoot && threadSystemActive ? threadSystemInput.trim() : undefined
       );
-      convo.setTree(p.panel, tree);
-      const msgs = activeMessages(convo.treeFor(p.panel)) as ChatMessage[];
+      ws.setTree(p.panel, tree);
+      const msgs = activeMessages(ws.treeFor(p.panel)) as ChatMessage[];
       chat.clearPanelBucket(p.panel);
       const { fireMsgs, prefill } = withPrefill(msgs);
       fireOne(p, nodeId, fireMsgs, prefill);
@@ -590,14 +590,14 @@
     const pSel = panelSels.find((x) => x.panel === panel);
     if (!pSel) return;
     const text = (panelDraft[panel] ?? '').trim();
-    if (!text || panelBusy(panel) || !panelCanChat(pSel) || !convo.activeId) return;
+    if (!text || panelBusy(panel) || !panelCanChat(pSel) || !ws.activeId) return;
     pushHistory(text);
     panelDraft[panel] = '';
     // The per-panel bubble ALWAYS continues this panel's active thread; ⑂
     // branch-from-start is a main-composer-only affordance (locked decision).
-    const { tree, nodeId } = appendUserTurn(convo.treeFor(panel), text);
-    convo.setTree(panel, tree);
-    const msgs = activeMessages(convo.treeFor(panel)) as ChatMessage[];
+    const { tree, nodeId } = appendUserTurn(ws.treeFor(panel), text);
+    ws.setTree(panel, tree);
+    const msgs = activeMessages(ws.treeFor(panel)) as ChatMessage[];
     chat.clearPanelBucket(panel);
     const { fireMsgs, prefill } = withPrefill(msgs);
     fireOne(pSel, nodeId, fireMsgs, prefill);
@@ -659,9 +659,9 @@
     );
   }
 
-  async function newConversation(e?: MouseEvent) {
-    if (anyRunning || convo.busy) return;
-    // Inherit the current conversation's panel MODELS (not its messages) so a new
+  async function newWorkspace(e?: MouseEvent) {
+    if (anyRunning || ws.busy) return;
+    // Inherit the current workspace's panel MODELS (not its messages) so a new
     // thread opens against the same comparison set. Shift+click → a single blank
     // panel with no model selected (a clean slate).
     const layout = e?.shiftKey
@@ -670,81 +670,92 @@
     // Mint the id and push ?c= BEFORE create — and AWAIT the navigation so
     // `page.url` is current. create() sets activeId then awaits an optimistic
     // setState, yielding to the reactive scheduler; if `page.url` still pointed at
-    // the OLD conversation (goto not yet applied) the ?c= sync effect would switch
+    // the OLD workspace (goto not yet applied) the ?c= sync effect would switch
     // right back. Awaiting goto first keeps URL == activeId across that await — no
     // revert. The id isn't in `list` until create commits, so the effect ignores
     // the URL in the meantime. new id → history entry; back returns to prior conv.
     const id = crypto.randomUUID();
-    await setConvUrl(id, true);
-    await convo.create('Untitled', layout, id);
+    await setWsUrl(id, true);
+    await ws.create('Untitled', layout, id);
     try { await api.close(); } catch {}
   }
 
-  // ── Conversation ↔ URL sync (?c=<id>) ─────────────────────────────
-  // The active conversation rides in the `?c=` query param so a URL can be
+  // ── Workspace ↔ URL sync (?w=<id>) ─────────────────────────────
+  // The active workspace rides in the `?w=` query param so a URL can be
   // shared / bookmarked / back-forward navigated. Query param (not a path) is
   // forced by the static-serving setup: FastAPI's StaticFiles only serves
-  // index.html at `/`, so a hard-load of `/c/<id>` would 404. One conversation
+  // index.html at `/`, so a hard-load of `/w/<id>` would 404. One workspace
   // id captures the whole multi-panel workspace (panels live in its `trees` map).
   //
+  // `?c=` (the pre-v1.0.0 name) is still READ — old bookmarks, open tabs and
+  // pasted links keep working — but never written; `wsIdFromUrl` is the one
+  // reader, and the first navigation rewrites the URL to `?w=`.
+  //
   // Single direction of control: the URL is the trigger for switching between
-  // EXISTING conversations (dropdown select / back-forward / manual edit all
-  // just change `?c=`, and the effect below performs the switchTo). create /
+  // EXISTING workspaces (dropdown select / back-forward / manual edit all
+  // just change `?w=`, and the effect below performs the switchTo). create /
   // delete / initial-load set activeId imperatively, then normalize the URL to
   // match — the effect no-ops because the id already equals activeId.
-  let convUrlNotice = $state<string | null>(null);
-  let convNoticeTimer: ReturnType<typeof setTimeout> | null = null;
-  function flashConvNotice(msg: string) {
-    convUrlNotice = msg;
-    if (convNoticeTimer) clearTimeout(convNoticeTimer);
-    convNoticeTimer = setTimeout(() => (convUrlNotice = null), 7000);
+  /** The workspace id in the URL: `?w=` (current), else `?c=` (legacy read-only). */
+  function wsIdFromUrl(): string | null {
+    return page.url.searchParams.get('w') ?? page.url.searchParams.get('c');
+  }
+  let wsUrlNotice = $state<string | null>(null);
+  let wsNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+  function flashWsNotice(msg: string) {
+    wsUrlNotice = msg;
+    if (wsNoticeTimer) clearTimeout(wsNoticeTimer);
+    wsNoticeTimer = setTimeout(() => (wsUrlNotice = null), 7000);
   }
   // Returns the goto promise so callers can AWAIT the navigation — `page.url`
-  // (which the ?c= sync effect reads) only updates once goto resolves, so a caller
+  // (which the ?w= sync effect reads) only updates once goto resolves, so a caller
   // that mutates activeId right after must await this or the effect sees a stale URL.
-  function setConvUrl(id: string | null, push = false): Promise<void> {
+  function setWsUrl(id: string | null, push = false): Promise<void> {
     if (!id) return Promise.resolve();
     const url = new URL(page.url);
-    if (url.searchParams.get('c') === id) return Promise.resolve();
-    url.searchParams.set('c', id);
+    // A legacy `?c=` for the SAME workspace still needs the rewrite, so the
+    // early-out checks `?w=` only.
+    if (url.searchParams.get('w') === id) return Promise.resolve();
+    url.searchParams.set('w', id);
+    url.searchParams.delete('c');
     return goto(url, { replaceState: !push, keepFocus: true, noScroll: true });
   }
   $effect(() => {
-    const id = page.url.searchParams.get('c');
-    if (!id || id === convo.activeId) return;
+    const id = wsIdFromUrl();
+    if (!id || id === ws.activeId) return;
     // Don't swap mid-stream (mirrors the dropdown guard); the effect re-runs
     // when anyRunning/busy clear and self-heals to whatever the URL now says.
-    if (anyRunning || convo.busy) return;
+    if (anyRunning || ws.busy) return;
     // Unknown id (e.g. a link from a different scan-root): ignore here — the
     // initial-load path already normalized + notified.
-    if (!convo.list.some((c) => c.id === id)) return;
-    void convo.switchTo(id).then(() => panelScroll.snapAll()); // open at the latest turn
+    if (!ws.list.some((c) => c.id === id)) return;
+    void ws.switchTo(id).then(() => panelScroll.snapAll()); // open at the latest turn
   });
 
-  // ── Named conversations (dropdown) ────────────────────────────────
-  let renamingConv = $state(false);
+  // ── Named workspaces (dropdown) ────────────────────────────────
+  let renamingWs = $state(false);
   let renameDraft = $state('');
-  function onSelectConversation(id: string) {
-    // convo.busy (own fold in flight) outlives anyRunning — block the swap so an
-    // in-flight reply can't land on the newly-selected conversation's tree.
-    if (anyRunning || convo.busy || id === convo.activeId) return;
-    // Push (not replace) so back/forward navigates between conversations; the
+  function onSelectWorkspace(id: string) {
+    // ws.busy (own fold in flight) outlives anyRunning — block the swap so an
+    // in-flight reply can't land on the newly-selected workspace's tree.
+    if (anyRunning || ws.busy || id === ws.activeId) return;
+    // Push (not replace) so back/forward navigates between workspaces; the
     // $effect above observes the URL change and runs the actual switchTo.
-    setConvUrl(id, true);
+    setWsUrl(id, true);
   }
-  function startRenameConversation() {
-    renameDraft = convo.list.find((c) => c.id === convo.activeId)?.name ?? '';
-    renamingConv = true;
+  function startRenameWorkspace() {
+    renameDraft = ws.list.find((c) => c.id === ws.activeId)?.name ?? '';
+    renamingWs = true;
   }
-  async function commitRenameConversation() {
-    if (convo.activeId && renameDraft.trim()) await convo.rename(convo.activeId, renameDraft.trim());
-    renamingConv = false;
+  async function commitRenameWorkspace() {
+    if (ws.activeId && renameDraft.trim()) await ws.rename(ws.activeId, renameDraft.trim());
+    renamingWs = false;
   }
-  async function onDeleteConversation() {
-    if (anyRunning || convo.busy || !convo.activeId) return;
+  async function onDeleteWorkspace() {
+    if (anyRunning || ws.busy || !ws.activeId) return;
     if (!confirm('Delete this workspace and all its threads?')) return;
-    await convo.remove(convo.activeId);
-    setConvUrl(convo.activeId, false); // remove resets/advances active → keep URL in sync
+    await ws.remove(ws.activeId);
+    setWsUrl(ws.activeId, false); // remove resets/advances active → keep URL in sync
   }
 
   // ── Chat-thread branching ─────────────────────────────────────────
@@ -761,8 +772,8 @@
     fireOne
   });
 
-  // ── Conversation rendering ────────────────────────────────────────
-  // Each column renders from ITS OWN branch TREE's active path (convo.treeFor(p)) —
+  // ── Workspace rendering ────────────────────────────────────────
+  // Each column renders from ITS OWN branch TREE's active path (ws.treeFor(p)) —
   // the single read source (the panel's messages echo is write-only for the CLI).
   // The per-(chat_id,panel) BUCKET (live.panels[panel]) holds
   // the LATEST turn's N variants + streaming progress; we overlay it on the
@@ -772,7 +783,7 @@
   // Render model (tree active path + live bucket overlay → ViewMessage[]) lives in
   // $lib/panel-view; this binds it to the panel's reactive tree/bucket/prefill.
   function panelView(p: PanelSel): ViewMessage[] {
-    return buildPanelView(convo.treeFor(p.panel), live.panels[p.panel] ?? emptyPanel(), chat.firePrefill[p.panel]);
+    return buildPanelView(ws.treeFor(p.panel), live.panels[p.panel] ?? emptyPanel(), chat.firePrefill[p.panel]);
   }
 
   // Follow streamed tokens: pin a panel to its bottom ONLY while its bucket is
@@ -780,7 +791,7 @@
   // running sample's text makes every token re-trigger this. Deliberately the
   // only reactive scroll in the app — tree mutations PRESERVE position
   // (panelScroll.preserve in the branching handlers) and deliberate jumps SNAP
-  // (send / conversation open / branch received). The old effect here depended
+  // (send / workspace open / branch received). The old effect here depended
   // on the whole shared state (`void s.panels`), so every SSE patch — the cycle
   // mirror echo, the thinking toggle, param edits, the load cascade — re-pinned
   // every panel to its bottom ~50 ms after the local DOM update: that async
@@ -806,9 +817,9 @@
   // shift/ctrl are the toolbar's modifier axes).
   let kbFocus = $state<{ panel: Panel; index: number } | null>(null);
 
-  // Row indices are view positions — meaningless across conversations.
+  // Row indices are view positions — meaningless across workspaces.
   $effect(() => {
-    void convo.activeId;
+    void ws.activeId;
     kbFocus = null;
   });
 
@@ -831,7 +842,7 @@
     }
     if (!kbFocus) return;
     const pSel = panelSels.find((x) => x.panel === kbFocus!.panel);
-    if (!pSel || convo.reducedPanels.has(pSel.panel)) {
+    if (!pSel || ws.reducedPanels.has(pSel.panel)) {
       kbFocus = null; // panel gone/reduced under the focus — drop it
       return;
     }
@@ -1057,7 +1068,7 @@
   }
 
   function lastUserQuestion(): string {
-    const msgs = activeMessages(convo.treeFor(panelSels[0]?.panel ?? 'primary'));
+    const msgs = activeMessages(ws.treeFor(panelSels[0]?.panel ?? 'primary'));
     for (let i = msgs.length - 1; i >= 0; i--) if (msgs[i].role === 'user') return msgs[i].content;
     return '';
   }
@@ -1174,7 +1185,7 @@
   function buildChartSources(): ChartPanelData[] {
     const out: ChartPanelData[] = [];
     for (const p of panelSels) {
-      const tree = convo.treeFor(p.panel);
+      const tree = ws.treeFor(p.panel);
       const turns: ChartTurn[] = [];
       let lastQ = '';
       for (const node of activePath(tree)) {
@@ -1205,7 +1216,7 @@
         if (streamed.length > 0) turns.push({ question: lastQ, samples: streamed, streaming: true });
       }
       if (turns.length > 0)
-        out.push({ model: panelLabel(p), turns, folded: convo.reducedPanels.has(p.panel) });
+        out.push({ model: panelLabel(p), turns, folded: ws.reducedPanels.has(p.panel) });
     }
     return out;
   }
@@ -1225,12 +1236,12 @@
   });
 
   // Token-probs prefetch: while the view is on, warm the blob cache for every
-  // token-bearing node in the open conversation, so cycling between completions
+  // token-bearing node in the open workspace, so cycling between completions
   // never waits on a cold blob (the source of the render flicker). ensure()
   // dedupes, so re-running on tree mutations only fetches genuinely new nodes.
   $effect(() => {
     if (!logprobView.enabled) return;
-    const ids = tokenBlobNodeIds(convo.trees);
+    const ids = tokenBlobNodeIds(ws.trees);
     if (ids.length) void nodeBlobs.ensure(ids);
   });
 
@@ -1261,24 +1272,24 @@
     // The bus describes ONE workspace at a time (bus-scope.ts), so make it the
     // one you're looking at: focusing a tab re-asserts its workspace, and
     // `tinkpg` follows. No-op when we already own it or a chat is streaming.
-    const onFocus = () => void convo.claimBus();
+    const onFocus = () => void ws.claimBus();
     window.addEventListener('focus', onFocus);
 
     // Open the ONE live-state stream on load + wire the terminal-fold hooks:
     // our own detached chats fold from their bus bucket (chat.try*), everything
-    // else reconciles from the transcript echo (convo's foreign path).
+    // else reconciles from the transcript echo (ws's foreign path).
     live.start();
-    convo.init({
+    ws.init({
       done: (panel, data) => chat.tryFoldOwnDone(panel, data),
       error: (panel, data) => chat.tryOwnError(panel, data)
     });
     // On EventSource reconnect (a fresh snapshot): recover any terminal missed during
     // the gap (reload mid-generation) + un-latch busy. See reconcileOnReconnect.
-    live.onSnapshot = () => convo.reconcileOnReconnect();
-    // Pre-transition barrier: the convo store flushes our pending debounced
-    // state patch (response assigned into live.state) before any conversation
+    live.onSnapshot = () => ws.reconcileOnReconnect();
+    // Pre-transition barrier: the ws store flushes our pending debounced
+    // state patch (response assigned into live.state) before any workspace
     // switch — see flushStatePatch/#preSwitch for why (the system-prompt leak).
-    convo.flushStatePatch = flushPatchState;
+    ws.flushStatePatch = flushPatchState;
 
     (async () => {
       try { health = await api.health(); } catch (e: any) { backendError = `Backend not reachable: ${e?.message ?? e}`; }
@@ -1286,21 +1297,21 @@
       await modelCatalog.loadOpenrouterModels(setBackendError);
       try { if (!live.state) live.adopt(await api.getState()); } catch {}
       // Restore last-used model selection + sampling params from disk (only if
-      // this process's state is fresh) BEFORE conversations load, so the right
+      // this process's state is fresh) BEFORE workspaces load, so the right
       // models are selected as the UI comes up.
       await restoreSession();
-      // Load conversations right after live.state is ensured (its on-load
+      // Load workspaces right after live.state is ensured (its on-load
       // reconcile reads live.state.messages) and BEFORE anything slow, so the
-      // input (gated on convo.activeId) un-gates as early as possible. Honor a
+      // input (gated on ws.activeId) un-gates as early as possible. Honor a
       // `?c=<id>` from the URL (shared/bookmarked link); fall back to newest +
       // notify if it's unknown, then normalize the URL to the opened conv.
       try {
-        const urlConvId = page.url.searchParams.get('c');
-        const honored = await convo.load(urlConvId);
-        if (urlConvId && !honored) flashConvNotice('That workspace was not found here — opened the most recent one instead.');
-        setConvUrl(convo.activeId, false);
+        const urlConvId = wsIdFromUrl();
+        const honored = await ws.load(urlConvId);
+        if (urlConvId && !honored) flashWsNotice('That workspace was not found here — opened the most recent one instead.');
+        setWsUrl(ws.activeId, false);
         void panelScroll.snapAll(); // trees just landed — open at the latest turn
-      } catch (e: any) { backendError = `Failed to load conversations: ${e?.message ?? e}`; }
+      } catch (e: any) { backendError = `Failed to load workspaces: ${e?.message ?? e}`; }
       await loadPins();
       await loadHighlightRules();
     })();
@@ -1331,11 +1342,11 @@
   {#if degraded}
     <div class="degraded-banner">{degraded}</div>
   {/if}
-  {#if convo.externalNotice}
-    <div class="degraded-banner external-notice">{convo.externalNotice}</div>
+  {#if ws.externalNotice}
+    <div class="degraded-banner external-notice">{ws.externalNotice}</div>
   {/if}
-  {#if convUrlNotice}
-    <div class="degraded-banner external-notice">{convUrlNotice}</div>
+  {#if wsUrlNotice}
+    <div class="degraded-banner external-notice">{wsUrlNotice}</div>
   {/if}
 
   <div class="main-layout">
@@ -1406,45 +1417,45 @@
         <div class="backend-error">{backendError}</div>
       {/if}
 
-      <!-- Workspace picker (a saved conversation = one multi-panel workspace) -->
+      <!-- Workspace picker (a saved workspace = one multi-panel workspace) -->
       <div class="sidebar-section">
         <label class="sidebar-label">Workspace</label>
-        {#if renamingConv}
+        {#if renamingWs}
           <!-- svelte-ignore a11y_autofocus -->
           <input
             class="sidebar-input"
             bind:value={renameDraft}
             autofocus
             onkeydown={(e) => {
-              if (e.key === 'Enter') { e.preventDefault(); commitRenameConversation(); }
-              else if (e.key === 'Escape') { renamingConv = false; }
+              if (e.key === 'Enter') { e.preventDefault(); commitRenameWorkspace(); }
+              else if (e.key === 'Escape') { renamingWs = false; }
             }}
-            onblur={commitRenameConversation}
+            onblur={commitRenameWorkspace}
           />
         {:else}
-          <div class="conv-row">
+          <div class="ws-row">
             <select
-              class="sidebar-select conv-select"
-              value={convo.activeId ?? ''}
-              disabled={anyRunning || convo.busy}
-              onchange={(e) => onSelectConversation((e.target as HTMLSelectElement).value)}
+              class="sidebar-select ws-select"
+              value={ws.activeId ?? ''}
+              disabled={anyRunning || ws.busy}
+              onchange={(e) => onSelectWorkspace((e.target as HTMLSelectElement).value)}
             >
-              {#each convo.list as c (c.id)}
+              {#each ws.list as c (c.id)}
                 <option value={c.id}>{c.name || 'Untitled'}</option>
               {/each}
             </select>
-            <button class="conv-icon-btn" class:shift-alt={shiftDown} data-tooltip={shiftDown ? 'New BLANK workspace (no models)' : 'New workspace · keeps current models (Shift: blank)'} use:tip disabled={anyRunning || convo.busy} aria-label="New workspace" onclick={newConversation}>
+            <button class="ws-icon-btn" class:shift-alt={shiftDown} data-tooltip={shiftDown ? 'New BLANK workspace (no models)' : 'New workspace · keeps current models (Shift: blank)'} use:tip disabled={anyRunning || ws.busy} aria-label="New workspace" onclick={newWorkspace}>
               {#if shiftDown}
-                <!-- blank-page + plus: a fresh conversation with no model -->
+                <!-- blank-page + plus: a fresh workspace with no model -->
                 <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M4 1.5h5L12.5 5v6.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /><path d="M8.5 1.5V5h3.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /><path d="M7.5 7v3M6 8.5h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" /></svg>
               {:else}
                 <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
               {/if}
             </button>
-            <button class="conv-icon-btn" title="Rename workspace" disabled={anyRunning || convo.busy} aria-label="Rename workspace" onclick={startRenameConversation}>
+            <button class="ws-icon-btn" title="Rename workspace" disabled={anyRunning || ws.busy} aria-label="Rename workspace" onclick={startRenameWorkspace}>
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M10.5 2.5l3 3L6 13l-3.5.5L3 10l7.5-7.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /></svg>
             </button>
-            <button class="conv-icon-btn conv-icon-danger" title="Delete workspace" disabled={anyRunning || convo.busy} aria-label="Delete workspace" onclick={onDeleteConversation}>
+            <button class="ws-icon-btn ws-icon-danger" title="Delete workspace" disabled={anyRunning || ws.busy} aria-label="Delete workspace" onclick={onDeleteWorkspace}>
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V2.5h4V4M4.5 4l.6 9h5.8l.6-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg>
             </button>
           </div>
@@ -1665,7 +1676,7 @@
     <div class="chat-area">
       <div class="chat-columns" class:multi={isComparing}>
         {#each panelSels as p, i (p.panel)}
-          {#if convo.reducedPanels.has(p.panel)}
+          {#if ws.reducedPanels.has(p.panel)}
             <div
               class="chat-column reduced"
               class:drop-left={panelDrag.showAt(s.panels, i)}
@@ -1675,7 +1686,7 @@
               ondragend={() => panelDrag.end()}
               role="group"
             >
-              <button class="restore-panel" onclick={() => convo.restorePanel(p.panel)} title="Restore this panel">
+              <button class="restore-panel" onclick={() => ws.restorePanel(p.panel)} title="Restore this panel">
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
                 <span class="restore-label" use:tip data-tooltip={panelLabel(p)}>{panelLabel(p)}</span>
               </button>
@@ -1708,7 +1719,7 @@
                   <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor"><circle cx="2.5" cy="3" r="1.2" /><circle cx="7.5" cy="3" r="1.2" /><circle cx="2.5" cy="7" r="1.2" /><circle cx="7.5" cy="7" r="1.2" /><circle cx="2.5" cy="11" r="1.2" /><circle cx="7.5" cy="11" r="1.2" /></svg>
                 </span>
                 <span class="column-title"><TruncLabel label={panelLabel(p)} /></span>
-                <button class="reduce-panel" onclick={() => convo.reducePanel(p.panel)} title="Reduce this panel" aria-label="Reduce panel">
+                <button class="reduce-panel" onclick={() => ws.reducePanel(p.panel)} title="Reduce this panel" aria-label="Reduce panel">
                   <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
                 </button>
               </div>
@@ -1755,7 +1766,7 @@
                 </div>
               {/if}
             </div>
-            {#if isComparing && convo.activeId && panelCanChat(p)}
+            {#if isComparing && ws.activeId && panelCanChat(p)}
               <!-- Per-panel composer: continue ONLY this panel, independent of the
                    other panel and of whatever it's doing. Lives OUTSIDE the
                    scrollable .messages so it stays stationary when branch cycling
@@ -1789,7 +1800,7 @@
           <div class="send-targets">
             <span class="send-targets-label">Send to</span>
             {#each panelSels as p (p.panel)}
-              <button class="send-chip" class:on={convo.sendTargets.has(p.panel)} class:reduced={convo.reducedPanels.has(p.panel)} onclick={() => convo.toggleSendTarget(p.panel)} title={convo.reducedPanels.has(p.panel) ? 'Reduced panel — click to send here anyway' : 'Toggle this panel as a send target'}><TruncLabel label={panelLabel(p)} /></button>
+              <button class="send-chip" class:on={ws.sendTargets.has(p.panel)} class:reduced={ws.reducedPanels.has(p.panel)} onclick={() => ws.toggleSendTarget(p.panel)} title={ws.reducedPanels.has(p.panel) ? 'Reduced panel — click to send here anyway' : 'Toggle this panel as a send target'}><TruncLabel label={panelLabel(p)} /></button>
             {/each}
           </div>
         {/if}
@@ -1902,14 +1913,14 @@
           bind:value={userInput}
           bind:this={inputTextarea}
           onkeydown={handleKeydown}
-          placeholder={!convo.activeId
+          placeholder={!ws.activeId
             ? 'Loading workspaces…'
             : !canChat
               ? 'Select a model to chat'
               : historyBrowsing
                 ? 'History mode -- up/down browse, Esc exit'
                 : 'Type a message... (Enter to send, Esc for history)'}
-          disabled={!canChat || !convo.activeId}
+          disabled={!canChat || !ws.activeId}
         ></textarea>
       </div>
     </div>
@@ -2003,15 +2014,15 @@
   .section-chevron { color: var(--color-text-muted); transition: transform 0.15s; flex-shrink: 0; }
   .section-chevron.open { transform: rotate(180deg); }
 
-  /* ── Conversation picker ───────────────────────────────────────── */
-  .conv-row { display: flex; gap: var(--space-1); align-items: center; }
-  .conv-select { flex: 1; min-width: 0; }
-  .conv-icon-btn { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; background: var(--color-surface-hover); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text-muted); flex-shrink: 0; cursor: pointer; }
-  .conv-icon-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
-  .conv-icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  /* Shift held → the New button signals its alternate action (blank conversation). */
-  .conv-icon-btn.shift-alt:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
-  .conv-icon-danger:hover:not(:disabled) { color: white; background: #d97070; border-color: #d97070; }
+  /* ── Workspace picker ───────────────────────────────────────── */
+  .ws-row { display: flex; gap: var(--space-1); align-items: center; }
+  .ws-select { flex: 1; min-width: 0; }
+  .ws-icon-btn { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; background: var(--color-surface-hover); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text-muted); flex-shrink: 0; cursor: pointer; }
+  .ws-icon-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
+  .ws-icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  /* Shift held → the New button signals its alternate action (blank workspace). */
+  .ws-icon-btn.shift-alt:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
+  .ws-icon-danger:hover:not(:disabled) { color: white; background: #d97070; border-color: #d97070; }
   .external-notice { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent); }
 
   /* ── Model picker ──────────────────────────────────────────────── */

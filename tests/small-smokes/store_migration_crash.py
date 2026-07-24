@@ -1,8 +1,8 @@
 """Crash-window + verify-strictness smokes for the storage-v2 boot migration.
 
 Each scenario builds an on-disk state under a fresh throwaway XDG_STATE_HOME and
-calls conversation_store.boot(), asserting the recovery behavior. 100% synthetic
-(tiny in-memory conversations, temp dirs) — no real store, no network, no server.
+calls workspace_store.boot(), asserting the recovery behavior. 100% synthetic
+(tiny in-memory workspaces, temp dirs) — no real store, no network, no server.
 Re-run whenever the migration / boot pipeline changes.
 
 Lifted from backend-review's storage-v2 probe suite; scenarios updated to the
@@ -40,7 +40,7 @@ def fresh_store(tmp: Path):
     import tinkerscope.paths as paths_mod
     importlib.reload(paths_mod)
     importlib.reload(settings_mod)
-    import tinkerscope.api.conversation_store as store_mod
+    import tinkerscope.api.workspace_store as store_mod
     return importlib.reload(store_mod)
 
 
@@ -60,12 +60,12 @@ def _(store):
     legacy = store._legacy_path()
     legacy.parent.mkdir(parents=True, exist_ok=True)
     legacy.write_text(json.dumps([CONV]))
-    staging = store._state_dir() / "conversations.migrating"
+    staging = store._state_dir() / "workspaces.migrating"
     staging.mkdir(parents=True)
     (staging / "conv-a.json").write_text('{"id": "conv-a", "TRUNCATED')  # torn write
     store.boot()
     assert not staging.exists(), "stale staging not cleaned"
-    assert store._convs_dir().is_dir()
+    assert store._ws_dir().is_dir()
     assert not legacy.exists() and legacy.with_suffix(".json.legacy").exists()
     body = store.get_body("conv-a")
     assert body["trees"]["primary"]["nodes"]["n1"]["has_token_logprobs"] is True
@@ -140,8 +140,8 @@ def _(store):
     except RuntimeError:
         pass
     assert legacy.read_text() == raw, "legacy modified!"
-    assert not store._convs_dir().exists()
-    assert not (store._state_dir() / "conversations.migrating").exists(), "staging litter"
+    assert not store._ws_dir().exists()
+    assert not (store._state_dir() / "workspaces.migrating").exists(), "staging litter"
 
 
 print("all scenarios done")

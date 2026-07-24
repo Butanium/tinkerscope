@@ -76,7 +76,7 @@ class Bus(threading.Thread):
 
 def main():
     ids = panel_ids(N_PANELS)
-    cid = _post("/api/conversations", {
+    cid = _post("/api/workspaces", {
         "title": "detached-reload",
         "panels": [{"id": p, "run_id": FREE, "checkpoint": None} for p in ids],
         "trees": {p: {"nodes": {}, "rootChildren": [], "selected": {}} for p in ids},
@@ -86,7 +86,7 @@ def main():
     # Long, high-token generations so they OUTLAST the ~1.5s reload gap — none
     # complete during it, so every reply lands AFTER the page's stream reconnects
     # (the reliable recovery path). Gap-completed replies are a documented sub-edge
-    # (recovered on the next conversation open, not necessarily live).
+    # (recovered on the next workspace open, not necessarily live).
     _post("/api/state", {"max_tokens": 1200, "n_samples": 1})
 
     bus = Bus()
@@ -96,7 +96,7 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
         page = browser.new_page(viewport={"width": 1600, "height": 950})
-        page.goto(f"{BASE}/?c={cid}", wait_until="load", timeout=20000)
+        page.goto(f"{BASE}/?w={cid}", wait_until="load", timeout=20000)
         page.wait_for_function("(n) => document.querySelectorAll('.chat-column').length >= n",
                                arg=N_PANELS, timeout=15000)
         composer = page.locator(".input-textarea")
@@ -138,7 +138,7 @@ def main():
 
     # Coherence + no-double-fold on the persisted trees: each panel that completed
     # (chat_done) folded EXACTLY ONE assistant under its single user turn.
-    conv = _get(f"/api/conversations/{cid}")  # v2: list is summaries-only
+    conv = _get(f"/api/workspaces/{cid}")  # v2: list is summaries-only
     trees = conv.get("trees") or {}
     done = [pid for pid, t in bus.terminals.items() if t == "chat_done"]
     bad = []

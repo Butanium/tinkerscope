@@ -19,7 +19,7 @@ from .tinker_sampler import supports_thinking
 
 def _path():
     # Resolve SETTINGS lazily (fresh module lookup) so a test that reloads settings
-    # against a new XDG_STATE_HOME is honored — mirrors conversation_store._state_dir.
+    # against a new XDG_STATE_HOME is honored — mirrors workspace_store._state_dir.
     from .settings import SETTINGS
 
     return SETTINGS.pack_models_path

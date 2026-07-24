@@ -1,15 +1,15 @@
 """System-prompt SPLIT-CHIP smoke — the composer's system-prompt control is a
 split pill (lib/SplitChip.svelte): left POWER zone = apply/mute (persisted as
-`system_enabled` on state + conversation), right label+chevron = expand/fold.
+`system_enabled` on state + workspace), right label+chevron = expand/fold.
 The two axes are orthogonal: folding never mutes; muting keeps the text.
 
   - the sidebar no longer has a System-prompt textarea
   - clicking the FOLD zone opens a textarea; typing auto-enables (empty→non-empty)
-    → chip ACTIVE (.on) + text AND system_enabled=true persist to the conversation
+    → chip ACTIVE (.on) + text AND system_enabled=true persist to the workspace
   - clicking the POWER zone mutes: chip drops .on, the textarea stays (muted
     border + "muted" hint), text is KEPT — and system_enabled=false persists
   - folding while muted keeps the mute; power back on → ACTIVE again, no retyping
-  - the value + flag SURVIVE a conversation switch-and-back (per-conversation)
+  - the value + flag SURVIVE a workspace switch-and-back (per-workspace)
   - clearing the prompt flips the chip back to inactive
   - no console errors
 
@@ -41,7 +41,7 @@ def api(method: str, path: str, body: dict | None = None):
 def conv_field(conv_id: str, key: str):
     # v2: the list is summaries-only — system fields live on the body.
     try:
-        return api("GET", f"/api/conversations/{conv_id}").get(key)
+        return api("GET", f"/api/workspaces/{conv_id}").get(key)
     except Exception:
         return None
 
@@ -65,8 +65,8 @@ CHIP_ON = f"() => document.querySelector('{SYS_FOLD}')?.closest('.split-chip')?.
 
 
 def main() -> None:
-    conv_a = api("POST", "/api/conversations", {"name": "sys-chip-A"})["id"]
-    conv_b = api("POST", "/api/conversations", {"name": "sys-chip-B"})["id"]
+    conv_a = api("POST", "/api/workspaces", {"name": "sys-chip-A"})["id"]
+    conv_b = api("POST", "/api/workspaces", {"name": "sys-chip-B"})["id"]
     checks: list[tuple[str, bool]] = []
     try:
         with sync_playwright() as p:
@@ -76,7 +76,7 @@ def main() -> None:
             page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
             page.on("pageerror", lambda e: errors.append(str(e)))
 
-            page.goto(f"{BASE}/?c={conv_a}", wait_until="load", timeout=20000)
+            page.goto(f"{BASE}/?w={conv_a}", wait_until="load", timeout=20000)
             page.wait_for_selector(SYS_FOLD, timeout=15000)
 
             # The sidebar no longer carries a System-prompt textarea.
@@ -96,7 +96,7 @@ def main() -> None:
             page.eval_on_selector(SYS_TA, "e => e.blur()")  # flush the debounced patch/save
 
             persisted = wait_conv(conv_a, "system_prompt", SYS_TEXT)
-            checks.append((f"typing persists the text to the conversation ({persisted!r})",
+            checks.append((f"typing persists the text to the workspace ({persisted!r})",
                            persisted == SYS_TEXT))
             enabled = wait_conv(conv_a, "system_enabled", True)
             checks.append((f"typing AUTO-ENABLES (conv system_enabled={enabled!r})", enabled is True))
@@ -128,16 +128,16 @@ def main() -> None:
                            re_enabled is True and page.evaluate(CHIP_ON) is True))
 
             # Switch to conv B (blank) then back to A ⇒ prompt + flag must restore.
-            page.goto(f"{BASE}/?c={conv_b}", wait_until="load", timeout=20000)
+            page.goto(f"{BASE}/?w={conv_b}", wait_until="load", timeout=20000)
             page.wait_for_selector(SYS_FOLD, timeout=15000)
             try:
                 page.wait_for_function(f"({CHIP_ON})() === false", timeout=8000)
                 b_inactive = True
             except Exception:
                 b_inactive = False
-            checks.append(("other conversation's chip is inactive (per-conv)", b_inactive))
+            checks.append(("other workspace's chip is inactive (per-conv)", b_inactive))
 
-            page.goto(f"{BASE}/?c={conv_a}", wait_until="load", timeout=20000)
+            page.goto(f"{BASE}/?w={conv_a}", wait_until="load", timeout=20000)
             page.wait_for_selector(SYS_FOLD, timeout=15000)
             page.wait_for_function(f"({CHIP_ON})() === true", timeout=10000)
             page.click(SYS_FOLD)  # open the textarea to read the restored value
@@ -156,8 +156,8 @@ def main() -> None:
                 print("CONSOLE ERRORS:", errors)
             browser.close()
     finally:
-        api("DELETE", f"/api/conversations/{conv_a}")
-        api("DELETE", f"/api/conversations/{conv_b}")
+        api("DELETE", f"/api/workspaces/{conv_a}")
+        api("DELETE", f"/api/workspaces/{conv_b}")
 
     print()
     ok = True

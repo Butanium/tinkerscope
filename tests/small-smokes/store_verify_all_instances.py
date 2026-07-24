@@ -18,7 +18,7 @@ import argparse
 import json
 from pathlib import Path
 
-from tinkerscope.api.conversation_store import materialize_conv, split_conv
+from tinkerscope.api.workspace_store import materialize_workspace, split_workspace
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--state-home", type=Path, default=Path.home() / ".local/state/tinkerscope",
@@ -38,8 +38,8 @@ for f in files:
         if not isinstance(conv, dict):
             bad.append(f"non-dict entry: {conv!r}")
             continue
-        light, blobs = split_conv(conv)
-        if materialize_conv(light, blobs) != conv:
+        light, blobs = split_workspace(conv)
+        if materialize_workspace(light, blobs) != conv:
             bad.append(f"verify mismatch: {conv.get('id')}")
     any_bad = any_bad or bool(bad)
     tag = "WOULD REFUSE" if bad else "ok"

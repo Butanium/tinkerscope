@@ -34,10 +34,10 @@ def main() -> None:
         page.wait_for_function("document.body.innerText.includes('ed_sheeran')", timeout=15000)
         page.wait_for_selector("select.model-slot-select", timeout=15000)
 
-        # The server persists conversations per dir-set and auto-opens the last one, so a
-        # prior smoke's thread can be loaded. Shift+click New conversation → a BLANK panel
+        # The server persists workspaces per dir-set and auto-opens the last one, so a
+        # prior smoke's thread can be loaded. Shift+click New workspace → a BLANK panel
         # (no model, no messages) for a deterministic single-user-turn starting point.
-        page.locator('button[aria-label="New conversation"]').first.click(modifiers=["Shift"])
+        page.locator('button[aria-label="New workspace"]').first.click(modifiers=["Shift"])
         page.wait_for_function(
             "document.querySelectorAll('.message').length === 0", timeout=10000
         )

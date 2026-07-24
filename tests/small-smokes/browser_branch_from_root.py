@@ -1,7 +1,7 @@
 """Branch-from-start composer toggle smoke — while the '⑂ branch from start' chip
 is ON, a send creates a NEW root-level branch (a sibling first message) instead of
 appending to the active thread; toggling it OFF restores plain append. Seeds a
-conversation with an existing thread, so only the two toggled sends hit the model
+workspace with an existing thread, so only the two toggled sends hit the model
 (free router, zero cost).
 
   uv run python tests/small-smokes/browser_branch_from_root.py [BASE_URL]
@@ -51,7 +51,7 @@ def main() -> None:
             [{"role": "user", "content": SEED_Q}, {"role": "assistant", "content": SEED_A}],
             title="branch_from_root",
         )
-        page.goto(f"{BASE}/?c={cid}", wait_until="load", timeout=20000)
+        page.goto(f"{BASE}/?w={cid}", wait_until="load", timeout=20000)
         page.wait_for_selector(".input-textarea:not([disabled])", timeout=15000)
         page.wait_for_selector(".message-content", timeout=15000)
         assert SEED_Q in chat_text(page), "seeded thread should be visible before branching"

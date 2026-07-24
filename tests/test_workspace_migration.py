@@ -2,7 +2,7 @@
 + write-once node blobs, with STRONG verification (split → re-materialize →
 deep-compare against the legacy object; any mismatch refuses to start).
 
-These drive `api/conversation_store.py` directly (no HTTP / no tinker): a fresh
+These drive `api/workspace_store.py` directly (no HTTP / no tinker): a fresh
 tmp XDG_STATE_HOME, a synthetic legacy file written BEFORE boot, then
 `store.boot()`. See `docs/STORAGE_V2.md` §2.3.
 """
@@ -32,7 +32,7 @@ def _tree(nodes):
 
 @pytest.fixture
 def store(monkeypatch, tmp_path):
-    """Reload paths → settings → conversation_store against a fresh tmp state home,
+    """Reload paths → settings → workspace_store against a fresh tmp state home,
     so the store resolves this test's dirs and starts with empty caches."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setenv("TINKERSCOPE_SCAN_ROOTS", str(tmp_path / "runs"))
@@ -44,7 +44,7 @@ def store(monkeypatch, tmp_path):
     importlib.reload(paths_mod)
     importlib.reload(settings_mod)
 
-    import tinkerscope.api.conversation_store as store_mod
+    import tinkerscope.api.workspace_store as store_mod
 
     importlib.reload(store_mod)
     return store_mod
@@ -67,7 +67,7 @@ def test_migration_round_trips_and_splits_blobs(store):
         ])}),
         _legacy_conv("conv-b", "Plain", {"primary": _tree([_node("n3", content="x")])}),
         # A pre-multipanel {tree, compare_tree} entry with NO `trees` key at all
-        # (2 of Clément's 16 real conversations have exactly this shape). Migration
+        # (2 of Clément's 16 real workspaces have exactly this shape). Migration
         # must split blobs out of the legacy `tree` too AND preserve key-presence
         # exactly — synthesizing a `trees` key here breaks the round-trip verify.
         {
@@ -86,7 +86,7 @@ def test_migration_round_trips_and_splits_blobs(store):
     # Legacy renamed aside, never deleted; the split dir now exists.
     assert not legacy_path.exists()
     assert legacy_path.with_suffix(".json.legacy").exists()
-    assert store._convs_dir().is_dir()
+    assert store._ws_dir().is_dir()
 
     # Summaries built for all three; bodies are LIGHT (blobs stripped, flags set).
     ids = {s["id"] for s in store.list_summaries()}
@@ -102,7 +102,7 @@ def test_migration_round_trips_and_splits_blobs(store):
     assert blobs["n2"]["token_logprobs"] == HEAVY_LOGPROBS
     assert blobs["n2"]["raw_meta"] == HEAVY_RAW_META
 
-    # STRONG guarantee: re-materialize every conversation and deep-compare to legacy.
+    # STRONG guarantee: re-materialize every workspace and deep-compare to legacy.
     by_id = {c["id"]: c for c in legacy}
     for cid in ids:
         light = store.get_body(cid)
@@ -111,7 +111,7 @@ def test_migration_round_trips_and_splits_blobs(store):
         node_ids = [
             nid for t in trees_iter if isinstance(t, dict) for nid in (t.get("nodes") or {})
         ]
-        remat = store.materialize_conv(light, store.get_blobs(cid, node_ids))
+        remat = store.materialize_workspace(light, store.get_blobs(cid, node_ids))
         assert remat == by_id[cid]
 
 
@@ -134,12 +134,12 @@ def test_migration_verify_aborts_on_divergent_shared_node_id(store):
 
     # Refused to start with everything untouched: legacy stays, no split dir.
     assert legacy_path.exists()
-    assert not store._convs_dir().exists()
+    assert not store._ws_dir().exists()
 
 
 def test_migration_noop_when_fully_migrated(store):
-    """conversations/ exists AND legacy already renamed to .legacy → true no-op."""
-    store._convs_dir().mkdir(parents=True, exist_ok=True)
+    """workspaces/ exists AND legacy already renamed to .legacy → true no-op."""
+    store._ws_dir().mkdir(parents=True, exist_ok=True)
     done = store._legacy_path().with_suffix(".json.legacy")
     done.write_text(json.dumps([_legacy_conv("z", "Z", {"primary": {}})]))
     store.boot()
@@ -148,10 +148,10 @@ def test_migration_noop_when_fully_migrated(store):
 
 
 def test_migration_completes_interrupted_rename(store):
-    """A crash between the atomic dir swap and the legacy rename leaves conversations/
+    """A crash between the atomic dir swap and the legacy rename leaves workspaces/
     AND conversations.json both present. Boot must finish the rename so a later
-    deletion of conversations/ can't silently re-migrate resurrected stale state."""
-    store._convs_dir().mkdir(parents=True, exist_ok=True)
+    deletion of workspaces/ can't silently re-migrate resurrected stale state."""
+    store._ws_dir().mkdir(parents=True, exist_ok=True)
     legacy_path = store._legacy_path()
     legacy_path.write_text(json.dumps([_legacy_conv("z", "Z", {"primary": {}})]))
     store.boot()

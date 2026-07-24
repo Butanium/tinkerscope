@@ -1,6 +1,6 @@
 """Token-logprob feature smoke — fully deterministic (no sampling).
 
-Seeds a conversation whose assistant siblings carry `token_logprobs` (the shape
+Seeds a workspace whose assistant siblings carry `token_logprobs` (the shape
 the native tinker path emits — see docs/API_CONTRACT.md), then drives both
 display surfaces:
 
@@ -62,7 +62,7 @@ def tlp(entries):
 def seed() -> str:
     """One turn with 3 logprob-carrying siblings + a follow-up turn without."""
     # Clear the shared panel echo first: a stale transcript from a previous chat
-    # would otherwise be grafted into the freshly-opened conversation by the
+    # would otherwise be grafted into the freshly-opened workspace by the
     # external-fold reconcile and shunt the seeded branch to a sibling.
     api("POST", "/api/state", {"panel_messages": {"primary": []}})
     nodes = {
@@ -94,7 +94,7 @@ def seed() -> str:
         "b0": {"id": "b0", "role": "assistant", "content": "Dark, mostly.",
                "parent": "u2", "children": []},
     }
-    conv = api("POST", "/api/conversations", {
+    conv = api("POST", "/api/workspaces", {
         "name": "token-logprobs-smoke",
         "trees": {"primary": {"nodes": nodes, "rootChildren": ["u1"],
                               "selected": {"__root__": "u1", "u1": "a0",
@@ -114,7 +114,7 @@ def main() -> None:
             page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
             page.on("pageerror", lambda e: errors.append(str(e)))
 
-            page.goto(f"{BASE}/?c={conv_id}", wait_until="load", timeout=20000)
+            page.goto(f"{BASE}/?w={conv_id}", wait_until="load", timeout=20000)
             page.wait_for_selector(".model-slot-select", timeout=15000)
             page.wait_for_function(
                 "document.body.innerText.includes('What color is the sky?')", timeout=15000
@@ -196,7 +196,7 @@ def main() -> None:
             browser.close()
     finally:
         try:
-            api("DELETE", f"/api/conversations/{conv_id}")
+            api("DELETE", f"/api/workspaces/{conv_id}")
         except Exception:
             pass
 

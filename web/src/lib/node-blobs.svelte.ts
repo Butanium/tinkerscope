@@ -7,15 +7,15 @@
 // Population, three ways:
 //   - seed() at FOLD time: a fresh sample already has the data in hand, so the
 //     turn's inspector works instantly, before (and independent of) the save.
-//   - ensure() lazily: batch POST /api/conversations/{id}/node-blobs for nodes
+//   - ensure() lazily: batch POST /api/workspaces/{id}/node-blobs for nodes
 //     whose has_* flag is set but whose blob isn't cached (old turns, foreign
 //     folds). Unknown ids come back omitted → cached as {} so they don't refetch.
-//   - reset() on every conversation transition: the cache is scoped to ONE open
-//     conversation (node ids are only unique within it), so switch/create/load
-//     clear it and rebind the conversation id ensure() fetches against.
+//   - reset() on every workspace transition: the cache is scoped to ONE open
+//     workspace (node ids are only unique within it), so switch/create/load
+//     clear it and rebind the workspace id ensure() fetches against.
 //
-// Ownership note: this store does NOT import the conversations store (which
-// imports it for reset-on-switch) — the conversation id is pushed in via reset().
+// Ownership note: this store does NOT import the workspaces store (which
+// imports it for reset-on-switch) — the workspace id is pushed in via reset().
 
 import { api } from './api';
 import type { NodeBlobs } from './types';
@@ -23,20 +23,20 @@ import type { NodeBlobs } from './types';
 class NodeBlobStore {
   /** node id → its blobs; {} = known blob-less (fetched, nothing there). */
   #cache = $state<Record<string, NodeBlobs>>({});
-  /** The conversation the cache belongs to (ensure() fetches against it). */
+  /** The workspace the cache belongs to (ensure() fetches against it). */
   #convId: string | null = null;
   /** Node ids with an in-flight fetch — never double-fetched. */
   #inflight = new Set<string>();
   // Micro-batching: each mounted row ensure()s its own node, so flipping the
-  // token-probs toggle on a long conversation fires one call PER ROW in the
+  // token-probs toggle on a long workspace fires one call PER ROW in the
   // same tick. A short collection window folds that burst into one POST.
   #queue = new Set<string>();
   #flushTimer: ReturnType<typeof setTimeout> | null = null;
   #flushPromise: Promise<void> | null = null;
   #resolveFlush: (() => void) | null = null;
 
-  /** Rebind to a (possibly different) conversation and drop everything cached.
-   *  Call on EVERY conversation transition, before the new trees land. */
+  /** Rebind to a (possibly different) workspace and drop everything cached.
+   *  Call on EVERY workspace transition, before the new trees land. */
   reset(convId: string | null): void {
     this.#convId = convId;
     this.#cache = {};
@@ -96,7 +96,7 @@ class NodeBlobStore {
       .fetchNodeBlobs(convId, ids)
       .then((res) => {
         for (const id of ids) this.#inflight.delete(id);
-        if (this.#convId !== convId) return; // conversation switched mid-fetch — stale
+        if (this.#convId !== convId) return; // workspace switched mid-fetch — stale
         for (const id of ids) {
           // Omitted id ⇒ the server has no blob for it — cache {} so the
           // consumer's has_* affordance can settle and we never refetch.

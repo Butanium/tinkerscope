@@ -1,5 +1,13 @@
 # Handoff — the conversations → workspaces wire/disk rename ("the magic wand")
 
+> **STATUS: SHIPPED in v1.0.0 (2026-07-24).** This file is the historical plan and
+> deliberately keeps the OLD names throughout — it describes the pre-rename state.
+> What actually shipped, and how to roll it back, is `docs/MIGRATIONS.md`.
+> Deviations from the plan below: staged aliases (§"Staging plan" step 1) were
+> DROPPED in favour of a clean major-version cut — Clément's call, since a version
+> tag + a migration doc buy the licence to break compatibility on a single-user
+> tool. `ws` became the primary CLI command, `conv` the hidden alias.
+
 Written 2026-07-17 from live working context (the session that shipped the
 vocabulary half + `tinkpg send` + the ThreadSwitcher), deliberately WITHOUT a
 fresh code sweep — items I did not verify this session are marked **VERIFY**.

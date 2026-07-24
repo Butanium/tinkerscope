@@ -70,7 +70,7 @@ def _sample_pack() -> packmod.Pack:
 
 
 def test_apply_fresh(backend):
-    from tinkerscope.api import conversation_store, pack_models_store
+    from tinkerscope.api import workspace_store, pack_models_store
     from tinkerscope.api.settings import SETTINGS
     from tinkerscope.api.store import read_json
     from tinkerscope.paths import OPENROUTER_MODELS_PATH
@@ -94,7 +94,7 @@ def test_apply_fresh(backend):
     assert {m["openrouter_model"] for m in orm} == {"ds/chat"}
 
     # workspace installed under deterministic id
-    bodies = conversation_store.list_bodies()
+    bodies = workspace_store.list_bodies()
     assert any(b["id"] == "pack-wp-pack-probe" and b["name"] == "probe" for b in bodies)
 
 
@@ -120,11 +120,11 @@ def test_apply_merge_safe(backend):
 
 
 def test_apply_idempotent_workspaces(backend):
-    from tinkerscope.api import conversation_store
+    from tinkerscope.api import workspace_store
 
     packmod.apply_pack(_sample_pack())
     packmod.apply_pack(_sample_pack())  # re-apply
-    ids = [b["id"] for b in conversation_store.list_bodies() if b["id"].startswith("pack-")]
+    ids = [b["id"] for b in workspace_store.list_bodies() if b["id"].startswith("pack-")]
     assert ids == ["pack-wp-pack-probe"]  # one, not duplicated
 
 
@@ -151,7 +151,7 @@ def _reseed_pack(ws_list: list[tuple[str, str]]) -> packmod.Pack:
 def test_apply_reseed_refreshes_blobs_and_drops_removed(backend):
     """A plain re-apply keeps stale blobs (write-once) and never drops workspaces;
     --reseed rebuilds each workspace (fresh blobs) and removes ones no longer in the pack."""
-    from tinkerscope.api import conversation_store as cs
+    from tinkerscope.api import workspace_store as cs
 
     packmod.apply_pack(_reseed_pack([("a", "V1"), ("b", "B")]))
     assert cs.get_blobs("pack-rp-a", ["n2"])["n2"]["raw_meta"] == "V1"
@@ -171,11 +171,11 @@ def test_apply_reseed_refreshes_blobs_and_drops_removed(backend):
 def test_export_no_defaults(backend):
     """--no-defaults omits the defaults block entirely — even when merging into an
     existing file that had one (the merge must not resurrect it)."""
-    from tinkerscope.api import conversation_store
+    from tinkerscope.api import workspace_store
     from tinkerscope.api.settings import SETTINGS
     from tinkerscope.api.store import write_json
 
-    _seed_live_state(conversation_store, SETTINGS, write_json)
+    _seed_live_state(workspace_store, SETTINGS, write_json)
     with_def = packmod.export_pack(state_dir_reader=packmod.StateReader(), name="e",
                                    description=None, models_from="all")
     assert with_def.defaults  # baseline: defaults present
@@ -224,7 +224,7 @@ def test_tinker_models_endpoint_merge(client):
 
 
 # ── export ──────────────────────────────────────────────────────────────────────
-def _seed_live_state(conversation_store, SETTINGS, write_json):
+def _seed_live_state(workspace_store, SETTINGS, write_json):
     """Seed prefs (a discovered run + an OR ref) + one workspace referencing a run."""
     write_json(SETTINGS.prefs_path, {"last_session": json.dumps({
         "temperature": 0.3, "n_samples": 5,
@@ -235,7 +235,7 @@ def _seed_live_state(conversation_store, SETTINGS, write_json):
     })})
     # n2 carries an inline raw_meta + token_logprobs → upsert splits them into a blob
     # (light node gets has_raw_meta / has_token_logprobs flags).
-    conversation_store.upsert(
+    workspace_store.upsert(
         id="ws1", name="myprobe", system_prompt=None, system_enabled=None,
         trees={"primary": {"nodes": {
             "n1": {"role": "user", "content": "hi"},
@@ -248,11 +248,11 @@ def _seed_live_state(conversation_store, SETTINGS, write_json):
 
 
 def test_export_rewrites_run_ids_and_strips_blobs(backend):
-    from tinkerscope.api import conversation_store
+    from tinkerscope.api import workspace_store
     from tinkerscope.api.settings import SETTINGS
     from tinkerscope.api.store import write_json
 
-    _seed_live_state(conversation_store, SETTINGS, write_json)
+    _seed_live_state(workspace_store, SETTINGS, write_json)
     warnings: list[str] = []
     pack = packmod.export_pack(
         state_dir_reader=packmod.StateReader(), name="exp", description=None,
@@ -292,11 +292,11 @@ def test_export_skips_nonservable_checkpoint(backend):
 
 
 def test_export_filters(backend):
-    from tinkerscope.api import conversation_store
+    from tinkerscope.api import workspace_store
     from tinkerscope.api.settings import SETTINGS
     from tinkerscope.api.store import write_json
 
-    _seed_live_state(conversation_store, SETTINGS, write_json)
+    _seed_live_state(workspace_store, SETTINGS, write_json)
     reader = packmod.StateReader()
     only = packmod.export_pack(state_dir_reader=reader, name="e", description=None,
                                models_from="all", include=["good_run"])
@@ -327,11 +327,11 @@ def test_reexport_preserves_authored_label(backend):
 def test_export_then_apply_roundtrip(backend):
     """Export from a live state dir, then apply the pack — panels resolve to the same
     shareable refs (the collaborator-reproduction path)."""
-    from tinkerscope.api import conversation_store, pack_models_store
+    from tinkerscope.api import workspace_store, pack_models_store
     from tinkerscope.api.settings import SETTINGS
     from tinkerscope.api.store import read_json, write_json
 
-    _seed_live_state(conversation_store, SETTINGS, write_json)
+    _seed_live_state(workspace_store, SETTINGS, write_json)
     pack = packmod.export_pack(state_dir_reader=packmod.StateReader(), name="rt", description=None,
                                models_from="all")
     # round-trip through YAML like a real shared file
@@ -348,5 +348,5 @@ def test_export_then_apply_roundtrip(backend):
     # pack_models registered the ckpt models
     assert ("ckpt", GOOD_FINAL) in {(m["kind"], m["ref"]) for m in pack_models_store.read()}
     # raw_meta survived export→apply as a fetchable blob (the collaborator's "Raw" view)
-    blobs = conversation_store.get_blobs("pack-rt-myprobe", ["n2"])
+    blobs = workspace_store.get_blobs("pack-rt-myprobe", ["n2"])
     assert blobs["n2"]["raw_meta"] == "REQ+RESP"

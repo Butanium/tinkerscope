@@ -1,30 +1,30 @@
-"""Regression smoke for the conversation-scoped external fold — the "new panel loads
-a weird random conversation" bug.
+"""Regression smoke for the workspace-scoped external fold — the "new panel loads
+a weird random workspace" bug.
 
-Panel ids ('compare','p-2'…) are re-minted across conversations, and PlaygroundState
+Panel ids ('compare','p-2'…) are re-minted across workspaces, and PlaygroundState
 is a process-wide singleton shared by every tab + the tinkpg CLI. Before the fix,
 `#onExternalDone` folded ANY chat_done into treeFor(panel) by the panel id string
-alone, so a chat generated in the context of conversation A grafted onto a
-freshly-reused panel of the conversation the browser had open (persisted into its
-tree + flashed the "Terminal started a new conversation" banner). The fix stamps each
-chat broadcast with the conversation open WHEN IT STARTED (chat.py snapshots
-state.conversation_id right after chat_begin) and folds only when that stamp ==
+alone, so a chat generated in the context of workspace A grafted onto a
+freshly-reused panel of the workspace the browser had open (persisted into its
+tree + flashed the "Terminal started a new workspace" banner). The fix stamps each
+chat broadcast with the workspace open WHEN IT STARTED (chat.py snapshots
+state.workspace_id right after chat_begin) and folds only when that stamp ==
 convo.activeId; a skipped foreign chat also has its live bucket dropped so its stream
 doesn't linger as an overlay. Null stamp (CLI/legacy) still folds → live-drive lockstep.
 
 NOTE on the shape: the *realistic* trigger is multi-origin on the shared bus, NOT a
-single browser switching conversations mid-generation — the sidebar conversation
+single browser switching workspaces mid-generation — the sidebar workspace
 controls are `disabled={anyRunning || convo.busy}`, so the UI already prevents a
 mid-gen switch. So this models the real thing: an external actor operating in
-conversation A (it sets shared conversation_id=A, exactly as an open browser/CLI
+workspace A (it sets shared workspace_id=A, exactly as an open browser/CLI
 session for A would) runs a chat on the reused `compare` id while THIS browser has B
 open. Deterministic — no timing race.
 
-  NEGATIVE — external chat stamped A (a foreign conversation) → completes but must NOT
+  NEGATIVE — external chat stamped A (a foreign workspace) → completes but must NOT
              fold into B, must NOT show, must NOT flash the banner. We prove the gate
              actually fired by checking B's panel echo DID receive the transcript
              (chat completed) while B's tree did NOT (fold skipped).
-  POSITIVE — external chat stamped B (the OPEN conversation = live-drive lockstep) →
+  POSITIVE — external chat stamped B (the OPEN workspace = live-drive lockstep) →
              MUST fold into B AND flash the banner (the user-visible tell for both).
 
 Zero tinker cost (free OpenRouter router).
@@ -45,7 +45,7 @@ SHOT_DIR = Path("/tmp/claude-1000/-home-c-dumas-tools-tinkerscope/"
 FOREIGN = "FOREIGN_A_must_not_graft_into_B"
 LOCKSTEP = "SAME_CONV_lockstep_must_fold"
 NULLSTAMP = "NULL_STAMP_legacy_cli_must_fold"
-BANNER = "Terminal started a new conversation"
+BANNER = "Terminal started a new workspace"
 
 
 def _get(path):
@@ -60,7 +60,7 @@ def _post(path, body):
 
 
 def _seed(name):
-    return _post("/api/conversations", {
+    return _post("/api/workspaces", {
         "name": name,
         "trees": {"primary": {"nodes": {
             "s0": {"id": "s0", "role": "user", "content": f"{name}: hi",
@@ -74,10 +74,10 @@ def _seed(name):
 
 def _drive(panel, text, origin_conv_id):
     """Model an external actor operating in `origin_conv_id`: set the shared
-    conversation stamp, then fire+drain a chat (non-owned token) that the backend
+    workspace stamp, then fire+drain a chat (non-owned token) that the backend
     stamps with that origin. Returns whether the stream reached a 'done' event
     (chat_done fired = the fold hook was exercised)."""
-    _post("/api/state", {"conversation_id": origin_conv_id})
+    _post("/api/state", {"workspace_id": origin_conv_id})
     body = {
         "openrouter_model": "openrouter/free",
         "messages": [{"role": "user", "content": text}],
@@ -109,7 +109,7 @@ def main():
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: errors.append(str(e)))
 
-        page.goto(f"{BASE}/?c={B['id']}", wait_until="load", timeout=20000)
+        page.goto(f"{BASE}/?w={B['id']}", wait_until="load", timeout=20000)
         page.wait_for_function("document.body.innerText.includes('ConvB: hello')", timeout=15000)
         _add_panel(page)  # re-mints 'compare' under B
         assert [pp["id"] for pp in _get("/api/state")["panels"]] == ["primary", "compare"]
@@ -134,7 +134,7 @@ def main():
         page.screenshot(path=str(SHOT_DIR / "fold_fixed_negative.png"), full_page=True)
         # …but it must NOT be in B's persisted tree.
         page.wait_for_timeout(500)
-        B_after = _get(f"/api/conversations/{B['id']}")  # v2: list is summaries-only
+        B_after = _get(f"/api/workspaces/{B['id']}")  # v2: list is summaries-only
         neg_disk = not any(
             FOREIGN in n["content"]
             for tr in B_after["trees"].values() for n in tr.get("nodes", {}).values())
@@ -153,16 +153,16 @@ def main():
             page.wait_for_timeout(500)
         pos_banner = BANNER in page.inner_text("body")  # the lockstep fold flashes it
         page.wait_for_timeout(600)
-        B_after2 = _get(f"/api/conversations/{B['id']}")
+        B_after2 = _get(f"/api/workspaces/{B['id']}")
         pos_disk = any(
             LOCKSTEP in n["content"]
             for n in B_after2["trees"].get("compare", {}).get("nodes", {}).values())
         page.screenshot(path=str(SHOT_DIR / "fold_fixed_positive.png"), full_page=True)
 
-        # ── NULL-STAMP (legacy CLI): a chat with conversation_id=null MUST still fold
-        # into the OPEN conversation. Unchanged behavior, but newly load-bearing now
+        # ── NULL-STAMP (legacy CLI): a chat with workspace_id=null MUST still fold
+        # into the OPEN workspace. Unchanged behavior, but newly load-bearing now
         # that every browser send rides the same fold gate (detached fire) — a CLI/
-        # legacy chat that never set conversation_id keeps the live-drive lockstep. ──
+        # legacy chat that never set workspace_id keeps the live-drive lockstep. ──
         null_ui = False
         for _ in range(4):
             try:
@@ -175,7 +175,7 @@ def main():
                 pass
             page.wait_for_timeout(500)
         page.wait_for_timeout(600)
-        B_after3 = _get(f"/api/conversations/{B['id']}")
+        B_after3 = _get(f"/api/workspaces/{B['id']}")
         null_disk = any(
             NULLSTAMP in n["content"]
             for n in B_after3["trees"].get("compare", {}).get("nodes", {}).values())
@@ -184,7 +184,7 @@ def main():
 
     for c in (A, B):
         urllib.request.urlopen(
-            urllib.request.Request(f"{BASE}/api/conversations/{c['id']}", method="DELETE"),
+            urllib.request.Request(f"{BASE}/api/workspaces/{c['id']}", method="DELETE"),
             timeout=10).read()
 
     print(f"NEGATIVE — foreign chat completed + hook ran (echo):  {gate_exercised}")
@@ -200,7 +200,7 @@ def main():
     ok = (gate_exercised and neg_disk and neg_ui and neg_banner_absent
           and pos_ui and pos_disk and pos_banner
           and null_ui and null_disk and not errors)
-    print("PANEL FOREIGN-FOLD SMOKE:", "PASS (fold is conversation-scoped)" if ok else "FAIL")
+    print("PANEL FOREIGN-FOLD SMOKE:", "PASS (fold is workspace-scoped)" if ok else "FAIL")
     sys.exit(0 if ok else 1)
 
 

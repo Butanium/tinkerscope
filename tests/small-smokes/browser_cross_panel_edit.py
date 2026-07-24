@@ -36,7 +36,7 @@ def _req(path, data=None, method="GET"):
 
 
 def main():
-    # Seed a fresh TWO-panel conversation, both on the free router, and open it —
+    # Seed a fresh TWO-panel workspace, both on the free router, and open it —
     # replaces the old native-<select> model picker + add-panel dance (the picker is
     # now the ModelDropdown combobox).
     cid, _ = seed_conversation(BASE, [OR_RUN, OR_RUN], "cross_panel_edit")
@@ -44,7 +44,7 @@ def main():
     with sync_playwright() as p:
         b = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
         page = b.new_page(viewport={"width": 1600, "height": 1000})
-        page.goto(f"{BASE}/?c={cid}", wait_until="load", timeout=20000)
+        page.goto(f"{BASE}/?w={cid}", wait_until="load", timeout=20000)
         page.wait_for_function("document.querySelectorAll('.chat-column').length >= 2", timeout=15000)
         page.wait_for_selector(".input-textarea:not([disabled])", timeout=15000)
 

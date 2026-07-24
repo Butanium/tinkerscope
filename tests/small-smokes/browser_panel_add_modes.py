@@ -1,7 +1,7 @@
 """Add-panel modes: default = clone the first panel's thread; Shift+add = blank.
 
 Clément's decision on the "new panel" default: keep the clone (compare a second
-model on the same conversation), and make Shift+add start the panel EMPTY. This
+model on the same workspace), and make Shift+add start the panel EMPTY. This
 smoke pins both: a plain add clones panel 0's thread; a Shift+add gives an empty
 panel (0 messages).
 
@@ -36,7 +36,7 @@ def _post(path, body):
 
 
 def main():
-    conv = _post("/api/conversations", {
+    conv = _post("/api/workspaces", {
         "name": "add-modes",
         "trees": {"primary": {"nodes": {
             "s0": {"id": "s0", "role": "user", "content": MARK + " — question",
@@ -55,7 +55,7 @@ def main():
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: errors.append(str(e)))
 
-        page.goto(f"{BASE}/?c={cid}", wait_until="load", timeout=20000)
+        page.goto(f"{BASE}/?w={cid}", wait_until="load", timeout=20000)
         page.wait_for_function(f"document.body.innerText.includes({json.dumps(MARK)})", timeout=15000)
 
         # default add → clone
@@ -81,7 +81,7 @@ def main():
         browser.close()
 
     urllib.request.urlopen(
-        urllib.request.Request(f"{BASE}/api/conversations/{cid}", method="DELETE"),
+        urllib.request.Request(f"{BASE}/api/workspaces/{cid}", method="DELETE"),
         timeout=10).read()
 
     print(f"default add clones panel 0's thread:  {default_clone}")

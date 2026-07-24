@@ -1,15 +1,15 @@
-"""Real-browser regression smoke for two bugs that made the conversation toolbar
+"""Real-browser regression smoke for two bugs that made the workspace toolbar
 unusable after a generation (no debug hooks — drives the real UI):
 
   1. `convo.busy` read a plain (non-reactive) Set, so `disabled={…convo.busy}`
      never re-fired when the in-flight token cleared → New/regen/edit buttons
      LATCHED disabled after the first generation.
-  2. The `?c=` URL-sync effect fired during create()'s `await api.setState`, read
+  2. The `?w=` URL-sync effect fired during create()'s `await api.setState`, read
      a stale `page.url` (goto is async), and switched right back → clicking "New"
-     after a generation did nothing (URL + active conversation never changed).
+     after a generation did nothing (URL + active workspace never changed).
 
 Drives the real toolbar: pick the always-servable base model, send one message,
-then assert (1) the New button re-enables and (2) clicking it switches conv + ?c=.
+then assert (1) the New button re-enables and (2) clicking it switches conv + ?w=.
 
   uv run python tests/small-smokes/browser_newconv_busy.py [BASE_URL]
 
@@ -50,7 +50,7 @@ def main() -> None:
             timeout=15000,
         )
 
-        newconv = page.locator('button[aria-label="New conversation"]')
+        newconv = page.locator('button[aria-label="New workspace"]')
         assert not newconv.is_disabled(), "New button disabled before any generation"
 
         # Send one message.
@@ -75,7 +75,7 @@ def main() -> None:
         print("New button enabled after gen:", ok_enabled)
         assert ok_enabled, "BUG#1: New button latched disabled after generation"
 
-        # (2) new-conv race fix: clicking New must switch the ?c= URL.
+        # (2) new-conv race fix: clicking New must switch the ?w= URL.
         url_before = page.url
         newconv.click()
         switched = False
@@ -84,9 +84,9 @@ def main() -> None:
             if page.url != url_before and "c=" in page.url:
                 switched = True
                 break
-        print(f"?c= before: {url_before.split('?')[-1]}")
-        print(f"?c= after:  {page.url.split('?')[-1]}")
-        assert switched, "BUG#2: clicking New did not switch the conversation / URL"
+        print(f"?w= before: {url_before.split('?')[-1]}")
+        print(f"?w= after:  {page.url.split('?')[-1]}")
+        assert switched, "BUG#2: clicking New did not switch the workspace / URL"
 
         browser.close()
         print("\nBROWSER NEWCONV+BUSY SMOKE PASS")

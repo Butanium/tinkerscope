@@ -2,7 +2,7 @@
 
 The browser opens `/api/state/events` once on load and renders from the pushed
 state. Both the browser and the `tinkpg` CLI POST `/api/state` to change the
-selected run/checkpoint, the conversation, or sampling params — so terminal and
+selected run/checkpoint, the workspace, or sampling params — so terminal and
 browser stay in lockstep.
 """
 from __future__ import annotations
@@ -34,9 +34,9 @@ class StatePatch(BaseModel):
     Sampling params are global (shared across panels)."""
 
     panels: list[dict] | None = None
-    # id of the saved conversation the browser currently has open (its `?c=`), so the
-    # CLI can name what's on screen. Global (one conversation spans all panels).
-    conversation_id: str | None = None
+    # id of the saved workspace the browser currently has open (its `?c=`), so the
+    # CLI can name what's on screen. Global (one workspace spans all panels).
+    workspace_id: str | None = None
     # per-panel active-path echo {panel_id: messages} — mirrors transcripts for all
     # panels in one patch without touching their run_id/checkpoint.
     panel_messages: dict[str, list[dict]] | None = None

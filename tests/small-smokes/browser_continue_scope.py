@@ -15,7 +15,7 @@ Think-only set once silently rides along on every later continue.
 The fix: continue always fires with prefill_scope "all" — extending the turn IS
 the point; the composer scope applies to the composer prefill only.
 
-Seeds a one-turn conversation with an OpenRouter-sentinel panel, intercepts
+Seeds a one-turn workspace with an OpenRouter-sentinel panel, intercepts
 POST /api/chat (canned SSE reply), sets scope to Think-only with thinking off,
 clicks ＋ on the assistant turn, and asserts the outgoing request: scope "all",
 messages ending with the assistant prefill. Then checks the fold merged
@@ -66,7 +66,7 @@ def seed() -> str:
         "a1": {"id": "a1", "role": "assistant", "content": PREFILL_TEXT,
                "parent": "u1", "children": []},
     }
-    conv = api("POST", "/api/conversations", {
+    conv = api("POST", "/api/workspaces", {
         "name": "continue-scope-smoke",
         "trees": {"primary": {"nodes": nodes, "rootChildren": ["u1"],
                               "selected": {"__root__": "u1", "u1": "a1"}}},
@@ -94,7 +94,7 @@ def main() -> None:
 
             page.route("**/api/chat", fulfill_chat)
 
-            page.goto(f"{BASE}/?c={conv_id}", wait_until="load", timeout=20000)
+            page.goto(f"{BASE}/?w={conv_id}", wait_until="load", timeout=20000)
             page.wait_for_selector(".model-slot-select", timeout=15000)
             page.wait_for_function(
                 "document.body.innerText.includes('Describe the sky.')", timeout=15000
@@ -140,7 +140,7 @@ def main() -> None:
                 print("console errors:", errors[:5])
             browser.close()
     finally:
-        api("DELETE", f"/api/conversations/{conv_id}")
+        api("DELETE", f"/api/workspaces/{conv_id}")
 
     failed = [name for name, ok in checks if not ok]
     for name, ok in checks:

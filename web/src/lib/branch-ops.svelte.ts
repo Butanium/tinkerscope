@@ -2,7 +2,7 @@
 // select / continue, per panel and (in compare mode) across all panels.
 //
 // All operate on the per-panel branch TREE (the source of truth, owned by the
-// convo store). A mutation commits via convo.setTree, which re-derives the active
+// ws store). A mutation commits via ws.setTree, which re-derives the active
 // path, mirrors it into shared state (so the CLI follows), and debounce-saves.
 // Scroll policy: tree mutations PRESERVE the panel's scroll position, deliberate
 // jumps SNAP — see lib/scroll.svelte.ts.
@@ -13,7 +13,7 @@
 // resolution) — are INJECTED via configure() rather than reached into from here.
 
 import { live } from './state.svelte';
-import { conversations as convo } from './conversations.svelte';
+import { workspaces as ws } from './workspaces.svelte';
 import { chat, type ChatParams } from './chat.svelte';
 import { panelScroll } from './scroll.svelte';
 import { assembleAssistantRaw } from './render';
@@ -83,11 +83,11 @@ class BranchOps {
     nodeId: string,
     replace: boolean
   ): { userParentId: string; fireMessages: ChatMessage[] } | null {
-    const tree = convo.treeFor(panel);
+    const tree = ws.treeFor(panel);
     if (replace) {
       const r = regenReplace(tree, nodeId);
       if (!r) return null;
-      convo.setTree(panel, r.tree);
+      ws.setTree(panel, r.tree);
       return { userParentId: r.userParentId, fireMessages: r.fireMessages as ChatMessage[] };
     }
     const rt = regenTarget(tree, nodeId);
@@ -101,8 +101,8 @@ class BranchOps {
     if (this.#d.panelBusy(panel) || msg.nodeId == null) return;
     panelScroll.preserve(panel);
     chat.clearPanelBucket(panel);
-    const tree = convo.treeFor(panel);
-    convo.setTree(panel, all ? deleteSiblings(tree, msg.nodeId) : deleteSubtree(tree, msg.nodeId));
+    const tree = ws.treeFor(panel);
+    ws.setTree(panel, all ? deleteSiblings(tree, msg.nodeId) : deleteSubtree(tree, msg.nodeId));
   }
 
   /** Regenerate this panel's turn. plain = new sibling branch; replace (shift) =
@@ -120,11 +120,11 @@ class BranchOps {
    *  Matches by active-path depth so each panel re-rolls its own model. */
   regenerateAll(panel: Panel, msg: ViewMessage, replace = false) {
     if (msg.nodeId == null) return;
-    const depth = activePath(convo.treeFor(panel)).findIndex((n) => n.id === msg.nodeId);
+    const depth = activePath(ws.treeFor(panel)).findIndex((n) => n.id === msg.nodeId);
     if (depth < 0) return;
     for (const p of this.#d.panelSels()) {
       if (this.#d.panelBusy(p.panel)) continue;
-      const node = activePath(convo.treeFor(p.panel))[depth];
+      const node = activePath(ws.treeFor(p.panel))[depth];
       if (!node) continue;
       panelScroll.preserve(p.panel);
       chat.clearPanelBucket(p.panel);
@@ -139,7 +139,7 @@ class BranchOps {
    *  original stays as a sibling too. */
   #fireContinue(panel: Panel, nodeId: string, thinkingOnly = false) {
     if (this.#d.panelBusy(panel)) return;
-    const tree = convo.treeFor(panel);
+    const tree = ws.treeFor(panel);
     const node = tree.nodes[nodeId];
     if (!node || node.role !== 'assistant' || (!node.content && !node.reasoning)) return;
     const userParentId = node.parent;
@@ -183,10 +183,10 @@ class BranchOps {
   continueMessage(panel: Panel, msg: ViewMessage, all = false, thinkingOnly = false) {
     if (msg.nodeId == null) return;
     if (!all) { this.#fireContinue(panel, msg.nodeId, thinkingOnly); return; }
-    const depth = activePath(convo.treeFor(panel)).findIndex((n) => n.id === msg.nodeId);
+    const depth = activePath(ws.treeFor(panel)).findIndex((n) => n.id === msg.nodeId);
     if (depth < 0) return;
     for (const p of this.#d.panelSels()) {
-      const node = activePath(convo.treeFor(p.panel))[depth];
+      const node = activePath(ws.treeFor(p.panel))[depth];
       if (node) this.#fireContinue(p.panel, node.id, thinkingOnly);
     }
   }
@@ -196,7 +196,7 @@ class BranchOps {
     if (this.#d.panelBusy(panel) || msg.nodeId == null) return;
     panelScroll.preserve(panel);
     chat.clearPanelBucket(panel);
-    convo.setTree(panel, cycleTree(convo.treeFor(panel), msg.nodeId, delta));
+    ws.setTree(panel, cycleTree(ws.treeFor(panel), msg.nodeId, delta));
   }
 
   /** Switch every panel that HAS this thread (a same-content root sibling) to
@@ -207,7 +207,7 @@ class BranchOps {
       if (ts.activeIn.includes(panel) || this.#d.panelBusy(panel)) continue;
       panelScroll.snap(panel); // whole-thread jump → land on its latest turn
       chat.clearPanelBucket(panel);
-      convo.setTree(panel, setSelected(convo.treeFor(panel), rid));
+      ws.setTree(panel, setSelected(ws.treeFor(panel), rid));
     }
   }
 
@@ -219,7 +219,7 @@ class BranchOps {
     const nid = msg.sampleNodeIds?.[sampleIndex];
     if (!nid) return;
     panelScroll.preserve(panel);
-    convo.setTree(panel, setSelected(convo.treeFor(panel), nid));
+    ws.setTree(panel, setSelected(ws.treeFor(panel), nid));
     chat.clearPanelBucket(panel); // collapse the distribution view to the chosen branch
   }
 
@@ -230,7 +230,7 @@ class BranchOps {
     if (this.#d.panelBusy(panel)) return;
     const nid = msg.sampleNodeIds?.[sampleIndex];
     if (!nid) return;
-    convo.setTree(panel, setSelected(convo.treeFor(panel), nid));
+    ws.setTree(panel, setSelected(ws.treeFor(panel), nid));
     this.#fireContinue(panel, nid);
   }
 
@@ -240,11 +240,11 @@ class BranchOps {
     const keep = msg.sampleNodeIds?.[sampleIndex];
     if (!keep) return;
     panelScroll.preserve(panel);
-    let tree = setSelected(convo.treeFor(panel), keep);
+    let tree = setSelected(ws.treeFor(panel), keep);
     for (const sib of siblingsOf(tree, keep)) {
       if (sib !== keep) tree = deleteSubtree(tree, sib);
     }
-    convo.setTree(panel, tree);
+    ws.setTree(panel, tree);
     chat.clearPanelBucket(panel);
   }
 
@@ -255,7 +255,7 @@ class BranchOps {
     const nid = msg.sampleNodeIds?.[sampleIndex];
     if (!nid) return;
     panelScroll.preserve(panel);
-    convo.setTree(panel, deleteSubtree(convo.treeFor(panel), nid));
+    ws.setTree(panel, deleteSubtree(ws.treeFor(panel), nid));
     // Remove the card from the bucket overlay (keep the rest visible).
     const bucket = live.panels[panel];
     if (bucket && bucket.samples.length > sampleIndex) {
@@ -288,17 +288,17 @@ class BranchOps {
     const sys = systemPrompt?.trim() || undefined;
     if (msg.role === 'user') {
       if (copyDownstream) {
-        const r = editUserForkCopy(convo.treeFor(panel), msg.nodeId, text, sys);
-        if (r) convo.setTree(panel, r.tree);
+        const r = editUserForkCopy(ws.treeFor(panel), msg.nodeId, text, sys);
+        if (r) ws.setTree(panel, r.tree);
       } else {
-        const r = editUserFork(convo.treeFor(panel), msg.nodeId, text, sys);
+        const r = editUserFork(ws.treeFor(panel), msg.nodeId, text, sys);
         if (!r) return;
-        convo.setTree(panel, r.tree);
+        ws.setTree(panel, r.tree);
         this.#fireForPanel(panel, r.newUserId, r.fireMessages as ChatMessage[]);
       }
     } else if (msg.role === 'assistant') {
-      const r = editAssistant(convo.treeFor(panel), msg.nodeId, text, reasoning);
-      if (r) convo.setTree(panel, r.tree);
+      const r = editAssistant(ws.treeFor(panel), msg.nodeId, text, reasoning);
+      if (r) ws.setTree(panel, r.tree);
     }
   }
 
@@ -306,10 +306,10 @@ class BranchOps {
    *  allSiblings (shift) prunes every sibling branch at that level too. */
   deleteMessageAll(panel: Panel, msg: ViewMessage, allSiblings = false) {
     if (msg.nodeId == null) return;
-    const depth = activePath(convo.treeFor(panel)).findIndex((n) => n.id === msg.nodeId);
+    const depth = activePath(ws.treeFor(panel)).findIndex((n) => n.id === msg.nodeId);
     if (depth < 0) return;
     for (const p of this.#d.panelSels()) {
-      const node = activePath(convo.treeFor(p.panel))[depth];
+      const node = activePath(ws.treeFor(p.panel))[depth];
       if (node) this.deleteMessage(p.panel, { ...msg, nodeId: node.id }, allSiblings);
     }
   }
@@ -325,10 +325,10 @@ class BranchOps {
     systemPrompt?: string
   ) {
     if (msg.nodeId == null) return;
-    const depth = activePath(convo.treeFor(panel)).findIndex((n) => n.id === msg.nodeId);
+    const depth = activePath(ws.treeFor(panel)).findIndex((n) => n.id === msg.nodeId);
     if (depth < 0) return;
     for (const p of this.#d.panelSels()) {
-      const node = activePath(convo.treeFor(p.panel))[depth];
+      const node = activePath(ws.treeFor(p.panel))[depth];
       if (node) this.applyEdit(p.panel, { ...msg, nodeId: node.id }, content, reasoning, copyDownstream, systemPrompt);
     }
   }
@@ -344,7 +344,7 @@ class BranchOps {
         : (content ?? '');
     let text: string;
     if (all) {
-      const nodes = activePath(convo.treeFor(panel)).filter((n) => n.role !== 'system');
+      const nodes = activePath(ws.treeFor(panel)).filter((n) => n.role !== 'system');
       const header = (r: string) => (r === 'user' ? 'User' : r === 'assistant' ? 'Assistant' : 'System');
       text = nodes.map((n) => `## ${header(n.role)}\n\n${fmt(n.content, n.reasoning)}`).join('\n\n');
     } else {
@@ -361,15 +361,15 @@ class BranchOps {
    *  root thread; either way the dest's other threads survive. */
   sendBranchToPanel(srcPanel: Panel, msg: ViewMessage, destPanel: Panel) {
     if (msg.nodeId == null || destPanel === srcPanel || this.#d.panelBusy(destPanel)) return;
-    const srcTree = convo.treeFor(srcPanel);
+    const srcTree = ws.treeFor(srcPanel);
     const msgs = ancestryMessages(srcTree, msg.nodeId) as ChatMessage[];
     if (!msgs.length) return;
     chat.clearPanelBucket(destPanel);
     // The branch's thread system prompt travels with its context — the dest
     // panel's model should be prompted under the SAME conditions.
-    convo.setTree(
+    ws.setTree(
       destPanel,
-      reconcileExternal(convo.treeFor(destPanel), msgs, threadSystemAt(srcTree, msg.nodeId))
+      reconcileExternal(ws.treeFor(destPanel), msgs, threadSystemAt(srcTree, msg.nodeId))
     );
     panelScroll.snap(destPanel); // land on the grafted thread's latest turn
   }

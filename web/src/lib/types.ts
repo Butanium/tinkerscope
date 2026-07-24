@@ -111,7 +111,7 @@ export type Pin = Record<string, any> & { id: string; created_at: string; note: 
  *  array index — closing a middle panel must not rebind a tree to another. */
 export type Panel = string;
 
-/** One panel's MODEL selection (no transcript) — the persisted, per-conversation
+/** One panel's MODEL selection (no transcript) — the persisted, per-workspace
  *  layout. `live.state.panels` (PanelState) is this plus the messages echo. */
 export type PanelLayout = { id: Panel; run_id: string | null; checkpoint: string | null };
 
@@ -139,7 +139,7 @@ export type PanelState = {
  *  per-panel. */
 export type PlaygroundState = {
   panels: PanelState[];
-  conversation_id: string | null; // the open conversation's id (browser `?c=`), for `tinkpg state`
+  workspace_id: string | null; // the open workspace's id (browser `?c=`), for `tinkpg state`
   system_prompt: string | null;
   /** Power toggle for the global system prompt: false = kept but muted (skipped
    *  at fire time). null/absent (legacy state) → derive from text presence. */
@@ -163,7 +163,7 @@ export type PlaygroundState = {
  *  the rest are global params. */
 export type StatePatch = {
   panels?: PanelState[];
-  conversation_id?: string | null;
+  workspace_id?: string | null;
   panel_messages?: Record<string, ChatMessage[]>;
   /** {panel_id: thread system prompt} — mirrored alongside panel_messages. */
   panel_thread_system?: Record<string, string | null>;
@@ -230,51 +230,51 @@ export type ChatRequest = {
   /** The workspace this chat belongs to; echoed on the terminal events so a tab
    *  on a DIFFERENT workspace skips the external fold. Absent (CLI) ⇒ the server
    *  falls back to the bus's current stamp. See lib/bus-scope.ts. */
-  conversation_id?: string | null;
+  workspace_id?: string | null;
 };
 
-/** What `GET /api/conversations` returns per conversation (storage v2): the
+/** What `GET /api/workspaces` returns per workspace (storage v2): the
  *  sidebar/list projection — NO trees. The full body (trees included, blobs
- *  excluded) is fetched per-conversation via `GET /api/conversations/{id}`. */
-export type ConversationSummary = {
+ *  excluded) is fetched per-workspace via `GET /api/workspaces/{id}`. */
+export type WorkspaceSummary = {
   id: string;
   name: string;
   created_at: string;
   updated_at: string;
-  /** Per-conversation panel layout — present so "new conversation inherits the
+  /** Per-workspace panel layout — present so "new workspace inherits the
    *  current model set" works without fetching the body. Absent on legacy rows. */
   panels?: PanelLayout[];
 };
 
 /** A tree node's heavy out-of-tree payload (storage v2): per-node write-once
- *  blobs, fetched in batch via `POST /api/conversations/{id}/node-blobs` and
+ *  blobs, fetched in batch via `POST /api/workspaces/{id}/node-blobs` and
  *  cached in lib/node-blobs.svelte.ts. Light nodes carry `has_*` flags instead. */
 export type NodeBlobs = {
   token_logprobs?: TokenLogprob[];
   raw_meta?: string;
 };
 
-/** One saved, branchable conversation. The trees are OPAQUE to the backend; the
- *  browser owns them (lib/tree.ts). `system_prompt` travels with the conversation
- *  (each conversation = one experiment). */
-export type Conversation = {
+/** One saved, branchable workspace. The trees are OPAQUE to the backend; the
+ *  browser owns them (lib/tree.ts). `system_prompt` travels with the workspace
+ *  (each workspace = one experiment). */
+export type Workspace = {
   id: string;
   name: string;
   system_prompt: string | null;
-  /** Power state of the conversation's system prompt (false = kept but muted).
+  /** Power state of the workspace's system prompt (false = kept but muted).
    *  Absent on legacy bodies → readers derive from text presence. */
   system_enabled?: boolean | null;
   /** Per-panel branch trees, keyed by panel id ('primary','compare','p-2',…). */
   trees: Record<string, ConvTree>;
-  /** Legacy 2-panel shape — present only on un-migrated saved conversations; the
+  /** Legacy 2-panel shape — present only on un-migrated saved workspaces; the
    *  store's #loadTrees read-shim folds these into `trees`. Never written anymore. */
   tree?: ConvTree;
   compare_tree?: ConvTree | null;
-  /** Per-conversation panel LAYOUT: which models are shown in which panels. Absent
-   *  on legacy conversations (the store keeps the currently-shown panels on open). */
+  /** Per-workspace panel LAYOUT: which models are shown in which panels. Absent
+   *  on legacy workspaces (the store keeps the currently-shown panels on open). */
   panels?: PanelLayout[];
-  /** Per-conversation panel UI (opaque panel-id lists): folded panels, composer
-   *  send-targets, and the defaulting bookkeeping. Absent on legacy conversations
+  /** Per-workspace panel UI (opaque panel-id lists): folded panels, composer
+   *  send-targets, and the defaulting bookkeeping. Absent on legacy workspaces
    *  (the store treats missing as empty ⇒ every open panel defaults ON). */
   reduced_panels?: string[];
   send_targets?: string[];

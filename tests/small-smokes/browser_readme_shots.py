@@ -1,6 +1,6 @@
 """Capture the README feature-tour screenshots against a live tinkerscope.
 
-Non-destructive: creates its OWN conversation and never deletes others. The
+Non-destructive: creates its OWN workspace and never deletes others. The
 discovered Tinker example runs currently 404 ("Weights not found" — Tinker has
 GC'd the old sampler weights), so this drives **OpenRouter reference models**
 (which don't depend on Tinker weights) to get authentic sample cards / a
@@ -66,7 +66,7 @@ def main():
         page.goto(BASE, wait_until="load", timeout=20000)
         page.wait_for_function("document.body.innerText.includes('q_nk')", timeout=15000)
 
-        page.locator("button.conv-icon-btn[aria-label='New conversation']").click()
+        page.locator("button.ws-icon-btn[aria-label='New workspace']").click()
         page.wait_for_timeout(500)
 
         # ── SHOT: sidebar with the type-to-filter box ──

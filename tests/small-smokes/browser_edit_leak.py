@@ -1,12 +1,12 @@
 """Regression test for the edit-mode-leak bug (found by the chat-refactor review):
-edit state is local to ChatMessage, so reshaping the conversation while an editor
+edit state is local to ChatMessage, so reshaping the workspace while an editor
 is open could hand that instance a DIFFERENT node and let Save write the stale
 draft onto the wrong one.
 
 The fix is a $effect in ChatMessage that drops in-progress edit/raw state when the
 bound node changes (it tracks msg.nodeId since branching — identical-content
 siblings share role+content). This test opens an editor, then DELETES the root
-turn — which under tree semantics prunes the whole subtree (the conversation is a
+turn — which under tree semantics prunes the whole subtree (the workspace is a
 parent→child chain) — and asserts the editor auto-closed and the stale draft never
 landed. The subtler same-position-identical-content sibling case is covered by
 browser_branching.py.
@@ -39,14 +39,14 @@ STATE = {
 
 
 def main():
-    # Seed the U1/A1/U2/A2 thread as a conversation TREE and open it — the old
+    # Seed the U1/A1/U2/A2 thread as a workspace TREE and open it — the old
     # post_state({messages}) seeding drove the legacy state echo, which no longer
     # feeds the tree-based UI.
     cid = seed_thread(BASE, STATE["messages"], title="edit_leak")
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
         page = browser.new_page(viewport={"width": 1500, "height": 950})
-        page.goto(f"{BASE}/?c={cid}", wait_until="load", timeout=20000)
+        page.goto(f"{BASE}/?w={cid}", wait_until="load", timeout=20000)
         page.wait_for_function("document.body.innerText.includes('A1 assistant being edited')", timeout=15000)
 
         # Open the editor on A1 (the 2nd message) and type a draft — but DON'T save.

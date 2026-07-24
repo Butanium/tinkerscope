@@ -107,7 +107,7 @@ class ChatRequest(BaseModel):
     sampler_path: str | None = None
     # OpenRouter selection (alternative)
     openrouter_model: str | None = None
-    # conversation + params (numeric params tolerate None → server defaults, so a
+    # workspace + params (numeric params tolerate None → server defaults, so a
     # transiently-empty UI input can't 422 the request)
     messages: list[ChatMessage]
     system_prompt: str | None = None
@@ -154,11 +154,11 @@ class ChatRequest(BaseModel):
     logprobs: bool = True
     # live-drive routing
     panel: str = "primary"                  # "primary" | "compare"
-    # The workspace (conversation) this chat belongs to. The browser always sends
+    # The workspace this chat belongs to. The browser always sends
     # its own; the CLI omits it and inherits the bus's current one. Stamped onto the
     # chat_done / chat_error broadcasts so a browser tab on ANOTHER workspace skips
     # the external fold instead of grafting a foreign reply onto a reused panel id.
-    conversation_id: str | None = None
+    workspace_id: str | None = None
     broadcast: bool = True                   # mirror samples to the state bus
     # Detached (fire-and-forget) mode. The browser sets this so its POST returns
     # IMMEDIATELY instead of holding the SSE stream open for the whole generation:
@@ -571,7 +571,7 @@ async def chat(req: ChatRequest):
             # the bus is on". Stamped into the bus with the rest of the chat's
             # selection so the bus never claims one workspace while showing another
             # — see web/src/lib/bus-scope.ts.
-            **({"conversation_id": req.conversation_id} if req.conversation_id else {}),
+            **({"workspace_id": req.workspace_id} if req.workspace_id else {}),
             # Panel-routed: the RESOLVED thread part, so a CLI new-thread probe
             # updates the panel's thread mirror and an inheriting send is a no-op
             # write-back (thread state, not a sampling param — both scopes).
@@ -600,7 +600,7 @@ async def chat(req: ChatRequest):
         # different workspace by the time this chat ends. None when the caller didn't
         # say and no workspace is open (CLI-only / legacy) — the browser folds those
         # (lockstep). Read synchronously after chat_begin — no await, so it can't drift.
-        conv_id = req.conversation_id or BUS.state.conversation_id
+        conv_id = req.workspace_id or BUS.state.workspace_id
 
         # ── stream samples, with EXACTLY ONE terminal event on every exit path ──
         # Three ways this chat can end — done / producer error / cancelled (client
@@ -650,10 +650,10 @@ async def chat(req: ChatRequest):
             async def _fire() -> None:
                 await BUS.chat_end(event, **end_patch)
                 if req.broadcast:
-                    # conversation_id scopes the browser's external fold (#onExternalDone):
+                    # workspace_id scopes the browser's external fold (#onExternalDone):
                     # every terminal flavour — done / error / cancelled — carries the stamp.
                     payload = {"chat_id": chat_id, "panel": req.panel, "client_token": req.client_token,
-                               "conversation_id": conv_id,
+                               "workspace_id": conv_id,
                                # the resolved thread part — the browser's foreign-fold
                                # reconcile stamps it onto the thread's root node
                                "thread_system_prompt": thread_system}
@@ -705,7 +705,7 @@ async def chat(req: ChatRequest):
                 await BUS.broadcast(
                     "chat_start",
                     {"chat_id": chat_id, "panel": req.panel, "n": total, "label": label,
-                     "client_token": req.client_token, "conversation_id": conv_id,
+                     "client_token": req.client_token, "workspace_id": conv_id,
                      "thread_system_prompt": thread_system},
                 )
             while True:

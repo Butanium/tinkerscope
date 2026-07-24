@@ -1,19 +1,19 @@
-"""System-prompt × conversation-switch smoke — fully deterministic (no sampling).
+"""System-prompt × workspace-switch smoke — fully deterministic (no sampling).
 
 The leak this guards (found reviewing the 2665af5 chip move; the binding itself
 dates to the initial commit): type into the system-prompt textarea, then switch
-conversations INSIDE patchState's 200ms debounce window. Pre-fix, the timer
-fired AFTER the new conversation's setState, so conversation A's half-typed
+workspaces INSIDE patchState's 200ms debounce window. Pre-fix, the timer
+fired AFTER the new workspace's setState, so workspace A's half-typed
 prompt landed on B's live state, B's next save PERSISTED it, and A never got
-the edit — silent cross-conversation contamination of an experiment-defining
+the edit — silent cross-workspace contamination of an experiment-defining
 parameter. The fix: flushPatchState (response assigned into live.state) is
 called via the convo store's #preSwitch barrier ahead of every transition.
 
-Seeds two conversations, opens A, opens the system chip, types, and immediately
+Seeds two workspaces, opens A, opens the system chip, types, and immediately
 switches to B via the dropdown (well inside the debounce). Asserts:
 
-  - conversation A PERSISTED the typed prompt (the edit stayed home)
-  - conversation B's persisted + live system_prompt are untouched (None)
+  - workspace A PERSISTED the typed prompt (the edit stayed home)
+  - workspace B's persisted + live system_prompt are untouched (None)
   - the visible textarea on B does not show A's text
   - no console errors
 
@@ -45,7 +45,7 @@ def api(method: str, path: str, body: dict | None = None):
 
 
 def seed(name: str) -> str:
-    return api("POST", "/api/conversations", {
+    return api("POST", "/api/workspaces", {
         "name": name, "system_prompt": None,
         "trees": {"primary": {"nodes": {"u1": {"id": "u1", "role": "user",
                                                "content": f"{name} turn",
@@ -66,10 +66,10 @@ def main() -> None:
             page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
             page.on("pageerror", lambda e: errors.append(str(e)))
 
-            page.goto(f"{BASE}/?c={a}", wait_until="load", timeout=20000)
-            page.wait_for_selector(".conv-select", timeout=15000)
+            page.goto(f"{BASE}/?w={a}", wait_until="load", timeout=20000)
+            page.wait_for_selector(".ws-select", timeout=15000)
             page.wait_for_function(
-                f"document.querySelector('.conv-select')?.value === '{a}'", timeout=10000
+                f"document.querySelector('.ws-select')?.value === '{a}'", timeout=10000
             )
 
             # Type into the system textarea, then switch to B IMMEDIATELY — well
@@ -77,20 +77,20 @@ def main() -> None:
             page.click("[data-testid=system-fold]")
             page.wait_for_selector(SYS_TA, timeout=5000)
             page.fill(SYS_TA, TYPED)
-            page.select_option(".conv-select", value=b)
+            page.select_option(".ws-select", value=b)
 
             page.wait_for_function(
-                f"document.querySelector('.conv-select')?.value === '{b}'", timeout=10000
+                f"document.querySelector('.ws-select')?.value === '{b}'", timeout=10000
             )
             time.sleep(1.2)  # let the (now pre-switch-flushed) patch + debounced saves land
 
             live_sp = api("GET", "/api/state").get("system_prompt")
-            convs = {cid: api("GET", f"/api/conversations/{cid}") for cid in (a, b)}  # v2: bodies per id
+            convs = {cid: api("GET", f"/api/workspaces/{cid}") for cid in (a, b)}  # v2: bodies per id
             ta = page.input_value(SYS_TA) if page.locator(SYS_TA).count() else ""
 
-            checks.append((f"conversation A kept the edit ({convs[a].get('system_prompt')!r})",
+            checks.append((f"workspace A kept the edit ({convs[a].get('system_prompt')!r})",
                            convs[a].get("system_prompt") == TYPED))
-            checks.append((f"conversation B persisted prompt untouched ({convs[b].get('system_prompt')!r})",
+            checks.append((f"workspace B persisted prompt untouched ({convs[b].get('system_prompt')!r})",
                            convs[b].get("system_prompt") in (None, "")))
             checks.append((f"live state on B untouched ({live_sp!r})",
                            live_sp in (None, "")))
@@ -100,8 +100,8 @@ def main() -> None:
                 print("console errors:", errors[:5])
             browser.close()
     finally:
-        api("DELETE", f"/api/conversations/{a}")
-        api("DELETE", f"/api/conversations/{b}")
+        api("DELETE", f"/api/workspaces/{a}")
+        api("DELETE", f"/api/workspaces/{b}")
 
     failed = [name for name, ok in checks if not ok]
     for name, ok in checks:

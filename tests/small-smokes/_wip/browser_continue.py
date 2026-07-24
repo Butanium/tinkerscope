@@ -32,10 +32,10 @@ def main() -> None:
         page.wait_for_function("document.body.innerText.includes('ed_sheeran')", timeout=15000)
         page.wait_for_selector("select.model-slot-select", timeout=15000)
 
-        # Clean slate: a fresh conversation (keeps the current models) so the thread
+        # Clean slate: a fresh workspace (keeps the current models) so the thread
         # holds exactly one user+assistant turn — no leftover/restored siblings to
         # make the ‹k/N› assertion ambiguous.
-        page.click('button[aria-label="New conversation"]')
+        page.click('button[aria-label="New workspace"]')
         page.wait_for_timeout(400)
 
         # Select the free OpenRouter model FIRST — the composer is disabled until a

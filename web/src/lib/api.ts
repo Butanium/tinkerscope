@@ -10,8 +10,8 @@ import type {
   PlaygroundState,
   StatePatch,
   ChatRequest,
-  Conversation,
-  ConversationSummary,
+  Workspace,
+  WorkspaceSummary,
   NodeBlobs,
   HighlightRule,
   PanelLayout
@@ -87,20 +87,20 @@ export const api = {
     j<Record<string, unknown>>('/api/pins', { method: 'POST', body: JSON.stringify(entry) }),
   deletePin: (id: string) =>
     j<{ status: string }>(`/api/pins/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  // conversations (branchable trees; server adds id/created_at/updated_at).
-  // Storage v2: the LIST is summaries only; a conversation's light body (trees
+  // workspaces (branchable trees; server adds id/created_at/updated_at).
+  // Storage v2: the LIST is summaries only; a workspace's light body (trees
   // incl., per-node blobs excl.) is fetched per-id; heavy per-node blobs are
   // batch-fetched; PUT /tree upserts only the dirty panels; PATCH carries any
   // layout-only change with zero tree bytes. See docs/STORAGE_V2.md §2.4.
-  listConversations: () => j<ConversationSummary[]>('/api/conversations'),
-  getConversation: (id: string) =>
-    j<Conversation>(`/api/conversations/${encodeURIComponent(id)}`),
+  listWorkspaces: () => j<WorkspaceSummary[]>('/api/workspaces'),
+  getWorkspace: (id: string) =>
+    j<Workspace>(`/api/workspaces/${encodeURIComponent(id)}`),
   fetchNodeBlobs: (id: string, nodes: string[]) =>
-    j<Record<string, NodeBlobs>>(`/api/conversations/${encodeURIComponent(id)}/node-blobs`, {
+    j<Record<string, NodeBlobs>>(`/api/workspaces/${encodeURIComponent(id)}/node-blobs`, {
       method: 'POST',
       body: JSON.stringify({ nodes })
     }),
-  createConversation: (entry: {
+  createWorkspace: (entry: {
     id?: string;
     name?: string;
     system_prompt?: string | null;
@@ -110,22 +110,22 @@ export const api = {
     reduced_panels?: string[];
     send_targets?: string[];
     seen_panels?: string[];
-  }) => j<Conversation>('/api/conversations', { method: 'POST', body: JSON.stringify(entry) }),
-  patchConversation: (id: string, patch: Partial<ConvFields> & { name?: string }) =>
-    j<ConversationSummary>(`/api/conversations/${encodeURIComponent(id)}`, {
+  }) => j<Workspace>('/api/workspaces', { method: 'POST', body: JSON.stringify(entry) }),
+  patchWorkspace: (id: string, patch: Partial<ConvFields> & { name?: string }) =>
+    j<WorkspaceSummary>(`/api/workspaces/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify(patch)
     }),
-  saveConversationTree: (
+  saveWorkspaceTree: (
     id: string,
     body: ConvFields & { trees: Record<string, ConvTree>; dropped_trees: string[] }
   ) =>
-    j<{ status: string; id: string }>(`/api/conversations/${encodeURIComponent(id)}/tree`, {
+    j<{ status: string; id: string }>(`/api/workspaces/${encodeURIComponent(id)}/tree`, {
       method: 'PUT',
       body: JSON.stringify(body)
     }),
-  deleteConversation: (id: string) =>
-    j<{ status: string }>(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  deleteWorkspace: (id: string) =>
+    j<{ status: string }>(`/api/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   // chat (returns the raw Response so the caller can read the SSE stream directly)
   chat: (req: ChatRequest, signal?: AbortSignal) =>
     fetch('/api/chat', {

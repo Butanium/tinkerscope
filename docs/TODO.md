@@ -74,29 +74,29 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
   end-to-end against a real checkpoint (edit/delete/pick/regenerate all persist to
   `/api/state`).
 
-- [x] **Conversation branching (tree) — SHIPPED 2026-06-22.** Full Claude.ai-style
+- [x] **Workspace branching (tree) — SHIPPED 2026-06-22.** Full Claude.ai-style
   branching: nothing is destroyed; regenerate / edit / n-samples become sibling
   branches you cycle through with ‹ k/N ›. **Subsumed the just-built pick-a-sample**
-  (N samples → N cycle-able branches) **and the "persist named conversations" item.**
+  (N samples → N cycle-able branches) **and the "persist named workspaces" item.**
   - Per-panel **tree** in a SEPARATE per-scan-root store (NOT in the SSE snapshot —
     diverged from the original handoff to respect `state.py`'s no-bloat principle).
     `messages`/`compare_messages` stay the linear ACTIVE PATH (sampler + CLI
     contract untouched; **CLI needed zero changes**).
   - n>1 → N sibling branches; regenerate on user+assistant; edit-user forks+regens;
-    **shift+click edit** forks + copies the whole downstream conversation (no gen);
+    **shift+click edit** forks + copies the whole downstream workspace (no gen);
     edit-assistant = manual branch; **delete prunes the subtree**.
-  - Named conversations via a **dropdown** (create/switch/rename/delete), each
+  - Named workspaces via a **dropdown** (create/switch/rename/delete), each
     carrying its own `system_prompt`.
   - Files: `web/src/lib/tree.ts` (pure, 27 unit tests via `node tree.test.ts`),
-    `web/src/lib/conversations.svelte.ts` (store: tree ownership, fold, persistence),
-    `api/routes/conversations.py` (flock'd CRUD + corrupt-file backup),
+    `web/src/lib/workspaces.svelte.ts` (store: tree ownership, fold, persistence),
+    `api/routes/workspaces.py` (flock'd CRUD + corrupt-file backup),
     `+page.svelte` / `ChatMessage.svelte` (render + ops), `chat.py` `client_token`.
   - Design + contract: `BRANCHING_DESIGN.md`. Verified: 33 pytest, 27 tree tests,
     `tests/small-smokes/browser_branching.py` (token-free fork/cycle/delete/edit-leak)
     + `branching_real_sample.py` (real n=1 fold / regen / n=3 multi-fold).
-  - **Known v1 limitations:** two tabs editing the SAME conversation = last-writer-wins
+  - **Known v1 limitations:** two tabs editing the SAME workspace = last-writer-wins
     (flock prevents file corruption + sibling clobber, not same-id logical merge);
-    per-conversation mode/model-selection not restored on switch (only trees +
+    per-workspace mode/model-selection not restored on switch (only trees +
     system_prompt); CLI external turns fold only sample 0 + lack reasoning.
 
 ## Next
@@ -126,15 +126,15 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
   own, params stay global. `docs/API_CONTRACT.md` §"Workspace scoping on the state
   bus"; smoke `browser_two_tab_workspace.py` (verified to fail pre-fix).
 - [x] **Storage v2 — SHIPPED (2026-07-13).** The browser-OOM-on-big-workspace fix:
-  per-conversation files + write-once per-node blobs (token_logprobs/raw_meta,
+  per-workspace files + write-once per-node blobs (token_logprobs/raw_meta,
   89.8% of the bytes), summaries-only list + fetch-on-open, dirty-panel partial
   saves, zero-tree-bytes PATCH for layout changes, `$state.raw` trees, lazy
   node-blob cache. Design + as-built: `docs/STORAGE_V2.md`, `docs/API_CONTRACT.md`.
-  Real-store result: list 419MB → 13KB; the 115MB conversation opens in ~0.6s,
+  Real-store result: list 419MB → 13KB; the 115MB workspace opens in ~0.6s,
   add-model 0.08–0.24s (was: tab OOM). Migration ran 2026-07-13 (17 convs, 1190
   blobs, byte-faithful-verified); `conversations.json.legacy` + a checksummed
   `.bak-20260713` remain in the instance dir until Clément clears them.
-  - Also fixed en route (pre-existing): layout-less conversation open grafting
+  - Also fixed en route (pre-existing): layout-less workspace open grafting
     foreign panel echoes into the opened conv's trees (durable pollution;
     regression smoke `browser_legacy_echo_graft.py` — read its docstring before
     editing, the repro has a false-green trap).
@@ -153,7 +153,7 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
   - Foreign-fold reconciled turns get LOCAL node ids → can't lazy-fetch the
     owner's blobs even after its PUT lands; heals on reload/switch-back (same
     visible behavior as v1's light echo).
-  - Opening a bare/legacy conversation persists panel-UI defaults once → bumps
+  - Opening a bare/legacy workspace persists panel-UI defaults once → bumps
     `updated_at` (recency reorder on first open; v1 did it too).
   - Smoke-suite hygiene: the browser smokes want two environments (fixtures root
     vs fresh state — real highlight rules perturb `chart_rules`' oracle) and must
@@ -191,8 +191,8 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
   loose-sampler / base-model-n==1 get response-prefill best-effort (no region
   parse). Smoke: `tests/small-smokes/prefill_thinking_check.py`. Persists across
   sends so you can draw N samples off one prefill.
-- [x] **Persist named conversations to disk.** ✅ Subsumed by conversation branching
-  (above): `/api/conversations` store + the sidebar dropdown. (We did NOT extend
+- [x] **Persist named workspaces to disk.** ✅ Subsumed by workspace branching
+  (above): `/api/workspaces` store + the sidebar dropdown. (We did NOT extend
   PlaygroundState to carry the trees — they live in their own store to keep the SSE
   snapshot small; only the active path stays in `messages`.)
 - [x] **Distribution chart overhaul — SHIPPED 2026-07-08.** The chart's default
@@ -219,8 +219,8 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
 
 - [ ] **Generate view + "send to chat".** A scratchpad distinct from the chat: free
   prompt (text or messages builder) → sample across selected models side-by-side →
-  promote a chosen result into a named conversation. (Dashboard's Multi-Generation
-  tab + "Continue to Chat".) This is the "don't click New Conversation every time"
+  promote a chosen result into a named workspace. (Dashboard's Multi-Generation
+  tab + "Continue to Chat".) This is the "don't click New Workspace every time"
   UX the requester wanted.
 - [ ] **Auto gen-logging to JSONL.** Every generation appended to a per-scan-root
   `generations.jsonl` (one row/sample: timestamp, model, sampler_path, params,
@@ -239,7 +239,7 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
   sharpen docs + maybe a `tinkpg pack` that errors helpfully / aliases; (b) merge into one
   `tinkerscope <subcmd>` (`serve`/`chat`/`pack`/…) with `tinkpg` kept as an alias; (c) something
   else. Real tradeoff (a running-server HTTP client vs server-lifecycle/offline ops are different
-  modes) — Clément's call on whether unification is worth the churn. A conversation, not a task.
+  modes) — Clément's call on whether unification is worth the churn. A workspace, not a task.
 
 - [ ] **Init the live state bus from `prefs.json` `last_session` on startup** (raised 2026-07-23).
   Today the bus starts at `PlaygroundState` defaults and only gets the saved panels/params when a
@@ -312,8 +312,8 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
 - [ ] **Wire/disk rename: conversations → workspaces (staged).** Handoff with
   the trap inventory + staging detail: `docs/HANDOFF_WORKSPACE_RENAME.md`. The vocabulary
   rename shipped 2026-07-17 (UI/CLI/docs say workspace; threads = root
-  siblings); the wire (`/api/conversations`, `conversation_id`, `?c=`) and the
-  on-disk per-conversation files still carry the legacy name. Magic-wand answer
+  siblings); the wire (`/api/workspaces`, `workspace_id`, `?c=`) and the
+  on-disk per-workspace files still carry the legacy name. Magic-wand answer
   is YES — full consistency is worth it big-picture (legacy naming is a
   permanent reader tax) — but it's a persistence migration, so do it as its own
   deliberate pass at a quiet moment: alias endpoints (`/api/workspaces` primary,
@@ -339,7 +339,7 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
   the setState response — `live.state` learns only via the SSE echo. If that echo
   lags past the save debounce, the OLD layout is persisted once (self-heals on the
   next save). Traced during the 2026-07-09 drag-reorder review; same family as the
-  system-prompt × conversation-switch contamination (whose fix — assign the
+  system-prompt × workspace-switch contamination (whose fix — assign the
   setState response into `live.state` + flush pending patches before a switch —
   would close this too).
 - [x] **Fold aborted-chat partials into the committed tree (deterministically).**
@@ -371,7 +371,7 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
 - [ ] **Saved prompt library** with folders (reusable probe prompts; dashboard's
   `multi_prompt_tab` + `folder_manager_ui`). tinkerscope only has localStorage prompt
   history today.
-- [ ] **Markdown export** of a conversation / result set ("Save all").
+- [ ] **Markdown export** of a workspace / result set ("Save all").
 - [ ] **Multi-prompt batch grid** (N prompts × M models). Different use case
   (systematic eval) — may belong in `inspect_ai` land instead of the playground.
 - [ ] **Reasoning/raw on committed turns.** Committed transcript messages are

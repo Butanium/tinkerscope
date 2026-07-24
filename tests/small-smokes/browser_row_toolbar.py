@@ -1,7 +1,7 @@
 """Browser smoke for the row toolbar — adaptive fold + unfold-below (OverflowRow).
 
 100% TOKEN-FREE: seeds a 2-panel workspace with ready-made branch trees via
-POST /api/conversations, opens it with ?c=<id> at a viewport narrow enough
+POST /api/workspaces, opens it with ?w=<id> at a viewport narrow enough
 that the columns sit at their 280px min-width, then checks the fold behavior:
 
   1. a narrow assistant row (10 actions) FOLDS: the tail buttons wrap to
@@ -98,13 +98,13 @@ OVERFLOW_PROBE = """() => {
 
 
 def main():
-    # A REAL run id for both panels: the conversation-open self-heal drops panels
+    # A REAL run id for both panels: the workspace-open self-heal drops panels
     # whose run_id is null (the phantom-panel fix), which would silently collapse
     # the seeded compare panel — and with it the send-to picker under test.
     runs = _get("/api/models")
     assert runs, "isolated instance discovered no runs — seed needs a scan root with runs"
     rid = runs[0]["id"]
-    conv = _post("/api/conversations", {
+    conv = _post("/api/workspaces", {
         "name": "row toolbar smoke",
         "trees": {"primary": seed_tree("P"), "compare": seed_tree("C")},
         "panels": [
@@ -125,7 +125,7 @@ def main():
         page.add_init_script(
             "Object.defineProperty(navigator, 'clipboard', {value: {writeText: (t) => "
             "{ window.__copied = t; return Promise.resolve(); }}, configurable: true});")
-        page.goto(f"{BASE}/?c={conv['id']}", wait_until="load", timeout=20000)
+        page.goto(f"{BASE}/?w={conv['id']}", wait_until="load", timeout=20000)
         page.wait_for_function("document.body.innerText.includes('ANSWER-3-A')", timeout=15000)
 
         panel = page.locator(".chat-column").first
@@ -200,7 +200,7 @@ def main():
         browser.close()
 
     urllib.request.urlopen(
-        urllib.request.Request(f"{BASE}/api/conversations/{conv['id']}", method="DELETE"),
+        urllib.request.Request(f"{BASE}/api/workspaces/{conv['id']}", method="DELETE"),
         timeout=10).read()
 
     print("browser_row_toolbar: OK — adaptive fold, unfold-below buttons, copy node id, send-to popover, wide=no toggle")

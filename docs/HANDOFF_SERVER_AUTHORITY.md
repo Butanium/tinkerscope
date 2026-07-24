@@ -16,7 +16,7 @@ world; they get rewritten per phase as this lands (don't pre-edit them).
 
 ## 0. TL;DR
 
-Today the **browser is the only writer** of conversation trees: the server
+Today the **browser is the only writer** of workspace trees: the server
 stores bytes but never authors them, chats fired by `tinkpg` are persisted only
 if a browser tab happens to be open to fold them, and that fold reads a
 deliberately-stripped text echo — which is why CLI turns lose `token_logprobs`,
@@ -54,18 +54,18 @@ fold time) would be throwaway work; the disease is where authorship lives.
 
 Authorship & persistence:
 
-- The server-side store (`api/conversation_store.py`) is a dumb file store:
+- The server-side store (`api/workspace_store.py`) is a dumb file store:
   light per-workspace JSON + write-once per-node blobs
-  (`conversation_store.py:20` — blobs never rewritten, deleted only with the
-  whole conversation). Located per instance under `STATE_HOME/<instance>/`
+  (`workspace_store.py:20` — blobs never rewritten, deleted only with the
+  whole workspace). Located per instance under `STATE_HOME/<instance>/`
   (`paths.py:11`, `settings.py:37-41`).
-- **Nothing server-side ever writes a conversation on its own initiative.**
+- **Nothing server-side ever writes a workspace on its own initiative.**
   `routes/chat.py` streams samples onto the bus and updates the in-memory
   panel echo; `api/state.py` has zero disk writes (snapshots only fan out over
-  SSE). The only conversation-writing client is the browser
-  (`conversations.svelte.ts` + `save-plan.ts`: dirty-panel partial-upsert PUT /
+  SSE). The only workspace-writing client is the browser
+  (`workspaces.svelte.ts` + `save-plan.ts`: dirty-panel partial-upsert PUT /
   layout-only PATCH). `tinkpg` only reads (`cli.py` — no POST/PUT/PATCH of
-  `/api/conversations` except the read-only `node-blobs` fetch, `cli.py:2024`).
+  `/api/workspaces` except the read-only `node-blobs` fetch, `cli.py:2024`).
 - Browser saves ship **whole per-panel trees** (`save-plan.ts:44` `planSave`).
 
 Folding (who turns a finished chat into tree nodes):
@@ -74,7 +74,7 @@ Folding (who turns a finished chat into tree nodes):
   samples from the bus bucket on `chat_done` (`tryFoldOwnDone`,
   `chat.svelte.ts:129`), heavy fields seeded into the blob cache
   (`chat.svelte.ts:149`).
-- CLI / foreign chats: `#onExternalDone` (`conversations.svelte.ts:817`)
+- CLI / foreign chats: `#onExternalDone` (`workspaces.svelte.ts:817`)
   reconciles from the panel transcript **echo** — which
   `state.py:115` (`_HEAVY_MSG_FIELDS`) strips of `token_logprobs`/`raw_meta`
   on ingest, and which carries only the **representative** sample
@@ -82,10 +82,10 @@ Folding (who turns a finished chat into tree nodes):
   and nothing at all if the server restarts before a browser folds
   (the echo lives only in process memory).
 - Ownership/scoping is a stack of heuristics this design retires: client
-  tokens (`chat.py:165`), the `conversation_id` stamp captured at chat start
+  tokens (`chat.py:165`), the `workspace_id` stamp captured at chat start
   (`chat.py:560-567`), the deliberate null-stamp fold-anyway hole and the
   `#afterLoad`-is-ungated asymmetry (`BRANCHING_DESIGN.md` §0.3b), content-
-  matching reconcile on reconnect (`conversations.svelte.ts:865`).
+  matching reconcile on reconnect (`workspaces.svelte.ts:865`).
 
 Tree mechanics that carry over unchanged:
 
@@ -145,8 +145,8 @@ Tree mechanics that carry over unchanged:
 
 ### 4.1 Op vocabulary
 
-`POST /api/conversations/{id}/ops` with `{ops: [...]}` →
-`{rev, results: [...]}`; applied atomically under `locked("conversations")`,
+`POST /api/workspaces/{id}/ops` with `{ops: [...]}` →
+`{rev, results: [...]}`; applied atomically under `locked("workspaces")`,
 `rev` bumped once per accepted batch, then broadcast as one bus event
 (`ops {workspace, rev, ops}` — light node bodies only, never heavy fields).
 No client/batch identity in the protocol: §4.2's always-apply rule makes
@@ -162,9 +162,9 @@ below. Ops are applied by their own semantics, full stop.
 | `add_nodes` | `{panel, nodes: [{id, role, content, reasoning?, raw_text?, system_prompt?, parent}], select}` | Append a node or chain (edit-fork-copy mints a chain; a pre-fire user turn is one of these — §4.3). Ids client-minted (`nid()` format) or server-minted (folds). **Idempotent by id**: an existing id is a no-op (server asserts content equality — a mismatch is a client bug, rejected loudly). `parent` missing/deleted → op rejected (see §5). `select` = select the (last) added node under its parent. Root adds stamp `system_prompt` (thread identity). |
 | `select` | `{panel, parent_key, child_id}` | `selected[parent] = child` — last-writer-wins; unknown child → no-op (the mirror's clamp-to-last-child rendering makes this harmless). Covers cycle/select/thread-switch. |
 | `delete` | `{panel, node_id}` | Prune node + subtree (+ `selected` cleanup, same semantics as `deleteSubtree`). Idempotent: missing id → no-op. Rejected if the subtree contains the parent of an in-flight chat (§5). |
-| `copy_subtree` | `{from_panel, node_id, to_panel}` | Server-side deep copy **keeping ids** — this is `duplicateTo` (the add-panel clone, `conversations.svelte.ts:212`) and ONLY that: keep-ids is what preserves cross-panel blob sharing (`conversation_store.py:26-29`). Idempotent (same ids). ⚠️ NOT send-branch-to-panel — that op re-mints (next row). |
+| `copy_subtree` | `{from_panel, node_id, to_panel}` | Server-side deep copy **keeping ids** — this is `duplicateTo` (the add-panel clone, `workspaces.svelte.ts:212`) and ONLY that: keep-ids is what preserves cross-panel blob sharing (`workspace_store.py:26-29`). Idempotent (same ids). ⚠️ NOT send-branch-to-panel — that op re-mints (next row). |
 | `replace_tree` | `{panel, tree \| null}` | Wholesale panel-tree replacement (LWW per panel); `null` drops the panel's tree (today's `dropped_trees`). Covers the three current wholesale mutations: **send-branch-to-panel** (`branch-ops.svelte.ts:350` — builds a FRESH-id linear chain from the source ancestry via `treeFromMessages` and replaces the dest; it drops heavy fields today and v1 keeps those semantics — a later keep-ids variant could preserve blobs, noted not locked), **fresh/reset tree** (new-conv / reset-thread), and **panel removal**. Payloads are small in practice (empty trees or one linear chain — the one genuinely big clone is `copy_subtree`). |
-| `set_meta` | any of `{name, system_prompt, system_enabled, panels, reduced_panels, send_targets, seen_panels}` | Field-wise last-writer-wins. The existing PATCH endpoint stays as sugar for this op (same locked apply, same rev bump, same broadcast) so old clients keep working. `panels` becoming server-authoritative must preserve the **phantom-panel self-heal** (dropping run_id=null panels, today applied browser-side on load, `conversations.svelte.ts:705-717`) — relocate it server-side (normalize on set/read) or old convs with baked-in phantoms resurrect them. |
+| `set_meta` | any of `{name, system_prompt, system_enabled, panels, reduced_panels, send_targets, seen_panels}` | Field-wise last-writer-wins. The existing PATCH endpoint stays as sugar for this op (same locked apply, same rev bump, same broadcast) so old clients keep working. `panels` becoming server-authoritative must preserve the **phantom-panel self-heal** (dropping run_id=null panels, today applied browser-side on load, `workspaces.svelte.ts:705-717`) — relocate it server-side (normalize on set/read) or old convs with baked-in phantoms resurrect them. |
 
 Deliberately **not** ops: in-place content edit (doesn't exist today; keeping
 content immutable is what makes the whole table idempotent), blob writes
@@ -188,7 +188,7 @@ in the P1 PR description so none silently keeps the old save path.
   echoes included** — through the same `tree.ts` functions; track `rev` and on
   any gap (`event.rev !== local + 1`) or op rejection, refetch the light body
   and reset the mirror. Refetch is the only non-incremental path and is rare,
-  cheap (light tree), and already the shape of today's conversation-open.
+  cheap (light tree), and already the shape of today's workspace-open.
 - **Why always-apply, not skip-own** (review finding #1 — the original draft
   had skip-own-by-batch-id and it was WRONG): with two contended LWW writers,
   skip-own diverges. Trace: tabs C1/C2 both re-select under parent U (server
@@ -228,7 +228,7 @@ in the P1 PR description so none silently keeps the old save path.
   deleted parent, in-flight delete) → refetch, never retry. Without the retry
   rule, fire-and-forget silently loses the mutation — a durability
   *regression* vs today's save path, which re-merges drained dirt on failure
-  so the next save retries it (`conversations.svelte.ts:450-461`).
+  so the next save retries it (`workspaces.svelte.ts:450-461`).
 - **Cross-workspace sequencing rules** (review, 2nd pass — the always-apply
   math is workspace-safe; these order-of-checks rules are where a naive
   implementation goes wrong):
@@ -241,7 +241,7 @@ in the P1 PR description so none silently keeps the old save path.
      switch** — never carry one workspace's counter into another.
   3. **A browser tab always sends explicit `workspace` on `/api/chat` and
      scopes reconnect-refetch to its OWN `activeId`** — never through the
-     process-wide `BUS.state.conversation_id`, which flips to whichever tab
+     process-wide `BUS.state.workspace_id`, which flips to whichever tab
      pushed last (that shared field remains only the CLI's implicit-target
      fallback, §4.4).
 - Open sequence: GET body (returns `rev = R`) → subsequent `ops` events apply
@@ -302,12 +302,12 @@ the pre-start-error hole it replaces.
 ### 4.4 Workspace addressing (headless CLI)
 
 - Resolution order for a chat's home workspace: explicit `workspace` on the
-  request → else the open conversation (`BUS.state.conversation_id`) → else
+  request → else the open workspace (`BUS.state.workspace_id`) → else
   **400** — since the user turn is an op (§4.3), a chat without a resolvable
   workspace has nowhere to hang and the server should say so, not guess.
   Auto-create is the *CLI's* job (it's UX, and the CLI is a writer now): with
-  neither `--workspace` nor an open conversation, `tinkpg` POSTs
-  `/api/conversations` (name derived from the first user message), prints the
+  neither `--workspace` nor an open workspace, `tinkpg` POSTs
+  `/api/workspaces` (name derived from the first user message), prints the
   new id prominently, then proceeds ops → chat. Every chat has a home; the
   null-stamp hole and the "pure lockstep, nothing persisted" mode retire.
   Escape hatch if we ever miss it: a `--no-persist` flag can bring ephemeral
@@ -331,14 +331,14 @@ the pre-start-error hole it replaces.
 
 Retires (per deprecation protocol — moved, not deleted, where it's code):
 
-- `save-plan.ts` + its dirt accumulation in `conversations.svelte.ts`
+- `save-plan.ts` + its dirt accumulation in `workspaces.svelte.ts`
   (+ tests → `deprecated/`), the PUT `/tree` save path (endpoint kept one
   transition window for stale tabs, then removed — this box has one user;
   same old-tab trap `HANDOFF_WORKSPACE_RENAME.md` documents),
   post-save heavy-field lightening (mirror nodes are light from birth; heavy
   data only ever lives in the bucket + `nodeBlobs` + server blobs).
 - `#onExternalDone`, `#afterLoad`'s reconcile loop, `reconcileOnReconnect`
-  content matching, the `conversation_id` chat stamp + null-stamp hole,
+  content matching, the `workspace_id` chat stamp + null-stamp hole,
   `ownTokens`-as-fold-gate (a busy-latch role may remain).
 - The panel `messages` echo + `_HEAVY_MSG_FIELDS` strip + `_light_msgs`
   (`state.py`) — after P3, `PanelState` holds selection + thread-system
@@ -354,7 +354,7 @@ files, highlights/prefs stores, discovery/sampling.
 ### 4.6 Server tree model
 
 New `api/tree_ops.py`: the `ConvTree` shape + the §4.1 ops in Python. Not
-greenfield: `cli.py:206` already carries the READ half ("Conversation tree
+greenfield: `cli.py:206` already carries the READ half ("Workspace tree
 helpers (mirror web/src/lib/tree.ts)" — `_selected_child`/`_thread_path`/
 `_root_of`/ROOT); `tree_ops.py` absorbs those (cli imports from it) or we get
 two drifting Python tree impls. Its "the branch tree is OPAQUE to the server"
@@ -365,7 +365,7 @@ asserted by both `tree_ops` pytest and a `tree.ts` node test. Honest caveat
 (review): `tree.test.ts` is assertion-style, NOT declarative vectors — the
 vectors get *recorded* by a small node script instrumenting `tree.ts` (or
 hand-authored), which is cheap but not free; decision #6 previously oversold
-this. Applies through `conversation_store` under the existing lock; bodies
+this. Applies through `workspace_store` under the existing lock; bodies
 memoized as today (`_bodies` eviction on write already exists).
 
 ## 5. The save race, analyzed (Clément's intuition, confirmed)
@@ -475,7 +475,7 @@ edges (§4.5's old-tab window), not the core logic.
 ## 9. Open questions for Clément
 
 1. **Headless default**: auto-create a workspace for a `tinkpg send` with no
-   open conversation and no `--workspace` (proposed — never silently
+   open workspace and no `--workspace` (proposed — never silently
    unpersisted), or hard-error asking for `--workspace`?
 2. **All-n folding for CLI fires**: CLI turns will now show ‹k/N› sibling
    cyclers in the browser like browser fires do. Intended and wanted, yes?

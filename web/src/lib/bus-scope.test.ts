@@ -33,7 +33,7 @@ function panel(id: string, run: string | null): PanelState {
 function state(convId: string | null, panels: PanelState[], over: Partial<PlaygroundState> = {}): PlaygroundState {
   return {
     panels,
-    conversation_id: convId,
+    workspace_id: convId,
     system_prompt: null,
     system_enabled: null,
     temperature: 1.0,
@@ -66,7 +66,7 @@ test('foreign workspace: panel layout is NOT adopted', () => {
   const merged = mergeBusState(MINE, THEIRS, 'ws-mine');
   eq(merged.panels.map((p) => p.id), ['primary', 'p-2'], 'panel ids');
   eq(merged.panels.map((p) => p.run_id), ['inkling', 'inkling-2'], 'models');
-  eq(merged.conversation_id, 'ws-mine', 'stamp');
+  eq(merged.workspace_id, 'ws-mine', 'stamp');
 });
 
 test('foreign workspace: system prompt is NOT adopted', () => {
@@ -87,7 +87,7 @@ test('foreign workspace: our own state object is not mutated', () => {
   const mine = state('ws-mine', [panel('primary', 'inkling')]);
   mergeBusState(mine, THEIRS, 'ws-mine');
   eq(mine.panels.map((p) => p.run_id), ['inkling']);
-  eq(mine.conversation_id, 'ws-mine');
+  eq(mine.workspace_id, 'ws-mine');
 });
 
 // ── the cases that must still adopt ────────────────────────────────────
@@ -104,11 +104,11 @@ test('unstamped incoming (fresh process / CLI patch): adopt — keeps tinkpg dri
 });
 
 test('no mirror yet (first snapshot): adopt', () => {
-  eq(mergeBusState(null, THEIRS, 'ws-mine').conversation_id, 'ws-theirs');
+  eq(mergeBusState(null, THEIRS, 'ws-mine').workspace_id, 'ws-theirs');
 });
 
 test('no workspace open yet: adopt', () => {
-  eq(mergeBusState(MINE, THEIRS, null).conversation_id, 'ws-theirs');
+  eq(mergeBusState(MINE, THEIRS, null).workspace_id, 'ws-theirs');
 });
 
 test('WORKSPACE_FIELDS is exactly what merge protects', () => {
@@ -133,7 +133,7 @@ test('touchesWorkspace: workspace writes are detected', () => {
 test('touchesWorkspace: global-only writes are not', () => {
   ok(!touchesWorkspace({ temperature: 0.7 }), 'temperature');
   ok(!touchesWorkspace({ n_samples: 4, thinking: true }), 'params');
-  ok(!touchesWorkspace({ conversation_id: 'x' }), 'a bare stamp needs no stamping');
+  ok(!touchesWorkspace({ workspace_id: 'x' }), 'a bare stamp needs no stamping');
 });
 
 console.log(`\nbus-scope: ${passed} passed, ${failed} failed`);

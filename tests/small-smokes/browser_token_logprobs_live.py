@@ -40,10 +40,10 @@ def api(method: str, path: str, body: dict | None = None):
 
 def main() -> None:
     checks: list[tuple[str, bool]] = []
-    # fresh conversation (empty tree) + fresh shared state: the live run
-    # selected, small cheap batch. Opening by ?c= sidesteps whatever
-    # conversation the app last had open.
-    conv_id: str | None = api("POST", "/api/conversations", {
+    # fresh workspace (empty tree) + fresh shared state: the live run
+    # selected, small cheap batch. Opening by ?w= sidesteps whatever
+    # workspace the app last had open.
+    conv_id: str | None = api("POST", "/api/workspaces", {
         "name": "token-logprobs-live-smoke",
         "trees": {"primary": {"nodes": {}, "rootChildren": [], "selected": {}}},
     })["id"]
@@ -60,7 +60,7 @@ def main() -> None:
             page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
             page.on("pageerror", lambda e: errors.append(str(e)))
 
-            page.goto(f"{BASE}/?c={conv_id}", wait_until="load", timeout=20000)
+            page.goto(f"{BASE}/?w={conv_id}", wait_until="load", timeout=20000)
             page.wait_for_selector(".model-slot-select", timeout=15000)
             page.click('.thinking-toggle-row:has-text("Token probs") .seg-btn:has-text("On")')
 
@@ -96,10 +96,10 @@ def main() -> None:
             # async browser-side PUT after generation ends.
             carrying: list = []
             for _ in range(30):
-                conv = api("GET", f"/api/conversations/{conv_id}")
+                conv = api("GET", f"/api/workspaces/{conv_id}")
                 nodes = (conv or {}).get("trees", {}).get("primary", {}).get("nodes", {})
                 flagged = [n["id"] for n in nodes.values() if n.get("has_token_logprobs")]
-                blobs = api("POST", f"/api/conversations/{conv_id}/node-blobs",
+                blobs = api("POST", f"/api/workspaces/{conv_id}/node-blobs",
                             {"nodes": flagged}) if flagged else {}
                 carrying = [b for b in blobs.values() if b.get("token_logprobs")]
                 if carrying:
@@ -119,7 +119,7 @@ def main() -> None:
     finally:
         if conv_id:
             try:
-                api("DELETE", f"/api/conversations/{conv_id}")
+                api("DELETE", f"/api/workspaces/{conv_id}")
             except Exception:
                 pass
 

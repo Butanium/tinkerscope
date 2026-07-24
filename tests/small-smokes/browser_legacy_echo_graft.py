@@ -1,15 +1,15 @@
 """Legacy echo-graft regression smoke — the layout-less-open echo-clear fix.
 
-THE BUG (fixed in `conversations.svelte.ts` #loadTrees, storage-v2 era): opening
-a conversation with NO stored panel layout (a migrated legacy {tree,
-compare_tree} conv, or a bare API-created one) kept the PREVIOUS conversation's
+THE BUG (fixed in `workspaces.svelte.ts` #loadTrees, storage-v2 era): opening
+a workspace with NO stored panel layout (a migrated legacy {tree,
+compare_tree} conv, or a bare API-created one) kept the PREVIOUS workspace's
 transcript echoes on the state bus — the layout-less branch never sent the
 `messages: []` reset a layout-carrying open does. #afterLoad (whose contract is
 "echoes are cleared before it runs") then reconciled those FOREIGN turns into
 the freshly-loaded trees, and the next save persisted the graft durably.
 
 This smoke POISONS both panel echoes with a marker transcript, opens a legacy
-conversation, makes one structural edit (shift-edit fork, 0 tokens), and
+workspace, makes one structural edit (shift-edit fork, 0 tokens), and
 asserts: the marker never renders, the open cleared the echoes server-side,
 nothing foreign persisted, and the compare panel survives byte-identical.
 
@@ -22,7 +22,7 @@ REPRO SUBTLETIES (each cost a false result once — do not simplify them away):
     this smoke works once per dev-isolated instance; it SKIPs (exit 0) with an
     explanation on a converted fixture — restart dev-isolated to re-snapshot.
   - Point at an ISOLATED instance only (scripts/dev-isolated.sh): the smoke
-    mutates the legacy conversation.
+    mutates the legacy workspace.
 
   uv run python tests/small-smokes/browser_legacy_echo_graft.py [BASE_URL]
 """
@@ -54,9 +54,9 @@ def content_multiset(tree):
 
 
 def find_legacy_conv():
-    """First conversation whose body is still legacy-shaped ({tree,...}, no trees)."""
-    for c in api("GET", "/api/conversations"):
-        body = api("GET", f"/api/conversations/{c['id']}")
+    """First workspace whose body is still legacy-shaped ({tree,...}, no trees)."""
+    for c in api("GET", "/api/workspaces"):
+        body = api("GET", f"/api/workspaces/{c['id']}")
         if "trees" not in body and body.get("tree"):
             return body
     return None
@@ -65,7 +65,7 @@ def find_legacy_conv():
 def main() -> int:
     pre = find_legacy_conv()
     if pre is None:
-        print("SKIP: no legacy {tree, compare_tree} conversation in this instance's "
+        print("SKIP: no legacy {tree, compare_tree} workspace in this instance's "
               "state (already converted by a prior run? restart dev-isolated to "
               "re-snapshot, or run against a snapshot that still has one)")
         return 0
@@ -94,7 +94,7 @@ def main() -> int:
         page = browser.new_page(viewport={"width": 1600, "height": 950})
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(f"{BASE}/?c={legacy_id}", wait_until="load", timeout=20000)
+        page.goto(f"{BASE}/?w={legacy_id}", wait_until="load", timeout=20000)
         page.wait_for_selector(".message", timeout=20000)
         page.wait_for_timeout(800)  # let the load-time patch + any (wrong) graft settle
         checks.append(("foreign echo does not render in the workspace",
@@ -116,7 +116,7 @@ def main() -> int:
                 if any(m.get("content", "").startswith("FOREIGN-ECHO") for m in p["messages"])]
     checks.append((f"foreign echoes cleared from the bus ({leftover})", not leftover))
 
-    post = api("GET", f"/api/conversations/{legacy_id}")
+    post = api("GET", f"/api/workspaces/{legacy_id}")
     trees = post.get("trees") or {}
     all_contents = [c for t in trees.values() for (_, c) in content_multiset(t)]
     checks.append(("no foreign turn persisted into ANY tree",

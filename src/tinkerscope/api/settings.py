@@ -38,7 +38,7 @@ class Settings:
     highlights_path: Path
     pins_path: Path
     prefs_path: Path
-    conversations_path: Path
+    legacy_conversations_path: Path
     pack_models_path: Path
     host: str
     port: int
@@ -106,7 +106,9 @@ def load_settings() -> Settings:
         highlights_path=state_dir / "highlights.json",
         pins_path=state_dir / "pins.json",
         prefs_path=state_dir / "prefs.json",
-        conversations_path=state_dir / "conversations.json",
+        # Pre-storage-v2 single file. Keeps its historical name on disk — it is only
+        # ever read by the v2 boot migration, which renames it to `.legacy` after.
+        legacy_conversations_path=state_dir / "conversations.json",
         pack_models_path=state_dir / "pack_models.json",
         host=os.environ.get("TINKERSCOPE_HOST", "127.0.0.1"),
         port=int(os.environ.get("TINKERSCOPE_PORT", "8765")),

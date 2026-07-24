@@ -1,8 +1,8 @@
-"""Storage v2 for saved conversation TREES — per-conversation files + node blobs.
+"""Storage v2 for saved workspace TREES — per-workspace files + node blobs.
 
 WHY (measured): the v1 single-`conversations.json` design put every conversation
 WITH full trees in one file. One real workspace hit 380 MB, and 89.8% of a heavy
-conversation's bytes were `token_logprobs` (raw_meta another 6.9%). Loading /
+workspace's bytes were `token_logprobs` (raw_meta another 6.9%). Loading /
 re-saving that whole file — and shipping every tree to the browser on page load —
 OOMed the tab. See `docs/STORAGE_V2.md` for the byte breakdown.
 
@@ -14,24 +14,24 @@ flags so the UI can gate affordances without the payload.
 
 ON-DISK LAYOUT (per instance/state dir):
 
-    <state>/conversations/<cid>.json           # light conversation (light trees)
-    <state>/conversations/<cid>.blobs/<nid>.json   # {"token_logprobs":[...]?, "raw_meta":"..."?}
+    <state>/workspaces/<cid>.json           # light workspace (light trees)
+    <state>/workspaces/<cid>.blobs/<nid>.json   # {"token_logprobs":[...]?, "raw_meta":"..."?}
     <state>/conversations.json.legacy          # pre-v2 file, renamed after migration
 
 Blob invariant: **write-once**. Logprobs/raw_meta never change after a node is
 created (edits/regens mint new nodes), so a blob that already exists on disk is
 never rewritten (idempotent retries are free), and blobs are deleted only when
-their whole conversation is deleted.
+their whole workspace is deleted.
 
-Blobs are keyed by node id, flat within one conversation's `.blobs/` dir. Node ids
-are globally unique within a conversation (one client-side counter mints them),
+Blobs are keyed by node id, flat within one workspace's `.blobs/` dir. Node ids
+are globally unique within a workspace (one client-side counter mints them),
 and add-model's `duplicateTo` CLONES a panel's tree keeping the SAME ids — so two
 panels can share a node id, and the shared blob is written once (identical data).
 
 CACHING: an in-memory `_summaries` map (id → {id,name,created_at,updated_at,panels})
-is built once at boot and maintained on every write — `GET /api/conversations`
+is built once at boot and maintained on every write — `GET /api/workspaces`
 never re-parses the store. Parsed light bodies are memoized in `_bodies`, evicted
-on write. Every mutation is wrapped in `store.locked("conversations")` (the flock
+on write. Every mutation is wrapped in `store.locked("workspaces")` (the flock
 convention) so two threads / a second process can't clobber sibling files or the
 caches; mutations never nest the lock.
 """
@@ -52,7 +52,7 @@ from typing import Any
 
 from .store import locked, write_json
 
-log = logging.getLogger("tinkerscope.conversation_store")
+log = logging.getLogger("tinkerscope.workspace_store")
 
 # Heavy per-node fields that live in blobs, not the light tree.
 BLOB_FIELDS = ("token_logprobs", "raw_meta")
@@ -60,7 +60,7 @@ BLOB_FIELDS = ("token_logprobs", "raw_meta")
 _FLAG = {"token_logprobs": "has_token_logprobs", "raw_meta": "has_raw_meta"}
 _FLAGS = tuple(_FLAG.values())
 
-# Conversation / node ids become path components — confine them to safe chars so a
+# Workspace / node ids become path components — confine them to safe chars so a
 # crafted id can't escape the store dir. Real ids are uuids, `draft-...` slugs, or
 # `n<session><counter>` node ids, all within this set.
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -77,7 +77,7 @@ def _check_id(x: Any, kind: str) -> str:
 
 
 def is_safe_id(x: Any) -> bool:
-    """Public: is this a filename-safe conversation id? The create route uses it to
+    """Public: is this a filename-safe workspace id? The create route uses it to
     reject a crafted client id with a clean 400 instead of surfacing upsert's internal
     ValueError as a 500."""
     return _is_safe_id(x)
@@ -98,26 +98,26 @@ def _state_dir() -> Path:
 def _legacy_path() -> Path:
     from .settings import SETTINGS
 
-    return SETTINGS.conversations_path  # <state_dir>/conversations.json
+    return SETTINGS.legacy_conversations_path  # <state_dir>/conversations.json
 
 
-def _convs_dir() -> Path:
-    return _state_dir() / "conversations"
+def _ws_dir() -> Path:
+    return _state_dir() / "workspaces"
 
 
-def _conv_file(cid: str) -> Path:
-    return _convs_dir() / f"{cid}.json"
+def _ws_file(cid: str) -> Path:
+    return _ws_dir() / f"{cid}.json"
 
 
 def _blobs_dir(cid: str) -> Path:
-    return _convs_dir() / f"{cid}.blobs"
+    return _ws_dir() / f"{cid}.blobs"
 
 
 def _blob_file(cid: str, nid: str) -> Path:
     return _blobs_dir(cid) / f"{nid}.json"
 
 
-# ── node/tree/conversation split + re-materialize (PURE — never mutate input) ────
+# ── node/tree/workspace split + re-materialize (PURE — never mutate input) ────
 def split_node(node: dict) -> tuple[dict, dict]:
     """Split one tree node into (light_node, blob).
 
@@ -172,15 +172,15 @@ def _split_tree(tree: Any, blobs: dict[str, dict]) -> Any:
     return light
 
 
-# Tree-bearing conversation keys. `trees` is the v2 {panel_id: tree} map; `tree` /
+# Tree-bearing workspace keys. `trees` is the v2 {panel_id: tree} map; `tree` /
 # `compare_tree` are the pre-multipanel single trees (2 of Clément's 16 real
-# conversations still carry that shape — migration must split blobs out of them too,
+# workspaces still carry that shape — migration must split blobs out of them too,
 # and preserve their key presence EXACTLY for the round-trip verify).
 _TREES_MAP_KEY = "trees"
 _SINGLE_TREE_KEYS = ("tree", "compare_tree")
 
 
-def split_conv(conv: dict) -> tuple[dict, dict[str, dict]]:
+def split_workspace(conv: dict) -> tuple[dict, dict[str, dict]]:
     """Split a full conversation into (light_conversation, {node_id: blob}).
 
     Copies conv verbatim except its tree-bearing keys, whose nodes are split. Only
@@ -212,8 +212,8 @@ def _materialize_tree(ltree: Any, blobs: dict[str, dict]) -> Any:
     return tree
 
 
-def materialize_conv(light: dict, blobs: dict[str, dict]) -> dict:
-    """Inverse of split_conv (migration verification only)."""
+def materialize_workspace(light: dict, blobs: dict[str, dict]) -> dict:
+    """Inverse of split_workspace (migration verification only)."""
     conv: dict = {}
     for k, v in light.items():
         if k == _TREES_MAP_KEY:
@@ -270,7 +270,7 @@ def _build_summaries() -> dict[str, dict]:
     """Read each light file's head into a fresh summary map (file I/O; no lock held —
     the caller assigns the result under _CACHE_LOCK)."""
     built: dict[str, dict] = {}
-    d = _convs_dir()
+    d = _ws_dir()
     if not d.exists():
         return built
     for f in sorted(d.glob("*.json")):
@@ -306,7 +306,7 @@ def _snapshot_ordered_cids() -> list[str]:
 
 
 def _load_body(cid: str) -> dict | None:
-    """Parsed light body for one conversation (memoized). None if missing/corrupt.
+    """Parsed light body for one workspace (memoized). None if missing/corrupt.
     The file read happens outside the lock; on insert we re-check under the lock so a
     concurrent writer's fresher body wins, and only cache when the file STILL exists —
     otherwise a DELETE landing during our read would leave a ghost body GETtable until
@@ -317,7 +317,7 @@ def _load_body(cid: str) -> dict | None:
     with _CACHE_LOCK:
         if cid in _bodies:
             return _bodies[cid]
-    f = _conv_file(cid)
+    f = _ws_file(cid)
     if not f.exists():
         return None
     try:
@@ -347,10 +347,10 @@ def _write_blobs(cid: str, blobs: dict[str, dict]) -> None:
 
 
 def _persist(light: dict) -> None:
-    """Write one light conversation file + refresh both caches for it. The file write
+    """Write one light workspace file + refresh both caches for it. The file write
     is atomic (tmp+rename); the cache refresh is under _CACHE_LOCK."""
-    cid = _check_id(light.get("id"), "conversation")
-    write_json(_conv_file(cid), light)
+    cid = _check_id(light.get("id"), "workspace")
+    write_json(_ws_file(cid), light)
     with _CACHE_LOCK:
         assert _summaries is not None
         _bodies[cid] = light
@@ -359,7 +359,7 @@ def _persist(light: dict) -> None:
 
 # ── public reads ─────────────────────────────────────────────────────────────
 def list_summaries() -> list[dict]:
-    """`GET /api/conversations` — {id,name,created_at,updated_at,panels}, no trees.
+    """`GET /api/workspaces` — {id,name,created_at,updated_at,panels}, no trees.
 
     Returns refs to the cached summary dicts, which are replaced wholesale (never
     mutated in place) on write, so a caller holding one is unaffected by later saves."""
@@ -371,19 +371,19 @@ def list_summaries() -> list[dict]:
 
 
 def list_bodies() -> list[dict]:
-    """`GET /api/conversations?bodies=1` — light bodies (trees incl., blobs excl.)."""
+    """`GET /api/workspaces?bodies=1` — light bodies (trees incl., blobs excl.)."""
     _ensure_loaded()
     return [b for c in _snapshot_ordered_cids() if (b := _load_body(c)) is not None]
 
 
 def get_body(cid: str) -> dict | None:
-    """`GET /api/conversations/{id}` — one light body, or None (404)."""
+    """`GET /api/workspaces/{id}` — one light body, or None (404)."""
     _ensure_loaded()
     return _load_body(cid)
 
 
 def get_blobs(cid: str, node_ids: list[str]) -> dict[str, dict]:
-    """`POST /api/conversations/{id}/node-blobs` — {node_id: blob} for known ids.
+    """`POST /api/workspaces/{id}/node-blobs` — {node_id: blob} for known ids.
     Unknown / unsafe / unreadable ids are omitted (never an error)."""
     out: dict[str, dict] = {}
     if not _is_safe_id(cid) or not _blobs_dir(cid).exists():
@@ -413,11 +413,11 @@ def upsert(
     send_targets: list[str],
     seen_panels: list[str],
 ) -> dict:
-    """Create (or upsert by client-supplied id) a conversation. Returns the LIGHT
+    """Create (or upsert by client-supplied id) a workspace. Returns the LIGHT
     body (trees included, blobs excluded) — same top-level shape as v1 create."""
-    with locked("conversations"):
+    with locked("workspaces"):
         _ensure_loaded()
-        cid = _check_id(id or str(uuid.uuid4()), "conversation")
+        cid = _check_id(id or str(uuid.uuid4()), "workspace")
         now = _now()
         entry = {
             "id": cid,
@@ -435,7 +435,7 @@ def upsert(
         existing = _load_body(cid)
         if existing is not None:  # upsert: keep original created_at
             entry["created_at"] = existing.get("created_at", now)
-        light, blobs = split_conv(entry)
+        light, blobs = split_workspace(entry)
         _write_blobs(cid, blobs)
         _persist(light)
     return light
@@ -456,16 +456,16 @@ def save_tree(
     """PUT /{id}/tree — PARTIAL upsert. `trees_partial` carries only dirty panels
     (merged over the stored trees); `dropped_trees` removes panels. Inline heavy
     fields on fresh-fold nodes are stripped into write-once blobs. Returns False if
-    the conversation is unknown (404). Blobs for dropped panels are NOT deleted
-    (write-once invariant — cleaned only on conversation delete)."""
-    with locked("conversations"):
+    the workspace is unknown (404). Blobs for dropped panels are NOT deleted
+    (write-once invariant — cleaned only on workspace delete)."""
+    with locked("workspaces"):
         _ensure_loaded()
         conv = _load_body(cid)
         if conv is None:
             return False
-        light_partial, blobs = split_conv({"trees": trees_partial})
+        light_partial, blobs = split_workspace({"trees": trees_partial})
         trees = dict(conv.get("trees") or {})
-        # A migrated legacy {tree, compare_tree} conversation has no `trees` yet.
+        # A migrated legacy {tree, compare_tree} workspace has no `trees` yet.
         # Seed the merge base with its reserved-id panels BEFORE the partial upsert so
         # a first save carrying only one dirty panel can't drop the other — then the
         # self-heal pop below is always safe regardless of what the client sends. The
@@ -504,7 +504,7 @@ def patch_meta(cid: str, fields: dict[str, Any]) -> dict | None:
     """PATCH /{id} — layout-only metadata (name/system_prompt/panels/reduced_panels/
     send_targets/seen_panels), no tree bytes. Returns the updated summary, or None
     (404). Only keys present in `fields` are applied."""
-    with locked("conversations"):
+    with locked("workspaces"):
         _ensure_loaded()
         conv = _load_body(cid)
         if conv is None:
@@ -522,17 +522,17 @@ def delete(cid: str) -> bool:
     """DELETE /{id} — remove the light file AND the blobs dir. False if unknown."""
     if not _is_safe_id(cid):  # never unlink/rmtree a path built from a crafted id
         return False
-    with locked("conversations"):
+    with locked("workspaces"):
         _ensure_loaded()
         with _CACHE_LOCK:
             assert _summaries is not None
             known = cid in _summaries
-        if not known and not _conv_file(cid).exists():
+        if not known and not _ws_file(cid).exists():
             return False
         with _CACHE_LOCK:
             # Unlink the light file + drop the caches atomically vs _load_body's
             # exists-check-then-cache, so a concurrent GET can't re-cache a ghost body.
-            _conv_file(cid).unlink(missing_ok=True)
+            _ws_file(cid).unlink(missing_ok=True)
             _bodies.pop(cid, None)
             _summaries.pop(cid, None)
         shutil.rmtree(_blobs_dir(cid), ignore_errors=True)  # blobs: no cache impact
@@ -549,23 +549,46 @@ def _progress(msg: str) -> None:
     log.info(msg)
 
 
+def _migrate_dir_locked() -> None:
+    """v1.0.0 rename: `<state>/conversations/` → `<state>/workspaces/`.
+
+    The saved container has been a WORKSPACE (panels + their branch trees) in the
+    UI, CLI and docs since 2026-07-17; v1.0.0 finishes the job on the wire and on
+    disk. File CONTENTS are untouched — no field of a stored body contains the old
+    word — so this is a directory rename and nothing else.
+
+    Runs before the storage-v2 migration below: that one keys off `workspaces/`
+    existing, so an already-v2 instance whose data still sits in `conversations/`
+    has to be moved first or it would look like a fresh install.
+
+    Rollback is the inverse rename (see docs/MIGRATIONS.md); the rename is atomic
+    and instant, which is why this doesn't copy — the stores run to hundreds of MB
+    and a copy on the slow volume would be a multi-minute boot."""
+    old = _state_dir() / "conversations"
+    new = _ws_dir()
+    if new.exists() or not old.exists():
+        return
+    old.rename(new)
+    _progress(f"v1.0.0 migration: {old.name}/ → {new.name}/ (directory rename; contents untouched)")
+
+
 def _migrate_locked() -> None:
     """Migrate legacy `conversations.json` → per-conversation files + blob dirs.
 
-    Runs iff the legacy file exists and `conversations/` does NOT. STRONG verify:
-    every conversation is split AND re-materialized (blobs folded back) and deep-
+    Runs iff the legacy file exists and `workspaces/` does NOT. STRONG verify:
+    every workspace is split AND re-materialized (blobs folded back) and deep-
     compared against the legacy object in memory; ANY mismatch raises (refuse to
     start) with the legacy file untouched. Only after all pass do we write into a
     staging dir, atomically swap it into place, then rename legacy → `.legacy`
     (never deleted)."""
     legacy = _legacy_path()
-    convs_dir = _convs_dir()
+    convs_dir = _ws_dir()
     legacy_done = legacy.with_suffix(legacy.suffix + ".legacy")
     if convs_dir.exists():
         # Already migrated (the normal case). But a crash BETWEEN the atomic dir swap
         # and the legacy rename can leave conversations.json un-renamed forever (this
         # guard would skip it every subsequent boot); finish that rename now so a later
-        # deletion of conversations/ can't silently re-migrate resurrected stale state.
+        # deletion of workspaces/ can't silently re-migrate resurrected stale state.
         if legacy.exists() and not legacy_done.exists():
             legacy.rename(legacy_done)
             _progress(f"storage-v2: completed an interrupted migration (legacy → {legacy_done.name})")
@@ -583,27 +606,27 @@ def _migrate_locked() -> None:
     if not isinstance(items, list):
         raise RuntimeError("legacy conversations.json is not a JSON list — refusing to migrate")
 
-    _progress(f"storage-v2 migration: verifying {len(items)} conversation(s)…")
+    _progress(f"storage-v2 migration: verifying {len(items)} workspace(s)…")
     staged: list[tuple[dict, dict[str, dict]]] = []
     for conv in items:
         if not isinstance(conv, dict):
             raise RuntimeError(f"legacy entry is not an object: {conv!r} — refusing to migrate")
-        light, blobs = split_conv(conv)
-        if materialize_conv(light, blobs) != conv:
+        light, blobs = split_workspace(conv)
+        if materialize_workspace(light, blobs) != conv:
             raise RuntimeError(
-                f"storage-v2 migration verify FAILED for conversation "
+                f"storage-v2 migration verify FAILED for workspace "
                 f"{conv.get('id')!r}: re-materialized body != legacy. Refusing to "
                 f"start; legacy file left untouched."
             )
         staged.append((light, blobs))
 
-    staging = _state_dir() / "conversations.migrating"
+    staging = _state_dir() / "workspaces.migrating"
     if staging.exists():
         shutil.rmtree(staging, ignore_errors=True)
     staging.mkdir(parents=True)
     n_blobs = 0
     for light, blobs in staged:
-        cid = _check_id(light.get("id"), "conversation")
+        cid = _check_id(light.get("id"), "workspace")
         write_json(staging / f"{cid}.json", light)
         if blobs:
             bdir = staging / f"{cid}.blobs"
@@ -614,7 +637,7 @@ def _migrate_locked() -> None:
     os.replace(staging, convs_dir)  # atomic dir swap (same filesystem)
     legacy.rename(legacy_done)
     _progress(
-        f"storage-v2 migration complete: {len(staged)} conversation(s), "
+        f"storage-v2 migration complete: {len(staged)} workspace(s), "
         f"{n_blobs} blob(s); legacy → {legacy_done.name}"
     )
 
@@ -622,7 +645,8 @@ def _migrate_locked() -> None:
 def boot() -> None:
     """Called once at app startup (main.lifespan). Migrates if needed (may RAISE to
     refuse start), then rebuilds the summary cache from disk."""
-    with locked("conversations"):
-        _migrate_locked()
+    with locked("workspaces"):
+        _migrate_dir_locked()   # v1.0.0: conversations/ → workspaces/ (must come first)
+        _migrate_locked()       # storage v2: legacy conversations.json → per-workspace files
     reset_cache()
     _ensure_loaded()

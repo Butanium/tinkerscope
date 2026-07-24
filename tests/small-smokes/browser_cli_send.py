@@ -64,7 +64,7 @@ def tinkpg(*args):
 
 
 def saved_roots(conv_id):
-    convs = _get("/api/conversations?bodies=1")
+    convs = _get("/api/workspaces?bodies=1")
     c = next(x for x in convs if x["id"] == conv_id)
     return {pid: len(t.get("rootChildren", [])) for pid, t in (c.get("trees") or {}).items()}
 
@@ -79,7 +79,7 @@ def wait_for(pred, what, timeout=30):
 
 
 def main():
-    conv = _post("/api/conversations", {
+    conv = _post("/api/workspaces", {
         "name": "cli send smoke",
         "trees": {"primary": seed_tree(), "compare": seed_tree()},
         "panels": [{"id": "primary", "run_id": FREE, "checkpoint": None},
@@ -92,7 +92,7 @@ def main():
         page = browser.new_page(viewport={"width": 1500, "height": 800})
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(f"{BASE}/?c={conv['id']}", wait_until="load", timeout=20000)
+        page.goto(f"{BASE}/?w={conv['id']}", wait_until="load", timeout=20000)
         page.wait_for_function("document.body.innerText.includes('PROBE-ZERO')", timeout=15000)
         layout_before = [pp["id"] for pp in _get("/api/state")["panels"]]
         assert layout_before == ["primary", "compare"], f"seed layout: {layout_before}"
