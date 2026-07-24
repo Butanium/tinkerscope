@@ -385,6 +385,13 @@ extracted UI: `tests/small-smokes/browser_{chart_modal,modals}.py`.
   but **merge commits skip it**: after `git merge`, run `npm run build` yourself
   or the served `web/dist` silently stays stale.
 - **Python**: `uv run pytest -q` (no remote calls — capabilities probe is stubbed).
+- **Browser smokes — use `scripts/smoke.sh`** (builds web/, launches a throwaway
+  instance, runs the token-free set SERIALLY under a lock, skips the known-stale
+  ones by name). Smokes must never run concurrently: `browser_state_reprime.py`
+  kills and restarts a server mid-run, so a parallel smoke fails with a bogus
+  error — on 2026-07-24 that produced a false "the fix doesn't work" on the
+  cross-tab corruption smoke. `scripts/smoke.sh --fresh` for the empty-state set
+  (`chart_rules` wants it); `scripts/smoke.sh <name>…` to run a subset.
 - **Isolated instance for testing** — NEVER test against the user's live server
   or `~/.local/state/tinkerscope`; run `scripts/dev-isolated.sh [--port N] [SCAN_DIR ...]`
   instead: it snapshots the real state into a throwaway `XDG_STATE_HOME` (realistic
