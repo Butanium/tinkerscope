@@ -155,7 +155,7 @@
             class:disabled={it.disabled}
             class:unavailable={it.unavailable}
             disabled={busy || it.disabled}
-            title={it.unavailable ? 'Not samplable right now — base model not served or sampler weights no longer exist (selecting still allowed)' : undefined}
+            title={it.unavailable ? 'Not samplable — base model not served, or the sampler weights are gone' : undefined}
             onmouseenter={() => { if (!it.disabled) active = i; }}
             onclick={() => pick(it)}
           >

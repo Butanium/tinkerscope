@@ -50,16 +50,18 @@ whole screen plus a keyboard-shortcut table. The longer prose version — for a
 person, or for an agent explaining the tool to one — is the guide skill
 (`plugin/skills/guide/SKILL.md`; install it below).
 
-### Install the Claude Code skills
+### Install the agent skills
 
-The repo doubles as a Claude Code plugin marketplace. The plugin ships the two
-skills — `tinkerscope:cli` (teaches an agent to drive `tinkpg` from a terminal)
-and `tinkerscope:guide` (explains the browser UI to a person) — it does **not**
+The repo doubles as a plugin marketplace. The plugin ships the two skills —
+`tinkerscope:cli` (teaches an agent to drive `tinkpg` from a terminal) and
+`tinkerscope:guide` (explains the browser UI to a person) — it does **not**
 install the tool itself, so do both:
 
 ```bash
 uv tool install git+https://github.com/Butanium/tinkerscope    # the tool
 ```
+
+**Claude Code**
 
 ```
 /plugin marketplace add Butanium/tinkerscope                   # the skills
@@ -70,6 +72,26 @@ Claude Code treats the commit SHA as the plugin version, so the skills track
 `main`. Third-party marketplaces are manual-update by default — toggle
 auto-update from `/plugin` > Marketplaces, or run `/plugin marketplace update
 tinkerscope` followed by `/reload-plugins`.
+
+**Codex**
+
+```bash
+codex plugin marketplace add Butanium/tinkerscope
+codex plugin add tinkerscope@tinkerscope
+```
+
+Codex caches by the `version` in `plugin/.codex-plugin/plugin.json`, so bump it
+when skill content should reach Codex users; they pull with `codex plugin
+marketplace upgrade tinkerscope`.
+
+**Cursor / Copilot / Windsurf / Cline**
+
+```bash
+npx skills add Butanium/tinkerscope --agent <agent> -g -y
+```
+
+The same three blocks are in the app's `?` modal, folded, under "Lost? Ask your
+agent" — keep them in sync.
 
 **Hacking on the skills?** Don't install — the install *snapshots* into a cache,
 so your edits won't show. Symlink each skill into your skills dir instead and it

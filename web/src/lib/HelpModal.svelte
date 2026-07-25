@@ -2,66 +2,130 @@
   The `?` modal: what the UI does, for a HUMAN.
 
   Why it exists: every other doc in this repo is written for an agent driving the
-  tool from a terminal (the `tinkerscope` skill) or for whoever maintains it
+  tool from a terminal (the `tinkerscope:cli` skill) or for whoever maintains it
   (docs/*.md). Nothing explained the browser UI to the person using it, so the
   discoverable-by-accident features (keyboard row nav, the shift/ctrl modifier
   axes, branch-from-start) were effectively invisible. Its prose twin is the
-  `tinkerscope-guide` skill — keep the two in sync when behavior changes.
+  `tinkerscope:guide` skill — keep the two in sync when behavior changes.
+
+  Every button this file names is drawn with its REAL glyph, from the shared
+  `lib/Icon.svelte` the toolbar uses: "Shift + edit" is useless if you can't tell
+  which of eight unlabeled icons is edit.
 
   Two tabs on purpose: "Guide" answers *what is this screen*, "Keys" is the
   lookup table you reopen later. Both stay short enough to scan.
 -->
 <script lang="ts">
   import Modal from '$lib/Modal.svelte';
+  import Icon, { type IconName } from '$lib/Icon.svelte';
 
   let { onclose }: { onclose: () => void } = $props();
 
   let tab = $state<'guide' | 'keys'>('guide');
 
-  /** [keys, what it does, extra context] — rendered as the Keys tab's rows. */
-  const KEYS: { group: string; rows: [string, string][] }[] = [
+  type ButtonDoc = { icon: IconName; name: string; what: string };
+
+  /** The row toolbar, in the order it renders on a chat row. */
+  const ROW_BUTTONS: ButtonDoc[] = [
+    { icon: 'regen', name: 'regenerate', what: 'sample this turn again — arrives as a new sibling branch' },
+    { icon: 'continue', name: 'continue', what: 'let the model EXTEND this message instead of replying to it' },
+    { icon: 'edit', name: 'edit', what: 'change the text; forks a branch, never overwrites' },
+    { icon: 'trash', name: 'delete', what: 'prune this branch and everything under it' },
+    { icon: 'tag', name: 'bookmark', what: 'pin this sample with a note' },
+    { icon: 'copy', name: 'copy message', what: 'just this message' },
+    { icon: 'copy-all', name: 'copy conversation', what: 'the whole thread as markdown' },
+    { icon: 'send-to', name: 'send to panel', what: "copy this branch's context into another panel" },
+    { icon: 'hash', name: 'copy node id', what: 'the id the `tinkpg --node` flag addresses' }
+  ];
+
+  /** Extra buttons that only exist on the cards of an n&gt;1 sample draw. */
+  const SAMPLE_BUTTONS: ButtonDoc[] = [
+    { icon: 'use-sample', name: 'make active', what: 'collapse the draw to this sample (the rest stay ‹k/N› siblings)' },
+    { icon: 'continue', name: 'continue this sample', what: 'make it active, then extend it' },
+    { icon: 'discard-others', name: 'discard others', what: 'keep this sample, delete its siblings' }
+  ];
+
+  /** The icon column at the top of the sidebar. */
+  const SIDEBAR_BUTTONS: ButtonDoc[] = [
+    { icon: 'chart', name: 'distribution chart', what: 'the "what does it usually say?" view over an N-sample draw' },
+    { icon: 'pins', name: 'pins', what: 'browse everything you bookmarked, as a slideshow' },
+    { icon: 'dataset', name: 'training data', what: "peek at the selected run's training set" },
+    { icon: 'regen', name: 'refresh', what: 'rescan the run directory + re-check which checkpoints still serve' },
+    { icon: 'help', name: 'help', what: 'this modal' },
+    { icon: 'stop', name: 'stop', what: 'abort generation in every panel' }
+  ];
+
+  type KeyRow = {
+    /** Rendered as <kbd> chips joined by "+". */
+    keys: string[];
+    /** The toolbar button the modifier applies to — drawn, then named. */
+    icon?: IconName;
+    btn?: string;
+    what: string;
+    /** Buttons the row applies to as a set (shown after the description). */
+    also?: IconName[];
+  };
+
+  const KEYS: { group: string; rows: KeyRow[] }[] = [
     {
       group: 'Composer',
       rows: [
-        ['Enter', 'Send to every panel (or just the picked send targets)'],
-        ['Shift + Enter', 'Newline'],
-        ['Esc', 'Enter prompt history — then ↑/↓ to browse, Esc again to leave'],
-        ['Enter (per-panel box)', 'Continue that one panel only — the others stay put']
+        { keys: ['Enter'], what: 'Send to every panel (or just the picked send targets)' },
+        { keys: ['Shift', 'Enter'], what: 'Newline' },
+        { keys: ['Esc'], what: 'Enter prompt history — then ↑/↓ to browse, Esc again to leave' },
+        { keys: ['Enter (per-panel box)'], what: 'Continue that one panel only — the others stay put' }
       ]
     },
     {
       group: 'Chat rows (click a row first)',
       rows: [
-        ['↑ / ↓', 'Move the focus ring up/down that panel'],
-        ['← / →', "Cycle the focused row's ‹k/N› sibling branches"],
-        ['Esc', 'Drop the focus ring']
+        { keys: ['↑ / ↓'], what: 'Move the focus ring up/down that panel' },
+        { keys: ['← / →'], what: "Cycle the focused row's ‹k/N› sibling branches" },
+        { keys: ['Esc'], what: 'Drop the focus ring' }
       ]
     },
     {
       group: 'Row toolbar modifiers (hold, then click)',
       rows: [
-        ['Ctrl / ⌘', 'Do it in ALL panels at once — edit · regenerate · delete · continue (only with >1 panel)'],
-        ['Shift + edit (user row)', 'Fork a full editable copy of the conversation — generates nothing'],
-        ['Shift + regenerate', 'Replace this branch in place instead of adding a sibling'],
-        ['Shift + delete', 'Delete every branch at this turn, not just the shown one'],
-        ['Shift + continue', 'Resume INSIDE the think block (assistant turns with reasoning)'],
-        ['Shift + copy', 'Include the thinking text in the copy'],
-        ['Shift + bookmark', 'Pin instantly, skipping the note dialog']
+        {
+          keys: ['Ctrl / ⌘'],
+          what: 'Do it in ALL panels at once (only with >1 panel) —',
+          also: ['edit', 'regen', 'trash', 'continue']
+        },
+        { keys: ['Shift'], icon: 'edit', btn: 'edit', what: 'On a USER row: fork a full editable copy of the conversation, generating nothing' },
+        { keys: ['Shift'], icon: 'regen', btn: 'regenerate', what: 'Replace this branch in place instead of adding a sibling' },
+        { keys: ['Shift'], icon: 'trash', btn: 'delete', what: 'Delete every branch at this turn, not just the shown one' },
+        { keys: ['Shift'], icon: 'continue', btn: 'continue', what: 'Resume INSIDE the think block (assistant turns with reasoning)' },
+        { keys: ['Shift'], icon: 'copy', btn: 'copy', what: 'Include the thinking text in the copy' },
+        { keys: ['Shift'], icon: 'tag', btn: 'bookmark', what: 'Pin instantly, skipping the note dialog' }
       ]
     },
     {
       group: 'Sidebar modifiers',
       rows: [
-        ['Shift + New workspace', 'Create it BLANK — otherwise it inherits the current models'],
-        ['Shift + Add panel', 'Add an empty panel — otherwise it clones the last one']
+        { keys: ['Shift'], icon: 'plus', btn: 'New workspace', what: 'Create it BLANK — otherwise it inherits the current models' },
+        { keys: ['Shift'], icon: 'plus', btn: 'Add panel', what: 'Add an empty panel — otherwise it clones the last one' }
       ]
     },
     {
       group: 'Anywhere',
-      rows: [['Esc (modal open)', 'Close the modal']]
+      rows: [{ keys: ['Esc (modal open)'], what: 'Close the modal' }]
     }
   ];
 </script>
+
+<!-- One button, drawn the way the app draws it; `label` names it inline in prose. -->
+{#snippet chip(icon: IconName, label?: string)}
+  <span class="help-chip"><Icon name={icon} size={12} />{#if label}<span class="help-chip-label">{label}</span>{/if}</span>
+{/snippet}
+
+{#snippet legend(items: ButtonDoc[])}
+  <ul class="help-btns">
+    {#each items as b (b.name + b.icon)}
+      <li>{@render chip(b.icon)}<b>{b.name}</b> — {b.what}</li>
+    {/each}
+  </ul>
+{/snippet}
 
 <Modal title="How to use tinkerscope" {onclose} modalStyle="width: 760px;">
   {#snippet headerExtra()}
@@ -79,6 +143,60 @@
     </p>
 
     <section class="help-sec">
+      <h3>Lost? Ask your agent</h3>
+      <p>
+        tinkerscope ships two Claude skills, so the fastest help is often not this modal:
+      </p>
+      <ul>
+        <li>
+          <code>tinkerscope:guide</code> — the long-form version of this page. Ask Claude "walk me through
+          tinkerscope" or "what does this button do" and it reads the screen back to you.
+        </li>
+        <li>
+          <code>tinkerscope:cli</code> — lets Claude <em>drive</em> this playground from its terminal: pick a
+          run, send a prompt, draw a 50-sample distribution. It lands in this browser live, while you watch.
+        </li>
+      </ul>
+      <!-- Folded by default: most people arrive with the skills already installed,
+           and a wall of install commands is noise until you need it. -->
+      <details class="help-fold">
+        <summary>Your agent doesn't know them? Install the plugin</summary>
+        <p class="help-fold-note">
+          The repo doubles as a plugin marketplace, so both skills come as one install.
+        </p>
+        <p class="help-fold-h">Claude Code</p>
+        <pre>/plugin marketplace add Butanium/tinkerscope
+/plugin install tinkerscope@tinkerscope</pre>
+        <p class="help-fold-note">
+          Third-party marketplaces are manual-update by default — toggle auto-update from
+          <code>/plugin</code> › Marketplaces, or run <code>/plugin marketplace update tinkerscope</code>
+          then <code>/reload-plugins</code>.
+        </p>
+        <p class="help-fold-h">Codex</p>
+        <pre>codex plugin marketplace add Butanium/tinkerscope
+codex plugin add tinkerscope@tinkerscope</pre>
+        <p class="help-fold-note">Updates are manual: <code>codex plugin marketplace upgrade tinkerscope</code>.</p>
+        <p class="help-fold-h">Cursor / Copilot / Windsurf / Cline</p>
+        <pre>npx skills add Butanium/tinkerscope --agent &lt;agent&gt; -g -y</pre>
+        <p class="help-fold-note">
+          And the tool itself, on a machine that doesn't have it:
+          <code>uv tool install git+https://github.com/Butanium/tinkerscope</code>.
+        </p>
+      </details>
+    </section>
+
+    <section class="help-sec">
+      <h3>Start here</h3>
+      <ol class="help-steps">
+        <li>Sidebar → <b>Models</b>: click the picker, type a few letters of the run, pick a checkpoint.</li>
+        <li>Type in the composer and hit <kbd>Enter</kbd>.</li>
+        <li>Set <b>Samples</b> to 20 and send again — you now have 20 replies to the same prompt, not one.</li>
+        <li>Open {@render chip('chart')} to see how they split; write a <b>Highlight rule</b> to name the split.</li>
+        <li>Hit <b>Compare</b> in the sidebar to add a second model and answer both at once.</li>
+      </ol>
+    </section>
+
+    <section class="help-sec">
       <h3>Workspaces and panels</h3>
       <p>
         A <b>workspace</b> is one saved conversation setup: its message tree, its system prompt, and the set of
@@ -87,8 +205,9 @@
         prompt answered by different models.
       </p>
       <p class="help-note">
-        Switching workspaces restores its models too. A new workspace inherits the current models
-        (Shift → blank). Panels reorder by dragging a column header; the sidebar pickers and send chips follow.
+        Switching workspaces restores its models too. {@render chip('plus')} makes a new workspace that
+        inherits the current models (Shift → blank). Panels reorder by dragging a column header; the sidebar
+        pickers and send chips follow.
       </p>
       <p class="help-note">
         Both sidebar pickers — workspace and model — are the same control: click it and <em>type to filter</em>,
@@ -98,16 +217,64 @@
     </section>
 
     <section class="help-sec">
+      <h3>The sidebar icon row</h3>
+      {@render legend(SIDEBAR_BUTTONS)}
+      <p class="help-note">The leftmost icon cycles the theme: light → dark → auto (follows your system).</p>
+    </section>
+
+    <section class="help-sec">
       <h3>Nothing is destroyed — branches</h3>
       <p>
-        Regenerating, editing a message, or drawing N samples does not overwrite anything: each becomes a
-        <b>sibling branch</b>, and the row shows a <code>‹ k/N ›</code> cycler you click (or ←/→) to walk them.
-        Deleting prunes only that subtree. So "what did it say the other three times?" is always answerable.
+        {@render chip('regen', 'regenerate')}, {@render chip('edit', 'edit')} or drawing N samples does not
+        overwrite anything: each becomes a <b>sibling branch</b>, and the row shows a <code>‹ k/N ›</code>
+        cycler you click (or ←/→) to walk them. {@render chip('trash', 'delete')} prunes only that subtree.
+        So "what did it say the other three times?" is always answerable.
       </p>
       <p class="help-note">
         Editing a <em>user</em> message forks and regenerates from there; Shift+edit forks a full editable
         copy and generates nothing. Editing an <em>assistant</em> message just writes a manual branch —
         useful for putting words in its mouth and continuing.
+      </p>
+    </section>
+
+    <section class="help-sec">
+      <h3>The row toolbar</h3>
+      <p>Hover a message and its buttons appear, in this order:</p>
+      {@render legend(ROW_BUTTONS)}
+      <p class="help-note">
+        <b>Raw</b> leads the row as a text button — it shows the model's untouched output, tags and all.
+        In a narrow column the tail of the row folds behind a chevron; click it to unfold the rest onto a
+        second line. Holding Shift or Ctrl swaps the glyph to show what the modifier will do — see the
+        <b>Keys</b> tab.
+      </p>
+      <p class="help-note">Cards of an N-sample draw add three more:</p>
+      {@render legend(SAMPLE_BUTTONS)}
+    </section>
+
+    <section class="help-sec">
+      <h3>N samples at once</h3>
+      <p>
+        <b>Samples</b> in the sidebar is how many replies one send draws. They arrive as cards under the turn —
+        all of them stacked, or one at a time with ‹/› if you flip <b>Sample view</b> to Cycle. Each card is a
+        real branch: keep one and the others stay reachable through its ‹k/N› cycler.
+      </p>
+      <p class="help-note">
+        A distribution is only as interesting as the temperature that drew it — at 0 you get the same reply
+        twenty times. The chart, the highlight rules and the first-token view all read this one draw.
+      </p>
+    </section>
+
+    <section class="help-sec">
+      <h3>Comparing models</h3>
+      <p>
+        With more than one panel, a send fans out to all of them. The <b>Send to</b> chips above the composer
+        narrow that to a subset; the small box at the bottom of a column continues <em>that</em> column alone.
+        A column header has a grip to drag it into a new position and a <b>−</b> to fold it out of the way
+        (folded panels are skipped by the chart unless you ask for them).
+      </p>
+      <p class="help-note">
+        Holding Ctrl/⌘ while clicking a row button applies it to every panel at that depth — the way to
+        regenerate the same turn everywhere and keep the columns aligned.
       </p>
     </section>
 
@@ -137,7 +304,7 @@
 
     <section class="help-sec">
       <h3>Distribution chart</h3>
-      <p>The bar-chart button (top of the sidebar) opens it. Three modes:</p>
+      <p>{@render chip('chart')} at the top of the sidebar opens it. Three modes:</p>
       <ul>
         <li><b>By rules</b> — each sample bucketed by the SET of highlight rules it matches (grey = none, striped = a combo). This is the "what does it usually say?" view for an N-sample draw.</li>
         <li><b>By answer</b> — the plain exact-match histogram over sample text.</li>
@@ -151,8 +318,12 @@
       <p>
         Sidebar → <b>Token probs</b> renders assistant replies as their raw token stream, each token tinted by
         surprisal, with a hover popover showing its probability and the top-5 alternatives. It's display-only
-        and retroactive — turns sampled earlier already carry the data. Pick up to two highlight rules under
-        <b>Color by match</b> to tint by "how much mass went to text matching this rule" instead of surprisal.
+        and retroactive — turns sampled earlier already carry the data.
+      </p>
+      <p class="help-note">
+        Under it, <b>Color by match</b> flips the tint to "how much probability mass went to text matching
+        this rule" instead of surprisal. Turn it On and pick up to two highlight rules — two rules split each
+        token into a top and a bottom band. Off keeps your picks for next time.
       </p>
     </section>
 
@@ -164,13 +335,17 @@
         think block to jump straight to the answer. It persists across sends, so you can draw N samples off
         one prefill.
       </p>
+      <p class="help-note">
+        With thinking set to <b>Both</b> (n samples each way in one send), the scope toggle picks which half
+        the prefill applies to; the other half is left un-prefilled.
+      </p>
     </section>
 
     <section class="help-sec">
       <h3>Keeping things</h3>
       <p>
-        <b>Pins</b> (the bookmark button on a row) save a sample with a note; the play button in the sidebar
-        browses them as a slideshow. <b>Share packs</b> bundle checkpoints, default params and whole
+        {@render chip('tag', 'bookmark')} on a row saves a sample with a note; {@render chip('pins')} in the
+        sidebar browses them as a slideshow. <b>Share packs</b> bundle checkpoints, default params and whole
         workspaces into one portable file — <code>tinkerscope pack export</code> to author, <code>tinkerscope
         --pack &lt;file|url&gt;</code> to open someone else's setup with no local run dirs.
       </p>
@@ -180,8 +355,10 @@
       <h3>Driven from the terminal</h3>
       <p>
         Everything on this screen is live-shared with the <code>tinkpg</code> CLI, so an agent (or you) can
-        select a run, fire a chat, or draw a distribution from a terminal and watch it land here. The <b>#</b>
-        button on a row copies that node's id, which is how you point the CLI at a specific message.
+        select a run, fire a chat, or draw a distribution from a terminal and watch it land here — that's what
+        the <code>tinkerscope:cli</code> skill above teaches Claude to do.
+        {@render chip('hash')} on a row copies that node's id, which is how you point the CLI at a specific
+        message.
       </p>
     </section>
   {:else}
@@ -189,14 +366,24 @@
       {#each KEYS as g (g.group)}
         <tbody>
           <tr><th colspan="2" class="help-keys-group">{g.group}</th></tr>
-          {#each g.rows as [k, what] (k)}
-            <tr><td class="help-key"><kbd>{k}</kbd></td><td>{what}</td></tr>
+          {#each g.rows as r (r.keys.join() + (r.btn ?? ''))}
+            <tr>
+              <td class="help-key">
+                {#each r.keys as k, i (k)}{#if i > 0}<span class="help-sep">+</span>{/if}<kbd>{k}</kbd>{/each}
+                {#if r.icon}<span class="help-sep">+</span>{@render chip(r.icon, r.btn)}{/if}
+              </td>
+              <td>
+                {r.what}
+                {#if r.also}{#each r.also as ic (ic)}{@render chip(ic)}{/each}{/if}
+              </td>
+            </tr>
           {/each}
         </tbody>
       {/each}
     </table>
     <p class="help-note help-keys-foot">
       Row keys are ignored while you're typing in a box or a modal is open, so nothing steals your Escape.
+      Every button above lives on a chat row — the <b>Guide</b> tab's "row toolbar" section names them all.
     </p>
   {/if}
 </Modal>
@@ -210,17 +397,37 @@
   .help-lede { font-size: 0.86rem; color: var(--color-text-secondary); line-height: 1.6; margin-bottom: var(--space-4); }
   .help-sec { margin-bottom: var(--space-4); }
   .help-sec h3 { font-size: 0.8rem; font-weight: 600; color: var(--color-accent); margin-bottom: var(--space-2); }
-  .help-sec p { font-size: 0.82rem; color: var(--color-text-secondary); line-height: 1.6; margin-bottom: var(--space-2); }
-  .help-sec ul { margin: 0 0 var(--space-2) var(--space-4); padding: 0; }
+  .help-sec p { font-size: 0.82rem; color: var(--color-text-secondary); line-height: 1.8; margin-bottom: var(--space-2); }
+  .help-sec ul, .help-sec ol { margin: 0 0 var(--space-2) var(--space-4); padding: 0; }
   .help-sec li { font-size: 0.82rem; color: var(--color-text-secondary); line-height: 1.6; margin-bottom: var(--space-1); }
+  .help-steps li { line-height: 1.9; }
   .help-sec b { color: var(--color-text); font-weight: 600; }
   .help-note { font-size: 0.78rem !important; color: var(--color-text-muted) !important; border-left: 2px solid var(--color-border); padding-left: var(--space-3); }
   code { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.94em; background: var(--color-surface-alt); padding: 0.05em 0.3em; border-radius: var(--radius-sm); }
 
+  /* A button as the app draws it. Inline in prose (baseline-aligned) and as the
+     bullet of a legend row, so "which one is edit?" never needs an answer. */
+  .help-chip { display: inline-flex; align-items: center; gap: 4px; vertical-align: -0.2em; margin: 0 1px; padding: 2px 5px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-alt); color: var(--color-text); }
+  .help-chip-label { font-size: 0.75rem; font-weight: 600; }
+
+  /* Folded install commands — present but out of the way (see the markup note). */
+  .help-fold { border: 1px solid var(--color-border); border-radius: var(--radius); padding: var(--space-2) var(--space-3); }
+  .help-fold summary { font-size: 0.78rem; color: var(--color-text-muted); cursor: pointer; list-style-position: outside; }
+  .help-fold summary:hover { color: var(--color-text); }
+  .help-fold[open] summary { margin-bottom: var(--space-2); color: var(--color-text); }
+  .help-fold-h { font-size: 0.75rem !important; font-weight: 600; color: var(--color-text) !important; margin: var(--space-2) 0 2px !important; }
+  .help-fold-note { font-size: 0.75rem !important; color: var(--color-text-muted) !important; margin-bottom: 0 !important; line-height: 1.6; }
+  .help-fold pre { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.72rem; color: var(--color-text); background: var(--color-surface-alt); border-radius: var(--radius-sm); padding: 6px 8px; margin: 0 0 4px; overflow-x: auto; white-space: pre; }
+
+  .help-btns { list-style: none; margin: 0 0 var(--space-2) 0 !important; padding: 0; }
+  .help-btns li { display: flex; align-items: baseline; gap: 6px; font-size: 0.8rem; color: var(--color-text-secondary); line-height: 1.7; margin-bottom: 2px; }
+  .help-btns b { color: var(--color-text); font-weight: 600; }
+
   .help-keys { width: 100%; border-collapse: collapse; }
   .help-keys-group { text-align: left; font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-muted); padding: var(--space-3) 0 var(--space-1); }
-  .help-keys td { font-size: 0.8rem; color: var(--color-text-secondary); padding: 0.22rem 0; vertical-align: top; line-height: 1.5; }
-  .help-key { width: 200px; padding-right: var(--space-3) !important; white-space: nowrap; }
-  kbd { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.72rem; color: var(--color-text); background: var(--color-surface-alt); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 0.1em 0.4em; }
+  .help-keys td { font-size: 0.8rem; color: var(--color-text-secondary); padding: 0.28rem 0; vertical-align: top; line-height: 1.6; }
+  .help-key { width: 235px; padding-right: var(--space-3) !important; }
+  .help-sep { color: var(--color-text-muted); margin: 0 3px; }
+  kbd { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.72rem; color: var(--color-text); background: var(--color-surface-alt); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 0.1em 0.4em; white-space: nowrap; }
   .help-keys-foot { margin-top: var(--space-4); }
 </style>

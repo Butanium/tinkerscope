@@ -10,6 +10,7 @@
   import { logprobView } from '$lib/logprobs.svelte';
   import { nodeBlobs } from '$lib/node-blobs.svelte';
   import ActionMenu from '$lib/ActionMenu.svelte';
+  import Icon from '$lib/Icon.svelte';
   import OverflowRow from '$lib/OverflowRow.svelte';
   import TokenLogprobs from '$lib/TokenLogprobs.svelte';
   import type { ViewMessage, SampleData } from '$lib/types';
@@ -321,64 +322,32 @@
     <OverflowRow klass="sample-actions" resetKey={msg.sampleNodeIds?.[idx] ?? String(idx)}>
       {#if sample.raw_text}
         <!-- Raw leads the row (very left, never folds), like the single-row toolbar. -->
-        <button class="btn-raw" class:active={rawSamples.has(idx)} onclick={() => toggleRawSample(idx)} title="Toggle raw model output with tags preserved">Raw</button>
+        <button class="btn-raw" class:active={rawSamples.has(idx)} onclick={() => toggleRawSample(idx)} data-tooltip="Raw model output, tags preserved" use:tip>Raw</button>
       {/if}
-      <button class="btn-use" class:active={msg.activeSampleIndex === idx} data-tooltip="Make this the active branch & collapse to it (others stay as ‹k/N› siblings)" use:tip aria-label="Make active" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onSelectSample(idx)}>
-        <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4" /><path d="M5.2 8.3l1.9 1.9 3.7-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+      <button class="btn-use" class:active={msg.activeSampleIndex === idx} data-tooltip="Make this the active branch (others stay ‹k/N› siblings)" use:tip aria-label="Make active" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onSelectSample(idx)}>
+        <Icon name="use-sample" />
       </button>
-      <button class="btn-act sample-continue" data-tooltip="Continue THIS sample — makes it the active branch, then the model extends it (n-samples → new branches to pick)" use:tip aria-label="Continue this sample" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onContinueSample(idx)}>
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" /></svg>
+      <button class="btn-act sample-continue" data-tooltip="Continue THIS sample — makes it active, then extends it" use:tip aria-label="Continue this sample" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onContinueSample(idx)}>
+        <Icon name="continue" size={12} />
       </button>
       <button class="btn-tag" class:shift-alt={shiftDown} data-tooltip={shiftDown ? 'Bookmark instantly (no note)' : 'Bookmark with a note'} use:tip onclick={(e) => onTag(sample.content, idx, msg.totalSamples ?? null, sample.reasoning || '', e.shiftKey)}>
-        {#if shiftDown}{@render tagQuickIcon()}{:else}{@render tagIcon()}{/if}
+        {#if shiftDown}<Icon name="tag-quick" size={12} />{:else}<Icon name="tag" size={12} />{/if}
       </button>
       <button class="btn-act btn-act-danger sample-del" data-tooltip="Delete this sample" use:tip aria-label="Delete this sample" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onDeleteSample(idx)}>
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V2.5h4V4M4.5 4l.6 9h5.8l.6-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg>
+        <Icon name="trash" size={12} />
       </button>
       <button class="btn-act btn-act-danger" data-tooltip="Keep only this sample — discard the others" use:tip aria-label="Discard others" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onDiscardOthers(idx)}>
-        <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="2.5" y="5" width="7" height="8.5" rx="1" stroke="currentColor" stroke-width="1.3" /><path d="M7 2.5h6.5V11" stroke="currentColor" stroke-width="1.2" opacity="0.5" /><path d="M10.8 4.8l2.4 2.4M13.2 4.8l-2.4 2.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>
+        <Icon name="discard-others" />
       </button>
       {@render copyIdBtn(msg.sampleNodeIds?.[idx])}
     </OverflowRow>
   </div>
 {/snippet}
 
-<!-- Action icons. The shift-held variants signal the alternate action: regenerate
-     becomes "replace in place" (square in the center), edit becomes "fork a full
-     copy" (overlapping pages). -->
-{#snippet regenIcon()}
-  <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M1.5 7a5.5 5.5 0 0 1 9.9-3.3M12.5 7a5.5 5.5 0 0 1-9.9 3.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><path d="M11.5 1v3h-3M2.5 13v-3h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
-{/snippet}
-{#snippet replaceIcon()}
-  <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M1.5 7a5.5 5.5 0 0 1 9.9-3.3M12.5 7a5.5 5.5 0 0 1-9.9 3.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><path d="M11.5 1v3h-3M2.5 13v-3h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /><rect x="5.1" y="5.1" width="3.8" height="3.8" rx="0.6" fill="currentColor" /></svg>
-{/snippet}
-{#snippet editIcon()}
-  <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M10.5 2.5l3 3L6 13l-3.5.5L3 10l7.5-7.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /></svg>
-{/snippet}
-{#snippet editCopyIcon()}
-  <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="2.5" y="2.5" width="7.5" height="9.5" rx="1" stroke="currentColor" stroke-width="1.2" /><path d="M6 4.5h6a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" /></svg>
-{/snippet}
-{#snippet tagIcon()}
-  <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 2h6l6 6-6 6-6-6V2Z" stroke="currentColor" stroke-width="1.5" /><circle cx="5.5" cy="5.5" r="1" fill="currentColor" /></svg>
-{/snippet}
-{#snippet tagQuickIcon()}
-  <!-- filled bookmark = save instantly, no note prompt -->
-  <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 2h6l6 6-6 6-6-6V2Z" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" /><circle cx="5.3" cy="5.3" r="1" fill="var(--color-bg)" /></svg>
-{/snippet}
-{#snippet trashIcon()}
-  <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V2.5h4V4M4.5 4l.6 9h5.8l.6-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg>
-{/snippet}
-{#snippet continuePlusIcon()}
-  <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" /></svg>
-{/snippet}
-{#snippet continueThinkIcon()}
-  <!-- thought bubble + plus = continue the reasoning (resume inside the think block) -->
-  <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="8.4" rx="4.2" stroke="currentColor" stroke-width="1.3" /><path d="M8 4.4v3.6M6.2 6.2h3.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /><circle cx="5" cy="12.5" r="1.15" fill="currentColor" /><circle cx="2.8" cy="14.4" r="0.75" fill="currentColor" /></svg>
-{/snippet}
-{#snippet trashAllIcon()}
-  <!-- trash + a back layer = "delete every branch at this level" -->
-  <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M5.5 5.5l.5 7.5h5.5l.5-7.5M5 5.5h8M7.5 5.5V4h3v1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" /><path d="M3 3.2h6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /><path d="M2.6 3.2l.5 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
-{/snippet}
+<!-- Action glyphs come from `lib/Icon.svelte` (shared with the Help modal, which
+     shows the same pictogram next to each shortcut). The shift-held variants are
+     distinct icons on purpose: regenerate becomes "replace in place" (square in
+     the center), edit becomes "fork a full copy" (overlapping pages). -->
 
 <!-- think / no-think chip: which renderer mode drew this sample. Only rendered
      when the field is set, i.e. on thinking=BOTH batches (single-mode turns
@@ -396,7 +365,7 @@
 {#snippet noTokTag()}
   <span
     class="mode-tag"
-    data-tooltip="No token logprobs on this turn — they're captured for native tinker sampling only (not OpenRouter or token-streamed single samples)"
+    data-tooltip="No token logprobs on this turn — native tinker sampling only"
     use:tip>no token data</span>
 {/snippet}
 
@@ -405,7 +374,7 @@
 {#snippet truncatedTag()}
   <span
     class="truncated-tag"
-    data-tooltip="Hit the max-tokens limit — the output is cut off. Continue (+) extends it."
+    data-tooltip="Hit the max-tokens limit — Continue (+) extends it"
     use:tip>truncated</span>
 {/snippet}
 
@@ -418,29 +387,14 @@
     class:btn-act-all={allActive}
     class:shift-alt={shiftDown && canResumeThinking}
     data-tooltip={(shiftDown && canResumeThinking
-      ? 'Continue the REASONING — resume inside the think block (before </think>)'
+      ? 'Continue the REASONING — resume inside the think block'
       : 'Continue this message (extends it; n-samples → pick one)') + (allActive ? ' — in ALL panels' : '')}
     use:tip
     aria-label="Continue this message"
     onclick={(e) => onContinue(e.ctrlKey || e.metaKey, e.shiftKey)}
   >
-    {#if shiftDown && canResumeThinking}{@render continueThinkIcon()}{:else}{@render continuePlusIcon()}{/if}
+    {#if shiftDown && canResumeThinking}<Icon name="continue-think" />{:else}<Icon name="continue" />{/if}
   </button>
-{/snippet}
-
-{#snippet copyIcon()}
-  <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="8.5" height="8.5" rx="1.2" stroke="currentColor" stroke-width="1.2" /><path d="M3 10.5A1.5 1.5 0 0 1 2.5 9.5V3.5A1.5 1.5 0 0 1 4 2h6a1.5 1.5 0 0 1 1.1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>
-{/snippet}
-{#snippet copyAllIcon()}
-  <!-- copy + text lines = "copy the FULL conversation as markdown" -->
-  <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="5" y="4.5" width="8.5" height="9" rx="1.2" stroke="currentColor" stroke-width="1.2" /><path d="M7 7.3h4.5M7 9.3h4.5M7 11.3h2.6" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" /><path d="M3 10.5A1.5 1.5 0 0 1 2.5 9.5V3.5A1.5 1.5 0 0 1 4 2h6a1.5 1.5 0 0 1 1.1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>
-{/snippet}
-{#snippet checkIcon()}
-  <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5L13 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
-{/snippet}
-{#snippet hashIcon()}
-  <!-- node-id glyph (a # = "this row's id") -->
-  <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M6.2 2.5L4.8 13.5M11.2 2.5L9.8 13.5M2.8 6h10.5M2.5 10h10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" /></svg>
 {/snippet}
 
 <!-- Copy THIS message's content. shift = also include the thinking as <think>…</think>. -->
@@ -454,7 +408,7 @@
     aria-label="Copy this message"
     onclick={(e) => { onCopy(false, e.shiftKey); flashCopied('msg'); }}
   >
-    {#if copiedMsg}{@render checkIcon()}{:else}{@render copyIcon()}{/if}
+    {#if copiedMsg}<Icon name="check" />{:else}<Icon name="copy" />{/if}
   </button>
 {/snippet}
 
@@ -469,7 +423,7 @@
     aria-label="Copy conversation"
     onclick={(e) => { onCopy(true, e.shiftKey); flashCopied('conv'); }}
   >
-    {#if copiedWs}{@render checkIcon()}{:else}{@render copyAllIcon()}{/if}
+    {#if copiedWs}<Icon name="check" />{:else}<Icon name="copy-all" />{/if}
   </button>
 {/snippet}
 
@@ -479,7 +433,7 @@
   {#if otherPanels.length && onSendToPanel && msg.nodeId != null}
     <ActionMenu label="Send this branch's context to another panel" testid="send-to" resetKey={msg.nodeId ?? ''}>
       {#snippet trigger()}
-        <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M2 6h10M9.5 3.5 12 6 9.5 8.5M14 10H4M6.5 7.5 4 10l2.5 2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+        <Icon name="send-to" />
       {/snippet}
       {#snippet children(close)}
         {#each otherPanels as op (op.id)}
@@ -502,12 +456,12 @@
       class="btn-act"
       class:copied={copiedId}
       data-testid="copy-node-id"
-      data-tooltip={copiedId ? 'Copied!' : `Copy node id ${id} — the CLI handle: tinkpg samples --node ${id} (this fork's fan-out) · tinkpg continue --node ${id} (loom from here)`}
+      data-tooltip={copiedId ? 'Copied!' : `Copy node id ${id} — the tinkpg --node handle`}
       use:tip
       aria-label="Copy node id"
       onclick={() => { navigator.clipboard?.writeText(id); flashCopied('id'); }}
     >
-      {#if copiedId}{@render checkIcon()}{:else}{@render hashIcon()}{/if}
+      {#if copiedId}<Icon name="check" />{:else}<Icon name="hash" />{/if}
     </button>
   {/if}
 {/snippet}
@@ -523,7 +477,7 @@
     aria-label={shiftDown ? 'Delete all branches' : 'Delete'}
     onclick={(e) => onDelete(e.ctrlKey || e.metaKey, e.shiftKey)}
   >
-    {#if shiftDown}{@render trashAllIcon()}{:else}{@render trashIcon()}{/if}
+    {#if shiftDown}<Icon name="trash-all" />{:else}<Icon name="trash" />{/if}
   </button>
 {/snippet}
 
@@ -538,7 +492,7 @@
     aria-label="Regenerate"
     onclick={(e) => onRegenerate(e.ctrlKey || e.metaKey, e.shiftKey)}
   >
-    {#if shiftDown}{@render replaceIcon()}{:else}{@render regenIcon()}{/if}
+    {#if shiftDown}<Icon name="replace" />{:else}<Icon name="regen" />{/if}
   </button>
 {/snippet}
 
@@ -575,7 +529,7 @@
         class="sys-strip"
         class:expanded={sysExpanded}
         data-testid="thread-system-strip"
-        data-tooltip={sysExpanded ? 'Collapse' : 'This thread\'s system prompt (composed over the global one) — click to expand'}
+        data-tooltip={sysExpanded ? 'Collapse' : 'This thread\'s system prompt — click to expand'}
         use:tip
         onclick={(e) => { e.stopPropagation(); sysExpanded = !sysExpanded; onFocusRow?.(); }}
       >
@@ -700,7 +654,7 @@
           {#if msg.raw_text}
             <!-- Raw leads the row (Clément: very left, always visible — first
                  in priority order it can never fold). -->
-            <button class="btn-raw" class:active={rawSingle} onclick={() => (rawSingle = !rawSingle)} title="Toggle raw model output with tags preserved">Raw</button>
+            <button class="btn-raw" class:active={rawSingle} onclick={() => (rawSingle = !rawSingle)} data-tooltip="Raw model output, tags preserved" use:tip>Raw</button>
           {/if}
           {#if canEdit}
             {@render regenGroup()}
@@ -710,19 +664,19 @@
               class:shift-alt={shiftDown && msg.role === 'user'}
               class:btn-act-all={allActive}
               data-tooltip={`${msg.role === 'user'
-                ? (shiftDown ? 'Edit → fork a FULL editable copy of the conversation from here (no generation)' : 'Edit → fork + regenerate (shift: fork full copy)')
+                ? (shiftDown ? 'Edit → fork a full editable copy (no generation)' : 'Edit → fork + regenerate (shift: fork full copy)')
                 : 'Edit → new branch'}${allActive ? ' — in ALL panels' : ''}`}
               use:tip
               aria-label="Edit"
               onclick={(e) => startEdit(e.shiftKey, e.ctrlKey || e.metaKey)}
             >
-              {#if shiftDown && msg.role === 'user'}{@render editCopyIcon()}{:else}{@render editIcon()}{/if}
+              {#if shiftDown && msg.role === 'user'}<Icon name="edit-copy" />{:else}<Icon name="edit" />{/if}
             </button>
             {@render deleteBtn('Delete this branch')}
           {/if}
           {#if msg.role === 'assistant' && msg.content}
             <button class="btn-tag" class:shift-alt={shiftDown} data-tooltip={shiftDown ? 'Bookmark instantly (no note)' : 'Bookmark with a note'} use:tip onclick={(e) => onTag(msg.content, null, null, msg.reasoning || '', e.shiftKey)}>
-              {#if shiftDown}{@render tagQuickIcon()}{:else}{@render tagIcon()}{/if}
+              {#if shiftDown}<Icon name="tag-quick" size={12} />{:else}<Icon name="tag" size={12} />{/if}
             </button>
           {/if}
           {@render copyMsgBtn()}

@@ -434,7 +434,7 @@
         <button class="chart-mode-btn" class:active={mode === 'firsttoken'} disabled={!hasFirstToken}
           onclick={() => { mode = 'firsttoken'; inspect = null; }}
           data-tooltip={hasFirstToken
-            ? "The model's own probability distribution over the FIRST generated token (from stored logprobs)"
+            ? "The model's probability distribution over the first generated token"
             : 'Needs token logprobs — captured on native tinker sampling only'} use:tip>first token</button>
       </div>
       {#if turnCount > 1}
@@ -463,7 +463,7 @@
           bind:value={thinkFilter}
           onchange={() => (inspect = null)}
           aria-label="Thinking filter"
-          data-tooltip="This turn mixes samples generated with and without thinking — chart one population at a time"
+          data-tooltip="This turn mixes think / no-think samples — chart one at a time"
           use:tip
         >
           <option value="all">all samples</option>
@@ -487,7 +487,7 @@
             aria-pressed={!off}
             data-tooltip={off
               ? 'Excluded from the chart — click to re-include'
-              : 'Click to exclude this rule from the bucketing (useful when it matches every sample)'}
+              : 'Exclude this rule from the bucketing'}
             use:tip
             onclick={() => toggleRule(r.id)}
           >
@@ -597,8 +597,8 @@
               data-tooltip={chip.excluded
                 ? 'Excluded — click to re-include'
                 : merged
-                  ? 'Merged group — click to exclude, drag onto another to grow, ✕ to split'
-                  : 'Click to exclude · drag onto another token to merge them into one color'}
+                  ? 'Merged — click to exclude, drag onto another to grow, ⊗ to split'
+                  : 'Click to exclude · drag onto another to merge'}
               use:tip
               onclick={() => toggleFtExclude(chip.key)}
               onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), toggleFtExclude(chip.key))}
@@ -626,7 +626,7 @@
             </div>
           {/if}
           <label class="ft-renorm"
-            data-tooltip="Drop the grey “rest of distribution” (the top-K tail + any excluded tokens) and rescale the shown tokens to sum to 100%. Off: the bar keeps absolute model probabilities and rest stays as a segment."
+            data-tooltip="Drop the grey rest and rescale the shown tokens to 100%"
             use:tip>
             <input type="checkbox" bind:checked={ftRenorm} />
             <span>renormalize</span>
@@ -636,7 +636,7 @@
         <div class="ft-add">
           <input class="ft-add-input" type="text" placeholder="add a hidden token… (e.g. “ D”)"
             bind:value={ftQuery}
-            data-tooltip="Search tokens recorded for this turn (top-K alternatives + sampled first tokens across panels) and pull one out of the grey rest into its own color"
+            data-tooltip="Search tokens recorded for this turn and pull one out of the rest"
             use:tip />
           {#if ftQuery.trim()}
             <div class="ft-matches">
@@ -645,7 +645,7 @@
               {:else}
                 {#each ftMatches as m (m.tid)}
                   <button class="ft-match" onclick={() => addToken(m)}
-                    data-tooltip="{m.kind} match · recorded p={((prob(m.lp) ?? 0) * 100).toFixed(1)}% — click to add" use:tip>
+                    data-tooltip="{m.kind} match · p={((prob(m.lp) ?? 0) * 100).toFixed(1)}% — click to add" use:tip>
                     <span class="ft-match-tok">{displayToken(m.t)}</span>
                     <span class="ft-match-p">{((prob(m.lp) ?? 0) * 100).toFixed(1)}%</span>
                   </button>

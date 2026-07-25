@@ -250,7 +250,13 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
   - `lib/render.ts` — store-coupled render entry point (wraps highlight-render).
   - `lib/api.ts` — typed backend client + named-event SSE helper.
   - `lib/types.ts` — TS types mirroring the backend (see `docs/API_CONTRACT.md`).
-  - `lib/tooltip.svelte.ts` — the `use:tip` tooltip action.
+  - `lib/tooltip.svelte.ts` — the `use:tip` tooltip action (+ `tipHost`, which
+    registers the one rendered box so a wide tip gets clamped into the
+    viewport). **House rule for tooltip TEXT, repo-wide: ONE short line naming
+    what the control does (~70 chars).** Mechanism / modifier tables / caveats
+    belong in the `?` modal — the tip is hover-instant and lands on the way to
+    clicking something else. Prefer `use:tip` over a native `title=` on the main
+    screen (sidebar / chat area / composer); `title` survives inside modals only.
 - **Components** — `.svelte`:
   - `routes/+page.svelte` — **the workspace component**: wires every store +
     handler to the markup. Still the biggest file (~2.2k lines); organized by
@@ -275,9 +281,19 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     `.row-menu-item`), which receives `close()`; the `resetKey` prop closes a
     menu when the UNKEYED chat rows hand the mounted instance a different node.
   - `lib/HelpModal.svelte` — the `?` modal (sidebar icon row): Guide + Keys tabs
-    describing the UI to a HUMAN. Its prose twin is the `tinkerscope-guide`
+    describing the UI to a HUMAN. Its prose twin is the `tinkerscope:guide`
     skill; both update in the same commit as any UI behavior change (see
-    §Working conventions). Smoke: `browser_help_modal.py`.
+    §Working conventions). Every button it names is drawn with its REAL glyph via
+    `Icon.svelte` (a hand-copied path would drift) — the Guide carries button
+    legends for the row toolbar / sample cards / sidebar, and Keys shows the icon
+    next to each modifier. Also fronts the agent-skill pitch + a FOLDED
+    plugin-install block (Claude Code / Codex / npx skills) that twins README
+    §"Install the agent skills". Smoke: `browser_help_modal.py`.
+  - `lib/Icon.svelte` — the shared SVG glyph set (`<Icon name="edit" size={13} />`).
+    One dispatch table for every row-toolbar + sidebar icon, so the toolbar and the
+    Help modal can't disagree. Shift-variants are their own names (`replace`,
+    `edit-copy`, `trash-all`, `tag-quick`). ⚠️ Parent-scoped CSS can't reach the
+    glyph — style it via `:global(svg)` (see `.theme-toggle.refreshing`).
   - `lib/ChartModal.svelte`, `lib/TagModal.svelte`, `lib/DatasetModal.svelte`,
     `lib/SlideshowModal.svelte`, `lib/OrManagerModal.svelte`,
     `lib/TinkerPickerModal.svelte` — the six workspace modals. Each owns its body

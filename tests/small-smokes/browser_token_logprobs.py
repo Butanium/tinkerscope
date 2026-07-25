@@ -12,6 +12,12 @@ display surfaces:
   - a turn WITHOUT logprobs shows the "no token data" pill instead
   - Off → back to the normal markdown render
 
+  "Color by match" (the Off/On toggle under Token probs):
+  - hidden until a highlight rule exists; defaults Off
+  - On adopts the first enabled rule and re-tints tokens by match probability
+    (the rule's hue) instead of surprisal
+  - Off restores the surprisal tint but KEEPS the picked rule
+
   first-token chart mode:
   - the "first token" mode button is enabled (data present) and produces
     model-probability bars: legend = tokens + the grey rest-of-distribution
@@ -59,8 +65,21 @@ def tlp(entries):
     ]
 
 
+RULE_ID = "smoke-tlp-blue"
+
+
 def seed() -> str:
-    """One turn with 3 logprob-carrying siblings + a follow-up turn without."""
+    """One turn with 3 logprob-carrying siblings + a follow-up turn without.
+
+    Also installs one highlight rule: "Color by match" only renders when at
+    least one enabled rule exists, and position 0's top-3 (Blue/Gray/The) is
+    exactly the distribution the match tint reads.
+    """
+    api("PUT", f"/api/highlights/{RULE_ID}", {
+        "id": RULE_ID, "name": "blue", "enabled": True, "patterns": ["Blue"],
+        "combinator": "or", "is_regex": False, "case_sensitive": False,
+        "color": "#3b82f6", "scope_role": None, "sort_order": 100,
+    })
     # Clear the shared panel echo first: a stale transcript from a previous chat
     # would otherwise be grafted into the freshly-opened workspace by the
     # external-fold reconcile and shunt the seeded branch to a sibling.
@@ -152,6 +171,48 @@ def main() -> None:
                            page.query_selector('.mode-tag:has-text("no token data")') is not None))
             # thinking fold: none of these carry reasoning, nothing to assert here.
 
+            # ── "Color by match" toggle ──────────────────────────────────
+            # A pre-toggle install had no on-flag, so the store infers ON from a
+            # stored selection; this smoke's browser is fresh → Off with no picks.
+            match_row = '.lp-hl .thinking-toggle-row:has-text("Color by match")'
+            page.wait_for_selector(match_row, timeout=3000)
+            checks.append(("match toggle defaults Off",
+                           page.query_selector(f'{match_row} .seg-btn.active').inner_text() == "Off"))
+            checks.append(("no rule chips while Off", page.query_selector(".lp-hl-chip") is None))
+
+            surprisal_bg = toks[0].get_attribute("style") or ""
+            page.click(f'{match_row} .seg-btn:has-text("On")')
+            page.wait_for_selector(".lp-hl-chip.sel", timeout=3000)
+            # "adopts the FIRST enabled rule" — which rule that is depends on the
+            # instance's own rules (a state snapshot carries them), so assert the
+            # invariant, not the name: exactly one chip, and it's the leading one.
+            sel = page.query_selector_all(".lp-hl-chip.sel")
+            first_chip = page.query_selector(".lp-hl-chip")
+            checks.append(("On adopts the first enabled rule",
+                           len(sel) == 1 and sel[0].inner_text() == first_chip.inner_text()))
+            toks = page.query_selector_all(".tok-stream >> nth=0 >> .tok")
+            match_bg = toks[0].get_attribute("style") or ""
+            checks.append(("tint switches off surprisal", match_bg != surprisal_bg))
+            # Pick OUR rule explicitly: 'Blue' holds 60% of position 0's mass and
+            # the rule matches it → a blue band (59,130,246), never the surprisal hue.
+            page.click('.lp-hl-chip:has-text("blue")')
+            page.wait_for_timeout(150)
+            toks = page.query_selector_all(".tok-stream >> nth=0 >> .tok")
+            match_bg = toks[0].get_attribute("style") or ""
+            checks.append(("tinted with the matching rule's hue",
+                           "59, 130, 246" in match_bg or "59,130,246" in match_bg))
+
+            page.click(f'{match_row} .seg-btn:has-text("Off")')
+            page.wait_for_timeout(150)
+            toks = page.query_selector_all(".tok-stream >> nth=0 >> .tok")
+            checks.append(("Off restores the surprisal tint",
+                           (toks[0].get_attribute("style") or "") == surprisal_bg))
+            page.click(f'{match_row} .seg-btn:has-text("On")')
+            page.wait_for_timeout(150)
+            checks.append(("Off kept the picked rule",
+                           page.query_selector(".lp-hl-chip.sel") is not None))
+            page.click(f'{match_row} .seg-btn:has-text("Off")')
+
             # Off → normal render returns
             page.click('.thinking-toggle-row:has-text("Token probs") .seg-btn:has-text("Off")')
             page.wait_for_timeout(200)
@@ -195,10 +256,11 @@ def main() -> None:
                 print("console errors:", errors[:5])
             browser.close()
     finally:
-        try:
-            api("DELETE", f"/api/workspaces/{conv_id}")
-        except Exception:
-            pass
+        for path in (f"/api/workspaces/{conv_id}", f"/api/highlights/{RULE_ID}"):
+            try:
+                api("DELETE", path)
+            except Exception:
+                pass
 
     ok = all(c for _, c in checks)
     for name, c in checks:

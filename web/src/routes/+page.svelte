@@ -31,6 +31,7 @@
   import OrManagerModal from '$lib/OrManagerModal.svelte';
   import TinkerPickerModal from '$lib/TinkerPickerModal.svelte';
   import HelpModal from '$lib/HelpModal.svelte';
+  import Icon from '$lib/Icon.svelte';
   import PickerDropdown from '$lib/PickerDropdown.svelte';
   import SplitChip from '$lib/SplitChip.svelte';
   import TruncLabel from '$lib/TruncLabel.svelte';
@@ -38,7 +39,7 @@
   import { logprobView, logprobHighlight } from '$lib/logprobs.svelte';
   import HighlightRules from '$lib/HighlightRules.svelte';
   import type { Pin } from '$lib/types';
-  import { tip, tooltip } from '$lib/tooltip.svelte';
+  import { tip, tipHost, tooltip } from '$lib/tooltip.svelte';
   import {
     activePath,
     activeMessages,
@@ -357,6 +358,16 @@
     // user's own; the Qwen presets apply solely via the explicit "Reset to Qwen
     // defaults" button, never as a side effect of cycling thinking mode.
     patchState({ thinking: next }, true);
+  }
+
+  /** Sidebar "Color by match" Off/On. Turning it on with nothing picked would be
+   *  a no-op toggle, so it adopts the first enabled rule; turning it off keeps
+   *  the selection for the next time. */
+  function setMatchColor(on: boolean) {
+    logprobHighlight.setEnabled(on);
+    if (!on || logprobHighlight.selected.length) return;
+    const first = highlightStore.rules.find((r) => r.enabled);
+    if (first) logprobHighlight.set([first.id]);
   }
 
   // ── Sampleability / chat eligibility ──────────────────────────────
@@ -1388,59 +1399,30 @@
           use:tip
         >
           {#if themeMode === 'light'}
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <circle cx="8" cy="8" r="3.5" stroke="currentColor" stroke-width="1.5" />
-              <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-            </svg>
+            <Icon name="theme-light" size={16} />
           {:else if themeMode === 'dark'}
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M14 9.2A6 6 0 0 1 6.8 2 6 6 0 1 0 14 9.2Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
+            <Icon name="theme-dark" size={16} />
           {:else}
-            <!-- auto: monitor glyph (follows system scheme) -->
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <rect x="2" y="3" width="12" height="8" rx="1" stroke="currentColor" stroke-width="1.5" />
-              <path d="M6 14h4M8 11v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-            </svg>
+            <Icon name="theme-auto" size={16} />
           {/if}
         </button>
         <button class="theme-toggle" onclick={openChart} data-tooltip="View response distribution chart (needs samples)" use:tip>
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <rect x="2" y="9" width="3" height="5" rx="0.5" stroke="currentColor" stroke-width="1.3" />
-            <rect x="6.5" y="5" width="3" height="9" rx="0.5" stroke="currentColor" stroke-width="1.3" />
-            <rect x="11" y="2" width="3" height="12" rx="0.5" stroke="currentColor" stroke-width="1.3" />
-          </svg>
+          <Icon name="chart" size={16} />
         </button>
         <button class="theme-toggle" onclick={openSlideshow} data-tooltip="Browse saved pins ({pins.length} saved)" use:tip>
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path d="M3 2.5h10a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H3A1.5 1.5 0 0 1 1.5 12V4A1.5 1.5 0 0 1 3 2.5Z" stroke="currentColor" stroke-width="1.3" />
-            <path d="M6.5 6l4 2-4 2V6Z" fill="currentColor" />
-          </svg>
+          <Icon name="pins" size={16} />
         </button>
         <button class="theme-toggle" onclick={openDatasetLoader} data-tooltip="Peek at the selected run's training data" use:tip>
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <path d="M3 1.5h5l3.5 3.5v7.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-10a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.3" />
-            <path d="M8 1.5v3.5h3.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
-            <path d="M5 8h4M5 10h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
-          </svg>
+          <Icon name="dataset" size={14} />
         </button>
         <button class="theme-toggle" class:refreshing={refreshingModels} onclick={refreshModels} data-tooltip="Rescan runs + refresh tinker checkpoints" use:tip disabled={refreshingModels}>
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <path d="M1.5 7a5.5 5.5 0 0 1 9.9-3.3M12.5 7a5.5 5.5 0 0 1-9.9 3.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-            <path d="M11.5 1v3h-3M2.5 13v-3h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
+          <Icon name="regen" size={14} />
         </button>
         <button class="theme-toggle" onclick={() => (showHelp = true)} data-tooltip="How to use tinkerscope — features + keyboard shortcuts" use:tip aria-label="Help">
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-            <circle cx="8" cy="8" r="6.25" stroke="currentColor" stroke-width="1.3" />
-            <path d="M6.2 6.1a1.85 1.85 0 1 1 2.3 1.85c-.35.1-.5.35-.5.75v.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
-            <circle cx="8" cy="11.4" r="0.75" fill="currentColor" />
-          </svg>
+          <Icon name="help" size={15} />
         </button>
         <button class="btn-stop-sidebar" class:active={anyRunning} onclick={() => chat.stopGeneration()} data-tooltip="Stop all generation" use:tip disabled={!anyRunning}>
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <rect x="2" y="2" width="10" height="10" rx="1.5" fill="currentColor" />
-          </svg>
+          <Icon name="stop" size={14} />
         </button>
       </div>
 
@@ -1480,17 +1462,16 @@
             </div>
             <button class="ws-icon-btn" class:shift-alt={shiftDown} data-tooltip={shiftDown ? 'New BLANK workspace (no models)' : 'New workspace · keeps current models (Shift: blank)'} use:tip disabled={anyRunning || ws.busy} aria-label="New workspace" onclick={newWorkspace}>
               {#if shiftDown}
-                <!-- blank-page + plus: a fresh workspace with no model -->
-                <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M4 1.5h5L12.5 5v6.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /><path d="M8.5 1.5V5h3.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /><path d="M7.5 7v3M6 8.5h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" /></svg>
+                <Icon name="new-blank" />
               {:else}
-                <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+                <Icon name="plus" />
               {/if}
             </button>
-            <button class="ws-icon-btn" title="Rename workspace" disabled={anyRunning || ws.busy} aria-label="Rename workspace" onclick={startRenameWorkspace}>
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M10.5 2.5l3 3L6 13l-3.5.5L3 10l7.5-7.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /></svg>
+            <button class="ws-icon-btn" data-tooltip="Rename workspace" use:tip disabled={anyRunning || ws.busy} aria-label="Rename workspace" onclick={startRenameWorkspace}>
+  <Icon name="edit" />
             </button>
-            <button class="ws-icon-btn ws-icon-danger" title="Delete workspace" disabled={anyRunning || ws.busy} aria-label="Delete workspace" onclick={onDeleteWorkspace}>
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6 4V2.5h4V4M4.5 4l.6 9h5.8l.6-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            <button class="ws-icon-btn ws-icon-danger" data-tooltip="Delete workspace" use:tip disabled={anyRunning || ws.busy} aria-label="Delete workspace" onclick={onDeleteWorkspace}>
+  <Icon name="trash" />
             </button>
           </div>
         {/if}
@@ -1589,7 +1570,7 @@
         {/each}
         <button class="btn-add-model" class:shift-alt={shiftDown} onclick={addPanel} disabled={modelCatalog.runs.length + modelCatalog.openrouterModels.length < 1}
             data-tooltip={shiftDown ? 'Add a BLANK panel (empty thread)' : 'Add panel · clones the first panel\u2019s thread (Shift: blank)'} use:tip>
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+<Icon name="plus" size={12} />
             {panelSels.length < 2 ? 'Compare' : 'Add panel'}
           </button>
         {/if}
@@ -1615,7 +1596,7 @@
       <div class="sidebar-section">
         <label class="sidebar-label thinking-toggle-row">
           <span>Sample view</span>
-          <span class="seg-toggle" data-tooltip="How an n>1 distribution renders: All = every card stacked (scroll); Cycle = one card at a time with ‹/›" use:tip>
+          <span class="seg-toggle" data-tooltip="All = every sample stacked; Cycle = one at a time with ‹/›" use:tip>
             <button class="seg-btn" class:active={sampleView === 'all'} onclick={() => setSampleView('all')}>All</button>
             <button class="seg-btn" class:active={sampleView === 'cycle'} onclick={() => setSampleView('cycle')}>Cycle</button>
           </span>
@@ -1625,7 +1606,7 @@
       <div class="sidebar-section">
         <label class="sidebar-label thinking-toggle-row">
           <span>Token probs</span>
-          <span class="seg-toggle" data-tooltip="On = assistant turns show their raw token stream; hover a token for its probability + top-5 alternatives. Captured on native tinker sampling (display-only toggle — data is always stored)" use:tip>
+          <span class="seg-toggle" data-tooltip="Show raw tokens tinted by surprisal; hover one for its top-5" use:tip>
             <button class="seg-btn" class:active={!logprobView.enabled} onclick={() => logprobView.set(false)}>Off</button>
             <button class="seg-btn" class:active={logprobView.enabled} onclick={() => logprobView.set(true)}>On</button>
           </span>
@@ -1633,20 +1614,28 @@
 
         {#if logprobView.enabled && highlightStore.rules.some((r) => r.enabled)}
           <div class="lp-hl">
-            <span class="lp-hl-title" data-tooltip="Tint each token by the model's probability of emitting a matching token there (over the captured top-5), instead of by surprisal. Pick up to 2 — they split the token top/bottom. None → surprisal." use:tip>Color by match</span>
-            <div class="lp-hl-chips">
-              {#each highlightStore.rules.filter((r) => r.enabled) as r (r.id)}
-                <button
-                  class="lp-hl-chip"
-                  class:sel={logprobHighlight.has(r.id)}
-                  onclick={() => logprobHighlight.toggle(r.id)}
-                  data-tooltip={r.name}
-                  use:tip>
-                  <span class="lp-hl-dot" style="background: {r.color}"></span>
-                  <span class="lp-hl-name">{r.name}</span>
-                </button>
-              {/each}
-            </div>
+            <label class="sidebar-label thinking-toggle-row">
+              <span>Color by match</span>
+              <span class="seg-toggle" data-tooltip="Tint tokens by P(matching text) instead of surprisal — up to 2 rules" use:tip>
+                <button class="seg-btn" class:active={!logprobHighlight.enabled} onclick={() => setMatchColor(false)}>Off</button>
+                <button class="seg-btn" class:active={logprobHighlight.enabled} onclick={() => setMatchColor(true)}>On</button>
+              </span>
+            </label>
+            {#if logprobHighlight.enabled}
+              <div class="lp-hl-chips">
+                {#each highlightStore.rules.filter((r) => r.enabled) as r (r.id)}
+                  <button
+                    class="lp-hl-chip"
+                    class:sel={logprobHighlight.has(r.id)}
+                    onclick={() => logprobHighlight.toggle(r.id)}
+                    data-tooltip={r.name}
+                    use:tip>
+                    <span class="lp-hl-dot" style="background: {r.color}"></span>
+                    <span class="lp-hl-name">{r.name}</span>
+                  </button>
+                {/each}
+              </div>
+            {/if}
           </div>
         {/if}
       </div>
@@ -1655,7 +1644,7 @@
         <div class="sidebar-section">
           <label class="sidebar-label thinking-toggle-row">
             <span>Thinking</span>
-            <span class="seg-toggle" data-tooltip="Both = n samples without thinking + n with (2n total, no-think half first) in one send" use:tip>
+            <span class="seg-toggle" data-tooltip="Both = n samples each way in one send (2n total)" use:tip>
               <button class="seg-btn" class:active={s.thinking === false} onclick={() => setThinking(false)}>Off</button>
               <button class="seg-btn" class:active={s.thinking === true} onclick={() => setThinking(true)}>On</button>
               <button class="seg-btn" class:active={s.thinking === 'both'} onclick={() => setThinking('both')}>Both</button>
@@ -1720,7 +1709,7 @@
               ondragend={() => panelDrag.end()}
               role="group"
             >
-              <button class="restore-panel" onclick={() => ws.restorePanel(p.panel)} title="Restore this panel">
+              <button class="restore-panel" onclick={() => ws.restorePanel(p.panel)} data-tooltip="Unfold this panel" use:tip>
                 <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
                 <span class="restore-label" use:tip data-tooltip={panelLabel(p)}>{panelLabel(p)}</span>
               </button>
@@ -1753,7 +1742,7 @@
                   <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor"><circle cx="2.5" cy="3" r="1.2" /><circle cx="7.5" cy="3" r="1.2" /><circle cx="2.5" cy="7" r="1.2" /><circle cx="7.5" cy="7" r="1.2" /><circle cx="2.5" cy="11" r="1.2" /><circle cx="7.5" cy="11" r="1.2" /></svg>
                 </span>
                 <span class="column-title"><TruncLabel label={panelLabel(p)} /></span>
-                <button class="reduce-panel" onclick={() => ws.reducePanel(p.panel)} title="Reduce this panel" aria-label="Reduce panel">
+                <button class="reduce-panel" onclick={() => ws.reducePanel(p.panel)} data-tooltip="Fold this panel away" use:tip aria-label="Reduce panel">
                   <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
                 </button>
               </div>
@@ -1834,7 +1823,7 @@
           <div class="send-targets">
             <span class="send-targets-label">Send to</span>
             {#each panelSels as p (p.panel)}
-              <button class="send-chip" class:on={ws.sendTargets.has(p.panel)} class:reduced={ws.reducedPanels.has(p.panel)} onclick={() => ws.toggleSendTarget(p.panel)} title={ws.reducedPanels.has(p.panel) ? 'Reduced panel — click to send here anyway' : 'Toggle this panel as a send target'}><TruncLabel label={panelLabel(p)} /></button>
+              <button class="send-chip" class:on={ws.sendTargets.has(p.panel)} class:reduced={ws.reducedPanels.has(p.panel)} onclick={() => ws.toggleSendTarget(p.panel)} data-tooltip={ws.reducedPanels.has(p.panel) ? 'Folded panel — click to send here anyway' : 'Toggle this panel as a send target'} use:tip><TruncLabel label={panelLabel(p)} /></button>
             {/each}
           </div>
         {/if}
@@ -1849,8 +1838,8 @@
             enabled={systemOn}
             open={showSystem}
             testid="system"
-            powerTip="Apply / mute the per-workspace system prompt. Muting keeps the text; sends skip it (hollow dot = muted)."
-            editTip="Edit the per-workspace system prompt. Folding just hides the editor — it stays {systemOn ? 'applied' : 'muted'}."
+            powerTip="Apply / mute the workspace system prompt (hollow dot = muted)"
+            editTip="Edit the workspace system prompt"
             onpower={toggleSystemOn}
             onfold={() => (showSystem = !showSystem)}
           />
@@ -1860,8 +1849,8 @@
             enabled={prefillOn}
             open={showPrefill}
             testid="prefill"
-            powerTip="Apply / mute the assistant prefill without losing the text. Sends skip a muted prefill (hollow dot = muted)."
-            editTip="Edit the assistant prefill — the model continues from your text. Type raw <think> tags (DeepSeek/Kimi/Qwen3.5 auto-open one in thinking mode, so a redundant <think> is dropped; Qwen3 opens nothing). Folding just hides the editor."
+            powerTip="Apply / mute the prefill, keeping the text (hollow dot = muted)"
+            editTip="Edit the prefill — the model continues from your text"
             onpower={togglePrefillOn}
             onfold={() => (showPrefill = !showPrefill)}
           />
@@ -1870,7 +1859,7 @@
             class:on={branchFromRoot}
             data-testid="branch-root-toggle"
             onclick={() => (branchFromRoot = !branchFromRoot)}
-            data-tooltip="While on, each MAIN-COMPOSER send starts a NEW THREAD (a sibling first message) instead of extending the current one. Per-panel bubble sends always continue their panel. Jump between threads with the ⑂ threads popover or the ‹k/N› arrows on the first row."
+            data-tooltip="While on, each composer send starts a NEW thread instead of replying"
             use:tip
           >{branchFromRoot ? '⑂ branching from start' : '⑂ branch from start'}</button>
           {#if branchFromRoot}
@@ -1880,15 +1869,15 @@
               enabled={threadSystemOn}
               open={showThreadSystem}
               testid="thread-system"
-              powerTip="Apply / mute the THREAD system prompt for the next new-thread send. Muting keeps the text."
-              editTip="Edit the THREAD system prompt: recorded on the new thread's first message and appended to the global system prompt (global + newline + this). Continuing an existing thread always reuses that thread's own prompt."
+              powerTip="Apply / mute the THREAD system prompt (hollow dot = muted)"
+              editTip="Edit the next new thread's system prompt — appended to the global one"
               onpower={toggleThreadSystemOn}
               onfold={() => (showThreadSystem = !showThreadSystem)}
             />
           {/if}
           <ThreadSwitcher />
           {#if showPrefill}
-            <span class="prefill-scope seg-toggle" data-tooltip="Which half(s) of the send get the prefill. Think only / Non-think only apply it to that side; with Both the other half is left un-prefilled. A single-mode send on the wrong side drops it entirely." use:tip>
+            <span class="prefill-scope seg-toggle" data-tooltip="Which half of a thinking=Both send gets the prefill" use:tip>
               <button class="seg-btn" class:active={prefillScope === 'all'} onclick={() => (prefillScope = 'all')}>All</button>
               <button class="seg-btn" class:active={prefillScope === 'think'} onclick={() => (prefillScope = 'think')}>Think only</button>
               <button class="seg-btn" class:active={prefillScope === 'non_think'} onclick={() => (prefillScope = 'non_think')}>Non-think only</button>
@@ -1898,7 +1887,7 @@
             {/if}
           {/if}
           {#if prefillInput.trim() && !showPrefill}
-            <button class="prefill-peek" class:live={prefillActive} title="Prefill {prefillOn ? 'applied' : 'muted'} — click to edit: {prefillInput}" onclick={() => (showPrefill = true)}>{prefillInput.replace(/\s+/g, ' ').slice(0, 80)}{prefillInput.length > 80 ? '…' : ''}</button>
+            <button class="prefill-peek" class:live={prefillActive} data-tooltip="Prefill {prefillOn ? 'applied' : 'muted'} — click to edit" use:tip onclick={() => (showPrefill = true)}>{prefillInput.replace(/\s+/g, ' ').slice(0, 80)}{prefillInput.length > 80 ? '…' : ''}</button>
           {/if}
           {#if prefillInput.length > 0}
             <button class="prefill-clear" onclick={() => { prefillInput = ''; prefillOn = false; showPrefill = false; }}>clear</button>
@@ -2017,7 +2006,7 @@
 
 <!-- Tooltip -->
 {#if tooltip.visible}
-  <div class="tooltip-instant" style="left: {tooltip.x}px; top: {tooltip.y}px;">{tooltip.text}</div>
+  <div class="tooltip-instant" use:tipHost style="left: {tooltip.x}px; top: {tooltip.y}px;">{tooltip.text}</div>
 {/if}
 
 <style>
@@ -2087,7 +2076,8 @@
   .theme-toggle { background: none; border: 1px solid var(--color-border); border-radius: var(--radius); padding: 6px; color: var(--color-text-muted); display: flex; align-items: center; }
   .theme-toggle:hover { color: var(--color-text); border-color: var(--color-text-muted); }
   .theme-toggle.refreshing { opacity: 0.5; cursor: wait; }
-  .theme-toggle.refreshing svg { animation: spin 0.8s linear infinite; }
+  /* :global — the glyph is inside <Icon>, out of this component's CSS scope. */
+  .theme-toggle.refreshing :global(svg) { animation: spin 0.8s linear infinite; }
   @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
   /* ── Chat area ─────────────────────────────────────────────────── */
@@ -2168,8 +2158,7 @@
   .seg-btn:not(.active):hover { color: var(--color-accent); }
 
   /* ── "Color by match" highlight picker under the Token-probs toggle ── */
-  .lp-hl { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
-  .lp-hl-title { font-size: 0.7rem; color: var(--color-text-muted); font-weight: 600; letter-spacing: 0.02em; cursor: help; }
+  .lp-hl { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
   .lp-hl-chips { display: flex; flex-wrap: wrap; gap: 4px; }
   .lp-hl-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 2px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: var(--color-bg); color: var(--color-text-muted); font-size: 0.7rem; font-weight: 600; cursor: pointer; transition: all 0.15s; }
   .lp-hl-chip:hover { color: var(--color-text); border-color: var(--color-text-muted); }
@@ -2194,7 +2183,9 @@
   .reset-defaults-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
 
   /* ── Instant tooltip ──────────────────────────────────────────── */
-  .tooltip-instant { position: fixed; z-index: 9999; background: var(--color-text); color: var(--color-bg); font-size: 0.72rem; padding: 4px 8px; border-radius: var(--radius); pointer-events: none; white-space: nowrap; transform: translateX(-50%); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+  /* max-width + wrap, not nowrap: a long tip used to render as one off-screen
+     line. `use:tipHost` clamps it horizontally (see lib/tooltip.svelte.ts). */
+  .tooltip-instant { position: fixed; z-index: 9999; background: var(--color-text); color: var(--color-bg); font-size: 0.72rem; line-height: 1.45; padding: 4px 8px; border-radius: var(--radius); pointer-events: none; max-width: min(30rem, 92vw); transform: translateX(-50%); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
 
   /* ── History mode indicator ───────────────────────────────────── */
   .input-textarea.history-mode { border-color: var(--color-accent); box-shadow: 0 0 0 1px var(--color-accent); }

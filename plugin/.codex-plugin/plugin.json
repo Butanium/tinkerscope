@@ -1,0 +1,13 @@
+{
+  "name": "tinkerscope",
+  "version": "1.0.0",
+  "description": "Skills for tinkerscope — a local browser playground that auto-discovers Tinker training-run checkpoints, lets you chat with / sample from them, and is drivable live from the terminal via the `tinkpg` CLI.",
+  "repository": "https://github.com/Butanium/tinkerscope",
+  "license": "MIT",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "tinkerscope",
+    "shortDescription": "Drive the tinkerscope checkpoint playground, and explain its UI",
+    "category": "Developer Tools"
+  }
+}

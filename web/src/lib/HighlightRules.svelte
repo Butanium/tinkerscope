@@ -17,6 +17,7 @@
   } from '$lib/highlights.svelte';
   import { deriveRuleName } from '$lib/highlight-match';
   import { DragReorder } from '$lib/drag-reorder.svelte';
+  import { tip } from '$lib/tooltip.svelte';
   import type { HighlightRule } from '$lib/types';
 
   const ROLES = ['', 'user', 'assistant', 'system'] as const;
@@ -108,7 +109,7 @@
             class="hr-combinator"
             class:and={d.combinator === 'and'}
             onclick={toggleCombinator}
-            title="how patterns combine — click to switch or / and"
+            data-tooltip="How the patterns combine — click to switch or / and" use:tip
           >{d.combinator}</button>
         {/if}
         <div class="hr-pattern-row">
@@ -124,7 +125,7 @@
             oninput={(e) => setPattern(i, (e.target as HTMLInputElement).value)}
           />
           {#if i < d.patterns.length}
-            <button class="hr-x" onclick={() => removePattern(i)} title="remove pattern">×</button>
+            <button class="hr-x" onclick={() => removePattern(i)} data-tooltip="Remove this pattern" use:tip>×</button>
           {/if}
         </div>
       {/each}
@@ -190,7 +191,7 @@
         class="hr-grip"
         draggable="true"
         ondragstart={(e) => ruleDrag.start(e, rule.id)}
-        title="Drag to reorder"
+        data-tooltip="Drag to reorder rule" use:tip
         role="button"
         tabindex="-1"
         aria-label="Drag to reorder rule"
@@ -203,7 +204,7 @@
           class="hr-dab"
           class:off={!rule.enabled}
           style="background:{rule.enabled ? rule.color : 'transparent'};border-color:{rule.color}"
-          title="color"
+          data-tooltip="Rule color" use:tip
           onclick={() => (paletteFor = paletteFor === rule.id ? null : rule.id)}
           aria-label="pick color"
         ></button>
@@ -225,7 +226,7 @@
               <!-- Custom: a color-wheel dab holding a transparent native <input
                    type="color"> seeded with the rule's current color, so clicking
                    opens the OS picker initialized to it. Sits bottom-right of the grid. -->
-              <div class="hr-swatch hr-swatch-custom" class:sel={isCustomColor(rule.color)} title="custom color">
+              <div class="hr-swatch hr-swatch-custom" class:sel={isCustomColor(rule.color)} data-tooltip="Custom color" use:tip>
                 <input
                   class="hr-color-native"
                   type="color"
@@ -243,7 +244,7 @@
         class="hr-onoff"
         class:on={rule.enabled}
         onclick={() => toggleHighlightRule(rule)}
-        title={rule.enabled ? 'enabled — click to disable' : 'disabled — click to enable'}
+        data-tooltip={rule.enabled ? 'Enabled — click to disable' : 'Disabled — click to enable'} use:tip
       >{rule.enabled ? 'on' : 'off'}</button>
 
       <div class="hr-namecol">
@@ -254,7 +255,7 @@
           onkeydown={(e) => {
             if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
           }}
-          title="click to rename"
+          data-tooltip="Click to rename" use:tip
         />
         <div class="hr-preview">
           {#if rule.is_regex}<span class="hr-flag re">/re/</span>{/if}
@@ -264,10 +265,10 @@
         </div>
       </div>
 
-      <button class="hr-icon" onclick={() => startEdit(rule)} title="edit" aria-label="edit rule">
+      <button class="hr-icon" onclick={() => startEdit(rule)} data-tooltip="Edit this rule" use:tip aria-label="edit rule">
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2L6 12l-2.5.5L4 10l7.5-7.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /></svg>
       </button>
-      <button class="hr-icon del" onclick={() => deleteHighlightRule(rule.id)} title="delete" aria-label="delete rule">
+      <button class="hr-icon del" onclick={() => deleteHighlightRule(rule.id)} data-tooltip="Delete this rule" use:tip aria-label="delete rule">
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6.5 4V2.8h3V4M5 4l.5 9h5L11 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg>
       </button>
     </div>

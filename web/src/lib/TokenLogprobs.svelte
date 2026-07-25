@@ -25,7 +25,7 @@
   // The ≤2 highlight rules chosen for match-coloring (order = top/bottom band).
   // Resolved by id so a rename/recolor keeps applying and a deleted rule drops out.
   const rules = $derived(
-    logprobHighlight.selected
+    logprobHighlight.activeIds
       .map((id) => highlightStore.rules.find((r) => r.id === id))
       .filter((r) => r != null)
   );
