@@ -10,12 +10,11 @@ parameter. The fix: flushPatchState (response assigned into live.state) is
 called via the convo store's #preSwitch barrier ahead of every transition.
 
 Seeds two workspaces, opens A, opens the system chip, types, and immediately
-switches to B via the workspace picker (well inside the debounce). Since the
-picker became a combobox (click → pick a row) rather than a native <select>,
-the smoke OPENS it first and then types into the textarea by dispatching the
-input event — a real `fill()` would mousedown on the document and close the
-dropdown, and re-opening it would burn the 200ms window this smoke needs to
-still be inside. Asserts:
+switches to B via the workspace picker. The keystroke and the switch are
+dispatched in ONE JS task, so the debounce timer is provably still pending when
+the transition fires — the smoke doesn't race the wall clock and can't go
+vacuous on a slow machine (or on a slower UI path: the picker is a combobox
+now, and a real `fill()` would mousedown the dropdown shut). Asserts:
 
   - workspace A PERSISTED the typed prompt (the edit stayed home)
   - workspace B's persisted + live system_prompt are untouched (None)
@@ -85,21 +84,19 @@ def main() -> None:
             page.locator(WS_TRIGGER).click()
             page.wait_for_selector(f".ws-picker .typeahead-row[data-id='{b}']", timeout=5000)
 
-            # Type into the system textarea, then switch to B IMMEDIATELY — well
-            # inside the 200ms patch debounce, the leak's window. The keystroke is
-            # a dispatched input event (what bind:value listens to) precisely so
-            # it doesn't close the open dropdown.
-            t0 = time.time()
+            # Type into the system textarea and switch to B in the SAME JS task:
+            # patchState's 200ms timer is set by the input handler and the click
+            # handler runs before the event loop can ever fire it. The worst-case
+            # interleaving, deterministically, instead of "38ms of 200 on this box".
             page.evaluate(
-                """([sel, text]) => {
+                """([sel, text, row]) => {
                     const ta = document.querySelector(sel);
                     ta.value = text;
-                    ta.dispatchEvent(new Event('input', { bubbles: true }));
+                    ta.dispatchEvent(new Event('input', { bubbles: true }));  // bind:value
+                    document.querySelector(row).click();
                 }""",
-                [SYS_TA, TYPED],
+                [SYS_TA, TYPED, f".ws-picker .typeahead-row[data-id='{b}']"],
             )
-            page.locator(f".ws-picker .typeahead-row[data-id='{b}']").click()
-            print(f"  (type→switch gap: {(time.time() - t0) * 1000:.0f}ms of the 200ms debounce)")
 
             wait_active_ws(page, b)
             time.sleep(1.2)  # let the (now pre-switch-flushed) patch + debounced saves land
