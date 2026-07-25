@@ -453,4 +453,10 @@ extracted UI: `tests/small-smokes/browser_{chart_modal,modals}.py`.
   into view — when asserting scroll behavior, use programmatic `element.click()` /
   keyboard dispatch or the auto-scroll fabricates false scroll-position failures
   (cost a verifier two false rewrites once; see `browser_kbnav.py` for the pattern).
+  ⚠️ `get_attribute("style")` returns the CSSOM-SERIALIZED string, not what the
+  code wrote — Svelte sets the style *property*, so `linear-gradient(to bottom,
+  X 0 50%, …)` reads back as `linear-gradient(X 0px, …)` and an alpha of `0.252`
+  as `0.25`. Assert colors NUMERICALLY (regex the channels out, compare with a
+  tolerance) — substring matching on an emitted color is a false failure waiting
+  to happen (see the ramp block in `browser_token_logprobs.py`).
 - Dev-HMR loop + more smoke commands: `docs/HANDOFF_BRANCHING.md` §6.

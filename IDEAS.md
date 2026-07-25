@@ -222,3 +222,24 @@ its coordination note), the third is the thread-system feature itself.
   `npm run build` doesn't typecheck, so `npm run check` was the only guard).
   *(opus-5, 2026-07-24)*
 
+
+## From the 2026-07-24 match-tint contrast session (opus-5)
+
+- **Make the top-K logprob capture configurable — the match tint is K-limited.**
+  `highlightMatchProb` sums the position's captured candidates, and the server
+  stores `TOPK_LOGPROBS = 5`, so the whole Color-by-match feature answers "did a
+  matching token make the top *five*?" The new Contrast slider at 1 (step: any
+  nonzero match at full tint) makes that ceiling much more visible — a related
+  token at rank 6 reads as a hard zero, indistinguishable from "the model never
+  considered it". Bumping K to ~20 as a sampling param (per-send, not global —
+  blobs get bigger) would turn the presence read from "top-5 only" into something
+  closer to the real answer. Cheap to try: the capture is one field on the tinker
+  sampling call, and the blob is already write-once heavy storage.
+  *(opus-5, 2026-07-24)*
+
+- **Give the surprisal tint the same ramp knob.** `surprisalAlpha` is hardcoded
+  linear-in-(-logprob), saturating at -lp 6. Same class of complaint the Contrast
+  slider just fixed for match tint: sometimes you want "show me anything at all
+  unusual" (a step), sometimes the relative shape. If it happens, share the
+  control rather than growing a second slider — one "tint ramp" that applies to
+  whichever mode is active. *(opus-5, 2026-07-24)*
