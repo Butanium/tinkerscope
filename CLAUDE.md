@@ -53,6 +53,10 @@ and in this file's reference section; HANDOFF.md itself is retired.
   (`plugin/skills/guide/`). Both describe the BROWSER to a person; the cli skill
   (`plugin/skills/cli/`) describes the CLI to an agent. Smoke:
   `tests/small-smokes/browser_help_modal.py`.
+- **Tooltips are ONE short line (~70 chars).** A fat tooltip renders as an ugly
+  slab over the UI and nobody reads it twice. Mechanism / modifier tables /
+  caveats go in the `?` modal instead. Full rule + the `use:tip`-over-`title`
+  part: `lib/tooltip.svelte.ts` and the frontend map below.
 - **Committing — no need to ask first.** Commit straight to `main` whenever work
   is at a clean, verified point; show the diff summary of what landed, don't gate
   on approval (Clément's standing preference for this repo — overrides the global
