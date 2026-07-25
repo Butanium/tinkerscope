@@ -29,14 +29,17 @@ and in this file's reference section; HANDOFF.md itself is retired.
 
 - **`tinkpg` CLI changes ship with their docs, in the same commit.** Any new
   command / flag / behavior change updates: README.md §"The CLI" (command table
-  + option notes) AND the `tinkerscope:cli` skill. **The skills live in this repo
-  at `plugin/skills/<name>/SKILL.md`** — `plugin/` is a Claude Code plugin
+  + option notes) AND the CLI skill. **The skills live in this repo at
+  `plugin/skills/<name>/SKILL.md`** — `plugin/` is a Claude Code plugin
   (`.claude-plugin/marketplace.json` at the repo root makes the repo its own
-  marketplace), so a new skill is just a new dir there; no hand-linking. On this
-  box `~/.claude/skills/tinkerscope` is a *directory* symlink to `plugin/`, which
-  loads as `tinkerscope@skills-dir` and reads the working tree — edits are live
-  with no reinstall, and `claude plugin details tinkerscope@skills-dir` shows what
-  loaded. **`plugin.json` declares NO `version` on purpose** — Claude Code keys the
+  marketplace). **The skill's name depends on how it was loaded**, so don't
+  hardcode one: a plugin consumer sees `tinkerscope:cli` / `tinkerscope:guide`,
+  while on this box each is a plain user skill — `~/.claude/skills/tinkerscope-{cli,guide}/SKILL.md`
+  is a *file-level* symlink to the repo file, so the names are `tinkerscope-cli` /
+  `tinkerscope-guide` and edits are live with no reinstall. (The directory name
+  wins over frontmatter `name:`, which is why `name: cli` still registers as
+  `tinkerscope-cli`.) A new skill needs its dir + link made by hand, as before.
+  **`plugin.json` declares NO `version` on purpose** — Claude Code keys the
   plugin cache by `version` when present and by COMMIT SHA when absent, so
   declaring one strands consumers on a stale cache until someone bumps it (that's
   what claude-lab's disabled post-commit hook was papering over, at the cost of
@@ -46,9 +49,10 @@ and in this file's reference section; HANDOFF.md itself is retired.
   the HTTP surface changed. (Checklist is also in `cli.py`'s module docstring.)
 - **UI behavior changes ship with the human-facing docs, in the same commit.**
   Two twins to keep in sync: the in-app `?` modal
-  (`web/src/lib/HelpModal.svelte`) and the `tinkerscope:guide` skill. Both
-  describe the BROWSER to a person; the `tinkerscope:cli` skill describes the CLI
-  to an agent. Smoke: `tests/small-smokes/browser_help_modal.py`.
+  (`web/src/lib/HelpModal.svelte`) and the guide skill
+  (`plugin/skills/guide/`). Both describe the BROWSER to a person; the cli skill
+  (`plugin/skills/cli/`) describes the CLI to an agent. Smoke:
+  `tests/small-smokes/browser_help_modal.py`.
 - **Committing — no need to ask first.** Commit straight to `main` whenever work
   is at a clean, verified point; show the diff summary of what landed, don't gate
   on approval (Clément's standing preference for this repo — overrides the global

@@ -47,8 +47,8 @@ them, and says so instead of erroring.
 
 **Lost in the UI?** The `?` button in the sidebar's icon row opens a guide to the
 whole screen plus a keyboard-shortcut table. The longer prose version — for a
-person, or for an agent explaining the tool to one — is the `tinkerscope:guide`
-skill (`plugin/skills/guide/SKILL.md`).
+person, or for an agent explaining the tool to one — is the guide skill
+(`plugin/skills/guide/SKILL.md`; install it below).
 
 ### Install the Claude Code skills
 
@@ -71,14 +71,22 @@ Claude Code treats the commit SHA as the plugin version, so the skills track
 auto-update from `/plugin` > Marketplaces, or run `/plugin marketplace update
 tinkerscope` followed by `/reload-plugins`.
 
-**Hacking on the skills?** Skip the install and symlink the plugin dir into your
-skills dir instead — it then loads as `tinkerscope@skills-dir` and reads your
-working tree directly, so edits are live with no push and no reinstall:
+**Hacking on the skills?** Don't install — the install *snapshots* into a cache,
+so your edits won't show. Symlink each skill into your skills dir instead and it
+reads your working tree directly, live, with no push and no reinstall:
 
 ```bash
-ln -s "$PWD/plugin" ~/.claude/skills/tinkerscope
-claude plugin details tinkerscope@skills-dir    # verify it loaded
+for s in cli guide; do
+  mkdir -p ~/.claude/skills/tinkerscope-$s
+  ln -sf "$PWD/plugin/skills/$s/SKILL.md" ~/.claude/skills/tinkerscope-$s/SKILL.md
+done
 ```
+
+They load as `tinkerscope-cli` / `tinkerscope-guide` (the directory name wins over
+the frontmatter `name:`) rather than the plugin's `tinkerscope:cli` /
+`tinkerscope:guide`. Symlinking `plugin/` itself as a single directory also works
+— it loads as the plugin, namespaced — but then don't *also* install it, or every
+skill is registered twice.
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: guide
-description: Explain the tinkerscope BROWSER UI to a human — what a workspace/panel/branch/thread is, how to run a distribution over N samples, highlight rules, the three chart modes, token probabilities, prefill, pins, share packs, and every keyboard shortcut. Use when someone asks how to use tinkerscope, what a button does, "how do I compare two checkpoints", "how do I see what it usually says", or is looking at the playground and lost. This is the human-facing twin of the `tinkerscope:cli` skill (which is for DRIVING the tool from a terminal) — read this one to talk someone through the screen, not to run commands.
+description: Explain the tinkerscope BROWSER UI to a human — what a workspace/panel/branch/thread is, how to run a distribution over N samples, highlight rules, the three chart modes, token probabilities, prefill, pins, share packs, and every keyboard shortcut. Use when someone asks how to use tinkerscope, what a button does, "how do I compare two checkpoints", "how do I see what it usually says", or is looking at the playground and lost. This is the human-facing twin of the tinkerscope CLI skill (`tinkerscope-cli`, or `tinkerscope:cli` via the plugin), which is for DRIVING the tool from a terminal — read this one to talk someone through the screen, not to run commands.
 ---
 
 # tinkerscope, for the person looking at it
@@ -89,10 +89,11 @@ regenerates in *all* panels at once so they stay in lockstep.
 replies render as their raw token stream, each token tinted by surprisal; hover a
 token for its probability and the top-5 alternatives it passed over. It's
 display-only and retroactive — turns you sampled before flipping it on already
-have the data. If you have highlight rules, **Color by match** (pick up to two)
-re-tints each token by how much probability mass went to alternatives matching
-that rule, which answers "how close was it to saying the other thing?" without
-resampling.
+have the data. If you have highlight rules, flip **Color by match** (the Off/On
+toggle right under it) On and pick up to two: each token is re-tinted by how much
+probability mass went to alternatives matching that rule, which answers "how
+close was it to saying the other thing?" without resampling. Two rules split each
+token into a top and bottom band; switching the toggle Off keeps the picks.
 
 **"What's the model's distribution over the FIRST token?"** The chart's third
 mode, *first token*, plots the model's own probability distribution at position
@@ -128,7 +129,8 @@ Rules aren't only cosmetic — they're the vocabulary the analysis views use:
 
 - the distribution chart's default mode buckets each sample by the *set* of rules
   it matches (grey = no rule matched, solid = one, striped = a combination);
-- **Color by match** on the token view tints by rule-match probability;
+- **Color by match** on the token view (its own Off/On toggle) tints by
+  rule-match probability;
 - the chart's per-rule chips let you drop a rule that the prompt makes ubiquitous
   from the bucketing, without deleting the rule.
 
@@ -173,6 +175,27 @@ Chat rows — **click a row first** to give it the focus ring:
 | `←` / `→` | Cycle the focused row's `‹k/N›` sibling branches |
 | `Esc` | Drop the focus ring |
 
+The row toolbar's buttons are unlabeled glyphs — if you're talking someone
+through one, name the shape, not just the verb (the app's own `?` modal draws
+each icon next to its name, so "open ? → Guide → the row toolbar" is the fastest
+answer to "which one is that"):
+
+| Button | Glyph | What |
+|---|---|---|
+| Raw | the word `Raw`, leftmost | the model's untouched output, tags and all |
+| regenerate | circular arrows | sample this turn again → a new sibling branch |
+| continue | `+` | the model EXTENDS this message instead of replying |
+| edit | pencil | change the text; forks, never overwrites |
+| delete | trash can | prune this branch and its subtree |
+| bookmark | tag/label outline | pin this sample with a note |
+| copy message | two overlapping squares | just this message |
+| copy conversation | the same, with text lines | the whole thread as markdown |
+| send to panel | two crossing arrows | copy this branch's context into another panel |
+| copy node id | `#` | the id `tinkpg --node` addresses |
+
+Sample cards (an n>1 draw) add: **make active** (circled check), **continue this
+sample** (`+`), **discard others** (a page with an ✕).
+
 Hold a modifier, then click a row-toolbar button:
 
 | Modifier | What |
@@ -215,5 +238,6 @@ always check what a chord will do before committing to it.
 
 This guide and the in-app `?` modal (`web/src/lib/HelpModal.svelte`) are twins —
 when UI behavior changes, both change, in the same commit as the code. The
-agent-facing counterpart is the `tinkerscope:cli` skill (terminal / `tinkpg`), which
+agent-facing counterpart is the CLI skill (`tinkerscope-cli`, or `tinkerscope:cli`
+via the plugin — terminal / `tinkpg`), which
 is the one to read when the task is *driving* the tool rather than explaining it.
