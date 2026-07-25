@@ -33,7 +33,19 @@ def main():
         body = page.locator(".modal-body").inner_text()
         for probe in ("Workspaces and panels", "sibling branch", "Distribution chart"):
             assert probe in body, f"Guide tab missing {probe!r}"
-        print(f"guide tab OK ({len(body)} chars)")
+
+        # Every button the modal NAMES is drawn with its real glyph (lib/Icon.svelte).
+        # Text probes alone would pass with every chip rendering blank — a name the
+        # dispatch chain doesn't know emits nothing, and `npm run build` doesn't
+        # typecheck, so only this assertion stands between a typo and a modal full
+        # of empty boxes.
+        chips = page.locator(".help-chip").count()
+        glyphs = page.locator(".help-chip svg").count()
+        legend_rows = page.locator(".help-btns li").count()
+        assert legend_rows >= 15, f"expected the three button legends, got {legend_rows} rows"
+        assert chips >= legend_rows, f"{chips} chips for {legend_rows} legend rows"
+        assert glyphs == chips, f"{chips - glyphs} chip(s) rendered no glyph"
+        print(f"guide tab OK ({len(body)} chars, {glyphs} button glyphs)")
 
         # Keys tab: the shortcut table, incl. the two undiscoverable axes.
         page.locator("button.help-tab", has_text="Keys").click()
@@ -45,7 +57,10 @@ def main():
             assert probe in keys, f"Keys tab missing {probe!r}"
         rows = page.locator(".help-keys tr").count()
         assert rows >= 15, f"expected a populated shortcut table, got {rows} rows"
-        print(f"keys tab OK ({rows} rows)")
+        # The modifier rows show WHICH button they apply to, drawn, not just named.
+        key_glyphs = page.locator(".help-keys .help-chip svg").count()
+        assert key_glyphs >= 6, f"expected drawn buttons next to the modifiers, got {key_glyphs}"
+        print(f"keys tab OK ({rows} rows, {key_glyphs} button glyphs)")
 
         # Escape closes (Modal chrome), and the row-nav handler must have stayed
         # out of the way while it was open.

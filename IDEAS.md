@@ -196,3 +196,29 @@ its coordination note), the third is the thread-system feature itself.
   pre-commit hook that warns when the staged set overlaps files modified since the
   session's start, but the convention alone would have caught both of today's.
   *(opus-5, 2026-07-24)*
+
+## From the 2026-07-24 help-modal / tooltip session (opus-5)
+
+- **Finish the icon consolidation.** `lib/Icon.svelte` now owns the row-toolbar +
+  sidebar glyph set (so the `?` modal draws the SAME button the toolbar does),
+  but ~22 inline `<svg>` remain outside it — and the drift it exists to prevent
+  is already there: `HighlightRules.svelte` draws its own pencil
+  (`M11.5 2.5l2 2L6 12…`) and trash, geometrically different from Icon's `edit`
+  / `trash`, for the same two verbs. Worth folding those in (plus +page's
+  reduce/restore/panel-send arrows). Chevrons and the drag grips are structural,
+  not iconography — leave them. *(opus-5, 2026-07-24)*
+
+- **Lint the tooltip length rule.** CLAUDE.md now says tooltips are ONE short
+  line (~70 chars) because a long one renders as an ugly slab over the UI, but
+  nothing enforces it and the six worst offenders had accreted quietly over
+  months. A ~20-line node test in `web/src/lib/` (or a pre-commit grep) that
+  parses `data-tooltip="..."` literals out of `web/src/**/*.svelte` and fails
+  over ~90 chars would catch the next one at write time. Ternaries need care —
+  measure each branch, not the whole expression. *(opus-5, 2026-07-24)*
+
+- ~~**The `?` modal has no visual regression net**~~ — done in the same session:
+  `browser_help_modal.py` now asserts every `.help-chip` actually rendered an
+  `svg` (a name `Icon.svelte`'s `{#if}` chain doesn't know emits NOTHING, and
+  `npm run build` doesn't typecheck, so `npm run check` was the only guard).
+  *(opus-5, 2026-07-24)*
+
