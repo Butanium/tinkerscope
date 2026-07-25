@@ -4,21 +4,15 @@
   // No deps — keyboard-navigable (↑/↓/Enter/Esc). Used for both the Tinker base
   // model catalog and the OpenRouter catalog (the 341-model list is NEVER
   // rendered unfiltered — we cap visible rows and require a query to show all),
-  // AND as the panel body of `ModelDropdown.svelte` (the sidebar's per-panel
-  // model picker — a select-like trigger button wrapping this component).
+  // AND as the panel body of `PickerDropdown.svelte` (the select-like trigger
+  // button wrapping this component — the sidebar's per-panel model picker and
+  // its workspace picker). Nothing here is model-specific.
 
   import TruncLabel from './TruncLabel.svelte';
   import DiffLabel from './DiffLabel.svelte';
   import { diffLabels } from './label-diff';
   import { tieredFilter } from './fuzzy';
-
-  // `search`: extra hidden text matched but never displayed (e.g. a run's
-  // wandb project / base model, so filtering isn't limited to the visible
-  // label). `disabled`: shown but not pickable — greyed, click/Enter is a no-op.
-  // `unavailable`: not samplable right now (base gone / weights gone) —
-  // greyed AND demoted below available rows, but STILL pickable (a warning, not
-  // a block; the sidebar shows why + a send surfaces the backend error).
-  type Item = { id: string; label: string; disabled?: boolean; unavailable?: boolean; search?: string };
+  import type { PickerItem as Item } from './picker';
 
   let {
     items,
@@ -149,9 +143,14 @@
           <div class="typeahead-fuzzy-note">no exact matches — close matches:</div>
         {/if}
         {#each filtered as it, i (it.id)}
+          <!-- Secondary line: an explicit `sub` wins (workspace rows show when
+               they were last touched), else the id when it adds something the
+               label doesn't already show. -->
+          {@const sub = it.sub ?? (it.label !== it.id ? it.id : '')}
           <button
             type="button"
             class="typeahead-row"
+            data-id={it.id}
             class:active={i === active}
             class:disabled={it.disabled}
             class:unavailable={it.unavailable}
@@ -167,8 +166,8 @@
                 <TruncLabel label={it.label} siblings={visibleLabels} />
               {/if}
             </span>
-            {#if it.label !== it.id}
-              <span class="typeahead-row-id">{it.id}</span>
+            {#if sub}
+              <span class="typeahead-row-id">{sub}</span>
             {/if}
           </button>
         {/each}

@@ -20,7 +20,7 @@ the running state (mirrors browser_panel_foreign_fold's positive-control retry).
 can't reach running after N tries, THAT is a real failure.
 
 The model + workspace are seeded via the API (the sidebar model picker is a
-ModelDropdown now, not a <select>), so this smoke drives only the composer and the
+PickerDropdown now, not a <select>), so this smoke drives only the composer and the
 Stop button.
 
 Point at an ISOLATED instance (scripts/dev-isolated.sh), never the live :8767.

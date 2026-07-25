@@ -6,7 +6,7 @@
 -->
 <script lang="ts">
   import Modal from './Modal.svelte';
-  import ModelTypeahead from './ModelTypeahead.svelte';
+  import Typeahead from './Typeahead.svelte';
   import type { OpenRouterModel } from './types';
 
   let {
@@ -57,7 +57,7 @@
   {/if}
   <label class="sidebar-label" style="margin-top: var(--space-4);">Add a model — type to filter the catalog</label>
   <div style="margin-top: var(--space-2);">
-    <ModelTypeahead
+    <Typeahead
       items={catalog.map((m) => ({ id: m.openrouter_model, label: m.label || m.openrouter_model }))}
       placeholder="e.g. anthropic/claude — type to filter {catalog.length || '…'} models"
       {busy}

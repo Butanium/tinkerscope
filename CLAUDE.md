@@ -169,7 +169,7 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     (TruncLabel) ellipsizes only the head and always shows the distinguishing
     tail. Sibling-aware mode anchors the tail at the divergence from the closest
     visible sibling. **Has `label-split.test.ts`**; browser smoke
-    `tests/small-smokes/browser_label_trunc.py` (now the ModelDropdown-trigger
+    `tests/small-smokes/browser_label_trunc.py` (now the PickerDropdown-trigger
     single-label site — sibling LIST rows moved to the diff view below).
   - `lib/label-diff.ts` — `diffLabels(labels)`: the "smarter" layer over
     tail-preserve for the case it can't handle — sibling runs that share BOTH ends
@@ -312,17 +312,23 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     the sidebar's "Color by match" (`logprobHighlight`), the surprisal tint is
     replaced by a per-token match-prob band (1–2 rules; `matchTintBackground`)
     and each popover alternative is tinted by which rule it matches.
-  - `lib/ModelTypeahead.svelte` — the type-to-filter model combobox (used by the
-    OpenRouter + Tinker picker modals, and as the panel body of `ModelDropdown`).
-    Rows render via `DiffLabel` when the visible siblings form a diffable family
-    (`diffLabels(visibleLabels)`), else `TruncLabel`. Search still matches the full
-    label, so filtering is unaffected by the compact display. Filtering is TIERED
-    (`lib/fuzzy` `tieredFilter`): exact substring primary, typo-tolerant fuzzy
-    fallback only on zero substring matches — with a subtle "no exact matches —
-    close matches:" note when the fuzzy tier is showing.
-  - `lib/ModelDropdown.svelte` — select-like trigger button + floating panel
-    wrapping `ModelTypeahead`; the sidebar's per-panel model picker (click →
-    type to filter, no separate "Filter models…" textbox).
+  - `lib/Typeahead.svelte` — the type-to-filter combobox (used by the OpenRouter
+    + Tinker picker modals, and as the panel body of `PickerDropdown`). Item
+    shape: `lib/picker.ts`'s `PickerItem` (`sub` = the secondary line, defaulting
+    to the id). Rows render via `DiffLabel` when the visible siblings form a
+    diffable family (`diffLabels(visibleLabels)`), else `TruncLabel`. Search still
+    matches the full label, so filtering is unaffected by the compact display.
+    Filtering is TIERED (`lib/fuzzy` `tieredFilter`): exact substring primary,
+    typo-tolerant fuzzy fallback only on zero substring matches — with a subtle
+    "no exact matches — close matches:" note when the fuzzy tier is showing.
+    Each row carries `data-id` (how browser smokes address one).
+  - `lib/PickerDropdown.svelte` — select-like trigger button + floating panel
+    wrapping `Typeahead`; **every sidebar picker** (click → type to filter, no
+    separate "Filter models…" textbox): the per-panel model picker inside
+    `.model-block`, and the **workspace picker** (`.ws-picker`, whose
+    `data-ws-id` mirrors `ws.activeId` — the smokes' oracle, drive it with
+    `tests/small-smokes/_ws_picker.py`). Both wear `.picker-dropdown-trigger`,
+    so a smoke targeting one must scope by its wrapper.
   - `lib/HighlightRules.svelte` — the highlight-rules editor UI.
   - `lib/ThreadSwitcher.svelte` — the composer-row **cross-panel thread jump**:
     a popover (next to the ⑂ branch-from-start toggle) listing
@@ -334,14 +340,14 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
   - `lib/TruncLabel.svelte` — the middle-ellipsis label: a two-span flex trick
     (head clips with `flex:0 1 auto`, tail always shows) over `splitTail`, plus
     the full-name `use:tip` tooltip backstop. The SINGLE-LABEL renderer — the
-    `ModelDropdown` trigger and +page's `.column-title` / `.send-chip` — plus the
-    fallback for `ModelTypeahead` rows a diff family doesn't cover. So two runs
+    `PickerDropdown` trigger and +page's `.column-title` / `.send-chip` — plus the
+    fallback for `Typeahead` rows a diff family doesn't cover. So two runs
     sharing a long prefix stay distinguishable at any width.
   - `lib/DiffLabel.svelte` — the diff-view label: renders `label-diff`'s compact
     parts (varying segments at full emphasis, cluster-constant anchors + `…` dimmed)
     with the same `use:tip` tooltip / aria-label affordances as TruncLabel; only
     the leading family anchor may shrink under width pressure. Used for
-    `ModelTypeahead` rows when `diffLabels` returns a render for the row.
+    `Typeahead` rows when `diffLabels` returns a render for the row.
 
 Cross-component CSS utility classes (`.sidebar-label`, `.btn-new`,
 `.backend-error`, …) live in **global `app.css`** — scoped `+page.svelte` styles

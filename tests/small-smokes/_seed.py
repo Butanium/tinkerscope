@@ -2,7 +2,7 @@
 so a smoke can open it with ?w=<id> instead of driving the model picker.
 
 The per-panel model picker migrated from a native <select class="model-slot-select">
-to the custom ModelDropdown combobox; the old `page.select_option("select.model-
+to the custom PickerDropdown combobox; the old `page.select_option("select.model-
 slot-select", …)` + `body.innerText.includes('ed_sheeran')` setup several smokes
 used no longer works. Seeding the panels' run_id directly (the sentinel string, e.g.
 "openrouter:openrouter/free") bypasses the picker entirely and is deterministic.

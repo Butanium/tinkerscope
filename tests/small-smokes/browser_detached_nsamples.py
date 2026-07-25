@@ -9,7 +9,7 @@ sends a SECOND turn to confirm multi-turn fold still lands after the first folde
 
   uv run python tests/small-smokes/browser_detached_nsamples.py [BASE_URL]
 
-Needs OPENROUTER_API_KEY (free router). Seeds via POST (no stale model-dropdown UI).
+Needs OPENROUTER_API_KEY (free router). Seeds via POST (no stale model-picker UI).
 """
 import json
 import sys

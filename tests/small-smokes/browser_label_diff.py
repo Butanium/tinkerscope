@@ -6,7 +6,7 @@ a tail cap ellipsizes the head to the identical prefix and BOTH rows read the sa
 The diff view instead collapses the cluster-constant runs to a dimmed `…` and shows
 every varying segment in full, so the middle divergence (base vs instruct) survives.
 
-This drives the real panel ModelDropdown → its typeahead list, filters to the 26
+This drives the real panel PickerDropdown → its typeahead list, filters to the 26
 ed_sheeran sibling runs, and asserts the base-vs-instruct pair (SAME seed+lr, so
 they differ ONLY at the model segment) renders two DISTINCT row texts — the exact
 case the old scheme rendered identically.
@@ -61,8 +61,8 @@ def main():
         page.goto(BASE, wait_until="load", timeout=20000)
 
         # Open the first panel's model dropdown and filter to the ed_sheeran runs.
-        page.wait_for_selector(".model-dropdown-trigger", timeout=15000)
-        page.locator(".model-dropdown-trigger").first.click()
+        page.wait_for_selector(".model-block .picker-dropdown-trigger", timeout=15000)
+        page.locator(".model-block .picker-dropdown-trigger").first.click()
         page.wait_for_selector(".typeahead-input", timeout=5000)
         page.locator(".typeahead-input").first.fill("ed_sheeran")
         page.wait_for_function(

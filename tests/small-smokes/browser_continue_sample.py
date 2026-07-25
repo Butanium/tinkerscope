@@ -69,7 +69,7 @@ def main() -> None:
         page.on("pageerror", lambda e: errors.append(str(e)))
 
         # Seed a fresh single-panel workspace on the model and open it — replaces
-        # the old native-<select> model picker (now the ModelDropdown combobox).
+        # the old native-<select> model picker (now the PickerDropdown combobox).
         conv_id, _ = seed_conversation(BASE, [MODEL], "continue_sample")
         page.goto(f"{BASE}/?w={conv_id}", wait_until="load", timeout=20000)
         page.wait_for_selector(".input-textarea:not([disabled])", timeout=15000)

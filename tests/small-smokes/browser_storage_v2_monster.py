@@ -128,7 +128,7 @@ def main() -> int:
             t0 = time.time()
             page.click("button.btn-add-model")
             page.wait_for_function(
-                f"document.querySelectorAll('.model-dropdown-trigger').length >= {PANELS + 1}",
+                f"document.querySelectorAll('.model-block .picker-dropdown-trigger').length >= {PANELS + 1}",
                 timeout=15000)
             add_s = time.time() - t0
             checks.append((f"add model completes fast ({add_s:.2f}s)", add_s < 8))
@@ -143,7 +143,7 @@ def main() -> int:
 
             # ── 4. model swap = PATCH, no tree PUT ────────────────────
             reqs.clear()
-            page.locator(".model-dropdown-trigger").last.click()
+            page.locator(".model-block .picker-dropdown-trigger").last.click()
             page.wait_for_selector(".typeahead-row", timeout=10000)
             page.locator(".typeahead-row").last.click()
             page.wait_for_timeout(1500)  # debounce + request

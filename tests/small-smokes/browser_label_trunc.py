@@ -7,7 +7,7 @@ TruncLabel (lib/label-split) ellipsizes the HEAD and always shows the tail.
 Scope note: TruncLabel's *sibling-aware* mode in the typeahead LIST rows has been
 superseded by the diff view (lib/label-diff + DiffLabel) — a sibling family now
 renders compact diffs instead (see tests/small-smokes/browser_label_diff.py).
-TruncLabel now owns the SINGLE-LABEL sites: the ModelDropdown trigger button, the
+TruncLabel now owns the SINGLE-LABEL sites: the PickerDropdown trigger button, the
 chat column titles, the send-chips. This smoke drives the dropdown TRIGGER (pick a
 long-named run, inspect the trigger) and asserts the fixed-tail guarantee holds.
 
@@ -28,7 +28,7 @@ SHOT = args[1] if len(args) > 1 else None
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
 
 TRIGGER_PROBE = """() => {
-  const t = document.querySelector('.model-dropdown-trigger-label');
+  const t = document.querySelector('.model-block .picker-dropdown-trigger-label');
   return {
     text: (t?.textContent ?? '').trim(),
     head: t?.querySelector('.trunc-head')?.textContent ?? null,
@@ -49,8 +49,8 @@ def main():
 
         # Open the first panel's model dropdown, filter to the ed_sheeran runs, and
         # pick the first ENABLED (sampleable) long-named run.
-        page.wait_for_selector(".model-dropdown-trigger", timeout=15000)
-        page.locator(".model-dropdown-trigger").first.click()
+        page.wait_for_selector(".model-block .picker-dropdown-trigger", timeout=15000)
+        page.locator(".model-block .picker-dropdown-trigger").first.click()
         page.wait_for_selector(".typeahead-input", timeout=5000)
         page.locator(".typeahead-input").first.fill("ed_sheeran")
         page.wait_for_function(

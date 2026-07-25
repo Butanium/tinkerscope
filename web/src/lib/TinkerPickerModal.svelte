@@ -5,7 +5,7 @@
 -->
 <script lang="ts">
   import Modal from './Modal.svelte';
-  import ModelTypeahead from './ModelTypeahead.svelte';
+  import Typeahead from './Typeahead.svelte';
   import type { TinkerModel } from './types';
 
   let {
@@ -43,7 +43,7 @@
     >⟳</button>
   </div>
   <div style="margin-top: var(--space-2);">
-    <ModelTypeahead
+    <Typeahead
       items={models.map((m) => ({ id: m.id, label: m.label || m.id }))}
       placeholder="e.g. Qwen or a UUID — type to filter {models.length || '…'} base models + checkpoints"
       {loading}

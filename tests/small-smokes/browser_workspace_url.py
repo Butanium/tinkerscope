@@ -12,7 +12,7 @@ then drives the browser to verify the `?w=` query param round-trips:
   6. load  /?c=<A>      → the PRE-v1.0.0 param is still honored on read
                           (old bookmarks / open tabs) and rewritten to ?w=<A>
 
-Oracle: the workspace <select> (its value == ws.activeId) + window URL.
+Oracle: the workspace picker's `data-ws-id` (== ws.activeId) + window URL.
 
   uv run python tests/small-smokes/browser_workspace_url.py [BASE_URL]
 """
@@ -22,6 +22,9 @@ import urllib.request
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+
+sys.path.insert(0, str(Path(__file__).parent))
+from _ws_picker import active_ws_id, pick_workspace, wait_active_ws  # noqa: E402
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8809"
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
@@ -47,14 +50,11 @@ def _clean_conversations():
 
 
 def _active_id(page):
-    """The workspace <select> is value-bound to convo.activeId."""
-    return page.locator("select.ws-select").input_value()
+    return active_ws_id(page)
 
 
 def _wait_active(page, want, timeout=10000):
-    page.wait_for_function(
-        "([want]) => document.querySelector('select.ws-select')?.value === want",
-        arg=[want], timeout=timeout)
+    wait_active_ws(page, want, timeout=timeout)
 
 
 def _param_w(page):
@@ -104,7 +104,7 @@ def main():
 
         # ── 3. Selecting the OTHER conv in the dropdown pushes ?c and switches ──
         other = a["id"] if want == b["id"] else b["id"]
-        page.locator("select.ws-select").select_option(other)
+        pick_workspace(page, other)
         _wait_active(page, other)
         page.wait_for_function(
             "([want]) => new URL(location.href).searchParams.get('w') === want",

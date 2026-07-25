@@ -5,7 +5,7 @@ primary; only when it yields ZERO does the fuzzy tier engage (bigram-Dice ranked
 surfacing the run you fat-fingered instead of an empty list. When it engages, a
 one-line "no exact matches — close matches:" note reads as a fallback.
 
-Drives the real panel ModelDropdown → its typeahead and asserts:
+Drives the real panel PickerDropdown → its typeahead and asserts:
   1. a deliberate typo ("ed_shreean") shows the note + the ed_sheeran runs,
   2. an exact substring ("sheeran") shows NO note (primary tier untouched),
   3. garbage ("zzxqwvk") shows the empty state, not the note.
@@ -56,8 +56,8 @@ def main():
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(BASE, wait_until="load", timeout=20000)
 
-        page.wait_for_selector(".model-dropdown-trigger", timeout=15000)
-        page.locator(".model-dropdown-trigger").first.click()
+        page.wait_for_selector(".model-block .picker-dropdown-trigger", timeout=15000)
+        page.locator(".model-block .picker-dropdown-trigger").first.click()
         page.wait_for_selector(".typeahead-input", timeout=5000)
 
         # 1. TYPO → fuzzy tier engages: note shown, ed_sheeran runs surfaced.

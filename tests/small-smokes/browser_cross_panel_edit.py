@@ -38,7 +38,7 @@ def _req(path, data=None, method="GET"):
 def main():
     # Seed a fresh TWO-panel workspace, both on the free router, and open it —
     # replaces the old native-<select> model picker + add-panel dance (the picker is
-    # now the ModelDropdown combobox).
+    # now the PickerDropdown combobox).
     cid, _ = seed_conversation(BASE, [OR_RUN, OR_RUN], "cross_panel_edit")
 
     with sync_playwright() as p:

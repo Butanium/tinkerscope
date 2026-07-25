@@ -111,7 +111,7 @@ def main() -> None:
             page.on("pageerror", lambda e: errors.append(str(e)))
 
             page.goto(f"{BASE}/?w={conv_id}", wait_until="load", timeout=20000)
-            # .model-slot-select is a div since the ModelDropdown rework — this
+            # .model-slot-select is a div since the PickerDropdown rework — this
             # wait only means "sidebar booted", so don't pin the element kind
             page.wait_for_selector(".model-slot-select", timeout=15000)
             # the seeded workspace's user turn is on screen ⇒ tree loaded

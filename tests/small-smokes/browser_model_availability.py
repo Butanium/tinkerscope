@@ -92,8 +92,8 @@ def main():
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(BASE, wait_until="load", timeout=20000)
 
-        page.wait_for_selector(".model-dropdown-trigger", timeout=15000)
-        page.locator(".model-dropdown-trigger").first.click()
+        page.wait_for_selector(".model-block .picker-dropdown-trigger", timeout=15000)
+        page.locator(".model-block .picker-dropdown-trigger").first.click()
         page.wait_for_selector(".typeahead-input", timeout=5000)
         page.locator(".typeahead-input").first.fill(token)
         page.wait_for_function(

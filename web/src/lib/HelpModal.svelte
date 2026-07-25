@@ -90,6 +90,11 @@
         Switching workspaces restores its models too. A new workspace inherits the current models
         (Shift → blank). Panels reorder by dragging a column header; the sidebar pickers and send chips follow.
       </p>
+      <p class="help-note">
+        Both sidebar pickers — workspace and model — are the same control: click it and <em>type to filter</em>,
+        ↑/↓ to walk, Enter to pick, Esc to close. Workspace rows are newest-first and show when you last
+        touched them, which is how you tell two same-named workspaces apart.
+      </p>
     </section>
 
     <section class="help-sec">

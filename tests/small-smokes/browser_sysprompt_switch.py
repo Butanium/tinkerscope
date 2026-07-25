@@ -10,7 +10,12 @@ parameter. The fix: flushPatchState (response assigned into live.state) is
 called via the convo store's #preSwitch barrier ahead of every transition.
 
 Seeds two workspaces, opens A, opens the system chip, types, and immediately
-switches to B via the dropdown (well inside the debounce). Asserts:
+switches to B via the workspace picker (well inside the debounce). Since the
+picker became a combobox (click → pick a row) rather than a native <select>,
+the smoke OPENS it first and then types into the textarea by dispatching the
+input event — a real `fill()` would mousedown on the document and close the
+dropdown, and re-opening it would burn the 200ms window this smoke needs to
+still be inside. Asserts:
 
   - workspace A PERSISTED the typed prompt (the edit stayed home)
   - workspace B's persisted + live system_prompt are untouched (None)
@@ -26,6 +31,9 @@ import urllib.request
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+
+sys.path.insert(0, str(Path(__file__).parent))
+from _ws_picker import WS_TRIGGER, wait_active_ws  # noqa: E402
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:5180"
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
@@ -67,21 +75,33 @@ def main() -> None:
             page.on("pageerror", lambda e: errors.append(str(e)))
 
             page.goto(f"{BASE}/?w={a}", wait_until="load", timeout=20000)
-            page.wait_for_selector(".ws-select", timeout=15000)
-            page.wait_for_function(
-                f"document.querySelector('.ws-select')?.value === '{a}'", timeout=10000
-            )
+            page.wait_for_selector(WS_TRIGGER, timeout=15000)
+            wait_active_ws(page, a)
 
-            # Type into the system textarea, then switch to B IMMEDIATELY — well
-            # inside the 200ms patch debounce, the leak's window.
+            # Open the system chip AND the workspace picker up front, so the
+            # type→switch pair below is two JS-speed steps.
             page.click("[data-testid=system-fold]")
             page.wait_for_selector(SYS_TA, timeout=5000)
-            page.fill(SYS_TA, TYPED)
-            page.select_option(".ws-select", value=b)
+            page.locator(WS_TRIGGER).click()
+            page.wait_for_selector(f".ws-picker .typeahead-row[data-id='{b}']", timeout=5000)
 
-            page.wait_for_function(
-                f"document.querySelector('.ws-select')?.value === '{b}'", timeout=10000
+            # Type into the system textarea, then switch to B IMMEDIATELY — well
+            # inside the 200ms patch debounce, the leak's window. The keystroke is
+            # a dispatched input event (what bind:value listens to) precisely so
+            # it doesn't close the open dropdown.
+            t0 = time.time()
+            page.evaluate(
+                """([sel, text]) => {
+                    const ta = document.querySelector(sel);
+                    ta.value = text;
+                    ta.dispatchEvent(new Event('input', { bubbles: true }));
+                }""",
+                [SYS_TA, TYPED],
             )
+            page.locator(f".ws-picker .typeahead-row[data-id='{b}']").click()
+            print(f"  (type→switch gap: {(time.time() - t0) * 1000:.0f}ms of the 200ms debounce)")
+
+            wait_active_ws(page, b)
             time.sleep(1.2)  # let the (now pre-switch-flushed) patch + debounced saves land
 
             live_sp = api("GET", "/api/state").get("system_prompt")

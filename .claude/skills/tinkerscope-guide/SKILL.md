@@ -44,10 +44,13 @@ chart**, **pins slideshow**, **peek at training data**, **rescan runs**,
 ## The four nouns
 
 **Workspace** — one saved setup: its message tree, its system prompt, and which
-panels it shows. The dropdown at the top of the sidebar switches between them;
-switching restores that workspace's models too. New workspace inherits the
-current models; Shift-click the `+` for a blank one. Each workspace has its own
-URL (`?w=<id>`), so you can bookmark or share a link to it.
+panels it shows. The picker at the top of the sidebar switches between them:
+click it and type to filter (same control as the model picker — ↑/↓ to walk,
+Enter to pick, Esc to close), rows newest-touched first with a "3h ago" stamp
+so two same-named workspaces are still distinguishable. Switching restores that
+workspace's models too. New workspace inherits the current models; Shift-click
+the `+` for a blank one. Each workspace has its own URL (`?w=<id>`), so you can
+bookmark or share a link to it.
 
 **Panel** — one column, one model. A model is either a *discovered run
 checkpoint* (from the scanned directory), a *raw base model*, or an *OpenRouter

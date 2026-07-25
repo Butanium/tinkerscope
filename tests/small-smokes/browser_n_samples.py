@@ -39,7 +39,7 @@ def main() -> None:
         page.on("pageerror", lambda e: errors.append(str(e)))
 
         # Seed a fresh workspace with one free-router panel and open it directly —
-        # replaces the old native-<select> model picker (now the ModelDropdown combobox).
+        # replaces the old native-<select> model picker (now the PickerDropdown combobox).
         # Also avoids inheriting a prior run's on-disk branch state.
         cid, _ = seed_conversation(BASE, [MODEL], "n_samples")
         page.goto(f"{BASE}/?w={cid}", wait_until="load", timeout=20000)

@@ -185,7 +185,7 @@ def wait_persisted(conv_id: str, want: list[str], timeout=5.0) -> list[str]:
 def sidebar_order(page) -> list[str]:
     """Model label per sidebar picker block, in DOM order."""
     labels = page.eval_on_selector_all(
-        ".model-block .model-dropdown-trigger-label",
+        ".model-block .picker-dropdown-trigger-label",
         "els => els.map(e => e.innerText.trim())",
     )
     out = []

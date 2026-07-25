@@ -40,7 +40,7 @@ def main() -> None:
         # carried, and broke the moment either changed (2026-07-24). None of the
         # four modals below care which run is selected.
         page.wait_for_selector("aside.sidebar", timeout=15000)
-        page.wait_for_selector(".model-dropdown-trigger", timeout=15000)
+        page.wait_for_selector(".model-block .picker-dropdown-trigger", timeout=15000)
 
         results = []
         for kind, trigger, expected_header in CASES:

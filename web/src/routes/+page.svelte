@@ -21,6 +21,7 @@
   import { isNavKey, moveIndex, isEditableTarget, anyModalOpen } from '$lib/kbnav';
   import type { ChartPanelData, ChartTurn } from '$lib/chart';
   import { buildPanelView } from '$lib/panel-view';
+  import { relWhen } from '$lib/when';
   import { DragReorder } from '$lib/drag-reorder.svelte';
   import ThreadSwitcher from '$lib/ThreadSwitcher.svelte';
   import ChartModal from '$lib/ChartModal.svelte';
@@ -30,7 +31,7 @@
   import OrManagerModal from '$lib/OrManagerModal.svelte';
   import TinkerPickerModal from '$lib/TinkerPickerModal.svelte';
   import HelpModal from '$lib/HelpModal.svelte';
-  import ModelDropdown from '$lib/ModelDropdown.svelte';
+  import PickerDropdown from '$lib/PickerDropdown.svelte';
   import SplitChip from '$lib/SplitChip.svelte';
   import TruncLabel from '$lib/TruncLabel.svelte';
   import { loadHighlightRules, highlightStore } from '$lib/highlights.svelte';
@@ -738,6 +739,24 @@
   });
 
   // ── Named workspaces (dropdown) ────────────────────────────────
+  // The picker is the same type-to-filter combobox as the model one
+  // (PickerDropdown) — with 20+ saved workspaces a native <select> was a wall
+  // of names you couldn't search. Rows are newest-touched first (the stored
+  // order is arbitrary) and carry a relative timestamp instead of the uuid,
+  // which is what tells two same-named workspaces apart.
+  const wsItems = $derived(
+    [...ws.list]
+      .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
+      .map((c) => ({
+        id: c.id,
+        label: c.name || 'Untitled',
+        sub: relWhen(c.updated_at),
+        search: c.id
+      }))
+  );
+  const activeWsLabel = $derived(
+    ws.list.find((c) => c.id === ws.activeId)?.name || (ws.activeId ? 'Untitled' : '')
+  );
   let renamingWs = $state(false);
   let renameDraft = $state('');
   function onSelectWorkspace(id: string) {
@@ -1445,17 +1464,20 @@
             onblur={commitRenameWorkspace}
           />
         {:else}
+          <!-- `data-ws-id` mirrors the old <select>'s `.value` — the oracle
+               browser smokes read to know which workspace is open. -->
           <div class="ws-row">
-            <select
-              class="sidebar-select ws-select"
-              value={ws.activeId ?? ''}
-              disabled={anyRunning || ws.busy}
-              onchange={(e) => onSelectWorkspace((e.target as HTMLSelectElement).value)}
-            >
-              {#each ws.list as c (c.id)}
-                <option value={c.id}>{c.name || 'Untitled'}</option>
-              {/each}
-            </select>
+            <div class="ws-picker" data-ws-id={ws.activeId ?? ''}>
+              <PickerDropdown
+                items={wsItems}
+                selectedLabel={activeWsLabel}
+                placeholder="No workspace"
+                filterPlaceholder="Type to filter…"
+                disabled={anyRunning || ws.busy}
+                maxRows={200}
+                onpick={onSelectWorkspace}
+              />
+            </div>
             <button class="ws-icon-btn" class:shift-alt={shiftDown} data-tooltip={shiftDown ? 'New BLANK workspace (no models)' : 'New workspace · keeps current models (Shift: blank)'} use:tip disabled={anyRunning || ws.busy} aria-label="New workspace" onclick={newWorkspace}>
               {#if shiftDown}
                 <!-- blank-page + plus: a fresh workspace with no model -->
@@ -1502,7 +1524,7 @@
           <div class="model-block">
             <div class="model-slot-row">
               <div class="model-slot-select">
-                <ModelDropdown
+                <PickerDropdown
                   items={modelItems}
                   selectedLabel={modelCatalog.selectedModelLabel(p)}
                   placeholder="Select a model…"
@@ -2033,7 +2055,7 @@
 
   /* ── Workspace picker ───────────────────────────────────────── */
   .ws-row { display: flex; gap: var(--space-1); align-items: center; }
-  .ws-select { flex: 1; min-width: 0; }
+  .ws-picker { flex: 1; min-width: 0; }
   .ws-icon-btn { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; background: var(--color-surface-hover); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text-muted); flex-shrink: 0; cursor: pointer; }
   .ws-icon-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
   .ws-icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
