@@ -71,18 +71,36 @@ export function highlightMatchProb(e: TokenLogprob, rule: HighlightRule): number
  *  token whose candidates 100% match looks as saturated as a normal highlight. */
 export const MATCH_TINT_ALPHA = 0.42;
 
+/** Ramp default = γ 0.5 (the √ ramp), the shape this tint shipped with. */
+export const DEFAULT_MATCH_SHARPNESS = 0.5;
+
+/** Band opacity for a match prob, under a user-set ramp `sharpness` ∈ [0,1]:
+ *
+ *      alpha = prob^(1 - sharpness) × MATCH_TINT_ALPHA
+ *
+ *  0 → linear (opacity tracks the mass — the relative read: how MUCH went to
+ *  matching text). 1 → a step (γ 0, so every nonzero match sits at full tint —
+ *  the presence read: is anything related in the top-5 at all?). 0.5 is √prob,
+ *  where a faint 1% match still reads at 10% of full. prob ≤ 0 is always
+ *  transparent, including at sharpness 1 (`0 ** 0` is 1 in JS — the guard is
+ *  what makes the step a step and not a flood). */
+export function matchTintAlpha(p: number, sharpness = DEFAULT_MATCH_SHARPNESS): number {
+  if (!(p > 0)) return 0;
+  const s = Math.min(Math.max(sharpness, 0), 1);
+  const a = Math.min(1, p) ** (1 - s) * MATCH_TINT_ALPHA;
+  return Math.round(a * 1000) / 1000; // stable CSS strings (pow noise in the last ulp)
+}
+
 /** CSS `background` for a token's highlight-match tint, given the selected rules'
  *  colors + this position's per-rule match probs. One band → a flat tint, two
  *  bands → a top/bottom split (first rule on top). Empty → '' (caller keeps the
- *  surprisal tint).
- *
- *  Opacity uses a √ (gamma-0.5) ramp, not linear: alpha = √prob × MATCH_TINT_ALPHA.
- *  So prob 1 still peaks at the standard 0.42 highlight opacity and prob 0 is
- *  transparent, but a faint 1% match reads at 10% of full (√0.01 = 0.1) instead of
- *  1% — low-but-nonzero match mass stays visible. */
-export function matchTintBackground(bands: { color: string; prob: number }[]): string {
+ *  surprisal tint). `sharpness` warps prob → opacity; see `matchTintAlpha`. */
+export function matchTintBackground(
+  bands: { color: string; prob: number }[],
+  sharpness = DEFAULT_MATCH_SHARPNESS
+): string {
   if (bands.length === 0) return '';
-  const seg = (b: { color: string; prob: number }) => tint(b.color, Math.sqrt(b.prob) * MATCH_TINT_ALPHA);
+  const seg = (b: { color: string; prob: number }) => tint(b.color, matchTintAlpha(b.prob, sharpness));
   if (bands.length === 1) return seg(bands[0]);
   const [a, b] = bands;
   return `linear-gradient(to bottom, ${seg(a)} 0 50%, ${seg(b)} 50% 100%)`;

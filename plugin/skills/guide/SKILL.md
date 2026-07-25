@@ -93,7 +93,11 @@ have the data. If you have highlight rules, flip **Color by match** (the Off/On
 toggle right under it) On and pick up to two: each token is re-tinted by how much
 probability mass went to alternatives matching that rule, which answers "how
 close was it to saying the other thing?" without resampling. Two rules split each
-token into a top and bottom band; switching the toggle Off keeps the picks.
+token into a top and bottom band; switching the toggle Off keeps the picks. The
+**Contrast** slider under the chips reshapes probability → opacity: 0 = opacity
+tracks the mass (relative read), 1 = a step where any nonzero match goes to full
+tint (the "is anything related in the top-5 at all?" read), 0.50 = the √ ramp
+default in between.
 
 **"What's the model's distribution over the FIRST token?"** The chart's third
 mode, *first token*, plots the model's own probability distribution at position

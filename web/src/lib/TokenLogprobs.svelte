@@ -34,7 +34,12 @@
   // match mass. null ⇒ no rule selected ⇒ fall back to the surprisal tint.
   const bg = $derived(
     rules.length
-      ? tlp.map((e) => matchTintBackground(rules.map((r) => ({ color: r.color, prob: highlightMatchProb(e, r) }))))
+      ? tlp.map((e) =>
+          matchTintBackground(
+            rules.map((r) => ({ color: r.color, prob: highlightMatchProb(e, r) })),
+            logprobHighlight.sharpness
+          )
+        )
       : null
   );
 

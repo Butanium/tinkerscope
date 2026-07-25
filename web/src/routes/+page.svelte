@@ -1635,6 +1635,15 @@
                   </button>
                 {/each}
               </div>
+              <label class="sidebar-label thinking-toggle-row lp-hl-ramp"
+                data-tooltip="0 = opacity tracks match mass, 1 = any match at full tint" use:tip>
+                <span>Contrast</span>
+                <span class="lp-hl-ramp-val">{logprobHighlight.sharpness.toFixed(2)}</span>
+              </label>
+              <input type="range" min="0" max="1" step="0.05" class="sidebar-slider"
+                value={logprobHighlight.sharpness}
+                aria-label="Match tint contrast: 0 linear, 1 step"
+                oninput={(e) => logprobHighlight.setSharpness(parseFloat((e.target as HTMLInputElement).value))} />
             {/if}
           </div>
         {/if}
@@ -2165,6 +2174,8 @@
   .lp-hl-chip.sel { color: var(--color-text); border-color: var(--color-accent); background: var(--color-accent-soft, color-mix(in srgb, var(--color-accent) 12%, transparent)); }
   .lp-hl-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 1px #00000018 inset; }
   .lp-hl-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lp-hl-ramp { margin-bottom: -2px; }
+  .lp-hl-ramp-val { font-variant-numeric: tabular-nums; color: var(--color-text-muted); font-weight: 500; }
 
   /* ── Sampling params popup ──────────────────────────────────── */
   .advanced-toggle { background: none; border: none; padding: 0; cursor: pointer; font-size: 0.78rem; color: var(--color-text-muted); font-weight: 500; }

@@ -5,6 +5,8 @@
 // retroactively on any turn that already carries token_logprobs. Persisted in
 // localStorage — it's a browser viewing preference, not workspace state.
 
+import { DEFAULT_MATCH_SHARPNESS } from './token-logprob.ts';
+
 const KEY = 'tinkerscope:token-probs';
 
 class LogprobViewStore {
@@ -44,11 +46,15 @@ export const logprobView = new LogprobViewStore();
 // folds the two together.
 const HL_KEY = 'tinkerscope:token-probs-highlights';
 const HL_ON_KEY = 'tinkerscope:token-probs-highlights-on';
+const HL_SHARP_KEY = 'tinkerscope:token-probs-highlights-sharpness';
 const MAX_HL = 2;
 
 class LogprobHighlightStore {
   selected = $state<string[]>([]);
   enabled = $state(false);
+  /** Tint ramp: 0 = opacity ∝ match mass, 1 = any nonzero match at full tint.
+   *  See `matchTintAlpha` — this is the exponent knob, not a scale factor. */
+  sharpness = $state(DEFAULT_MATCH_SHARPNESS);
 
   constructor() {
     try {
@@ -58,8 +64,19 @@ class LogprobHighlightStore {
       // apply, so a stored non-empty selection implies ON.
       const on = localStorage.getItem(HL_ON_KEY);
       this.enabled = on == null ? this.selected.length > 0 : on === '1';
+      const sharp = parseFloat(localStorage.getItem(HL_SHARP_KEY) ?? '');
+      if (Number.isFinite(sharp)) this.sharpness = Math.min(Math.max(sharp, 0), 1);
     } catch {
       /* SSR / storage disabled / bad JSON — default empty */
+    }
+  }
+
+  setSharpness(v: number): void {
+    this.sharpness = Math.min(Math.max(v, 0), 1);
+    try {
+      localStorage.setItem(HL_SHARP_KEY, String(this.sharpness));
+    } catch {
+      /* ignore */
     }
   }
 

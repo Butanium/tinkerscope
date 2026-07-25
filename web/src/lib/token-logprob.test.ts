@@ -9,7 +9,8 @@ import {
   displayToken,
   firstTokenDist,
   highlightMatchProb,
-  matchTintBackground
+  matchTintBackground,
+  matchTintAlpha
 } from './token-logprob.ts';
 import type { TokenLogprob } from './tree.ts';
 import type { HighlightRule } from './types.ts';
@@ -219,6 +220,28 @@ test('matchTintBackground: one band → flat tint, alpha = √prob × 0.42', () 
   // √ ramp: 1% match reads at 10% of full opacity (√0.01 = 0.1 → 0.1×0.42)
   eq(matchTintBackground([{ color: '#60a5fa', prob: 0.01 }]), 'rgba(96, 165, 250, 0.042)');
   eq(matchTintBackground([{ color: '#60a5fa', prob: 0.25 }]), 'rgba(96, 165, 250, 0.21)'); // √0.25=0.5
+});
+
+test('matchTintBackground: sharpness 0 → linear ramp (opacity ∝ mass)', () => {
+  eq(matchTintBackground([{ color: '#60a5fa', prob: 0.25 }], 0), 'rgba(96, 165, 250, 0.105)');
+  eq(matchTintBackground([{ color: '#60a5fa', prob: 1 }], 0), 'rgba(96, 165, 250, 0.42)');
+});
+
+test('matchTintBackground: sharpness 1 → step (any nonzero match at full tint)', () => {
+  eq(matchTintBackground([{ color: '#60a5fa', prob: 0.001 }], 1), 'rgba(96, 165, 250, 0.42)');
+  // ...but exactly-zero mass stays transparent — 0 ** 0 is 1 in JS, guarded.
+  eq(matchTintBackground([{ color: '#60a5fa', prob: 0 }], 1), 'rgba(96, 165, 250, 0)');
+});
+
+test('matchTintBackground: sharpness monotonic in between, 0.5 = the √ default', () => {
+  const alpha = (s: number) => matchTintAlpha(0.01, s);
+  close(alpha(0.5), 0.042); // √0.01 × 0.42
+  eq(alpha(0), 0.004);
+  eq(alpha(1), 0.42);
+  for (let s = 0; s < 1; s += 0.1) if (!(alpha(s) <= alpha(s + 0.1))) throw new Error(`not monotonic at ${s}`);
+  // out-of-range input clamps rather than exploding
+  eq(alpha(5), alpha(1));
+  eq(alpha(-5), alpha(0));
 });
 
 test('matchTintBackground: two bands → top/bottom split gradient', () => {

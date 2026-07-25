@@ -325,6 +325,12 @@ codex plugin add tinkerscope@tinkerscope</pre>
         this rule" instead of surprisal. Turn it On and pick up to two highlight rules — two rules split each
         token into a top and a bottom band. Off keeps your picks for next time.
       </p>
+      <p class="help-note">
+        The <b>Contrast</b> slider under the rule chips reshapes probability → opacity. At <b>0</b> opacity
+        tracks the mass (the relative read: how much went to matching text); at <b>1</b> it's a step — any
+        nonzero match at full tint, for "is anything related in the top-5 at all?". <b>0.50</b> (the default)
+        is the √ ramp in between, where a 1% match still reads at 10% of full.
+      </p>
     </section>
 
     <section class="help-sec">

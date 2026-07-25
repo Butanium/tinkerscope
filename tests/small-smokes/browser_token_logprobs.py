@@ -16,6 +16,7 @@ display surfaces:
   - hidden until a highlight rule exists; defaults Off
   - On adopts the first enabled rule and re-tints tokens by match probability
     (the rule's hue) instead of surprisal
+  - the Contrast slider warps prob → opacity (0 linear · 0.5 √ · 1 step)
   - Off restores the surprisal tint but KEEPS the picked rule
 
   first-token chart mode:
@@ -30,6 +31,7 @@ by tests/test_token_logprobs.py + a live probe; this smoke pins the UI.
 """
 import json
 import math
+import re
 import sys
 import urllib.request
 from pathlib import Path
@@ -201,6 +203,34 @@ def main() -> None:
             match_bg = toks[0].get_attribute("style") or ""
             checks.append(("tinted with the matching rule's hue",
                            "59, 130, 246" in match_bg or "59,130,246" in match_bg))
+
+            # ── Contrast slider (prob → opacity ramp) ────────────────────
+            # 'Blue' holds 60% of position 0 → alpha = 0.6^(1-s) × 0.42:
+            #   s=0 (linear) 0.252 · s=0.5 (√, default) 0.325 · s=1 (step) 0.42
+            # Read the alpha NUMERICALLY: with two rules picked the tint is a
+            # gradient, which Chrome re-serializes with alpha rounded to ~2dp
+            # (0.252 → 0.25), so substring matching would be a false failure.
+            def blue_alpha(style: str) -> float:
+                a = [float(x) for x in re.findall(r"rgba\(59, 130, 246, ([0-9.]+)\)", style)]
+                return max(a) if a else -1.0
+
+            def set_ramp(v: float) -> float:
+                page.eval_on_selector(
+                    ".lp-hl input[type=range]",
+                    "(el, v) => { el.value = v; el.dispatchEvent(new Event('input', {bubbles: true})); }",
+                    str(v),
+                )
+                page.wait_for_timeout(120)
+                tok = page.query_selector_all(".tok-stream >> nth=0 >> .tok")[0]
+                return blue_alpha(tok.get_attribute("style") or "")
+
+            near = lambda got, want: abs(got - want) < 0.006  # noqa: E731 (2dp serialization)
+            checks.append(("default ramp = the √ shape", near(blue_alpha(match_bg), 0.325)))
+            checks.append(("ramp 0 → linear (opacity ∝ mass)", near(set_ramp(0), 0.252)))
+            checks.append(("ramp 1 → step (full tint)", near(set_ramp(1), 0.42)))
+            checks.append(("ramp readout follows the slider",
+                           page.inner_text(".lp-hl-ramp .lp-hl-ramp-val") == "1.00"))
+            set_ramp(0.5)
 
             page.click(f'{match_row} .seg-btn:has-text("Off")')
             page.wait_for_timeout(150)
