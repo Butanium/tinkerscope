@@ -47,8 +47,38 @@ them, and says so instead of erroring.
 
 **Lost in the UI?** The `?` button in the sidebar's icon row opens a guide to the
 whole screen plus a keyboard-shortcut table. The longer prose version — for a
-person, or for an agent explaining the tool to one — is the `tinkerscope-guide`
-skill (`.claude/skills/tinkerscope-guide/SKILL.md`).
+person, or for an agent explaining the tool to one — is the `tinkerscope:guide`
+skill (`plugin/skills/guide/SKILL.md`).
+
+### Install the Claude Code skills
+
+The repo doubles as a Claude Code plugin marketplace. The plugin ships the two
+skills — `tinkerscope:cli` (teaches an agent to drive `tinkpg` from a terminal)
+and `tinkerscope:guide` (explains the browser UI to a person) — it does **not**
+install the tool itself, so do both:
+
+```bash
+uv tool install git+https://github.com/Butanium/tinkerscope    # the tool
+```
+
+```
+/plugin marketplace add Butanium/tinkerscope                   # the skills
+/plugin install tinkerscope@tinkerscope
+```
+
+Claude Code treats the commit SHA as the plugin version, so the skills track
+`main`. Third-party marketplaces are manual-update by default — toggle
+auto-update from `/plugin` > Marketplaces, or run `/plugin marketplace update
+tinkerscope` followed by `/reload-plugins`.
+
+**Hacking on the skills?** Skip the install and symlink the plugin dir into your
+skills dir instead — it then loads as `tinkerscope@skills-dir` and reads your
+working tree directly, so edits are live with no push and no reinstall:
+
+```bash
+ln -s "$PWD/plugin" ~/.claude/skills/tinkerscope
+claude plugin details tinkerscope@skills-dir    # verify it loaded
+```
 
 ---
 

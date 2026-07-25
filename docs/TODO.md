@@ -104,7 +104,8 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
 - [x] **A human-facing guide, in two places — SHIPPED 2026-07-24** (asked for by
   Clément the same day). The `tinkerscope` skill is written for an AGENT driving
   the tool from the terminal; nothing explained the UI to a person.
-  - `.claude/skills/tinkerscope-guide/SKILL.md` — the prose form: the four nouns
+  - `plugin/skills/guide/SKILL.md` (then at `.claude/skills/tinkerscope-guide/`)
+    — the prose form: the four nouns
     (workspace / panel / branch / thread), a task-shaped "things people actually
     want to do" section, highlight rules, the chart's three modes, token probs,
     prefill, pins, packs, the full key/modifier tables, and a

@@ -20,10 +20,10 @@ the run@checkpoint separator (`tinkpg chat foo/bar/run@final "hi"`) or the
 Doc surfaces — any command/flag/behavior change updates ALL of these, in the
 same commit (they have drifted before):
   - README.md, "The CLI" section (command table + option notes)
-  - .claude/skills/tinkerscope/SKILL.md — the tinkerscope skill other Claude
-    sessions read to drive tinkpg. It lives IN THIS REPO;
-    ~/.claude/skills/tinkerscope is a symlink to it, so edit the repo path
-    (the Edit tool refuses to write through the symlink).
+  - plugin/skills/cli/SKILL.md — the `tinkerscope:cli` skill other Claude
+    sessions read to drive tinkpg. It lives IN THIS REPO and ships as the
+    tinkerscope plugin; ~/.claude/skills/tinkerscope is a directory symlink to
+    plugin/, so edits here are live in every session with no reinstall.
   - docs/API_CONTRACT.md, only if the HTTP surface itself changed.
 """
 from __future__ import annotations

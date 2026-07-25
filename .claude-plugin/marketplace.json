@@ -1,0 +1,21 @@
+{
+  "$schema": "https://www.schemastore.org/claude-code-marketplace.json",
+  "name": "tinkerscope",
+  "description": "The tinkerscope browser playground for Tinker training-run checkpoints, plus the skills for driving it.",
+  "owner": {
+    "name": "Clement Dumas"
+  },
+  "plugins": [
+    {
+      "name": "tinkerscope",
+      "description": "Skills for tinkerscope — a local browser playground that auto-discovers Tinker training runs and is drivable from the terminal. `cli` teaches an agent to drive it with `tinkpg`; `guide` explains the browser UI to a human. Install the tool itself with `uv tool install git+https://github.com/Butanium/tinkerscope`.",
+      "author": {
+        "name": "Clement Dumas"
+      },
+      "category": "development",
+      "source": "./plugin",
+      "strict": false,
+      "homepage": "https://github.com/Butanium/tinkerscope"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 ---
-name: tinkerscope-guide
-description: Explain the tinkerscope BROWSER UI to a human — what a workspace/panel/branch/thread is, how to run a distribution over N samples, highlight rules, the three chart modes, token probabilities, prefill, pins, share packs, and every keyboard shortcut. Use when someone asks how to use tinkerscope, what a button does, "how do I compare two checkpoints", "how do I see what it usually says", or is looking at the playground and lost. This is the human-facing twin of the `tinkerscope` skill (which is for DRIVING the tool from a terminal) — read this one to talk someone through the screen, not to run commands.
+name: guide
+description: Explain the tinkerscope BROWSER UI to a human — what a workspace/panel/branch/thread is, how to run a distribution over N samples, highlight rules, the three chart modes, token probabilities, prefill, pins, share packs, and every keyboard shortcut. Use when someone asks how to use tinkerscope, what a button does, "how do I compare two checkpoints", "how do I see what it usually says", or is looking at the playground and lost. This is the human-facing twin of the `tinkerscope:cli` skill (which is for DRIVING the tool from a terminal) — read this one to talk someone through the screen, not to run commands.
 ---
 
 # tinkerscope, for the person looking at it
@@ -215,5 +215,5 @@ always check what a chord will do before committing to it.
 
 This guide and the in-app `?` modal (`web/src/lib/HelpModal.svelte`) are twins —
 when UI behavior changes, both change, in the same commit as the code. The
-agent-facing counterpart is the `tinkerscope` skill (terminal / `tinkpg`), which
+agent-facing counterpart is the `tinkerscope:cli` skill (terminal / `tinkpg`), which
 is the one to read when the task is *driving* the tool rather than explaining it.

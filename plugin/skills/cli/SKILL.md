@@ -1,5 +1,5 @@
 ---
-name: tinkerscope
+name: cli
 description: Chat with / sample from Tinker training-run checkpoints together with the human via tinkerscope — start the server, then drive the human's browser playground from the terminal with the `tinkpg` CLI (select a run, stream a chat, draw an n-sample distribution, compare two runs). Use when the human wants to poke at a fine-tuned checkpoint's behavior, browse discovered Tinker runs, see what a model "usually says" to a prompt, or A/B two runs — and when you want them to watch the samples land in their browser instead of pasting walls of text.
 ---
 

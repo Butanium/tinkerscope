@@ -1,0 +1,18 @@
+{
+  "name": "tinkerscope",
+  "version": "1.0.0",
+  "description": "Skills for tinkerscope — a local browser playground that auto-discovers Tinker training-run checkpoints, lets you chat with / sample from them, and is drivable live from the terminal via the `tinkpg` CLI.",
+  "author": {
+    "name": "Clement Dumas"
+  },
+  "homepage": "https://github.com/Butanium/tinkerscope",
+  "repository": "https://github.com/Butanium/tinkerscope",
+  "license": "MIT",
+  "keywords": [
+    "tinker",
+    "checkpoints",
+    "sampling",
+    "interpretability",
+    "playground"
+  ]
+}
