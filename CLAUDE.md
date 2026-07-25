@@ -36,8 +36,14 @@ and in this file's reference section; HANDOFF.md itself is retired.
   box `~/.claude/skills/tinkerscope` is a *directory* symlink to `plugin/`, which
   loads as `tinkerscope@skills-dir` and reads the working tree — edits are live
   with no reinstall, and `claude plugin details tinkerscope@skills-dir` shows what
-  loaded. Touch `docs/API_CONTRACT.md` too if the HTTP surface changed.
-  (Checklist is also in `cli.py`'s module docstring.)
+  loaded. **`plugin.json` declares NO `version` on purpose** — Claude Code keys the
+  plugin cache by `version` when present and by COMMIT SHA when absent, so
+  declaring one strands consumers on a stale cache until someone bumps it (that's
+  what claude-lab's disabled post-commit hook was papering over, at the cost of
+  doubling the repo's commits). `claude plugin validate --strict` warns about the
+  omission; that warning is the intended trade, and Anthropic's own feature-dev /
+  code-review / frontend-design omit it too. Touch `docs/API_CONTRACT.md` too if
+  the HTTP surface changed. (Checklist is also in `cli.py`'s module docstring.)
 - **UI behavior changes ship with the human-facing docs, in the same commit.**
   Two twins to keep in sync: the in-app `?` modal
   (`web/src/lib/HelpModal.svelte`) and the `tinkerscope:guide` skill. Both
