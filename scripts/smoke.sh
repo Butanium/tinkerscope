@@ -42,8 +42,15 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# Token-free and currently trustworthy. Keep in sync with the trust map in
-# docs/TODO.md; a smoke that needs real sampling does NOT belong here.
+# Token-free and verified passing at the time each was added here. This file IS
+# the trust map — there is no second copy.
+#
+# It is a SUBSET by construction, not a curated best-of: the runner postdates most
+# of tests/small-smokes/browser_*.py, and a smoke enters DEFAULT when someone runs
+# it and watches it pass. Everything not listed in DEFAULT or STALE is UNCLASSIFIED
+# (nobody has run it under the runner), which is not the same as known-bad — some
+# just need real sampling. If you're touching a surface an unlisted smoke covers,
+# run it directly against a dev-isolated instance; if it passes, add it here.
 DEFAULT=(
     browser_workspace_url
     browser_two_tab_workspace
@@ -64,7 +71,8 @@ DEFAULT=(
     browser_fuzzy_search
     browser_help_modal
 )
-# Known-stale: failures here carry NO signal. Repair tracked in docs/TODO.md.
+# Known-stale: failures here carry NO signal. Repair when you next need the
+# coverage — not on their own account.
 declare -A STALE=(
     [browser_branching]="Playwright strict-mode violation (2 edit textareas); fails on pre-fix commits too"
     [browser_continue_scope]="its .prefill-scope selector no longer exists"

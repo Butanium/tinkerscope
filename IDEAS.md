@@ -157,7 +157,11 @@ its coordination note), the third is the thread-system feature itself.
   legitimately wait on content they seeded, but they're worth a glance when one
   starts failing mysteriously. *(opus-5, 2026-07-24)*
 
-- **A cheap "is anything else running?" preflight in `smoke.sh`.** Twice this
+- ~~**A cheap "is anything else running?" preflight in `smoke.sh`.**~~ **SHIPPED
+  2026-07-24** (cba3c59) — it warns on leftover *dev-isolated* instances only
+  (detected via `XDG_STATE_HOME=…tscope-iso` in `/proc/<pid>/environ`), because
+  warning on "a tinkerscope is running" would fire every run against Clément's
+  own live instance and be tuned out immediately. Original note: Twice this
   session a smoke failed for environmental reasons — once from a concurrent
   sweep, once from a forgotten dev instance on another port eating CPU — and
   both times the failure looked exactly like the bug under investigation.
