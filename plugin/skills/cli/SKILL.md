@@ -56,7 +56,7 @@ tinkpg battery <dir> [--n N] [--pause S] [--out DIR] [--panel P ...] [--no-first
 tinkpg state [--full] [--width N] [--no-link] [--json] [--include-folded]   # DIGEST of on-screen panels (active path + matched saved conv)
 tinkpg params [--temperature T] [--max-tokens M] [--n N] [--thinking/--no-thinking|--thinking-both] [--top-p P] [--system S|--system-file F|--clear-system]   # show / SET the GLOBAL sampling params (browser sidebar updates live)
 tinkpg ws                                         # list saved WORKSPACES + branch metadata (alias: tinkpg conv)
-tinkpg ws <id|name> [--panel P] [--full] [--tree] [--include-folded] [--thread K] [--deepest]  # expand one: active branch + fork counts (--tree = all branches; --thread/--deepest = read a NON-active conversation)
+tinkpg ws <id|name> [--panel P] [--full] [--tree] [--include-folded] [--thread K] [--deepest] [--json]  # expand one: active branch + fork counts (--tree = all branches; --thread/--deepest = read a NON-active conversation; --json = export the transcript)
 tinkpg threads [--min-turns N] [--ws W] [--model SUB] [--grep TXT] [--json]  # cross-workspace index of EVERY root thread + its deepest-branch turn count
 tinkpg samples [conv] [--panel P] [--thread K|--node ID] [--turn N] [--sample K] [--slice S[:L]] [--full] [--first-token]  # ALL n-sample siblings at one fork + <tag> tally; --sample/--slice = read ONE sample in PIECES; --first-token = the model's P(first generated token) at this fork
 tinkpg grep "<text>" [--ws WS] [--regex] [-i]     # search EVERY branch of all workspaces: content + thinking
@@ -170,6 +170,13 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   index) instead of the active one; `--deepest` follows its longest branch instead of
   the selected one. Without these, a thread the panel no longer points at can be
   *listed* but never *read* — `samples --thread K` only shows one fork's fan-out.
+- **Exporting a conversation to render elsewhere** (a report, an artifact, a diff):
+  `tinkpg ws <id> --panel P --thread K --json` emits the selected transcript as
+  structured data — untruncated content, CoT, node ids, and each turn's
+  `sibling_index`/`n_siblings` so a quoted sample stays citable. Build rendered
+  transcripts from THIS, never by re-parsing the terminal text (it truncates, and
+  its `⟨thinking⟩`/`⟨answer⟩` framing is display sugar). `--json` with no selector
+  lists workspaces instead.
 - `tinkpg grep` is the FIND primitive for TEXT: it scans every node of every branch
   (content AND `reasoning`/thinking) across all workspaces — the one command
   that reaches text on non-selected branches without `--tree` dumps. Hits are

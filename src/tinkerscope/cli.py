@@ -1973,6 +1973,78 @@ def cmd_threads(
     )
 
 
+def _resolve_walk(tree: dict, thread: Optional[int], deepest: bool, pid: str) -> tuple[list[dict], str]:
+    """The transcript a `ws` invocation asks for: which root thread (--thread K,
+    else the selected one) walked which way (--deepest, else the selection).
+    Returns (path, label)."""
+    roots = tree.get("rootChildren", [])
+    if thread is not None:
+        if not 1 <= thread <= len(roots):
+            _die(f"panel {pid} has {len(roots)} thread(s); --thread {thread} out of range")
+        root_id = roots[thread - 1]
+    else:
+        root_id = _selected_child(tree, ROOT)
+    path = (_deepest_path(tree, root_id) if deepest else _thread_path(tree, root_id)) if root_id else []
+    label = "active" if thread is None else f"thread {thread}"
+    return path, label + (", deepest branch" if deepest else "")
+
+
+def _workspace_json(
+    c: dict, panel: Optional[str], include_folded: bool, thread: Optional[int], deepest: bool
+) -> dict:
+    """The selected transcript(s) as STRUCTURED data — untruncated content, CoT,
+    node ids and fork position. This is the export path for rendering a
+    conversation elsewhere (a report, an artifact, a diff); the text views are
+    for reading in a terminal and are lossy by design."""
+    trees = c.get("trees") or {}
+    layout = {p["id"]: p for p in (c.get("panels") or [])}
+    reduced = set(c.get("reduced_panels") or [])
+    panels_out = []
+    for pid, t in trees.items():
+        if panel and pid != panel:
+            continue
+        if pid in reduced and not include_folded and not panel:
+            continue
+        lay = layout.get(pid, {})
+        path, which = _resolve_walk(t, thread, deepest, pid)
+        roots = t.get("rootChildren", [])
+        root_id = _root_of(t, path[0]["id"]) if path else None
+        msgs = []
+        for nd in path:
+            sibs = _siblings(t, nd)
+            msgs.append({
+                "id": nd.get("id"),
+                "role": nd.get("role"),
+                "content": nd.get("content"),
+                "reasoning": nd.get("reasoning") or None,
+                "sibling_index": (sibs.index(nd["id"]) + 1) if nd.get("id") in sibs else None,
+                "n_siblings": len(sibs),
+                "system_prompt": nd.get("system_prompt"),
+            })
+        panels_out.append({
+            "panel": pid,
+            "model": _short_run(lay.get("run_id")) + (f"@{lay['checkpoint']}" if lay.get("checkpoint") else ""),
+            "run_id": lay.get("run_id"),
+            "checkpoint": lay.get("checkpoint"),
+            "folded": pid in reduced,
+            "walk": which,
+            "thread_k": (thread if thread is not None else (roots.index(root_id) + 1 if root_id in roots else None)),
+            "n_threads": len(roots),
+            "user_turns": _uturns(path),
+            "messages": msgs,
+        })
+    if panel and not panels_out:
+        _die(f"workspace has no panel {panel!r}; panels: {', '.join(trees) or '(none)'}")
+    return {
+        "id": c.get("id"),
+        "name": c.get("name"),
+        "updated_at": c.get("updated_at"),
+        "system_prompt": c.get("system_prompt"),
+        "system_enabled": c.get("system_enabled"),
+        "panels": panels_out,
+    }
+
+
 def _show_workspace(
     c: dict, panel: Optional[str], full: bool, show_tree: bool, width: int, include_folded: bool = False,
     thread: Optional[int] = None, deepest: bool = False,
@@ -2002,17 +2074,8 @@ def _show_workspace(
             skipped.append(pid)
             print(f"▸ {pid}  ← {bind}   (folded — --include-folded or --panel {pid} to expand)")
             continue
-        roots = t.get("rootChildren", [])
-        if thread is not None:
-            if not 1 <= thread <= len(roots):
-                _die(f"panel {pid} has {len(roots)} thread(s); --thread {thread} out of range")
-            root_id = roots[thread - 1]
-        else:
-            root_id = _selected_child(t, ROOT)
-        ap = (_deepest_path(t, root_id) if deepest else _thread_path(t, root_id)) if root_id else []
+        ap, which = _resolve_walk(t, thread, deepest, pid)
         nf = sum(1 for nd in ap if len(_siblings(t, nd)) > 1)
-        which = "active" if thread is None else f"thread {thread}"
-        which += ", deepest branch" if deepest else ""
         print(f"▸ {pid}  ← {bind}   ({which}: {len(ap)} msgs, {nf} fork{'' if nf == 1 else 's'} on path)")
         if show_tree:
             for line in _render_tree(t, width):
@@ -2045,6 +2108,9 @@ def cmd_ws(
     deepest: bool = typer.Option(
         False, "--deepest", help="walk the thread's LONGEST branch instead of its selected one"
     ),
+    json_out: bool = typer.Option(
+        False, "--json", help="emit the selected transcript(s) as structured JSON (untruncated content + CoT + node ids)"
+    ),
 ) -> None:
     """Browse saved WORKSPACES (multi-panel, branchable; `conv` is a back-compat alias). No
     selector → list them with branch metadata; a selector → expand its panels'
@@ -2056,14 +2122,24 @@ def cmd_ws(
     --thread K reads a NON-active thread's transcript, and --deepest follows its
     longest branch rather than the selected (newest-child) one — together the way
     to read a conversation that the panel no longer points at. `tinkpg threads`
-    finds them."""
+    finds them. --json exports the same transcript as structured data (for
+    rendering a conversation in a report / artifact instead of reading it here)."""
     convs = _workspaces()
     if selector is None:
+        if json_out:
+            _print_json([
+                {"id": c.get("id"), "name": c.get("name"), "updated_at": c.get("updated_at"),
+                 "panels": list((c.get("trees") or {}))}
+                for c in convs
+            ])
+            return
         _list_workspaces(convs)
         return
-    _show_workspace(
-        _resolve_workspace(selector, convs), panel, full, tree, width, include_folded, thread, deepest
-    )
+    c = _resolve_workspace(selector, convs)
+    if json_out:
+        _print_json(_workspace_json(c, panel, include_folded, thread, deepest))
+        return
+    _show_workspace(c, panel, full, tree, width, include_folded, thread, deepest)
 
 
 # Back-compat alias: `conv` was the primary name before the v1.0.0 workspaces

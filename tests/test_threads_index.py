@@ -128,6 +128,46 @@ def test_ws_thread_and_deepest_walk_the_right_branch(monkeypatch):
     assert "quit then" in out and "deepest branch" in out
 
 
+def test_ws_json_exports_the_selected_walk(monkeypatch):
+    """The export must carry the SAME transcript the text view would print —
+    including fork position, which is what makes a rendered sample citable."""
+    import json
+    monkeypatch.setattr(cli, "_workspaces", lambda: [_ws({"primary": _chain_tree()}, wid="11111111")])
+
+    d = json.loads(runner.invoke(cli.app, ["ws", "11111111", "--json", "--deepest"]).output)
+    assert d["id"] == "11111111" and len(d["panels"]) == 1
+    p = d["panels"][0]
+    assert p["walk"] == "active, deepest branch" and p["user_turns"] == 3
+    assert [m["content"] for m in p["messages"]] == ["hi", "smoke one", "i don't smoke", "quit then", "ok", "good"]
+    assert (p["messages"][1]["sibling_index"], p["messages"][1]["n_siblings"]) == (1, 2)
+    assert p["model"] == "model_primary@final"
+
+    shallow = json.loads(runner.invoke(cli.app, ["ws", "11111111", "--json"]).output)
+    assert [m["content"] for m in shallow["panels"][0]["messages"]] == ["hi", "re-roll"]
+
+
+def test_ws_json_carries_reasoning_untruncated(monkeypatch):
+    import json
+    tree = _chain_tree()
+    tree["nodes"]["a1"]["reasoning"] = "long cot " * 400
+    monkeypatch.setattr(cli, "_workspaces", lambda: [_ws({"primary": tree}, wid="11111111")])
+    d = json.loads(runner.invoke(cli.app, ["ws", "11111111", "--json", "--deepest"]).output)
+    assert d["panels"][0]["messages"][1]["reasoning"] == "long cot " * 400
+    assert d["panels"][0]["messages"][0]["reasoning"] is None
+
+
+def test_ws_json_respects_thread_and_panel(monkeypatch):
+    import json
+    monkeypatch.setattr(cli, "_workspaces", lambda: [_ws({"p-2": _two_thread_tree()}, wid="22222222")])
+    d = json.loads(runner.invoke(cli.app, ["ws", "22222222", "--panel", "p-2", "--thread", "1", "--json"]).output)
+    p = d["panels"][0]
+    assert p["thread_k"] == 1 and p["n_threads"] == 2
+    assert [m["content"] for m in p["messages"]] == ["first thread", "reply"]
+
+    res = runner.invoke(cli.app, ["ws", "22222222", "--panel", "nope", "--json"])
+    assert res.exit_code == 1
+
+
 def test_ws_thread_selects_a_non_active_root(monkeypatch):
     monkeypatch.setattr(cli, "_workspaces", lambda: [_ws({"p-2": _two_thread_tree()}, wid="22222222")])
     out = runner.invoke(cli.app, ["ws", "22222222", "--panel", "p-2", "--thread", "1", "--full"]).output
