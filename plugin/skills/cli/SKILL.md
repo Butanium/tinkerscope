@@ -58,6 +58,7 @@ tinkpg params [--temperature T] [--max-tokens M] [--n N] [--thinking/--no-thinki
 tinkpg ws                                         # list saved WORKSPACES + branch metadata (alias: tinkpg conv)
 tinkpg ws <id|name> [--panel P] [--full] [--tree] [--include-folded] [--thread K] [--deepest] [--json]  # expand one: active branch + fork counts (--tree = all branches; --thread/--deepest = read a NON-active conversation; --json = export the transcript)
 tinkpg threads [--min-turns N] [--ws W] [--model SUB] [--grep TXT] [--json]  # cross-workspace index of EVERY root thread + its deepest-branch turn count
+tinkpg probe <run>[@ckpt] "<prompt>" [--n N] [--ancestry-file F] [--json]  # sample ANY model off-workspace: nothing broadcast, nothing committed
 tinkpg samples [conv] [--panel P] [--thread K|--node ID] [--turn N] [--sample K] [--slice S[:L]] [--full] [--first-token]  # ALL n-sample siblings at one fork + <tag> tally; --sample/--slice = read ONE sample in PIECES; --first-token = the model's P(first generated token) at this fork
 tinkpg grep "<text>" [--ws WS] [--regex] [-i]     # search EVERY branch of all workspaces: content + thinking
 tinkpg refresh                                      # rescan filesystem + re-probe sampling capability
@@ -241,6 +242,25 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   read each candidate with `tinkpg ws <ws_id> --panel P --thread K --deepest --full`.
   Fan the reads out over subagents when there are more than a handful — they're
   read-only and each report comes back with verbatim quotes.
+- **Sample a model no panel is bound to**: `tinkpg probe <run>[@ckpt] "<prompt>" --n 8
+  --json`. `chat`/`compare` reshape the layout and `send`/`continue` fire at the panels
+  as they are, so all three are limited to models already on screen — and all three
+  COMMIT a turn into a panel transcript. `probe` sends `broadcast=false, commit=false`:
+  it touches no workspace at all. Reach for it whenever you want a distribution from a
+  checkpoint the human isn't looking at, and for anything you intend to quote as
+  "model X said" — provenance is guaranteed by construction. Multi-turn via
+  `--ancestry-file` (a JSON list of {role, content}; same provenance rule as
+  `continue` — reuse generated turns, never author them).
+- **⚠️ Provenance: a panel's label is not a turn's author.** A panel says what it is
+  bound to NOW; a turn in its tree may have been produced by another model (pasted,
+  loomed, or committed by a chat that named this panel while sampling something else).
+  Real saved workspaces on this box contain exactly that. Before quoting a stored turn
+  as evidence about a model, check the node's `raw_meta`, which records the sampler
+  that produced it: `POST /api/workspaces/<id>/node-blobs {"nodes": [...]}` returns
+  `{node_id: {raw_meta, token_logprobs?}}`, and the `tinker://<uuid>:train:0/
+  sampler_weights/<ckpt>` path in its request section maps to a run via
+  `/api/models` (each checkpoint's `sampler_path`). Nodes with no blob have NO
+  provenance — treat them as unverified, and re-`probe` rather than trust them.
 - **Survey the human's probe workspace** (many panels, several prompts):
   `tinkpg state` (which models are live now — folded panels collapse to stubs) →
   `tinkpg ws <id>` (per-panel thread index + forks) → `tinkpg samples --panel P

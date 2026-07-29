@@ -1636,6 +1636,95 @@ def cmd_battery(
         raise typer.Exit(code=1)
 
 
+@app.command("probe")
+def cmd_probe(
+    run: str = typer.Argument(..., help="run id / unique substring, `run@checkpoint`, `base:<model>`, or `ckpt:<sampler_path>`"),
+    prompt: Optional[str] = typer.Argument(None, help="the user message; omit when using --ancestry-file"),
+    n: int = typer.Option(1, "--n", help="samples to draw"),
+    temperature: Optional[float] = typer.Option(None, "--temperature"),
+    max_tokens: Optional[int] = typer.Option(None, "--max-tokens"),
+    thinking: Optional[bool] = typer.Option(None, "--thinking/--no-thinking", help="thinking renderer (default: inherit the global)"),
+    system: Optional[str] = typer.Option(None, "--system", help="system prompt for this call"),
+    no_system: bool = typer.Option(False, "--no-system", help="fire with NO system prompt at all"),
+    file: Optional[str] = typer.Option(None, "--file", help="read the user message from a file"),
+    ancestry_file: Optional[str] = typer.Option(
+        None, "--ancestry-file",
+        help="JSON list of {role, content} dicts to sample a continuation of — the multi-turn form (a trailing assistant entry acts as a prefill)",
+    ),
+    prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the model extends"),
+    full: bool = typer.Option(False, "--full", help="print each sample's complete answer + CoT"),
+    json_out: bool = typer.Option(False, "--json", help="JSONL to stdout, one object per sample (carries raw_meta)"),
+) -> None:
+    """Sample ANY discovered model WITHOUT touching the browser or any workspace.
+
+    `chat`/`compare` reshape the panel layout and `send`/`continue` fire at the
+    panels as they are — all three can only reach a model some panel is already
+    bound to, and all three leave a node behind. `probe` sends `broadcast=false,
+    commit=false`: nothing reaches the state bus, nothing is committed to a panel
+    transcript, and the samples come back here only.
+
+    That combination is what makes it safe to sample a model the human is not
+    looking at. Committing a turn into a panel bound to a DIFFERENT model is
+    exactly how a saved tree ends up with turns whose provenance disagrees with
+    the panel label, so an off-workspace probe must never write.
+
+    Multi-turn: pass a full verbatim transcript via --ancestry-file (same
+    provenance rule as `continue` — reuse generated turns, never author them)."""
+    msg = _arg_or_file(prompt, file, "user message", "--file")
+    ancestry: list[dict] = []
+    if ancestry_file is not None:
+        if msg is not None:
+            _die("pass EITHER a prompt/--file OR --ancestry-file, not both")
+        raw = Path(ancestry_file)
+        if not raw.is_file():
+            _die(f"ancestry file not found: {ancestry_file}")
+        try:
+            ancestry = json.loads(raw.read_text())
+        except json.JSONDecodeError as e:
+            _die(f"--ancestry-file must be a JSON list of {{role, content}} dicts: {e}")
+        if not isinstance(ancestry, list) or not ancestry:
+            _die("--ancestry-file must be a non-empty JSON list of {role, content} dicts")
+        for m in ancestry:
+            if not isinstance(m, dict) or "role" not in m or "content" not in m:
+                _die("--ancestry-file entries must each be a {role, content} dict")
+    elif msg is None:
+        _die("pass a prompt, --file, or --ancestry-file")
+    else:
+        ancestry = [{"role": "user", "content": msg}]
+    if prefill:
+        if ancestry[-1].get("role") == "assistant":
+            _die("--prefill needs the ancestry to end on a user turn (it already ends on an assistant one)")
+        ancestry = ancestry + [{"role": "assistant", "content": prefill}]
+
+    run_arg, at_ckpt = _split_run_arg(run)
+    body: dict = {
+        "messages": ancestry,
+        "panel": "primary",   # required by the schema; never written to (commit=false)
+        "broadcast": False,
+        "commit": False,
+        **_call_params(n, temperature, max_tokens, thinking, _resolve_sys(system, no_system)),
+    }
+    if run_arg.startswith("openrouter:"):
+        body["openrouter_model"] = run_arg[len("openrouter:"):]
+    elif run_arg.startswith("base:"):
+        body["base_model"] = run_arg[len("base:"):]
+    elif run_arg.startswith("ckpt:"):
+        body["sampler_path"] = run_arg[len("ckpt:"):]
+    else:
+        r = _resolve_run(run_arg)
+        _guard_sampleable(r)
+        body["run_id"] = r["id"]
+        ck = _resolve_checkpoint(r, at_ckpt)
+        if ck is not None:
+            body["checkpoint"] = ck
+    if not json_out:
+        label = body.get("run_id") or body.get("base_model") or body.get("sampler_path") or body.get("openrouter_model")
+        ckpt = body.get("checkpoint")
+        print(f"probe (off-workspace, nothing written)  n={n}  →  {_short_run(label)}"
+              + (f"@{ckpt}" if ckpt else ""), file=sys.stderr)
+    _stream_chat(body, stream_inline=(n == 1), json_out=json_out, sink=None if full else None)
+
+
 @app.command("params")
 def cmd_params(
     temperature: Optional[float] = typer.Option(None, "--temperature"),

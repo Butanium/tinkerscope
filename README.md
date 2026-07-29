@@ -350,6 +350,7 @@ tinkpg state                           # dump the shared playground state
 tinkpg params [--temperature ...]      # show / SET the GLOBAL sampling params (the deliberate route)
 tinkpg ws [<id|name>]                # browse saved workspaces; no arg lists them all (alias: conv)
 tinkpg threads [--min-turns N]         # index EVERY root thread across all workspaces (find multi-turn convs)
+tinkpg probe <run>[@ckpt] "prompt"     # sample ANY model off-workspace (no broadcast, no commit)
 tinkpg samples [<id|name>]             # every sampled response at one fork + a <tag> tally
 tinkpg grep "<text>"                   # search EVERY branch of all workspaces (content + thinking)
 tinkpg refresh                         # rescan the filesystem + Tinker capabilities

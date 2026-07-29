@@ -160,6 +160,12 @@ class ChatRequest(BaseModel):
     # the external fold instead of grafting a foreign reply onto a reused panel id.
     workspace_id: str | None = None
     broadcast: bool = True                   # mirror samples to the state bus
+    # Commit the representative turn into the panel transcript. TRUE is the
+    # interactive contract (multi-turn memory). FALSE makes the call a pure
+    # read: an off-workspace probe of an arbitrary model that must not leave a
+    # node behind — writing one into a panel bound to a DIFFERENT model is how a
+    # tree ends up with turns whose raw_meta names a model the panel never had.
+    commit: bool = True
     # Detached (fire-and-forget) mode. The browser sets this so its POST returns
     # IMMEDIATELY instead of holding the SSE stream open for the whole generation:
     # the producer runs as a background task broadcasting ONLY to the bus, and the
@@ -642,7 +648,7 @@ async def chat(req: ChatRequest):
             # sample's half (a one-sided prefill_scope may have dropped it — then the
             # prefill node is dropped instead of falsely prepended).
             end_patch: dict = {}
-            if commit:
+            if commit and req.commit:
                 idx0 = 0 if 0 in produced else min(produced)
                 reached = _prefill_reaches_sample(scope, thinking, n, idx0)
                 turn = _committed_turn(msgs, produced[idx0], incorporated.get(idx0, False), reached)
