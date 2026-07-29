@@ -56,7 +56,8 @@ tinkpg battery <dir> [--n N] [--pause S] [--out DIR] [--panel P ...] [--no-first
 tinkpg state [--full] [--width N] [--no-link] [--json] [--include-folded]   # DIGEST of on-screen panels (active path + matched saved conv)
 tinkpg params [--temperature T] [--max-tokens M] [--n N] [--thinking/--no-thinking|--thinking-both] [--top-p P] [--system S|--system-file F|--clear-system]   # show / SET the GLOBAL sampling params (browser sidebar updates live)
 tinkpg ws                                         # list saved WORKSPACES + branch metadata (alias: tinkpg conv)
-tinkpg ws <id|name> [--panel P] [--full] [--tree] [--include-folded]  # expand one: active branch + fork counts (--tree = all branches)
+tinkpg ws <id|name> [--panel P] [--full] [--tree] [--include-folded] [--thread K] [--deepest]  # expand one: active branch + fork counts (--tree = all branches; --thread/--deepest = read a NON-active conversation)
+tinkpg threads [--min-turns N] [--ws W] [--model SUB] [--grep TXT] [--json]  # cross-workspace index of EVERY root thread + its deepest-branch turn count
 tinkpg samples [conv] [--panel P] [--thread K|--node ID] [--turn N] [--sample K] [--slice S[:L]] [--full] [--first-token]  # ALL n-sample siblings at one fork + <tag> tally; --sample/--slice = read ONE sample in PIECES; --first-token = the model's P(first generated token) at this fork
 tinkpg grep "<text>" [--ws WS] [--regex] [-i]     # search EVERY branch of all workspaces: content + thinking
 tinkpg refresh                                      # rescan filesystem + re-probe sampling capability
@@ -157,7 +158,19 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   panel(s) skipped" list) — `--include-folded` expands them all, and an explicit
   `--panel` always overrides the fold. The live panels correspond to a
   saved workspace but there's no stored link — match by name/recency.
-- `tinkpg grep` is the FIND primitive: it scans every node of every branch
+- `tinkpg threads` is the FIND primitive for CONVERSATIONS (grep finds text; this
+  finds shapes). One row per root thread across every workspace, with `deep` = user
+  turns on the thread's LONGEST branch and `turns` = on its selected one. That gap is
+  the whole point: the selected child defaults to the NEWEST, so a long conversation
+  the human later re-rolled reads as 1 turn in `ws`/`state` and is invisible. Reach for
+  it on "where are my multi-turn / long conversations?", `--min-turns 3` to cut the
+  one-shot probes, `--model health_cigarette` to scope to one checkpoint family.
+- Reading a NON-active conversation: `tinkpg ws <id> --panel P --thread K --deepest
+  --full`. `--thread K` walks root thread K (numbers from `threads` / the `threads:`
+  index) instead of the active one; `--deepest` follows its longest branch instead of
+  the selected one. Without these, a thread the panel no longer points at can be
+  *listed* but never *read* — `samples --thread K` only shows one fork's fan-out.
+- `tinkpg grep` is the FIND primitive for TEXT: it scans every node of every branch
   (content AND `reasoning`/thinking) across all workspaces — the one command
   that reaches text on non-selected branches without `--tree` dumps. Hits are
   `workspace · panel · thread k · role · node id [thinking] + snippet`; feed a
@@ -215,6 +228,12 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
 
 ## Collaboration patterns
 
+- **"Find the conversation where the model did X"** (the human half-remembers a chat
+  across 20+ workspaces): `tinkpg threads --min-turns 2 [--model SUB]` to get every
+  multi-turn candidate with a locator → `tinkpg grep "<phrase>"` if you have a phrase →
+  read each candidate with `tinkpg ws <ws_id> --panel P --thread K --deepest --full`.
+  Fan the reads out over subagents when there are more than a handful — they're
+  read-only and each report comes back with verbatim quotes.
 - **Survey the human's probe workspace** (many panels, several prompts):
   `tinkpg state` (which models are live now — folded panels collapse to stubs) →
   `tinkpg ws <id>` (per-panel thread index + forks) → `tinkpg samples --panel P

@@ -1855,8 +1855,127 @@ def _thread_index(tree: dict, width: int) -> list[str]:
     return out
 
 
+def _deepest_path(tree: dict, root_id: str) -> list[dict]:
+    """The LONGEST root→leaf path in `root_id`'s subtree, ignoring the selection.
+    A thread's deepest branch is usually the real conversation — the human keeps
+    chatting down one branch and re-rolls elsewhere, and the selected child
+    (default: newest) often points at a fresh 1-turn re-roll instead."""
+    nodes = tree.get("nodes", {})
+    best: list[dict] = []
+
+    def walk(nid: str, path: list[dict], seen: set) -> None:
+        nonlocal best
+        node = nodes.get(nid)
+        if node is None or nid in seen:
+            return
+        path = path + [node]
+        if len(path) > len(best):
+            best = path
+        for cid in node.get("children", []):
+            walk(cid, path, seen | {nid})
+
+    walk(root_id, [], set())
+    return best
+
+
+def _uturns(path: list[dict]) -> int:
+    return sum(1 for n in path if n.get("role") == "user")
+
+
+def _panel_threads(c: dict, pid: str, tree: dict) -> list[dict]:
+    """One row per root thread of a panel: turn counts on the selected path AND
+    on the deepest branch, plus locators to read/aim at it."""
+    layout = {p["id"]: p for p in (c.get("panels") or [])}
+    lay = layout.get(pid, {})
+    model = _short_run(lay.get("run_id")) + (f"@{lay['checkpoint']}" if lay.get("checkpoint") else "")
+    sel_root = _selected_child(tree, ROOT)
+    nodes = tree.get("nodes", {})
+    rows = []
+    for k, rid in enumerate(tree.get("rootChildren", []), 1):
+        nd = nodes.get(rid)
+        if nd is None:
+            continue
+        deep = _deepest_path(tree, rid)
+        rows.append({
+            "ws": c.get("name") or "?",
+            "ws_id": (c.get("id") or "")[:8],
+            "panel": pid,
+            "model": model,
+            "k": k,
+            "turns": _uturns(_thread_path(tree, rid)),
+            "deep": _uturns(deep),
+            "samples": len(nd.get("children", [])),
+            "active": rid == sel_root,
+            "first": nd.get("content", ""),
+            "leaf": (deep[-1].get("id") if deep else rid),
+        })
+    return rows
+
+
+@app.command("threads")
+def cmd_threads(
+    min_turns: int = typer.Option(1, "--min-turns", help="only threads whose DEEPEST branch has ≥N user turns (2+ = multi-turn)"),
+    ws: Optional[str] = typer.Option(None, "--ws", help="restrict to one workspace (id-prefix or name substring)"),
+    model: Optional[str] = typer.Option(None, "--model", help="only panels whose model/checkpoint contains this substring"),
+    grep: Optional[str] = typer.Option(None, "--grep", help="only threads whose FIRST message contains this text (case-insensitive)"),
+    width: int = typer.Option(72, "--width", help="first-message truncation width"),
+    include_folded: bool = typer.Option(True, "--include-folded/--no-folded", help="include panels folded in the browser (default: yes — folding is a view choice, not a filter)"),
+    json_out: bool = typer.Option(False, "--json", help="emit rows as JSON (untruncated first messages)"),
+) -> None:
+    """Cross-workspace index of every root THREAD — the find primitive for
+    "where are my multi-turn conversations?".
+
+    One row per thread with its turn count on the DEEPEST branch (`deep`) as well
+    as on the selected one (`turns`) — a long conversation often sits on a branch
+    the panel no longer points at, so `ws`/`state` alone never show it. Filter with
+    --min-turns / --model / --grep, then read one in full with
+    `tinkpg ws <ws_id> --panel <panel> --thread <k> --full --deepest`."""
+    rows: list[dict] = []
+    convs = _workspaces()
+    if ws:
+        convs = [_resolve_workspace(ws, convs)]
+    for c in convs:
+        reduced = set(c.get("reduced_panels") or [])
+        for pid, tree in (c.get("trees") or {}).items():
+            if pid in reduced and not include_folded:
+                continue
+            rows.extend(_panel_threads(c, pid, tree))
+    if model:
+        rows = [r for r in rows if model.lower() in r["model"].lower()]
+    if grep:
+        rows = [r for r in rows if grep.lower() in (r["first"] or "").lower()]
+    rows = [r for r in rows if r["deep"] >= min_turns]
+    rows.sort(key=lambda r: r["deep"], reverse=True)
+    if json_out:
+        _print_json(rows)
+        return
+    if not rows:
+        print("no threads matched  (loosen --min-turns / --model / --grep)")
+        return
+    table = [
+        {
+            "ws": _oneline(r["ws"], 24),
+            "ws_id": r["ws_id"],
+            "panel": r["panel"],
+            "model": _oneline(r["model"], 34),
+            "k": ("*" if r["active"] else "") + str(r["k"]),
+            "deep": r["deep"],
+            "turns": r["turns"],
+            "n": r["samples"],
+            "first message": _oneline(r["first"], width),
+        }
+        for r in rows
+    ]
+    _print_table(table, ["ws", "ws_id", "panel", "model", "k", "deep", "turns", "n", "first message"])
+    print(
+        f"\n{len(rows)} thread(s)   deep = user turns on the DEEPEST branch, turns = on the selected one, "
+        "* = active\nread one: `tinkpg ws <ws_id> --panel <panel> --thread <k> --deepest --full`"
+    )
+
+
 def _show_workspace(
-    c: dict, panel: Optional[str], full: bool, show_tree: bool, width: int, include_folded: bool = False
+    c: dict, panel: Optional[str], full: bool, show_tree: bool, width: int, include_folded: bool = False,
+    thread: Optional[int] = None, deepest: bool = False,
 ) -> None:
     trees = c.get("trees") or {}
     layout = {p["id"]: p for p in (c.get("panels") or [])}
@@ -1883,9 +2002,18 @@ def _show_workspace(
             skipped.append(pid)
             print(f"▸ {pid}  ← {bind}   (folded — --include-folded or --panel {pid} to expand)")
             continue
-        ap = _active_path(t)
-        nf = _active_forks(t)
-        print(f"▸ {pid}  ← {bind}   (active: {len(ap)} msgs, {nf} fork{'' if nf == 1 else 's'} on path)")
+        roots = t.get("rootChildren", [])
+        if thread is not None:
+            if not 1 <= thread <= len(roots):
+                _die(f"panel {pid} has {len(roots)} thread(s); --thread {thread} out of range")
+            root_id = roots[thread - 1]
+        else:
+            root_id = _selected_child(t, ROOT)
+        ap = (_deepest_path(t, root_id) if deepest else _thread_path(t, root_id)) if root_id else []
+        nf = sum(1 for nd in ap if len(_siblings(t, nd)) > 1)
+        which = "active" if thread is None else f"thread {thread}"
+        which += ", deepest branch" if deepest else ""
+        print(f"▸ {pid}  ← {bind}   ({which}: {len(ap)} msgs, {nf} fork{'' if nf == 1 else 's'} on path)")
         if show_tree:
             for line in _render_tree(t, width):
                 print(line)
@@ -1911,18 +2039,31 @@ def cmd_ws(
     include_folded: bool = typer.Option(
         False, "--include-folded", help="also expand panels folded in the browser UI (skipped by default)"
     ),
+    thread: Optional[int] = typer.Option(
+        None, "--thread", help="walk root thread K (the `threads:` index / `tinkpg threads`) instead of the active one"
+    ),
+    deepest: bool = typer.Option(
+        False, "--deepest", help="walk the thread's LONGEST branch instead of its selected one"
+    ),
 ) -> None:
     """Browse saved WORKSPACES (multi-panel, branchable; `conv` is a back-compat alias). No
     selector → list them with branch metadata; a selector → expand its panels'
     active branch + forks, plus a `threads:` index when the panel has multiple
     root threads (branch-from-start first messages). Panels folded in the browser
     UI are skipped by default (shown as a one-line stub) — pass --include-folded
-    to expand them too, or --panel to target one."""
+    to expand them too, or --panel to target one.
+
+    --thread K reads a NON-active thread's transcript, and --deepest follows its
+    longest branch rather than the selected (newest-child) one — together the way
+    to read a conversation that the panel no longer points at. `tinkpg threads`
+    finds them."""
     convs = _workspaces()
     if selector is None:
         _list_workspaces(convs)
         return
-    _show_workspace(_resolve_workspace(selector, convs), panel, full, tree, width, include_folded)
+    _show_workspace(
+        _resolve_workspace(selector, convs), panel, full, tree, width, include_folded, thread, deepest
+    )
 
 
 # Back-compat alias: `conv` was the primary name before the v1.0.0 workspaces
