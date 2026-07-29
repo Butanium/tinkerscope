@@ -168,6 +168,39 @@ def test_ws_json_respects_thread_and_panel(monkeypatch):
     assert res.exit_code == 1
 
 
+def test_print_json_never_truncates():
+    """A `--json` document is parsed, not read: a length cap would cut it
+    mid-token and hand the caller syntactically invalid JSON."""
+    import io, json, contextlib
+    big = {"content": "x" * 60_000}
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cli._print_json(big)
+    assert json.loads(buf.getvalue()) == big
+
+
+def test_samples_deepest_reaches_a_fork_below_the_selection(monkeypatch):
+    """--turn walks the selected path, which stops at the shallow re-roll; the
+    T2 fan-out only exists on the deepest branch."""
+    import json
+    tree = _chain_tree()
+    tree["nodes"]["u2"]["children"] = ["a2", "a2b"]
+    tree["nodes"]["a2b"] = _node("a2b", "assistant", "sibling answer", "u2")
+    monkeypatch.setattr(cli, "_workspaces", lambda: [_ws({"primary": tree}, wid="11111111")])
+
+    res = runner.invoke(cli.app, ["samples", "11111111", "--panel", "primary", "--turn", "2", "--json"])
+    assert res.exit_code == 1 and "out of range" in res.output
+
+    d = json.loads(runner.invoke(
+        cli.app, ["samples", "11111111", "--panel", "primary", "--turn", "2", "--deepest", "--json"]
+    ).output)
+    assert d["prompt"] == "i don't smoke"
+    assert [s["content"] for s in d["samples"]] == ["quit then", "sibling answer"]
+
+    res = runner.invoke(cli.app, ["samples", "11111111", "--node", "u2", "--deepest", "--json"])
+    assert res.exit_code == 1 and "mutually exclusive" in res.output
+
+
 def test_ws_thread_selects_a_non_active_root(monkeypatch):
     monkeypatch.setattr(cli, "_workspaces", lambda: [_ws({"p-2": _two_thread_tree()}, wid="22222222")])
     out = runner.invoke(cli.app, ["ws", "22222222", "--panel", "p-2", "--thread", "1", "--full"]).output

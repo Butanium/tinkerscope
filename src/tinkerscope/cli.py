@@ -199,9 +199,13 @@ def _print_table(rows: list[dict], columns: list[str]) -> None:
 
 
 def _print_json(obj: Any, indent: int = 2) -> None:
-    """Pretty-print one object as JSON, with the global field-truncation cap."""
-    s = json.dumps(obj, indent=indent, default=str, ensure_ascii=False)
-    print(_truncate(s, limit=20_000))
+    """Pretty-print one object as JSON — NEVER truncated.
+
+    This used to apply the 20k field cap, which cut the document mid-token and
+    emitted syntactically INVALID JSON: every `--json` consumer parses this, so a
+    silent truncation is worse than a long document (the caller can redirect to a
+    file; it cannot recover a corrupted one)."""
+    print(json.dumps(obj, indent=indent, default=str, ensure_ascii=False))
 
 
 # ---------- Workspace tree helpers (mirror web/src/lib/tree.ts) ----------
@@ -2160,6 +2164,7 @@ def _show_samples(
     slice_rng: Optional[tuple[int, int]] = None,
     json_out: bool = False,
     first_token: bool = False,
+    deepest: bool = False,
 ) -> None:
     trees = c.get("trees") or {}
     if not trees:
@@ -2169,8 +2174,8 @@ def _show_samples(
         # --node pinpoints a fork ANYWHERE in a tree (grep prints the ids) —
         # including forks on non-selected branches that --thread/--turn (which
         # walk selected paths) can never reach.
-        if thread is not None or turn is not None:
-            _die("--node is mutually exclusive with --thread/--turn (it pinpoints the fork directly)")
+        if thread is not None or turn is not None or deepest:
+            _die("--node is mutually exclusive with --thread/--turn/--deepest (it pinpoints the fork directly)")
         search = [panel] if panel else list(trees)
         found: list[tuple[str, dict]] = []
         for p in search:
@@ -2210,13 +2215,10 @@ def _show_samples(
         if t is None:
             _die(f"no panel {panel!r}; panels: {', '.join(trees) or '(none)'}")
         roots = t.get("rootChildren", [])
+        path, _ = _resolve_walk(t, thread, deepest, pid)
         if thread is not None:
-            if not (1 <= thread <= len(roots)):
-                _die(f"--thread {thread} out of range (panel {pid} has {len(roots)} thread(s) — see `tinkpg ws`)")
-            path = _thread_path(t, roots[thread - 1])
             thread_k = thread
         else:
-            path = _active_path(t)
             sel_root = _selected_child(t, ROOT)
             thread_k = roots.index(sel_root) + 1 if sel_root in roots else 1
         user_idx = [i for i, n in enumerate(path) if n.get("role") == "user"]
@@ -2333,6 +2335,7 @@ def cmd_samples(
     slice_spec: Optional[str] = typer.Option(None, "--slice", help="START[:LEN] character window of each shown sample (default LEN 2000) — read long samples in pieces instead of truncating; with --full the same window applies to the CoT"),
     json_out: bool = typer.Option(False, "--json", help="the fork as one JSON object (workspace/panel/thread/prompt/tally/samples) instead of human text — for scripts (--slice is ignored; content is never truncated)"),
     first_token: bool = typer.Option(False, "--first-token", help="the model's probability distribution over the FIRST generated token at this fork (stored top-K + each sample's sampled token — the CLI twin of the chart's first-token mode); with --json, adds per-sample `first` records + the aggregate"),
+    deepest: bool = typer.Option(False, "--deepest", help="resolve --turn against the thread's LONGEST branch instead of its selected one — reaches forks deeper than the selection goes"),
 ) -> None:
     """Show every sibling response (the n-sample fan-out) at ONE fork, each with its
     CoT, plus a `<tag>` verdict tally — the 'what did the model say across all draws
@@ -2342,7 +2345,9 @@ def cmd_samples(
     root thread (numbers from `tinkpg ws <id>`'s thread index); --node <id> (ids
     from `tinkpg grep`) aims it at ANY fork, even on non-selected branches. Reading
     ergonomics: --sample K isolates one sibling, --slice START[:LEN] pages through it,
-    --json for scripts (untruncated content, no need to regex human-formatted text)."""
+    --json for scripts (untruncated content, no need to regex human-formatted text).
+    --deepest resolves --turn against the thread's longest branch, so a fork below
+    where the selection stops is reachable without hunting for its node id."""
     convs = _workspaces()
     if selector is not None:
         c = _resolve_workspace(selector, convs)
@@ -2359,7 +2364,7 @@ def cmd_samples(
         if not m:
             _die("--slice takes START[:LEN] character offsets, e.g. `--slice 2000:1500`")
         slice_rng = (int(m.group(1)), int(m.group(2) or 2000))
-    _show_samples(c, panel, turn, full, width, thread, node, sample, slice_rng, json_out, first_token)
+    _show_samples(c, panel, turn, full, width, thread, node, sample, slice_rng, json_out, first_token, deepest)
 
 
 def _slice_text(text: str, start: int, ln: int) -> str:

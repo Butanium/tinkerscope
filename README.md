@@ -349,6 +349,7 @@ tinkpg battery <dir>                   # fire a DIRECTORY of probe files as sequ
 tinkpg state                           # dump the shared playground state
 tinkpg params [--temperature ...]      # show / SET the GLOBAL sampling params (the deliberate route)
 tinkpg ws [<id|name>]                # browse saved workspaces; no arg lists them all (alias: conv)
+tinkpg threads [--min-turns N]         # index EVERY root thread across all workspaces (find multi-turn convs)
 tinkpg samples [<id|name>]             # every sampled response at one fork + a <tag> tally
 tinkpg grep "<text>"                   # search EVERY branch of all workspaces (content + thinking)
 tinkpg refresh                         # rescan the filesystem + Tinker capabilities
@@ -402,6 +403,18 @@ thread's first message + fan-out size, `*` = active, plus a `sys:` line for a
 thread that carries its own system prompt — and `tinkpg samples --thread k`
 shows the full n-sample fan-out of thread `k`, including non-active threads
 that the active-path views can't reach.
+
+**Finding, and then reading, a conversation the panel dropped.** Every path view
+follows the SELECTED child, which defaults to the NEWEST — so a long conversation
+that was later re-rolled from an early turn shows up as one turn and its real
+transcript is unreachable. `tinkpg threads` indexes every root thread across all
+workspaces with the turn count of its **deepest** branch beside the selected one
+(`--min-turns N`, `--ws`, `--model`, `--grep`, `--json`); `tinkpg ws <id> --panel P
+--thread K --deepest --full` then reads that branch, and `tinkpg samples --turn N
+--deepest` reaches a fork below where the selection stops. `tinkpg ws --json`
+exports the resolved transcript as structured data (untruncated content + CoT +
+node ids + each turn's `sibling_index`/`n_siblings`) for rendering it elsewhere —
+build reports and artifacts from that, not from the terminal text.
 
 `tinkpg samples` reading ergonomics: `--sample K` isolates one sibling of the
 fan-out, and `--slice START[:LEN]` shows a character window of each shown sample
