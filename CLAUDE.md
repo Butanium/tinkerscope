@@ -19,7 +19,7 @@ see `README.md` for the full feature list + credits.
 | `docs/HANDOFF_WORKSPACE_RENAME.md` | Historical planning record for the conversations→workspaces WIRE/DISK rename (shipped in v1.0.0, 2026-07-24). Deliberately keeps the OLD names — it describes the pre-rename state. The as-shipped result is `docs/MIGRATIONS.md` | shipped; historical |
 | `docs/HANDOFF_SERVER_AUTHORITY.md` | **Design: server-authoritative workspace trees (ops protocol)** — inverts the browser-is-sole-writer architecture so the server folds + persists chats (headless CLI durability, fixes the CLI no-token-data / n−1-samples loss), all tree mutation as idempotent ops + per-workspace `rev`, browser stays an optimistic mirror. Locked decisions, race analysis, 3-phase staging | design, not started — read before touching persistence/fold code |
 | `docs/PACK.md` | **Share packs** — bundle checkpoints + default params + workspaces into one portable YAML (`tinkerscope --pack <file\|url>` to consume, `tinkerscope pack export` to author) so a collaborator reproduces a setup against public checkpoints with no local run dirs. Code: `src/tinkerscope/pack.py` + `api/pack_models_store.py` | current |
-| `docs/STATIC_SITE.md` | **Static read-only site export + `?w=<pack link>`** (SHIPPED 2026-07-30) — what a published site keeps/hides and why, the size reality (logprobs are ~97% of the bytes), the `data/` layout (each file ≡ an endpoint response), the two index.html rewrites a GitHub Pages subpath needs, the id-vs-pack-source rule, collision handling, and how the chart view travels | current |
+| `docs/STATIC_SITE.md` | **Static read-only site export + `?w=<pack link>`** (SHIPPED 2026-07-30) — what a published site keeps/hides and why, the size reality (logprobs are ~97% of the bytes), the `data/` layout (each file ≡ an endpoint response), the two index.html rewrites a GitHub Pages subpath needs, the id-vs-pack-source rule, collision handling, and how the chart view travels. Since 2026-07-30 a published site is also a **general reader for anyone's pack** — IndexedDB overlay (localStorage's 5 MB cap made a real workspace uninstallable), gzip + `--logprobs` packs, and open-a-file-from-disk | current |
 | `docs/TODO.md` | Roadmap (branching marked done) | current |
 | `deprecated/HANDOFF.md` | Original tool-build handoff (Harry's playground → tinkerscope). Build done; file refs predate the `src/tinkerscope/` restructure | deprecated, kept for history |
 
@@ -309,6 +309,22 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     `workspace_store.split_node`, so a client-installed pack produces the same
     light-node + blob shape the server would (**has `node-split` coverage via the
     static smoke**).
+  - `lib/overlay-store.ts` — the **static site's write overlay**: an in-memory map
+    hydrated once from **IndexedDB** (localStorage until 2026-07-30 — its ~5 MB/origin
+    cap made a real workspace impossible to install, and it failed QUIETLY: the write
+    threw, was caught + warned, and reads then came back empty. Measured here:
+    localStorage 4.98 MB vs IndexedDB 6442 MB). Sync reads / async flush, so the ~30
+    read sites in `api-static` are unchanged; `readOverlay` **clones on read** to keep
+    the copy-per-read contract localStorage's `JSON.parse` gave for free. Every
+    `staticApi` method awaits the hydrate via ONE wrapper (`gated`), never 30 individual
+    awaits. Smoke: `tests/small-smokes/browser_pack_big.py` (**verified to fail on the
+    pre-fix build** — and note that smoke and `browser_static_site` build their own site,
+    so they honour `TSCOPE_APP_DIR` or `--baseline` silently tests the working tree).
+  - `lib/pack-logprobs.ts` — pure mirror of `pack.py::restore_logprobs`. In a PACK,
+    logprobs travel as a compact JSON **string** under `token_logprobs_json` (native YAML
+    lists measured 157 MB vs 107 MB, and the distinct name removes any is-it-a-string
+    question); everywhere else they are the parsed list. **Has `pack-logprobs.test.ts`**,
+    because the same file installs through either the Python or the browser path.
   - `lib/pack-source.ts` / `lib/pack-install.ts` / `PackInstallModal.svelte` —
     **`?w=` takes a pack path or URL**. The discriminator is free: store ids are
     `^[A-Za-z0-9_-]+$`, so any value with `/ : .` is a source (**has

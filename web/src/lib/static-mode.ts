@@ -5,9 +5,13 @@
 // touches it, and an async probe (fetching a manifest file) would race that. A live
 // instance never defines the global ⇒ zero cost and zero behavior change there.
 //
-// Reads come from baked JSON under the data root; writes go to localStorage,
-// namespaced per site because one github.io origin hosts many of them. See
-// docs/STATIC_SITE.md for the on-disk layout and what the mode can/can't do.
+// Reads come from baked JSON under the data root; writes go to the IndexedDB-backed
+// overlay in lib/overlay-store (localStorage until 2026-07-30 — its ~5 MB cap made a
+// real workspace impossible to install), namespaced per site because one github.io
+// origin hosts many of them. See docs/STATIC_SITE.md for the on-disk layout and what
+// the mode can/can't do.
+
+import { hydrateOverlay } from './overlay-store';
 
 export type StaticManifest = {
   version: number;
@@ -65,32 +69,19 @@ const SITE_PATH =
   MANIFEST && typeof document !== 'undefined' ? new URL('.', document.baseURI).pathname : '/';
 const PREFIX = `tscope-static:${MANIFEST?.site ?? 'default'}@${SITE_PATH}:`;
 
-// localStorage is a system boundary: it throws on quota exhaustion and in some
-// privacy modes it throws on read. The overlay is best-effort by design (a static
-// site's baked content is the truth), so a failure degrades to "this session's
-// edits don't survive a reload" — warned, never silent, never fatal.
-export function readLocal<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(PREFIX + key);
-    return raw == null ? fallback : (JSON.parse(raw) as T);
-  } catch (e) {
-    console.warn('static overlay read failed', key, e);
-    return fallback;
-  }
-}
+// Storage is a system boundary (private modes throw, quotas run out), and the overlay
+// is best-effort by design — a static site's baked content is the truth, so a failure
+// degrades to "this session's edits don't survive a reload", warned, never fatal.
+// The read/write primitives live in lib/overlay-store; this module owns only the
+// namespace and the one-time hydrate.
+export { readOverlay, writeOverlay, dropOverlay, overlayError } from './overlay-store';
 
-export function writeLocal(key: string, value: unknown): void {
-  try {
-    localStorage.setItem(PREFIX + key, JSON.stringify(value));
-  } catch (e) {
-    console.warn('static overlay write failed (edits will not survive a reload)', key, e);
-  }
-}
-
-export function dropLocal(key: string): void {
-  try {
-    localStorage.removeItem(PREFIX + key);
-  } catch (e) {
-    console.warn('static overlay delete failed', key, e);
-  }
-}
+/**
+ * Resolves when the overlay map has been loaded out of IndexedDB. Reads are
+ * synchronous afterwards, so EVERY entry point into api-static awaits this once
+ * (see `gated` there) rather than each of its ~30 methods remembering to.
+ * On a live instance there is no overlay and this is already resolved.
+ */
+export const overlayReady: Promise<void> = isStatic
+  ? hydrateOverlay(PREFIX)
+  : Promise.resolve();

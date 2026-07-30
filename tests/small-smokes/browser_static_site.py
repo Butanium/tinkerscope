@@ -37,7 +37,11 @@ import tempfile
 import threading
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
+# The checkout to exercise. `scripts/smoke.sh --baseline <ref>` sets TSCOPE_APP_DIR to
+# a worktree at that ref; without honouring it a self-contained smoke exports from the
+# WORKING TREE and passes against a ref that never had the fix — which makes the whole
+# baseline check a no-op. Defaults to this file's own repo for a direct run.
+REPO = Path(os.environ.get("TSCOPE_APP_DIR") or Path(__file__).resolve().parents[2])
 
 
 def _free_port() -> int:
@@ -226,7 +230,18 @@ def main() -> int:
             check(page.locator(".model-static-label").count() > 0, "static model label rendered")
             check(page.locator(".btn-add-model").count() == 0, "add-panel button hidden")
             check(page.locator(".or-manage-link").count() == 0, "+ model links hidden")
-            check(page.locator(".ws-icon-btn").count() == 0, "workspace new/rename/delete hidden")
+            # Not a bare count: the sidebar's icon row legitimately keeps the
+            # open-a-pack-file button in read-only mode (a published site is also a
+            # reader for other people's exports). Assert on the ACTIONS instead.
+            for label in ("New workspace", "Rename workspace", "Delete workspace"):
+                check(
+                    page.locator(f'.ws-icon-btn[aria-label="{label}"]').count() == 0,
+                    f"{label.lower()} hidden",
+                )
+            check(
+                page.locator('.ws-icon-btn[aria-label="Open a pack file"]').count() == 1,
+                "open-a-pack-file button IS offered (read-only, but installs are the visitor's)",
+            )
 
             row = page.locator(".message").last
             row.hover()

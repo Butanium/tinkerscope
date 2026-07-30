@@ -36,7 +36,11 @@ instance was launched with** (find it: `ps aux | grep '[t]inkerscope'`, or the s
 won't match and export reads nothing); and `--workspace NAME` exports ONE saved workspace
 (omit → all). Packs carry only models + params + workspaces — never highlights/pins
 (`--no-defaults` drops the params too). Export keeps each node's `raw_meta` (the Raw view)
-but strips `token_logprobs`. Merge-safe (won't clobber params without `--force`).
+and strips `token_logprobs` unless you pass **`--logprobs`** — which you should pair with a
+`.gz` output path, since the uncompressed form of a real workspace is 107 MB and GitHub
+hard-blocks files over 100 MB (gzipped: 30 MB). Both `--pack` and `?w=` un-gzip
+transparently, sniffing the magic bytes rather than the extension.
+Merge-safe (won't clobber params without `--force`).
 **Iterating on a pack** (re-export → re-consume the SAME folder)? A plain re-apply keeps
 write-once blobs and never drops workspaces — use `tinkerscope --pack <file> --reseed` to
 mirror the file exactly (refresh `raw_meta` blobs, drop removed workspaces, overwrite params).
@@ -68,6 +72,15 @@ logprobs by default, plus the chart's per-workspace view state. `--workspace` al
 drops saved PINS (they carry responses + a local `dataset_path` and have no workspace
 id to filter on — `--pins` forces them back) and narrows the chart-view state to the
 exported workspaces. Full doc: `docs/STATIC_SITE.md`.
+
+A published site is **also a reader for other people's packs**, so one deployment can
+serve many workspaces without re-publishing: `<site>/?w=<pack url>` installs into that
+visitor's browser (IndexedDB, so size is not a constraint), and the human can open a pack
+straight off their disk with the ⤒ button beside the workspace picker or by dropping the
+file on the page. A relative `?w=./demo.yaml.gz` works too, for a pack published next to
+its viewer. So "share this workspace" can mean pushing one `.yaml.gz` rather than
+re-exporting the whole site — the trade-off being that a `?w=` link is a fetch
+instruction, not a permalink: if the pack URL dies, so does the link.
 
 ## Drive the shared playground
 

@@ -783,8 +783,11 @@
   // which of the pack's workspaces lands open. Once installed the URL is rewritten
   // to the plain `?w=<id>`, so a reload is a normal open and never a re-install.
   let packPreview = $state<PackPreview | null>(null);
-  let packSource = $state('');
+  // A File when the visitor picked/dropped one on a static site — see openPackSource.
+  let packSource = $state<string | File>('');
   let packBusy = $state(false);
+  let packFileInput = $state<HTMLInputElement | null>(null);
+  let packDragging = $state(false);
   // Sources this PAGE SESSION has already handled. Two jobs, and the second is why
   // Cancel deliberately does NOT clear it:
   //
@@ -804,6 +807,46 @@
   // link. (A review proposed clearing on cancel for this reason; the baseline run
   // showed the premise was wrong and the change would have bought a nag loop.)
   const packSeen = new Set<string>();
+
+  /** A picked or dropped pack file. Not latched by `packSeen`: choosing the same file
+   *  twice is a deliberate act each time, unlike a URL effect that re-fires on its own. */
+  async function openPackFile(file: File): Promise<void> {
+    try {
+      const pv = await preview(file);
+      if (!pv.workspaces.length) {
+        flashWsNotice(`“${pv.pack}” contains no workspaces to open.`);
+        return;
+      }
+      packSource = file;
+      packPreview = pv;
+    } catch (e: any) {
+      flashWsNotice(`Could not open that pack: ${e?.message ?? e}`);
+    }
+  }
+
+  function onPickPackFile(e: Event): void {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    // Reset first: picking the SAME file again fires no change event otherwise, so a
+    // failed install could not be retried without choosing a different file.
+    input.value = '';
+    if (file) void openPackFile(file);
+  }
+
+  function onPackDragOver(e: DragEvent): void {
+    if (!isStatic || !e.dataTransfer?.types.includes('Files')) return;
+    e.preventDefault();
+    packDragging = true;
+  }
+
+  function onPackDrop(e: DragEvent): void {
+    if (!isStatic) return;
+    const file = e.dataTransfer?.files?.[0];
+    if (!file) return;
+    e.preventDefault();
+    packDragging = false;
+    void openPackFile(file);
+  }
 
   async function openPackSource(source: string): Promise<void> {
     if (packSeen.has(source)) return;
@@ -833,7 +876,7 @@
     packPreview = null;
   }
 
-  async function finishPackInstall(source: string, mode: ConflictMode): Promise<void> {
+  async function finishPackInstall(source: string | File, mode: ConflictMode): Promise<void> {
     packBusy = true;
     try {
       const installed = await install(source, mode);
@@ -1494,7 +1537,21 @@
   });
 </script>
 
-<div class="app">
+<!-- Drop a pack anywhere on a static site. `dragleave` fires on every child boundary
+     the pointer crosses, so the overlay is only dismissed when the pointer actually
+     leaves the window (relatedTarget === null) — otherwise it strobes. -->
+<div
+  class="app"
+  class:pack-dropping={packDragging}
+  ondragover={onPackDragOver}
+  ondragleave={(e) => { if (!e.relatedTarget) packDragging = false; }}
+  ondrop={onPackDrop}
+  role="application"
+  aria-label="tinkerscope"
+>
+  {#if packDragging}
+    <div class="pack-drop-hint">Drop a share pack to open it</div>
+  {/if}
   <header class="topbar">
     <div class="topbar-title">tinkerscope</div>
     {#if health?.root}
@@ -1630,6 +1687,20 @@
               <button class="ws-icon-btn ws-icon-danger" data-tooltip="Delete workspace" use:tip disabled={anyRunning || ws.busy} aria-label="Delete workspace" onclick={onDeleteWorkspace}>
     <Icon name="trash" />
               </button>
+            {/if}
+            <!-- Static only: a published site is the one place with no other way in.
+                 A live instance reads a path straight off disk via ?w=<path>. -->
+            {#if isStatic}
+              <button class="ws-icon-btn" data-tooltip="Open a share pack (.yaml / .yaml.gz)" use:tip aria-label="Open a pack file" onclick={() => packFileInput?.click()}>
+                <Icon name="upload" />
+              </button>
+              <input
+                bind:this={packFileInput}
+                type="file"
+                accept=".yaml,.yml,.json,.gz"
+                style="display:none"
+                onchange={onPickPackFile}
+              />
             {/if}
           </div>
         {/if}
@@ -2247,6 +2318,8 @@
   .section-chevron.open { transform: rotate(180deg); }
 
   /* ── Workspace picker ───────────────────────────────────────── */
+  .app.pack-dropping::after { content: ''; position: fixed; inset: 0; z-index: 90; background: var(--color-accent-bg); outline: 2px dashed var(--color-accent); outline-offset: -10px; pointer-events: none; }
+  .pack-drop-hint { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 91; padding: var(--space-3) var(--space-4); background: var(--color-surface); border: 1px solid var(--color-accent); border-radius: var(--radius); color: var(--color-text); font-size: 14px; pointer-events: none; }
   .ws-row { display: flex; gap: var(--space-1); align-items: center; }
   .ws-picker { flex: 1; min-width: 0; }
   .ws-icon-btn { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; background: var(--color-surface-hover); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text-muted); flex-shrink: 0; cursor: pointer; }

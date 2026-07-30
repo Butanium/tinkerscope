@@ -435,6 +435,14 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
   command reports the per-workspace breakdown. A middle setting would help: keep
   logprobs only for the turns a workspace's chart actually uses, or only the newest N
   turns per thread. See `docs/STATIC_SITE.md` §Size.
+- [ ] **Round the logprob floats.** Measured 2026-07-30 on `value guarding v2`:
+  rounding `lp` (and the top-K alternatives' logprobs) to 4 decimals cuts the
+  JSON-in-YAML pack from 107 MB to 73 MB, and 30 → 20 MB gzipped — a free ~33% on both
+  packs AND the baked site, since the UI never shows more than 2 significant digits of
+  a probability. Not done with the `--logprobs` work because it changes the stored blob
+  format, which is a wider blast radius than the pack path alone (`site_export` copies
+  blobs verbatim, and the write-once store would then hold two precisions). Wants its
+  own pass with a decision about whether to round at CAPTURE time instead.
 - [ ] **Static site: skip the discarded body prep in `site_export`.** It calls
   `pack.export_pack` purely for the model list + defaults and throws away its prepared
   workspace bodies — but that prep deep-copies every body AND fetches every

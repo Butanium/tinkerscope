@@ -370,6 +370,14 @@ codex plugin add tinkerscope@tinkerscope</pre>
         <code>?w=&lt;id&gt;</code>, so a reload opens instead of re-installing.
       </p>
       <p>
+        On a <b>published site</b> you can also open a pack straight off your own computer — the
+        <Icon name="upload" /> button next to the workspace picker, or just drop the file on the page.
+        Nothing gets uploaded: it's read and stored in this browser. That's the way in for a pack you
+        haven't hosted anywhere, and it's how a published site doubles as a reader for anyone's export.
+        Packs made with <code>--logprobs</code> carry the token view too, and are usually
+        <code>.yaml.gz</code> — that's expected, they open the same way.
+      </p>
+      <p>
         For someone who shouldn't need a setup at all, <code>tinkerscope site export ./site</code> writes a
         <b>read-only static copy</b> — hostable on GitHub Pages, no backend, no API key. Everything readable
         survives (workspaces, branches, threads, the chart, token probabilities, your highlight rules); the

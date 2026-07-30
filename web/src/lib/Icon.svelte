@@ -19,14 +19,17 @@
     | 'use-sample' | 'discard-others'
     // sidebar / chrome
     | 'chart' | 'pins' | 'dataset' | 'help' | 'stop' | 'plus' | 'new-blank'
-    | 'theme-light' | 'theme-dark' | 'theme-auto' | 'eye';
+    | 'theme-light' | 'theme-dark' | 'theme-auto' | 'eye' | 'upload';
 </script>
 
 <script lang="ts">
   let { name, size = 13 }: { name: IconName; size?: number } = $props();
 </script>
 
-{#if name === 'regen'}
+{#if name === 'upload'}
+  <!-- open a file FROM this computer: an arrow rising out of a tray -->
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M8 10.5V2.5M5 5.5L8 2.5l3 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /><path d="M2.5 10v3.5h11V10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg>
+{:else if name === 'regen'}
   <svg width={size} height={size} viewBox="0 0 14 14" fill="none"><path d="M1.5 7a5.5 5.5 0 0 1 9.9-3.3M12.5 7a5.5 5.5 0 0 1-9.9 3.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><path d="M11.5 1v3h-3M2.5 13v-3h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'replace'}
   <svg width={size} height={size} viewBox="0 0 14 14" fill="none"><path d="M1.5 7a5.5 5.5 0 0 1 9.9-3.3M12.5 7a5.5 5.5 0 0 1-9.9 3.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /><path d="M11.5 1v3h-3M2.5 13v-3h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /><rect x="5.1" y="5.1" width="3.8" height="3.8" rx="0.6" fill="currentColor" /></svg>

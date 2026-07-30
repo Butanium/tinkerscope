@@ -35,6 +35,7 @@ hand-edited labels/description survive).
 """
 from __future__ import annotations
 
+import gzip
 import json
 import re
 from dataclasses import dataclass, field
@@ -186,15 +187,40 @@ class Pack:
     def to_yaml(self) -> str:
         return yaml.safe_dump(self.to_dict(), sort_keys=False, allow_unicode=True, width=100)
 
+    def write(self, path: Path) -> int:
+        """Write to `path`, gzipping when it ends in `.gz`. Returns bytes written.
+
+        A logprob-carrying pack has to be compressed to exist at all: `value guarding
+        v2` measures 107 MB as plain YAML, and GitHub hard-blocks files over 100 MB.
+        gzip takes it to 30 MB, and browsers decompress it natively (DecompressionStream)
+        so consuming one costs no dependency."""
+        raw = self.to_yaml().encode("utf-8")
+        if path.suffix == ".gz":
+            raw = gzip.compress(raw, compresslevel=6)
+        path.write_bytes(raw)
+        return len(raw)
+
 
 # ── loading ──────────────────────────────────────────────────────────────────────
 def _is_url(src: str) -> bool:
     return src.startswith("http://") or src.startswith("https://")
 
 
+_GZIP_MAGIC = b"\x1f\x8b"
+
+
+def _decode_pack_bytes(raw: bytes) -> str:
+    """Pack bytes → YAML text, transparently un-gzipping. Sniffs the MAGIC rather than
+    the extension: a pack fetched over http may be served from any URL shape, and a
+    local file may have been renamed."""
+    if raw[:2] == _GZIP_MAGIC:
+        raw = gzip.decompress(raw)
+    return raw.decode("utf-8")
+
+
 def load_pack(src: str) -> Pack:
     """Load a pack from a local path or an http(s) URL. YAML or JSON (yaml.safe_load
-    parses both — JSON is a YAML subset)."""
+    parses both — JSON is a YAML subset), optionally gzipped."""
     # A `file://` source is neither: `_is_url` doesn't match it, so it would fall
     # through to Path("file:///x") and report "no such file: file:///x", which reads
     # like the file is missing rather than like the scheme is wrong.
@@ -204,12 +230,12 @@ def load_pack(src: str) -> Pack:
     if _is_url(src):
         import httpx
 
-        resp = httpx.get(src, timeout=30.0, follow_redirects=True)
+        resp = httpx.get(src, timeout=60.0, follow_redirects=True)
         resp.raise_for_status()
-        text = resp.text
+        raw = resp.content
     else:
-        text = Path(src).expanduser().read_text()
-    data = yaml.safe_load(text)
+        raw = Path(src).expanduser().read_bytes()
+    data = yaml.safe_load(_decode_pack_bytes(raw))
     return Pack.from_dict(data)
 
 
@@ -345,7 +371,7 @@ def apply_pack(pack: Pack, *, force: bool = False, reseed: bool = False, on_conf
     for cid, ws in cids.items():
         if reseed:
             workspace_store.delete(cid)
-        body = ws.body
+        body = restore_logprobs(ws.body)
         workspace_store.upsert(
             id=cid,
             name=ws.name,
@@ -465,14 +491,22 @@ def resolve_shareable(
     return m.panel_ref, m
 
 
-def _prepare_workspace_body(body: dict, raw_meta: dict[str, str]) -> dict:
+def _prepare_workspace_body(
+    body: dict, raw_meta: dict[str, str], logprobs: dict[str, Any] | None = None
+) -> dict:
     """Shape a light workspace body for a pack:
 
     - **inline each node's `raw_meta`** (the raw request/response) from `raw_meta`
       (node_id → value), so a collaborator can inspect what was actually sent — on apply,
       `upsert`'s split re-derives the `has_raw_meta` flag + the blob from the inlined field;
-    - **drop `token_logprobs`** (heavy — ~90% of a workspace's bytes — and a pack is one
-      self-contained YAML) and the stale presence flags."""
+    - **inline `token_logprobs`** the same way when `logprobs` is given (`--logprobs`),
+      as a compact JSON STRING under `token_logprobs_json`. Two reasons for the string:
+      YAML-dumping the nested lists natively measured 157 MB where the JSON-in-YAML form
+      is 107 MB (30 MB gzipped), and the distinct field name means nobody has to ask
+      whether a `token_logprobs` they are holding is a list or a string — in a pack it is
+      always the `_json` one, everywhere else always the list. `_restore_logprobs`
+      converts back on apply, mirrored in the browser by lib/pack-install.
+    - **drop the stale presence flags** (`upsert`'s split re-derives them)."""
     out = json.loads(json.dumps(body))  # deep copy
     for tree in (out.get("trees") or {}).values():
         if not isinstance(tree, dict):
@@ -485,7 +519,32 @@ def _prepare_workspace_body(body: dict, raw_meta: dict[str, str]) -> dict:
             node.pop("token_logprobs", None)  # defensive: light nodes carry no inline heavy field
             if raw_meta.get(nid):
                 node["raw_meta"] = raw_meta[nid]
+            if logprobs and logprobs.get(nid):
+                node["token_logprobs_json"] = json.dumps(logprobs[nid], separators=(",", ":"))
     return out
+
+
+def restore_logprobs(body: dict) -> dict:
+    """Turn a pack's `token_logprobs_json` strings back into inline `token_logprobs`
+    lists, in place, so `upsert`'s split stores them as ordinary blobs. Mirrored in the
+    browser by lib/pack-install.ts `restoreLogprobs` — the two must agree, since the same
+    pack installs through either path (tests/test_pack_logprobs.py pins the shape)."""
+    for tree in (body.get("trees") or {}).values():
+        if not isinstance(tree, dict):
+            continue
+        for node in (tree.get("nodes") or {}).values():
+            if not isinstance(node, dict):
+                continue
+            packed = node.pop("token_logprobs_json", None)
+            if not packed:
+                continue
+            try:
+                node["token_logprobs"] = json.loads(packed)
+            except (json.JSONDecodeError, TypeError) as e:
+                raise ValueError(
+                    f"node {node.get('id')!r}: token_logprobs_json is not valid JSON ({e})"
+                ) from e
+    return body
 
 
 def rewrite_panels(
@@ -526,6 +585,7 @@ def export_pack(
     workspaces: bool = True,
     workspace_names: list[str] | None = None,
     include_defaults: bool = True,
+    include_logprobs: bool = False,
     existing: Pack | None = None,
     warn: Callable[[str], None] = lambda _m: None,
 ) -> Pack:
@@ -551,10 +611,10 @@ def export_pack(
 
     # Workspaces first (rewriting their panels also surfaces the models they use).
     if workspaces:
-        for wname, body, raw_meta in state_dir_reader.workspace_bodies():
+        for wname, body, raw_meta, lps in state_dir_reader.workspace_bodies(logprobs=include_logprobs):
             if workspace_names and wname not in workspace_names:
                 continue
-            prepared = _prepare_workspace_body(body, raw_meta)
+            prepared = _prepare_workspace_body(body, raw_meta, lps)
             used = rewrite_panels(prepared, resolve=resolve)
             ws_out.append(PackWorkspace(name=wname, body=prepared))
             if models_from in ("workspaces", "all"):
@@ -663,21 +723,32 @@ class StateReader:
             )
         return resolve
 
-    def workspace_bodies(self):
-        """Yield (name, light_body, raw_meta) per saved workspace. `raw_meta` maps
-        node_id → its stored raw request/response (fetched from the write-once blobs),
-        so export can inline it into the pack."""
+    def workspace_bodies(self, logprobs: bool = False):
+        """Yield (name, light_body, raw_meta, token_logprobs) per saved workspace, each
+        heavy map being node_id → its stored value fetched from the write-once blobs, so
+        export can inline them into the pack.
+
+        `logprobs` is off by default because it dominates: the logprob blobs of one real
+        workspace are 128 MB on disk against 3.8 MB of tree, so fetching them for a
+        caller that will discard them is the difference between a fast export and a slow
+        one."""
+        want = ("has_raw_meta", "has_token_logprobs") if logprobs else ("has_raw_meta",)
         for body in self._store.list_bodies():
             cid = body.get("id")
             nids = [
                 nid
                 for tree in (body.get("trees") or {}).values() if isinstance(tree, dict)
                 for nid, n in (tree.get("nodes") or {}).items()
-                if isinstance(n, dict) and n.get("has_raw_meta")
+                if isinstance(n, dict) and any(n.get(f) for f in want)
             ]
             blobs = self._store.get_blobs(cid, nids) if (cid and nids) else {}
             raw_meta = {nid: b["raw_meta"] for nid, b in blobs.items() if b.get("raw_meta")}
-            yield (body.get("name") or "workspace", body, raw_meta)
+            lps = (
+                {nid: b["token_logprobs"] for nid, b in blobs.items() if b.get("token_logprobs")}
+                if logprobs
+                else {}
+            )
+            yield (body.get("name") or "workspace", body, raw_meta, lps)
 
     def prefs_panels(self):
         for p in self._last_session.get("panels") or []:

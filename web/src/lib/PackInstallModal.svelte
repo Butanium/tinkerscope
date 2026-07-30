@@ -21,7 +21,7 @@
     onclose
   }: {
     preview: PackPreview;
-    source: string;
+    source: string | File;
     busy?: boolean;
     onchoose: (mode: ConflictMode) => void;
     onclose: () => void;

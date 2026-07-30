@@ -59,8 +59,11 @@ export function bumpUntilFree(name: string, isFree: (candidate: string) => boole
 }
 
 /** A short, human label for a source — what the install prompt shows. A URL shows
- *  its host + filename; a path shows its basename. */
-export function sourceLabel(source: string): string {
+ *  its host + filename; a path shows its basename; a picked file shows its own name
+ *  plus where it came from, since "from a link" and "from your disk" are exactly the
+ *  distinction the prompt exists to make. */
+export function sourceLabel(source: string | File): string {
+  if (typeof source !== 'string') return `${source.name} (this computer)`;
   try {
     if (!isLocalPath(source)) {
       const u = new URL(source);

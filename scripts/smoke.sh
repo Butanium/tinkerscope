@@ -84,9 +84,10 @@ DEFAULT=(
     browser_fuzzy_search
     browser_help_modal
     browser_pack_link
-    # Owns its whole world (builds a state dir, exports a site, serves it) and
-    # ignores the base-url arg — it still belongs here so it runs under the lock.
+    # Own their whole world (build a state dir, export a site, serve it) and
+    # ignore the base-url arg — they still belong here so they run under the lock.
     browser_static_site
+    browser_pack_big
 )
 # Known-stale: failures here carry NO signal. Repair when you next need the
 # coverage — not on their own account.
@@ -188,7 +189,12 @@ for s in "${SMOKES[@]}"; do
     fi
     f="tests/small-smokes/$s.py"
     [ -f "$f" ] || { printf '  MISS  %-32s (no such smoke)\n' "$s"; continue; }
-    if timeout 240 uv run python "$f" "http://127.0.0.1:$PORT" > "$RUN_DIR/$s.log" 2>&1; then
+    # SELF-CONTAINED smokes (browser_static_site, browser_pack_big) ignore the base
+    # URL and build their own site instead — so they must be told which checkout to
+    # export from, or `--baseline` silently exercises the WORKING TREE and passes
+    # against a ref that lacks the fix. That happened on 2026-07-30 with
+    # browser_pack_big; a passing baseline is the one result you must not shrug at.
+    if TSCOPE_APP_DIR="$APP_DIR" timeout 240 uv run python "$f" "http://127.0.0.1:$PORT" > "$RUN_DIR/$s.log" 2>&1; then
         printf '  ok    %s\n' "$s"; pass=$((pass+1))
     else
         printf '  FAIL  %-32s → %s\n' "$s" "$RUN_DIR/$s.log"; fail=$((fail+1)); failed+=("$s")

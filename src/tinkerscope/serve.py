@@ -73,6 +73,9 @@ def _pack_command(argv: list[str]) -> None:
                     help="include only these workspaces by name (repeatable)")
     ex.add_argument("--overwrite", action="store_true",
                     help="regenerate from scratch instead of merging into an existing file")
+    ex.add_argument("--logprobs", action="store_true",
+                    help="include per-token logprobs (the token inspector + first-token chart). "
+                         "Large: give `out` a .gz suffix to compress (107 MB -> 30 MB on a real workspace)")
     args = parser.parse_args(argv)
     if args.cmd == "export":
         _pack_export(args)
@@ -103,14 +106,28 @@ def _pack_export(args) -> None:
         workspaces=not args.no_workspaces,
         workspace_names=args.workspace,
         include_defaults=not args.no_defaults,
+        include_logprobs=args.logprobs,
         existing=existing,
         warn=warnings.append,
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(pack.to_yaml())
+    written = pack.write(args.out)
     for w in warnings:
         print(f"  warning: {w}", file=sys.stderr)
-    print(f"wrote {args.out} — {len(pack.models)} model(s), {len(pack.workspaces)} workspace(s)")
+    mb = written / 1e6
+    print(
+        f"wrote {args.out} — {len(pack.models)} model(s), {len(pack.workspaces)} workspace(s), "
+        f"{mb:.1f} MB{' (gzipped)' if args.out.suffix == '.gz' else ''}"
+    )
+    # GitHub rejects a push containing a file over 100 MB outright, and a pack that
+    # can't be hosted can't be linked — which is the whole point of one.
+    if mb > 90 and args.out.suffix != ".gz":
+        print(
+            f"  NOTE: {mb:.0f} MB — GitHub hard-blocks files over 100 MB. Re-run with a\n"
+            "        .gz suffix on the output path (~3.6x smaller); the browser and\n"
+            "        `--pack` both decompress it transparently.",
+            file=sys.stderr,
+        )
 
 
 def _site_command(argv: list[str]) -> None:

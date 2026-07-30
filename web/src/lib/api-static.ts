@@ -1,4 +1,4 @@
-// The static-mode backend: baked JSON for reads, a localStorage overlay for writes.
+// The static-mode backend: baked JSON for reads, an IndexedDB overlay for writes.
 //
 // Shape-compatible with the HTTP client in ./api.ts (`ApiClient`), so every consumer
 // is transport-blind. What differs, and why:
@@ -18,7 +18,7 @@
 //     in memory, mirroring api/state.py's `_apply_patch`.
 
 import type { ApiClient } from './api';
-import { dataUrl, readLocal, writeLocal, dropLocal } from './static-mode';
+import { dataUrl, readOverlay, writeOverlay, dropOverlay, overlayReady } from './static-mode';
 import { splitTrees } from './node-split';
 import type {
   Run,
@@ -81,7 +81,7 @@ const K = {
 };
 
 function createdIds(): string[] {
-  return readLocal<string[]>(K.createdIds, []);
+  return readOverlay<string[]>(K.createdIds, []);
 }
 function isOverlay(id: string): boolean {
   return createdIds().includes(id);
@@ -159,12 +159,12 @@ function summaryOf(body: Workspace): WorkspaceSummary {
 }
 
 function overlayBody(id: string): Workspace | null {
-  return readLocal<Workspace | null>(K.body(id), null);
+  return readOverlay<Workspace | null>(K.body(id), null);
 }
 
 function saveOverlayBody(body: Workspace): void {
-  writeLocal(K.body(body.id), body);
-  writeLocal(K.summary(body.id), summaryOf(body));
+  writeOverlay(K.body(body.id), body);
+  writeOverlay(K.summary(body.id), summaryOf(body));
 }
 
 /** Install a workspace into the overlay, splitting inline heavy fields into blobs
@@ -198,28 +198,28 @@ function installWorkspace(entry: {
   };
   saveOverlayBody(body);
   // Write-once, like the server's blob store: keep whatever a previous install left.
-  const existing = readLocal<Record<string, NodeBlobs>>(K.blobs(entry.id), {});
-  writeLocal(K.blobs(entry.id), { ...blobs, ...existing });
+  const existing = readOverlay<Record<string, NodeBlobs>>(K.blobs(entry.id), {});
+  writeOverlay(K.blobs(entry.id), { ...blobs, ...existing });
   const ids = createdIds();
-  if (!ids.includes(entry.id)) writeLocal(K.createdIds, [...ids, entry.id]);
+  if (!ids.includes(entry.id)) writeOverlay(K.createdIds, [...ids, entry.id]);
   return body;
 }
 
 // ── highlights / pins (fully visitor-owned, seeded from the bake) ────────────
 async function highlights(): Promise<HighlightRule[]> {
-  const seeded = readLocal<boolean>(K.highlightsSeeded, false);
-  if (seeded) return readLocal<HighlightRule[]>(K.highlights, []);
+  const seeded = readOverlay<boolean>(K.highlightsSeeded, false);
+  if (seeded) return readOverlay<HighlightRule[]>(K.highlights, []);
   const base = await baked<HighlightRule[]>('highlights.json', []);
   return base;
 }
 
 function saveHighlights(rules: HighlightRule[]): void {
-  writeLocal(K.highlights, rules);
-  writeLocal(K.highlightsSeeded, true);
+  writeOverlay(K.highlights, rules);
+  writeOverlay(K.highlightsSeeded, true);
 }
 
 // ── the client ───────────────────────────────────────────────────────────────
-export const staticApi: ApiClient = {
+const impl: ApiClient = {
   health: () => once('health.json', () => baked<Health>('health.json', { ok: true })),
   models: () => once('models.json', () => baked<Run[]>('models.json', [])),
   refreshModels: async () => ({ status: 'static', count: 0 }),
@@ -229,7 +229,7 @@ export const staticApi: ApiClient = {
     const base = await once('openrouter-models.json', () =>
       baked<OpenRouterModel[]>('openrouter-models.json', [])
     );
-    const extra = readLocal<OpenRouterModel[]>(K.orModels, []);
+    const extra = readOverlay<OpenRouterModel[]>(K.orModels, []);
     const seen = new Set(base.map((m) => m.openrouter_model));
     return [...base, ...extra.filter((m) => !seen.has(m.openrouter_model))];
   },
@@ -241,7 +241,7 @@ export const staticApi: ApiClient = {
         models: []
       })
     );
-    const extra = readLocal<TinkerModel[]>(K.tinkerModels, []);
+    const extra = readOverlay<TinkerModel[]>(K.tinkerModels, []);
     const seen = new Set(base.models.map((m) => m.id));
     return { ...base, models: [...base.models, ...extra.filter((m) => !seen.has(m.id))] };
   },
@@ -267,10 +267,10 @@ export const staticApi: ApiClient = {
 
   getPrefs: async () => {
     const base = await once('prefs.json', () => baked<Record<string, string>>('prefs.json', {}));
-    return { ...base, ...readLocal<Record<string, string>>(K.prefs, {}) };
+    return { ...base, ...readOverlay<Record<string, string>>(K.prefs, {}) };
   },
   setPref: async (key: string, value: string) => {
-    writeLocal(K.prefs, { ...readLocal<Record<string, string>>(K.prefs, {}), [key]: value });
+    writeOverlay(K.prefs, { ...readOverlay<Record<string, string>>(K.prefs, {}), [key]: value });
     return { status: 'ok' };
   },
 
@@ -307,25 +307,25 @@ export const staticApi: ApiClient = {
 
   listPins: async () => {
     const base = await baked<Record<string, unknown>[]>('pins.json', []);
-    return [...base, ...readLocal<Record<string, unknown>[]>(K.pins, [])];
+    return [...base, ...readOverlay<Record<string, unknown>[]>(K.pins, [])];
   },
   createPin: async (entry: Record<string, unknown>) => {
     const pin = { ...entry, id: crypto.randomUUID(), created_at: nowIso() };
-    writeLocal(K.pins, [...readLocal<Record<string, unknown>[]>(K.pins, []), pin]);
+    writeOverlay(K.pins, [...readOverlay<Record<string, unknown>[]>(K.pins, []), pin]);
     return pin;
   },
   deletePin: async (id: string) => {
-    const local = readLocal<Record<string, unknown>[]>(K.pins, []);
+    const local = readOverlay<Record<string, unknown>[]>(K.pins, []);
     const next = local.filter((p) => p.id !== id);
     if (next.length === local.length) throw new Error('read-only site: cannot delete a shipped pin');
-    writeLocal(K.pins, next);
+    writeOverlay(K.pins, next);
     return { status: 'ok' };
   },
 
   listWorkspaces: async () => {
     const base = await bakedIndex();
     const overlay = createdIds()
-      .map((id) => readLocal<WorkspaceSummary | null>(K.summary(id), null))
+      .map((id) => readOverlay<WorkspaceSummary | null>(K.summary(id), null))
       .filter((s): s is WorkspaceSummary => s != null);
     const overlayById = new Map(overlay.map((s) => [s.id, s]));
     return [...base.map((s) => overlayById.get(s.id) ?? s), ...overlay.filter((s) => !base.some((b) => b.id === s.id))];
@@ -333,7 +333,7 @@ export const staticApi: ApiClient = {
   getWorkspace: async (id: string) =>
     overlayBody(id) ?? (await bakedStrict<Workspace>(`workspaces/${encodeURIComponent(id)}.json`)),
   fetchNodeBlobs: async (id: string, nodes: string[]) => {
-    const local = readLocal<Record<string, NodeBlobs>>(K.blobs(id), {});
+    const local = readOverlay<Record<string, NodeBlobs>>(K.blobs(id), {});
     const out: Record<string, NodeBlobs> = {};
     await Promise.all(
       nodes.map(async (nid) => {
@@ -370,16 +370,16 @@ export const staticApi: ApiClient = {
     for (const pid of body.dropped_trees ?? []) delete trees[pid];
     const { trees: _t, dropped_trees: _d, ...fields } = body as any;
     saveOverlayBody({ ...cur, ...fields, trees, updated_at: nowIso() });
-    const existing = readLocal<Record<string, NodeBlobs>>(K.blobs(id), {});
-    writeLocal(K.blobs(id), { ...blobs, ...existing });
+    const existing = readOverlay<Record<string, NodeBlobs>>(K.blobs(id), {});
+    writeOverlay(K.blobs(id), { ...blobs, ...existing });
     return { status: 'ok', id };
   },
   deleteWorkspace: async (id: string) => {
     if (!isOverlay(id)) throw new Error('read-only site: cannot delete a shipped workspace');
-    dropLocal(K.body(id));
-    dropLocal(K.summary(id));
-    dropLocal(K.blobs(id));
-    writeLocal(K.createdIds, createdIds().filter((x) => x !== id));
+    dropOverlay(K.body(id));
+    dropOverlay(K.summary(id));
+    dropOverlay(K.blobs(id));
+    writeOverlay(K.createdIds, createdIds().filter((x) => x !== id));
     return { status: 'ok' };
   },
 
@@ -393,6 +393,27 @@ export const staticApi: ApiClient = {
   },
   cancelChat: async (chat_id: number) => ({ status: 'not_found', chat_id })
 };
+
+// The overlay map is hydrated from IndexedDB asynchronously, but every read above is
+// synchronous — so the FIRST call into any method must wait for that hydrate, or a
+// visitor's installed workspaces are invisible until something happens to re-read.
+// Gating here, once, beats an `await overlayReady` at the top of ~30 methods: that
+// list only has to be wrong once, and the failure (missing workspaces on a cold load)
+// is a race that would not reproduce locally.
+function gated(target: ApiClient): ApiClient {
+  const out: Record<string, unknown> = {};
+  for (const [name, value] of Object.entries(target)) {
+    if (typeof value !== 'function') {
+      out[name] = value;
+      continue;
+    }
+    out[name] = (...args: unknown[]) =>
+      overlayReady.then(() => (value as (...a: unknown[]) => unknown).apply(target, args));
+  }
+  return out as ApiClient;
+}
+
+export const staticApi: ApiClient = gated(impl);
 
 /** Install a pack's workspace under `id`, replacing whatever is there. Used by the
  *  `?w=<pack-url>` loader (lib/pack-install.ts) — the static twin of the server's
@@ -414,14 +435,14 @@ export function staticInstallModels(models: {
   openrouter: OpenRouterModel[];
 }): void {
   if (models.tinker.length) {
-    const cur = readLocal<TinkerModel[]>(K.tinkerModels, []);
+    const cur = readOverlay<TinkerModel[]>(K.tinkerModels, []);
     const seen = new Set(cur.map((m) => m.id));
-    writeLocal(K.tinkerModels, [...cur, ...models.tinker.filter((m) => !seen.has(m.id))]);
+    writeOverlay(K.tinkerModels, [...cur, ...models.tinker.filter((m) => !seen.has(m.id))]);
   }
   if (models.openrouter.length) {
-    const cur = readLocal<OpenRouterModel[]>(K.orModels, []);
+    const cur = readOverlay<OpenRouterModel[]>(K.orModels, []);
     const seen = new Set(cur.map((m) => m.openrouter_model));
-    writeLocal(K.orModels, [
+    writeOverlay(K.orModels, [
       ...cur,
       ...models.openrouter.filter((m) => !seen.has(m.openrouter_model))
     ]);

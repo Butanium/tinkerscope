@@ -284,6 +284,12 @@ incoming copy becomes "name (2)"). Once installed the address bar
 shows the plain `?w=<id>`, so reloading opens rather than re-installing. They need
 their own API key to sample — the pack carries checkpoints, never credentials.
 
+By default a pack drops per-token logprobs; `pack export demo.yaml.gz --logprobs`
+keeps them, so the token inspector and the chart's *first token* mode work on the
+other side. Give it a `.gz` path when you do — uncompressed, a real workspace lands
+at 107 MB, past GitHub's 100 MB file limit; gzipped it's ~30 MB, and every consumer
+un-gzips it transparently.
+
 **A published read-only site — they get a link, no setup at all.**
 `tinkerscope site export ./site` writes a static copy hostable on GitHub Pages (no
 backend, no key). Visitors can read and analyze everything — every workspace, branch
@@ -299,6 +305,14 @@ worth arranging deliberately. And token probabilities are enormous: they're arou
 97% of the exported bytes, so if the site is only meant to show *what* the models
 said, `--no-logprobs` makes it roughly 30× smaller (at the cost of the token
 inspector and the chart's "first token" mode).
+
+**The two combine.** A published site is not only *your* workspaces — it reads
+anyone's pack. Point it at one with `?w=<pack url>`, or open a file from your own
+computer with the ⤒ button beside the workspace picker (or by dropping the file on
+the page), which needs no hosting at all. Installed workspaces live in that
+browser and persist; the site's own baked ones stay read-only. So one deployed site
+can serve as a general viewer, and each workspace you want to share is just a pack
+file rather than a re-publish.
 
 ## Keeping this file honest
 

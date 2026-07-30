@@ -201,26 +201,45 @@ def test_pack_workspace_ids_matches_the_browser_helper(backend, tmp_path):
     assert list(packmod.pack_workspace_ids(p)) == ["pack-weird-personas-hi-cigarettes"]
 
 
-def test_apply_from_a_url(client, tmp_path, monkeypatch):
-    """A pack URL is the shareable form; load_pack fetches it with httpx."""
-    src = _pack_dict("remote")
+def _stub_httpx(monkeypatch, payload: bytes):
+    """Stand in for httpx.get. Serves BYTES, because load_pack reads `.content` — it has
+    to sniff the gzip magic, which `.text` would have already mangled into a str."""
 
     class _Resp:
-        text = yaml.safe_dump(src, sort_keys=False)
+        content = payload
 
         def raise_for_status(self):
             return None
 
-    monkeypatch.setattr(packmod, "load_pack", packmod.load_pack)  # keep the real one
     import httpx
 
     monkeypatch.setattr(httpx, "get", lambda *a, **k: _Resp())
+
+
+def test_apply_from_a_url(client, tmp_path, monkeypatch):
+    """A pack URL is the shareable form; load_pack fetches it with httpx."""
+    _stub_httpx(monkeypatch, yaml.safe_dump(_pack_dict("remote"), sort_keys=False).encode())
     r = client.post(
         "/api/pack/apply",
         json={"source": "https://example.invalid/p.yaml", "on_conflict": "overwrite"},
     )
     assert r.status_code == 200, r.text
     assert r.json()["workspace_ids"] == [{"id": "pack-remote-w-one", "name": "w one"}]
+
+
+def test_apply_from_a_gzipped_url(client, monkeypatch):
+    """The shareable form for a logprob pack: too big to host uncompressed, so the
+    fetch path has to un-gzip as transparently as the local one does."""
+    import gzip
+
+    raw = yaml.safe_dump(_pack_dict("remotegz"), sort_keys=False).encode()
+    _stub_httpx(monkeypatch, gzip.compress(raw))
+    r = client.post(
+        "/api/pack/apply",
+        json={"source": "https://example.invalid/p.yaml.gz", "on_conflict": "overwrite"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["workspace_ids"] == [{"id": "pack-remotegz-w-one", "name": "w one"}]
 
 
 def test_json_pack_is_accepted(client, tmp_path):

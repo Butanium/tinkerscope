@@ -22,6 +22,7 @@ import { api } from './api';
 import { isStatic } from './static-mode';
 import { staticApi, staticInstallWorkspace, staticInstallModels } from './api-static';
 import { isLocalPath, packWorkspaceId, bumpUntilFree } from './pack-source';
+import { restoreLogprobs } from './pack-logprobs';
 import type { PanelLayout, TinkerModel, OpenRouterModel } from './types';
 import type { ConvTree } from './tree';
 
@@ -49,17 +50,57 @@ type RawPack = {
 // can't disagree about what it's installing if the URL changed underneath).
 const cache = new Map<string, RawPack>();
 
-async function fetchPack(source: string): Promise<RawPack> {
-  const hit = cache.get(source);
-  if (hit) return hit;
-  if (isLocalPath(source)) {
-    throw new Error(
-      `"${source}" is a local file path, which a static site cannot read — publish the pack and link its https:// URL instead.`
-    );
+/** Un-gzip if the bytes are gzipped, then decode as UTF-8. Sniffs the MAGIC, not the
+ *  extension — mirrors `_decode_pack_bytes` in pack.py. `DecompressionStream` is native
+ *  (Chrome 80+, Firefox 113+, Safari 16.4+), so a compressed pack costs no dependency. */
+async function decodePackBytes(buf: ArrayBuffer): Promise<string> {
+  const head = new Uint8Array(buf.slice(0, 2));
+  if (head[0] !== 0x1f || head[1] !== 0x8b) return new TextDecoder().decode(buf);
+  if (typeof DecompressionStream === 'undefined') {
+    throw new Error('this pack is gzipped and this browser cannot decompress it');
   }
-  const r = await fetch(source);
-  if (!r.ok) throw new Error(`could not fetch the pack: ${r.status} ${r.statusText}`);
-  const text = await r.text();
+  const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'));
+  return new TextDecoder().decode(await new Response(stream).arrayBuffer());
+}
+
+async function fetchPack(source: string | File): Promise<RawPack> {
+  const key = typeof source === 'string' ? source : `file:${source.name}:${source.size}`;
+  const hit = cache.get(key);
+  if (hit) return hit;
+  let buf: ArrayBuffer;
+  if (typeof source !== 'string') {
+    // A file the visitor picked. This is the only route that needs no hosting and no
+    // CORS — which is what "anyone can open their own export here" actually requires.
+    buf = await source.arrayBuffer();
+  } else {
+    // A static site has no filesystem, so a non-http source can only be a RELATIVE
+    // URL — `?w=./demo.yaml.gz` for a pack sitting next to index.html, which is the
+    // natural way to publish one alongside its viewer. So resolve and try it rather
+    // than refusing every non-http value; a genuine filesystem path just 404s, and the
+    // error below points at the file picker, which is the actual answer for one.
+    // (A LIVE instance keeps the opposite rule — there, non-http means a real path the
+    // server reads, and it never reaches this branch.)
+    const url = new URL(source, document.baseURI).href;
+    let r: Response;
+    try {
+      r = await fetch(url);
+    } catch (e) {
+      throw new Error(
+        isLocalPath(source)
+          ? `could not read "${source}" — a static site has no filesystem access. Use the file picker to open a pack from this computer, or link its https:// URL.`
+          : `could not fetch the pack: ${e}`
+      );
+    }
+    if (!r.ok) {
+      throw new Error(
+        isLocalPath(source)
+          ? `no pack at "${source}" (${r.status}). If that is a path on your computer, use the file picker instead — a static site cannot read local files.`
+          : `could not fetch the pack: ${r.status} ${r.statusText}`
+      );
+    }
+    buf = await r.arrayBuffer();
+  }
+  const text = await decodePackBytes(buf);
   // Dynamic import: js-yaml is only needed when someone actually opens a pack link,
   // so it stays out of the main bundle as its own chunk.
   const yaml = await import('js-yaml');
@@ -71,7 +112,7 @@ async function fetchPack(source: string): Promise<RawPack> {
   if (!Array.isArray(pack.workspaces) && !Array.isArray(pack.models)) {
     throw new Error('that file has no `workspaces` or `models` — it is not a tinkerscope pack');
   }
-  cache.set(source, pack);
+  cache.set(key, pack);
   return pack;
 }
 
@@ -79,9 +120,20 @@ function packName(p: RawPack): string {
   return String(p.name || 'pack');
 }
 
+// A picked File is a STATIC-mode affordance. A live instance doesn't need one — its
+// `?w=/some/path.yaml` already reads the filesystem server-side — and routing a File
+// through the static installer there would write to an overlay a live instance never
+// reads, i.e. silently do nothing. So it is refused rather than half-supported.
+function assertFileIsInstallable(source: string | File): void {
+  if (typeof source !== 'string' && !isStatic) {
+    throw new Error('opening a pack file needs a static site — on a live instance use ?w=<path>');
+  }
+}
+
 /** What installing `source` here would touch, without touching it. */
-export async function preview(source: string): Promise<PackPreview> {
-  if (!isStatic) {
+export async function preview(source: string | File): Promise<PackPreview> {
+  assertFileIsInstallable(source);
+  if (!isStatic && typeof source === 'string') {
     return (await api.applyPack({ source })) as PackPreview;
   }
   const p = await fetchPack(source);
@@ -99,8 +151,12 @@ export async function preview(source: string): Promise<PackPreview> {
 }
 
 /** Install `source`, resolving id collisions per `mode`. Returns what landed. */
-export async function install(source: string, mode: ConflictMode): Promise<InstalledWorkspace[]> {
-  if (!isStatic) {
+export async function install(
+  source: string | File,
+  mode: ConflictMode
+): Promise<InstalledWorkspace[]> {
+  assertFileIsInstallable(source);
+  if (!isStatic && typeof source === 'string') {
     const res = (await api.applyPack({ source, on_conflict: mode })) as {
       workspace_ids?: InstalledWorkspace[];
     };
@@ -126,7 +182,9 @@ export async function install(source: string, mode: ConflictMode): Promise<Insta
     }
     const id = packWorkspaceId(name, wsName);
     takenIds.add(id);
-    const body = (w.body ?? {}) as Record<string, any>;
+    // restoreLogprobs BEFORE the install: staticInstallWorkspace splits inline heavy
+    // fields into blobs (lib/node-split), and it only recognizes `token_logprobs`.
+    const body = restoreLogprobs((w.body ?? {}) as Record<string, any>);
     staticInstallWorkspace({
       id,
       name: wsName,

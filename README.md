@@ -379,6 +379,30 @@ workspaces.
 The chart's per-workspace view travels with the export, so a published site opens
 bucketed the way you left it. Full doc: **[`docs/STATIC_SITE.md`](docs/STATIC_SITE.md)**.
 
+### A published site is also a viewer for *other people's* packs
+
+A static site isn't only a way to publish your own workspaces — it's a general reader.
+Anyone can point one at a share pack and browse it, with nothing installed and no key:
+
+```
+https://you.github.io/site/?w=https://raw.githubusercontent.com/u/r/main/demo.yaml.gz
+```
+
+…or open a pack straight off their own disk with the ⤒ button next to the workspace
+picker (or by dropping the file on the page) — no hosting and no CORS involved. Installed
+workspaces live in that browser's IndexedDB and persist; the site's own baked ones stay
+read-only.
+
+To make a pack that carries the token inspector, export it with logprobs — and give the
+path a `.gz`, because the uncompressed form is past GitHub's 100 MB file limit:
+
+```bash
+tinkerscope pack export ./demo.yaml.gz --workspace "the good one" --logprobs
+```
+
+(107 MB → 30 MB on a real workspace. Browsers decompress it natively; `--pack` and `?w=`
+both take the `.gz` transparently, sniffing the magic bytes rather than the extension.)
+
 ---
 
 ## Drive it from the terminal — `tinkpg`

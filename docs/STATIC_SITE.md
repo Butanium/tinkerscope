@@ -120,14 +120,38 @@ synchronous at module init (`lib/static-mode.ts`) because `lib/api.ts` must pick
 transport before any consumer touches it — an async probe would race that. A live
 instance never defines the global, so the cost there is zero.
 
-Writes go to localStorage, namespaced per site by **slug + URL path**
-(`tscope-static:<site>@<path>:…`). The path matters: one `github.io` origin hosts many
-exports, and `<site>` is only a slug of the title — two sites both titled "demo" would
-otherwise share an overlay, so a visitor's installs and edits on one would surface in
-the other. Two sites can't occupy the same path, so the path disambiguates for free. **Baked workspaces are immutable**: a write targeting
-one is accepted and dropped, so an incidental layout normalization can't permanently
-shadow the published content with something worse. Workspaces the visitor *installs*
-live in the overlay and do persist.
+Writes go to an **IndexedDB** overlay (`lib/overlay-store.ts`), namespaced per site by
+**slug + URL path** (`tscope-static:<site>@<path>:…`). The path matters: one `github.io`
+origin hosts many exports, and `<site>` is only a slug of the title — two sites both
+titled "demo" would otherwise share an overlay, so a visitor's installs and edits on one
+would surface in the other. Two sites can't occupy the same path, so the path
+disambiguates for free. **Baked workspaces are immutable**: a write targeting one is
+accepted and dropped, so an incidental layout normalization can't permanently shadow the
+published content with something worse. Workspaces the visitor *installs* live in the
+overlay and do persist.
+
+#### Why not localStorage (it was, until 2026-07-30)
+
+localStorage caps at about **5 MB per origin** — measured 4.98 MB in headless Chromium
+on this box. One real workspace body is 12.3 MB with its logprobs *already stripped*, so
+installing a pack of any consequence was impossible. And it failed quietly: the write
+threw, `writeLocal` caught and console-warned it, and then every read came back through
+the same store, so the workspace opened **empty**. IndexedDB reports a 6442 MB quota on
+the same origin and round-trips a 37.6 MB workspace-shaped payload in 484 ms write /
+277 ms read.
+
+The awkward part is that IndexedDB is async while the ~30 read sites in `api-static.ts`
+are sync, so the overlay is an in-memory map hydrated **once** at startup and
+authoritative thereafter; writes update it immediately and flush in the background.
+Every entry point into `staticApi` awaits that hydrate through a single wrapper
+(`gated`) rather than 30 individual `await`s — the list only has to be wrong once, and
+the failure mode (workspaces missing on a cold load) is a race that wouldn't reproduce
+locally. Any pre-existing localStorage overlay is adopted on first hydrate and left in
+place, since a visitor may still load an older cached bundle.
+
+Pinned by `tests/small-smokes/browser_pack_big.py`, which installs a pack far past the
+old ceiling and asserts it survives a reload — the reload being the part that used to
+fail.
 
 ### Chart view state travels
 
@@ -186,10 +210,24 @@ second query param. The rule is `lib/pack-source.ts` `isPackSource`, pinned by
   `pack.load_pack` + `pack.apply_pack`. This is the only way a local **filesystem
   path** can be read at all.
 - **Static site** → the browser fetches and parses it (`js-yaml`, dynamically
-  imported so it stays out of the main bundle) and installs into the localStorage
-  overlay. A filesystem path is refused with an explanation rather than silently
-  doing nothing. Cross-origin fetch works for GitHub-hosted packs:
-  `raw.githubusercontent.com` sends `access-control-allow-origin: *`.
+  imported so it stays out of the main bundle) and installs into the overlay.
+  Cross-origin fetch works for GitHub-hosted packs: `raw.githubusercontent.com` sends
+  `access-control-allow-origin: *`.
+  A non-http `?w=` value is **resolved against `document.baseURI` and fetched** rather
+  than refused — a static site has no filesystem, so the only thing such a value can be
+  is a relative URL (`?w=./demo.yaml.gz` for a pack published beside its viewer). A real
+  filesystem path simply 404s, and the error points at the file picker. The live
+  instance keeps the opposite rule, where non-http genuinely means a path on disk.
+- **A file the visitor picks or drops** (static only) → read straight off their disk,
+  no hosting and no CORS. This is what lets a published site act as a general reader for
+  someone else's export; a live instance doesn't need it, since `?w=<path>` already
+  reads the filesystem, and passing a `File` there is refused rather than half-supported
+  (it would write to an overlay a live instance never reads).
+
+Both fetch paths **un-gzip transparently**, sniffing the gzip magic bytes rather than the
+extension, so a `pack export --logprobs` pack — which has to be compressed to clear
+GitHub's 100 MB file limit — opens like any other. That uses the browser's native
+`DecompressionStream`, so it adds no dependency.
 
 ### Collisions
 
@@ -242,10 +280,12 @@ different trigger, on a single-user tool bound to loopback.
 
 | Concern | File |
 |---|---|
-| Static-mode detection, data root, localStorage overlay | `web/src/lib/static-mode.ts` |
+| Static-mode detection, data root, overlay namespace + hydrate | `web/src/lib/static-mode.ts` |
+| The IndexedDB overlay itself (map + flush + quota) | `web/src/lib/overlay-store.ts` |
 | The baked-JSON backend (mirrors `ApiClient`) | `web/src/lib/api-static.ts` |
 | Heavy-field split (browser mirror of `workspace_store.split_node`) | `web/src/lib/node-split.ts` |
 | Id-vs-source discriminator + `(2)` naming (pure) | `web/src/lib/pack-source.ts` |
+| Pack logprob encoding, mirror of `pack.py::restore_logprobs` (pure) | `web/src/lib/pack-logprobs.ts` |
 | Pack loading / install orchestration | `web/src/lib/pack-install.ts` |
 | The collision prompt | `web/src/lib/PackInstallModal.svelte` |
 | Chart-view mirror + merge | `web/src/lib/chart-view.ts` |

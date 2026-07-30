@@ -47,7 +47,8 @@ defaults:                       # → prefs.json last_session (params + which mo
   thinking: false
   panels: ["health×cig ds (ep1)", "deepseek base"]   # by LABEL; must be in models
 
-workspaces:                     # inline, self-contained; raw request/response kept, logprobs stripped
+workspaces:                     # inline, self-contained; raw request/response kept,
+                                # logprobs stripped unless `--logprobs`
   - {name: "health-cig probes", body: { …light workspace body… }}
 ```
 
@@ -101,11 +102,34 @@ maintain one committed file. `--overwrite` regenerates from scratch.
 | `--no-defaults` | omit the `defaults` block (sampling params + default panel layout) |
 | `--name` / `--description` | override pack metadata |
 | `--overwrite` | regenerate instead of merging into an existing file |
+| `--logprobs` | include per-token logprobs (default: stripped). Pair with a `.gz` OUT |
 
 Export **keeps each node's `raw_meta`** (the raw request/response, inlined) so a
-collaborator's "Raw" view shows what was actually sent, but **strips `token_logprobs`**
-(~90% of a heavy workspace's bytes, and a pack is one self-contained YAML). On apply,
-the inlined `raw_meta` is split back into a write-once blob the browser fetches lazily.
+collaborator's "Raw" view shows what was actually sent. On apply, the inlined `raw_meta`
+is split back into a write-once blob the browser fetches lazily.
+
+### Logprobs and compression
+
+`token_logprobs` are ~90% of a heavy workspace's bytes, so they are **stripped by
+default**. `--logprobs` keeps them — which is what makes the token inspector and the
+chart's *first token* mode work on the other side — inlined as a compact JSON **string**
+under `token_logprobs_json`. The string, rather than the native nested lists, for two
+reasons: YAML-dumping the lists measured 157 MB where the JSON-in-YAML form is 107 MB,
+and the distinct field name means no consumer has to ask which representation it holds
+(in a pack it is always `token_logprobs_json`; everywhere else always `token_logprobs`).
+`restore_logprobs` converts back on apply, mirrored in the browser by
+`web/src/lib/pack-logprobs.ts` — both sides carry tests, because the same file installs
+through either path.
+
+107 MB is still past **GitHub's 100 MB hard file limit**, so give the output path a
+`.gz` suffix and `Pack.write` gzips it (measured 30 MB, 3.6×). Every consumer decompresses
+transparently — `load_pack` and the browser both sniff the gzip **magic bytes**, not the
+extension, so a compressed pack served from any URL shape still works. In the browser
+this uses the native `DecompressionStream`, so it costs no dependency.
+
+```bash
+tinkerscope pack export ./demo.yaml.gz --workspace "the good one" --logprobs
+```
 
 ## Where things live
 
