@@ -52,6 +52,15 @@ eq(
   [{ token: ' D', tid: 7 }]
 );
 eq('sanitize: truthy-but-not-true flags are false', sanitizeView({ ftRenorm: 1, includeFolded: 'yes' }).ftRenorm, false);
+eq('sanitize: matchLimit kept', sanitizeView({ matchLimit: 200 }).matchLimit, 200);
+eq('sanitize: fractional matchLimit floored', sanitizeView({ matchLimit: 12.9 }).matchLimit, 12);
+eq(
+  'sanitize: non-positive / non-numeric matchLimit → 0 (no cap)',
+  [sanitizeView({ matchLimit: 0 }), sanitizeView({ matchLimit: -5 }), sanitizeView({ matchLimit: '200' })].map(
+    (v) => v.matchLimit
+  ),
+  [0, 0, 0]
+);
 
 // ── parseStore ────────────────────────────────────────────────────────
 {
@@ -123,6 +132,7 @@ eq('sanitize: truthy-but-not-true flags are false', sanitizeView({ ftRenorm: 1, 
     think: 'split',
     turn: '2',
     rulesOff: ['red'],
+    matchLimit: 120,
     ftGroups: [['.', '!']],
     ftRenorm: true
   };
@@ -139,6 +149,7 @@ eq('sanitize: truthy-but-not-true flags are false', sanitizeView({ ftRenorm: 1, 
   saveChartView('b', { ...loadChartView('b'), think: 'no-thinking', turn: '5', includeFolded: true }, 200);
   const back = loadChartView('a');
   eq('round-trip: a keeps its tweaks', [back.turn, back.rulesOff, back.ftGroups], ['2', ['red'], [['.', '!']]]);
+  eq('round-trip: the match cap is per workspace', [back.matchLimit, loadChartView('b').matchLimit], [120, 0]);
   eq("round-trip: a picks up b's newer global think", back.think, 'no-thinking');
   eq('round-trip: b keeps its own turn', loadChartView('b').turn, '5');
 

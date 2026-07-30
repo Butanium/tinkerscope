@@ -14,6 +14,9 @@ chart modal and asserts the whole new flow:
   - the per-rule chart toggles: clicking the "yellow" chip drops that rule from
     the bucketing (legend collapses to red / no-match, the red+yellow sample
     re-buckets as red, the open inspector closes), clicking again restores it
+  - the "first N chars" match cap: at 3 only the two red-opening samples match
+    (2/5 red, 3/5 no match), the inspector marks the boundary and dims what fell
+    outside it, and clearing the box restores the full legend
   - the thinking filter: turn 1 mixes one CoT sample (a0) with four without, so
     the filter select appears there (and NOT on mix-free turn 2); "with
     thinking" charts just a0, "without thinking" the other four, "split think /
@@ -24,8 +27,9 @@ chart modal and asserts the whole new flow:
     hides the rule chips)
   - view persistence (lib/chart-view): close→reopen and a full page reload both
     restore the mode / match scope / thinking filter (global) AND the charted
-    turn + excluded rule chips (per workspace); a second, never-charted
-    workspace inherits the global picks with none of the per-question tweaks
+    turn + excluded rule chips + match cap (per workspace); a second,
+    never-charted workspace inherits the global picks with none of the
+    per-question tweaks
 
 Cleans up its rules + workspaces afterwards. Run against the vite dev server
 (live source) or a built instance:
@@ -199,6 +203,32 @@ def main() -> None:
             checks.append(("re-including restores the full legend",
                            legend_back == ["red", "yellow", "red + yellow", "no match"]))
 
+            # match cap: rules see only the first N chars of the response. At 3,
+            # "red" and "red and yellow" still open with red (2/5), while both
+            # "yellow"s and "nothing here at all" fall out of every bucket (3/5).
+            page.fill(".chart-limit", "3")
+            page.wait_for_timeout(200)
+            legend_cap = [el.inner_text() for el in page.query_selector_all(".chart-legend-label")]
+            svg_cap = page.text_content(".chart-svg") or ""
+            checks.append(("cap 3: legend = red / no match", legend_cap == ["red", "no match"]))
+            checks.append(("cap 3: red at 40%, no match at 60%",
+                           "40%" in svg_cap and "60%" in svg_cap))
+            page.click('rect[data-tooltip^="no match"]')
+            page.wait_for_selector(".chart-inspect", timeout=3000)
+            cap_line = page.query_selector(".chart-inspect .chart-cap-line")
+            checks.append(("inspector marks the cap boundary",
+                           cap_line is not None and "first 3 chars" in cap_line.inner_text()))
+            checks.append(("inspector dims what fell outside the cap",
+                           page.query_selector(".chart-inspect .chart-cap-rest") is not None))
+            page.click(".chart-inspect-close")
+            page.fill(".chart-limit", "")
+            page.wait_for_timeout(200)
+            legend_uncap = [el.inner_text() for el in page.query_selector_all(".chart-legend-label")]
+            checks.append(("clearing the cap restores the full legend",
+                           legend_uncap == ["red", "yellow", "red + yellow", "no match"]))
+            checks.append(("no cap: no boundary marker in the inspector",
+                           page.query_selector(".chart-cap-line") is None))
+
             # thinking filter: turn 1 mixes a0 (with CoT) and four without
             checks.append(("mixed turn shows the thinking filter",
                            page.query_selector("select.chart-think") is not None))
@@ -284,6 +314,7 @@ def main() -> None:
             page.click('.chart-mode[aria-label="Match scope"] .chart-mode-btn:has-text("split")')
             page.select_option("select.chart-think", value="split")
             page.click('.chart-rule-chip:has-text("yellow")')
+            page.fill(".chart-limit", "3")
             page.wait_for_timeout(200)
             page.reload(wait_until="load", timeout=20000)
             page.wait_for_selector(".model-slot-select", timeout=15000)
@@ -301,6 +332,8 @@ def main() -> None:
                            "Say a color." in page.inner_text(".chart-question")))
             checks.append(("reload keeps the per-workspace rule exclusion",
                            page.query_selector('.chart-rule-chip.off:has-text("yellow")') is not None))
+            checks.append(("reload keeps the per-workspace match cap",
+                           page.input_value(".chart-limit") == "3"))
             # both splits compose: think·response, think·thinking, no-think·response
             # (no vacuous thinking bar for the no-CoT population)
             svg_both = page.text_content(".chart-svg") or ""
@@ -322,6 +355,8 @@ def main() -> None:
             checks.append(("fresh workspace inherits the global picks", scope2 == ["split"]))
             checks.append(("fresh workspace has no inherited rule exclusion",
                            page.query_selector(".chart-rule-chip.off") is None))
+            checks.append(("fresh workspace has no inherited match cap",
+                           page.input_value(".chart-limit") == ""))
 
             checks.append(("no console/page errors", not errors))
             if errors:

@@ -210,7 +210,9 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     `tests/small-smokes/browser_fuzzy_search.py`.
   - `lib/chart.ts` — distribution-chart bucketing: `chartByRules` (samples
     bucketed by the SET of matching highlight rules — grey none / solid single /
-    striped combo) + `chartByAnswers` (legacy exact-match histogram) +
+    striped combo; its `limit` arg caps matching to the first N chars of the
+    matched text, applied PER PART so "first N of the response" survives the
+    `either` scope) + `chartByAnswers` (legacy exact-match histogram) +
     `chartByFirstToken` (the MODEL's probability distribution over the first
     generated token, from stored `token_logprobs` — segment pct = model prob,
     count/sampleIdx = the empirical side) + label helpers. `chartByFirstToken`
@@ -234,8 +236,9 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
   - `lib/chart-view.ts` — persistence for the chart modal's VIEW state, split by
     scope: the three how-you-look-at-it picks (mode / match scope / thinking
     filter) are GLOBAL (last-used carries to a workspace you've never charted),
-    everything question-specific (turn, include-folded, excluded rule chips,
-    first-token exclusions / merges / added tokens) is PER WORKSPACE, 40-entry
+    everything question-specific (turn, include-folded, excluded rule chips, the
+    first-N-chars match cap, first-token exclusions / merges / added tokens) is
+    PER WORKSPACE, 40-entry
     LRU by save time. localStorage, deliberately not a workspace field — it's how
     one person is looking at a distribution, so it stays out of the wire/disk
     contract and out of share packs. **Has `chart-view.test.ts`** (sanitize /
@@ -321,7 +324,9 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     (reactive; live-updates mid-stream) and owns mode toggle / turn picker
     (defaults to the LATEST turn) / match-scope (incl. `split` = a
     response|thinking bar pair) / per-rule include-exclude chips (drop a rule the
-    prompt makes ubiquitous from the bucketing; chart-only) / the thinking
+    prompt makes ubiquitous from the bucketing; chart-only) / the "first N chars"
+    match cap (opening-only matching for response-tag rules — the inspector dims
+    what fell past the cut, `.chart-cap-line` / `.chart-cap-rest`) / the thinking
     filter — all samples, one population, or `split` (a think and a no-think bar
     over disjoint samples; composes with the match-scope split for up to 4 bars
     per model), shown only when the picked turn mixes both /

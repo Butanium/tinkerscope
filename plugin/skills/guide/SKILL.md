@@ -80,6 +80,16 @@ which **highlight rules** they match, so if you have a rule for the behavior
 you're hunting, you get its rate directly, with the un-matched samples in grey.
 Click a bar segment to read the samples in that bucket.
 
+**"Did it open with the tag?"** Rules mode has a **first N chars** box beside the
+match scope: type a number and rules only match that far into the text. It's the
+fix for rules about how a reply *starts* — an `<answer>` tag, a "Verdict:"
+header — which otherwise also fire when the model discusses the same token later
+in its explanation, so every sample lands in the rule's bucket and the chart says
+nothing. Blank means the whole text. The cap counts into each part separately, so
+it means the same thing under any match scope, and when you click into a bucket
+the inspector greys out everything past the cut so a sample sitting in *no match*
+with a visible later hit explains itself.
+
 **"Do these two checkpoints differ?"** Add a panel per checkpoint, send the same
 prompt with a large *Samples*, and compare the charts (the chart shows every
 panel). For a single-turn difference, the row toolbar's regenerate with Ctrl held
@@ -120,8 +130,9 @@ their relative sizes.
 
 The chart remembers how you left it. Mode, match scope and thinking filter follow
 you everywhere (they're how you like to look at a distribution); the charted turn,
-the excluded rule chips and the first-token exclusions / merges / added tokens are
-remembered *per workspace*, since they only mean anything for that prompt. Both
+the excluded rule chips, the first-N-chars cap and the first-token exclusions /
+merges / added tokens are remembered *per workspace*, since they only mean
+anything for that prompt. Both
 survive closing the modal and reloading the page — it's browser-local, so it
 doesn't travel to another machine or into a share pack.
 

@@ -9,9 +9,10 @@
 //            distribution. Carried to a workspace you've never charted before,
 //            so a fresh one doesn't reset the choice you just made.
 //   PER-WORKSPACE  everything question-specific: the turn, the folded-panel
-//            toggle, the excluded rules, the first-token exclusions / merges /
-//            added tokens. These only mean something for THAT workspace's
-//            prompt — a global "excluded rule X" would leak nonsense sideways.
+//            toggle, the excluded rules, the first-N-chars match cap, and the
+//            first-token exclusions / merges / added tokens. These only mean
+//            something for THAT workspace's prompt — a global "excluded rule X"
+//            would leak nonsense sideways.
 //            Saving one also refreshes the global three, so the last workspace
 //            you touched sets the defaults for the next.
 //
@@ -36,6 +37,8 @@ export type ChartWorkspaceView = {
   turn: string;
   includeFolded: boolean;
   rulesOff: string[];
+  /** Rules mode: match only the first N chars (0 = whole text). */
+  matchLimit: number;
   ftExcluded: string[];
   ftGroups: string[][];
   ftAdded: { token: string; tid: number }[];
@@ -56,6 +59,7 @@ export const DEFAULT_VIEW: ChartView = {
   turn: 'last',
   includeFolded: false,
   rulesOff: [],
+  matchLimit: 0,
   ftExcluded: [],
   ftGroups: [],
   ftAdded: [],
@@ -76,6 +80,11 @@ export function sanitizeView(raw: unknown): ChartView {
     turn: typeof r.turn === 'string' ? r.turn : 'last',
     includeFolded: r.includeFolded === true,
     rulesOff: strings(r.rulesOff),
+    // A char cap is a positive integer or nothing; anything else (a stale float,
+    // a negative, a hand-edited string) means "no cap" rather than a weird slice.
+    matchLimit: Number.isFinite(r.matchLimit) && (r.matchLimit as number) > 0
+      ? Math.floor(r.matchLimit as number)
+      : 0,
     ftExcluded: strings(r.ftExcluded),
     ftGroups: Array.isArray(r.ftGroups)
       ? r.ftGroups.map(strings).filter((g) => g.length >= 2)
@@ -106,6 +115,7 @@ export function parseStore(raw: unknown): Stored {
         turn: v.turn,
         includeFolded: v.includeFolded,
         rulesOff: v.rulesOff,
+        matchLimit: v.matchLimit,
         ftExcluded: v.ftExcluded,
         ftGroups: v.ftGroups,
         ftAdded: v.ftAdded,
@@ -162,6 +172,7 @@ export function saveChartView(wsId: string | null, view: ChartView, now = Date.n
         turn: view.turn,
         includeFolded: view.includeFolded,
         rulesOff: view.rulesOff,
+        matchLimit: view.matchLimit,
         ftExcluded: view.ftExcluded,
         ftGroups: view.ftGroups,
         ftAdded: view.ftAdded,

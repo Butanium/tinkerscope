@@ -153,6 +153,49 @@ eq(
   eq('rules: empty-answer sample counted', empty.bars[0].total, 1);
 }
 {
+  // match cap: rules see only the first N chars of the matched text — the
+  // "did the reply OPEN with this?" read (a response-tag rule shouldn't fire on
+  // the model discussing the tag later on).
+  const redCount = (d: NonNullable<ReturnType<typeof chartByRules>>, bar = 0) =>
+    d.bars[bar].segments.find((s) => s.label === 'red')?.count ?? 0;
+  const late = [{ model: 'm', samples: [{ content: 'answer first, then a red aside' }] }];
+  eq('rules: no cap sees the whole response', redCount(chartByRules(late, [RED, YEL])!), 1);
+  eq('rules: cap hides a late match', redCount(chartByRules(late, [RED, YEL], 'response', 12)!), 0);
+  eq(
+    'rules: cap keeps an opening match',
+    redCount(chartByRules([{ model: 'm', samples: [{ content: 'red, and much more text after' }] }], [RED, YEL], 'response', 5)!),
+    1
+  );
+  eq(
+    'rules: cap longer than the text is a no-op',
+    redCount(chartByRules(late, [RED, YEL], 'response', 9999)!),
+    1
+  );
+  // 'either' caps each PART, so a long CoT can't eat the response's budget
+  const bigThink = [{ model: 'm', samples: [{ content: 'red opener', reasoning: 'x'.repeat(500) }] }];
+  eq(
+    'rules: either caps per part, not the joined text',
+    redCount(chartByRules(bigThink, [RED, YEL], 'either', 10)!),
+    1
+  );
+  eq(
+    'rules: cap applies to the thinking scope too',
+    redCount(chartByRules([{ model: 'm', samples: [{ reasoning: 'a long preamble then red', content: '' }] }], [RED, YEL], 'thinking', 8)!),
+    0
+  );
+  // per-bar matchOn still wins over the call scope, cap and all
+  const split = chartByRules(
+    [
+      { model: 'm', samples: bigThink[0].samples, matchOn: 'response' },
+      { model: 'm', samples: bigThink[0].samples, matchOn: 'thinking' }
+    ],
+    [RED, YEL],
+    'response',
+    10
+  )!;
+  eq('rules: capped split — response bar hits, thinking bar misses', [redCount(split, 0), redCount(split, 1)], [1, 0]);
+}
+{
   // two models share one legend; a bucket absent in one model is a 0% segment
   const d = chartByRules(
     [

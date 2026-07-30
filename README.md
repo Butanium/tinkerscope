@@ -173,7 +173,11 @@ rules it matches — grey = no rule, a solid segment = exactly one rule, a
 and *yellow*) — so "define a rule, see its prevalence per model" is one loop.
 A **match-scope toggle** picks what the rules run against: the **response**,
 the **thinking**, **either**, or **split** — response and thinking as two
-adjacent bars per model. Samples that spent their whole budget thinking and
+adjacent bars per model. A **first N chars** box next to it caps matching to
+the opening of that text, for rules that describe how a reply *starts* (a
+`<answer>` tag, a `Verdict:` header) and would otherwise also fire on the model
+discussing the same token later in its explanation; the inspector dims whatever
+fell outside the cap. Samples that spent their whole budget thinking and
 never emitted an answer still count (they chart as *no match* / `[NO ANSWER]`
 rather than silently shrinking n). When a turn mixes samples drawn *with* and
 *without* thinking, a **thinking filter** appears: pool them, chart one
@@ -184,8 +188,9 @@ workspace (defaults to the latest; if panels diverge, each prompt is shown
 with its models), segments are clickable (inspect exactly which samples landed
 in a bucket, with the matches painted), and a legacy **exact answers** mode
 still buckets identical responses for short constrained answers. The open
-chart live-updates while a batch streams, and the mode / match-scope /
-thinking-filter picks are remembered across reopens and reloads.
+chart live-updates while a batch streams, and how you left it is remembered
+across reopens and reloads — mode / match-scope / thinking-filter everywhere,
+the question-specific bits (turn, excluded rule chips, char cap) per workspace.
 
 ![The response distribution chart](docs/img/distribution-chart.png)
 

@@ -19,6 +19,12 @@
   - match scope (rules mode) — which text the rules run against: response /
     thinking / either, or "split" = a response|thinking bar pair per model,
     adjacent under ONE model name (bucketed separately over the same samples).
+  - "first N chars" (rules mode) — cap matching to the OPENING of that text
+    (per part, so it means the same under every scope). For rules that describe
+    how a reply STARTS — a `<answer>` tag, a "Verdict:" header — where the model
+    later discussing the same token would otherwise count as a match. Blank =
+    whole text. Remembered per workspace, and the inspector dims what fell
+    outside the cap so a "no match" sample explains itself.
   - thinking filter — which population to chart when the turn mixes samples
     generated WITH and WITHOUT a chain of thought (regen batches with the
     thinking toggle flipped; panels on different models), since their answer
@@ -60,6 +66,7 @@
   // turn can't serve it (no logprobs), and that fallback must not overwrite it.
   //
   //   chartOff    rule ids dropped from the BUCKETING (not from chat painting)
+  //   matchLimit  rules mode: match only the first N chars (0 = whole text)
   //   ftExcluded  first-token units dropped from the named segments; their mass
   //               + samples fold into the grey rest, unless ftRenorm
   //   ftGroups    merges — each is a list of display tokens fused into one color
@@ -76,6 +83,7 @@
   let turnSel = $state('last'); // 'last' | stringified turn index
   let includeFolded = $state(false);
   let chartOff = $state<string[]>([]);
+  let matchLimit = $state(0);
   let ftExcluded = $state<string[]>([]);
   let ftGroups = $state<string[][]>([]);
   let ftAdded = $state<{ token: string; tid: number }[]>([]);
@@ -100,6 +108,7 @@
     turnSel = v.turn;
     includeFolded = v.includeFolded;
     chartOff = v.rulesOff;
+    matchLimit = v.matchLimit;
     ftExcluded = v.ftExcluded;
     ftGroups = v.ftGroups;
     ftAdded = v.ftAdded;
@@ -114,6 +123,7 @@
       turn: turnSel,
       includeFolded,
       rulesOff: chartOff,
+      matchLimit,
       ftExcluded,
       ftGroups,
       ftAdded,
@@ -193,6 +203,14 @@
   const allRulesOff = $derived(
     applicableRules.length > 0 && applicableRules.every((r) => chartOff.includes(r.id))
   );
+  /** The first-N-chars match cap. Blank / 0 / junk = no cap; buckets change
+   *  under the reader, so a live inspect selection is dropped like toggleRule's. */
+  function setMatchLimit(raw: string) {
+    const n = Math.floor(Number(raw));
+    matchLimit = Number.isFinite(n) && n > 0 ? n : 0;
+    inspect = null;
+    saveView();
+  }
   function toggleRule(id: string) {
     chartOff = chartOff.includes(id) ? chartOff.filter((x) => x !== id) : [...chartOff, id];
     // Bucket keys are positional in the active-rule list — they all shift
@@ -353,7 +371,7 @@
 
   const data = $derived(
     mode === 'rules'
-      ? chartByRules(chartSources, activeRules, matchScope === 'split' ? 'response' : matchScope)
+      ? chartByRules(chartSources, activeRules, matchScope === 'split' ? 'response' : matchScope, matchLimit)
       : mode === 'firsttoken'
         ? (ft?.data ?? null)
         : chartByAnswers(chartSources)
@@ -604,6 +622,13 @@
               data-tooltip={tt} use:tip>{scope}</button>
           {/each}
         </div>
+        <label class="chart-check" data-tooltip="Match rules only in the opening N characters (blank = all)" use:tip>
+          first
+          <input class="chart-limit" type="number" min="1" step="50" placeholder="all"
+            value={matchLimit || ''} oninput={(e) => setMatchLimit(e.currentTarget.value)}
+            aria-label="Match only the first N characters" />
+          chars
+        </label>
       {/if}
       {#if hasThinkMix}
         <select
@@ -817,7 +842,29 @@
           {/each}
         </div>
       {/if}
+      <!-- One inspected text, cut at the match cap when this part was bucketed
+           under one: everything past it is dimmed and unpainted-looking, so a
+           sample sitting in "no match" while a later hit is plainly visible
+           reads as the cap doing its job, not the chart lying. The two halves
+           render independently — a markdown construct straddling the exact
+           boundary may render slightly off, same trade as renderPrefilled. -->
+      {#snippet capped(text: string, applies: boolean)}
+        {#if applies && matchLimit > 0 && text.length > matchLimit}
+          <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+          {@html renderContent(text.slice(0, matchLimit), 'assistant')}
+          <div class="chart-cap-line"><span>first {matchLimit} chars — matched to here</span></div>
+          <div class="chart-cap-rest">
+            <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+            {@html renderContent(text.slice(matchLimit), 'assistant')}
+          </div>
+        {:else}
+          <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+          {@html renderContent(text, 'assistant')}
+        {/if}
+      {/snippet}
       {#if inspected}
+        {@const capReasoning = mode === 'rules' && inspected.scope !== 'response'}
+        {@const capContent = mode === 'rules' && inspected.scope !== 'thinking'}
         <div class="chart-inspect">
           <div class="chart-inspect-head">
             <span class="chart-legend-swatch" style={swatchStyle(inspected.seg.colors)}></span>
@@ -834,13 +881,11 @@
                     ontoggle={(e) => (thinkOpen[sampleKey(s, i)] = (e.currentTarget as HTMLDetailsElement).open)}
                   >
                     <summary>thinking</summary>
-                    <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                    {@html renderContent(s.reasoning, 'assistant')}
+                    {@render capped(s.reasoning, capReasoning)}
                   </details>
                 {/if}
                 {#if s.content.trim()}
-                  <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                  {@html renderContent(s.content, 'assistant')}
+                  {@render capped(s.content, capContent)}
                 {:else}
                   <span class="chart-no-answer">[no answer — all budget spent thinking]</span>
                 {/if}
@@ -863,6 +908,7 @@
   .chart-note { font-size: 0.76rem; color: #b45309; background: #f59e0b14; border: 1px solid #f59e0b66; border-radius: var(--radius); padding: var(--space-2) var(--space-3); margin-bottom: var(--space-3); }
   .chart-turn, .chart-think { font-size: 0.78rem; padding: 3px 6px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-bg); color: var(--color-text); max-width: 340px; }
   .chart-check { display: inline-flex; align-items: center; gap: 5px; font-size: 0.78rem; color: var(--color-text-muted); cursor: pointer; user-select: none; }
+  .chart-limit { width: 62px; font-size: 0.78rem; padding: 3px 4px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-bg); color: var(--color-text); }
   .chart-rules { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
   .chart-rule-chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--color-border); border-radius: 999px; background: var(--color-bg); color: var(--color-text); font-size: 0.76rem; padding: 2px 10px 2px 6px; cursor: pointer; }
   .chart-rule-chip:hover { border-color: var(--color-text-muted); }
@@ -912,6 +958,12 @@
   .chart-inspect-sample { font-size: 0.8rem; color: var(--color-text); padding: var(--space-2); border: 1px solid var(--color-border-light); border-radius: var(--radius); background: var(--color-surface); overflow-wrap: anywhere; }
   .chart-inspect-sample :global(p) { margin: 0 0 0.4em; }
   .chart-inspect-sample :global(p:last-child) { margin-bottom: 0; }
+  /* beyond the match cap: dimmed, and its highlight marks de-tinted so only the
+     text the bucketing actually saw looks painted */
+  .chart-cap-line { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-1) 0; font-size: 0.68rem; color: var(--color-text-muted); white-space: nowrap; }
+  .chart-cap-line::after { content: ''; flex: 1; border-top: 1px dashed var(--color-border); }
+  .chart-cap-rest { opacity: 0.55; }
+  .chart-cap-rest :global(mark.hl-mark) { background: none; }
   .chart-inspect-think { margin-bottom: var(--space-1); }
   .chart-inspect-think summary { font-size: 0.72rem; color: var(--color-text-muted); cursor: pointer; }
 </style>

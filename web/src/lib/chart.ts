@@ -5,8 +5,8 @@
 // gathers per-panel/per-turn samples from reactive state and picks a turn;
 // the two builders here do the bucketing:
 //
-//   chartByRules(sources, rules, scope)  — bucket each sample by the SET of
-//     enabled assistant-scoped highlight rules that match it. No match → the
+//   chartByRules(sources, rules, scope, limit)  — bucket each sample by the SET
+//     of enabled assistant-scoped highlight rules that match it. No match → the
 //     grey "no match" bucket; exactly one rule → a solid segment in that
 //     rule's color; several rules → a combo segment rendered as stripes of ALL
 //     the matched rules' colors. This is the default mode: it rides on the
@@ -14,7 +14,7 @@
 //     is one loop. `scope` picks the matched text — response / thinking /
 //     either — and a source can override it per-bar (`matchOn`), which is how
 //     the modal's "split" view charts one panel as adjacent response|thinking
-//     bars over the same samples.
+//     bars over the same samples. `limit` caps matching to the first N chars.
 //   chartByAnswers(sources)       — the legacy exact-match histogram (trim +
 //     string-equality), still the right tool for short constrained answers
 //     ("reply with a single integer"). Rare answers (< MIN_FRACTION in every
@@ -117,11 +117,16 @@ export type ChartData = {
   legend: { key: string; label: string; colors: string[]; members?: string[] }[];
 };
 
-/** The text a rule matches against for one sample, per scope. */
-function matchText(s: ChartSample, scope: MatchScope): string {
-  if (scope === 'response') return s.content;
-  if (scope === 'thinking') return s.reasoning ?? '';
-  return s.reasoning ? s.reasoning + '\n' + s.content : s.content;
+/** The text a rule matches against for one sample, per scope. `limit` > 0 caps
+ *  matching to each part's first N characters — applied PER PART, not to the
+ *  joined 'either' text: "the first 200 chars of the response" has to mean the
+ *  same thing in every scope, and capping the concatenation would spend the
+ *  budget on the CoT and never reach the answer. */
+export function matchText(s: ChartSample, scope: MatchScope, limit = 0): string {
+  const head = (t: string) => (limit > 0 ? t.slice(0, limit) : t);
+  if (scope === 'response') return head(s.content);
+  if (scope === 'thinking') return head(s.reasoning ?? '');
+  return s.reasoning ? head(s.reasoning) + '\n' + head(s.content) : head(s.content);
 }
 
 /**
@@ -175,11 +180,17 @@ export function chartRules(rules: HighlightRule[]): HighlightRule[] {
 
 /** Bucket samples by the SET of matching highlight rules. Returns null when
  *  there is nothing to chart (no sources or no applicable rules — the modal
- *  distinguishes the two for its empty-state copy). */
+ *  distinguishes the two for its empty-state copy).
+ *
+ *  `limit` (0 = whole text) restricts matching to the first N chars of the
+ *  matched text — the "did it OPEN with this?" read. A rule for a response tag
+ *  (`<answer>`, "Verdict:") otherwise also fires on the model discussing the
+ *  tag later in its explanation, which makes the bucket meaningless. */
 export function chartByRules(
   sources: ChartSource[],
   rules: HighlightRule[],
-  scope: MatchScope = 'response'
+  scope: MatchScope = 'response',
+  limit = 0
 ): ChartData | null {
   const active = chartRules(rules);
   if (sources.length === 0 || active.length === 0) return null;
@@ -189,7 +200,7 @@ export function chartByRules(
   const perModel: Map<string, Bucket>[] = sources.map(({ samples, matchOn }) => {
     const buckets = new Map<string, Bucket>();
     samples.forEach((s, i) => {
-      const text = matchText(s, matchOn ?? scope);
+      const text = matchText(s, matchOn ?? scope, limit);
       const hit: number[] = [];
       active.forEach((r, ri) => {
         if (ruleMatches(r, text)) hit.push(ri);
