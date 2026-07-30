@@ -49,10 +49,12 @@ Full flags + format: `docs/PACK.md`.
 **A pack is also a LINK** — no restart needed. Open `<base>/?w=<path-or-url-to-pack>`
 in the human's browser (`&open=<workspace-id>` picks which one lands open) and it
 installs in place. A `?w=` value containing `/`, `:` or `.` can't be a workspace id,
-which is how the two are told apart. ⚠️ **The human must click through a consent
-prompt every time** — including a first, non-colliding open (Install/Cancel), and
-replace-vs-keep-both when the pack's workspaces are already there. Don't tell them a
-link "just opens"; tell them to expect the dialog. The URL then becomes the plain
+which is how the two are told apart. ⚠️ **Against the human's LIVE instance — which is
+what you are usually driving — expect a dialog every time**: a first, non-colliding open
+asks Install/Cancel, and an existing copy asks replace-vs-keep-both. Don't tell them a
+link "just opens"; tell them to expect it. (On a *published static site* a non-colliding
+open installs unprompted — that install lands in their browser, not in a state dir — but
+a collision still asks there too.) The URL then becomes the plain
 `?w=<id>`, so a reload opens rather than re-installs. Same thing over HTTP:
 `POST /api/pack/apply {source}` previews (which ids exist), `{source, on_conflict}`
 applies (`"overwrite"` | `"new"`) — the HTTP route has no prompt, so prefer it when

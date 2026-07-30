@@ -808,6 +808,31 @@
   // showed the premise was wrong and the change would have bought a nag loop.)
   const packSeen = new Set<string>();
 
+  /**
+   * When can a pack install without asking?
+   *
+   * Only ever when NOTHING is overwritten — a collision means destroying a workspace
+   * that is already here, which is a data question and always worth a click.
+   *
+   * Beyond that the answer differs by mode, and the distinction is the whole point:
+   *
+   *  - **Static site**: yes. The install lands in this site's own IndexedDB namespace,
+   *    is deletable, cannot touch the baked workspaces (immutable by design), and a
+   *    pack is data — message content is HTML-escaped before rendering, so there is no
+   *    execution path. What remains is that an attacker could send someone a link to
+   *    THIS viewer pointed at THEIR pack and borrow the domain — but they could equally
+   *    publish their own static tinkerscope with the same content, and the pack URL is
+   *    visible in the address bar throughout. A modal was not buying much for that.
+   *  - **Live instance**: no. There a `?w=<path>` makes the SERVER read the filesystem
+   *    and the install lands in the real state dir, on disk, among actual research
+   *    workspaces — and any page can navigate a browser to a localhost URL. Reaching
+   *    that store is something the visitor's browser could not otherwise do, so it
+   *    keeps asking.
+   */
+  function canInstallUnprompted(pv: PackPreview): boolean {
+    return isStatic && !pv.workspaces.some((w) => w.exists);
+  }
+
   /** A picked or dropped pack file. Not latched by `packSeen`: choosing the same file
    *  twice is a deliberate act each time, unlike a URL effect that re-fires on its own. */
   async function openPackFile(file: File): Promise<void> {
@@ -815,6 +840,11 @@
       const pv = await preview(file);
       if (!pv.workspaces.length) {
         flashWsNotice(`“${pv.pack}” contains no workspaces to open.`);
+        return;
+      }
+      // Picking the file IS the consent — a prompt on top of a file dialog is ceremony.
+      if (canInstallUnprompted(pv)) {
+        await finishPackInstall(file, 'overwrite');
         return;
       }
       packSource = file;
@@ -857,11 +887,10 @@
         flashWsNotice(`“${pv.pack}” contains no workspaces to open.`);
         return;
       }
-      // ALWAYS prompt, even with nothing to overwrite. A link installs on plain
-      // NAVIGATION, and any page can navigate a browser to a localhost URL — the API's
-      // CORS allowlist doesn't cover that. A silent install would plant transcripts
-      // that look sampled from your own checkpoints. One click, naming the source
-      // host, is a cheap price for that not being possible.
+      if (canInstallUnprompted(pv)) {
+        await finishPackInstall(source, 'overwrite');
+        return;
+      }
       packSource = source;
       packPreview = pv;
     } catch (e: any) {

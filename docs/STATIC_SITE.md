@@ -249,12 +249,23 @@ anywhere else in the app either. Both halves of this rule are one function,
 `pack.py`; a review caught them diverging on both counts, and tests on both sides now
 pin it.
 
-**The prompt is unconditional** — a non-colliding pack asks too, with a plain
-Install/Cancel. A pack link installs on plain *navigation*, and any web page can
-navigate a browser to a `localhost` URL (the API's CORS allowlist guards fetches, not
-navigation). A silent install would let a third party plant workspaces whose
-transcripts read as though your own checkpoints produced them. One click, with the
-source named by host, closes that.
+**When the prompt appears depends on the mode**, and the split is deliberate
+(`canInstallUnprompted` in `+page.svelte`):
+
+| | nothing overwritten | a collision |
+|---|---|---|
+| **static site** | installs, no prompt | asks: replace / keep both |
+| **live instance** | asks: Install / Cancel | asks: replace / keep both |
+
+A collision always asks, everywhere — overwriting destroys a workspace that is already
+here, which is a data question rather than a trust one.
+
+The mode split is about what an install can *reach*. On a live instance `?w=<path>` makes
+the SERVER read the filesystem and the result lands in the real on-disk state dir among
+actual research workspaces — something a visitor's browser could not otherwise do, and
+any page can navigate a browser to a `localhost` URL (the CORS allowlist guards fetches,
+not navigation). On a static site the install lands in that site's own IndexedDB
+namespace, is deletable, and cannot touch the baked workspaces.
 
 After installing, the URL is rewritten to the plain `?w=<id>` (and `open=` dropped),
 so a reload is a normal open and never a re-install.
@@ -264,11 +275,25 @@ id opens the first and says so.
 
 ### Trust
 
-A pack is data, never code — models, params, workspace trees. But "you can just
-delete it" undersells the risk: the content it installs is *conversations*, which
-once in your sidebar look exactly like turns your own checkpoints produced. That's
-why the prompt is unconditional and names the source host — installs happen on
-navigation, which no CORS policy governs.
+A pack is data, never code — models, params, workspace trees — and that claim is load-
+bearing enough to have been checked rather than assumed: message content is `<`/`>`-
+escaped before `marked` runs (`highlight-render.ts` `renderMarkdown`), so nothing in a
+pack reaches the DOM as markup.
+
+What remains is **attribution, not compromise**. The content is *conversations*, which
+once in a sidebar look exactly like turns your own checkpoints produced, and nothing in
+the app records who authored a workspace. So a third party can point your published
+viewer at their pack and borrow your domain.
+
+That was judged not worth a modal on a static site (Clément, 2026-07-30) — an attacker
+can publish their own static tinkerscope with the same fabricated content just as easily,
+and the pack URL sits in the address bar throughout, so the modal was buying very little.
+It is worth one on a live instance, where the install reaches the real state dir.
+
+A **query parameter** to skip the prompt was considered and rejected: whoever writes the
+URL would control it, attacker included, so it would delete the check rather than
+configure it. If a live instance ever needs an opt-out it has to be author-controlled
+(an export-time / launch-time setting), never link-controlled.
 
 The local-path branch is server-side by necessity, and deliberately not sandboxed to
 the scan roots: it's the same read `--pack /any/path.yaml` already does, from a

@@ -281,16 +281,17 @@ def main() -> int:
             pack_url = f"http://127.0.0.1:{port}/linked.yaml"
             print(f"open ?w={pack_url}")
             page.goto(f"{base}?w={pack_url}", wait_until="networkidle")
-            # Consent first, even with nothing to overwrite: a link installs on plain
-            # navigation, so a silent install would let any page plant transcripts.
-            page.wait_for_selector(".pack-actions", timeout=20000)
-            check(
-                page.locator(".pack-actions .pack-btn", has_text="Install").count() == 1,
-                "a non-colliding pack still asks before installing",
-            )
-            check(page.locator(".pack-badge.exists").count() == 0, "nothing is marked as existing")
-            page.locator(".pack-actions .pack-btn", has_text="Install").first.click()
+            # No prompt when NOTHING is overwritten. On a static site the install lands
+            # in this site's own IndexedDB, is deletable, can't touch the baked
+            # workspaces, and a pack is data (content is HTML-escaped before render), so
+            # a modal was buying attribution rather than safety. A LIVE instance still
+            # asks — there the install reaches the real on-disk state dir — which is what
+            # browser_pack_link.py pins.
             page.wait_for_selector(".ws-picker[data-ws-id='pack-linked-demo-from-the-link']", timeout=20000)
+            check(
+                page.locator(".pack-actions").count() == 0,
+                "a non-colliding pack installs without a prompt",
+            )
             page.wait_for_timeout(500)
             check(True, "pack link installed and opened its workspace")
             check(
@@ -312,10 +313,15 @@ def main() -> int:
             # (baked ones don't).
             check(page.locator(".ws-icon-danger").count() == 1, "installed workspace is deletable")
 
-            # 6. Re-opening the same link collides ⇒ the prompt, then "Keep both".
+            # 6. Re-opening the same link COLLIDES ⇒ the prompt is back. This is the
+            #    case that always asks: overwriting is destroying a workspace that is
+            #    already here, which is a data question, not an attribution one.
             page.goto(f"{base}?w={pack_url}", wait_until="networkidle")
             page.wait_for_selector(".pack-actions", timeout=20000)
-            check(True, "second open shows the overwrite/keep-both prompt")
+            check(
+                page.locator(".pack-badge.exists").count() == 1,
+                "a colliding open DOES prompt, naming what already exists",
+            )
             page.locator(".pack-actions .pack-btn", has_text="Keep both").first.click()
             page.wait_for_selector(".ws-picker[data-ws-id='pack-linked-demo-from-the-link-2']", timeout=20000)
             check(True, "'Keep both' installed a second copy under a fresh id")

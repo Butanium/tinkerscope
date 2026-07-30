@@ -331,9 +331,17 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     `pack-source.test.ts`**). Live → `POST /api/pack/apply` (also the only way a
     local PATH is readable); static → fetch + `js-yaml` (dynamic import) + overlay
     install. Two-phase: preview reports which deterministic ids collide, then the modal
-    asks — **unconditionally**, since a link installs on plain NAVIGATION (no CORS
-    involved) and the workspaces it plants read as real sampled turns; a collision adds
-    the replace-vs-keep-both choice. Renaming keys on the derived ID only, via the ONE
+    asks — but only when it has to (`canInstallUnprompted` in +page). **A collision always
+    asks** (replace vs keep both) since overwriting discards what's there. A NON-colliding
+    install asks on a LIVE instance only — there `?w=<path>` makes the server read the
+    filesystem into the real on-disk state dir, and any page can navigate a browser to
+    localhost. A static site just installs: per-site IndexedDB, deletable, can't touch the
+    baked workspaces, and pack content is HTML-escaped before render (`renderMarkdown`), so
+    what's left is attribution rather than compromise — judged not worth a modal (Clément,
+    2026-07-30, after pushing back on my over-broad first answer). ⚠️ A **query param** to
+    skip it is the one shape to refuse: the URL author controls it, so it deletes the check
+    instead of configuring it. Any future opt-out must be author-controlled (export-time or
+    launch-time). Renaming keys on the derived ID only, via the ONE
     shared rule `bumpUntilFree` (mirrored by `pack.py::_dedupe_conflicting` — a review
     caught them diverging, so both sides have tests). Then the URL is rewritten to the
     plain `?w=<id>` so a reload never re-installs. `&open=<ws-id>` picks the one to open.

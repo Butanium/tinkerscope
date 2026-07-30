@@ -101,8 +101,10 @@ function bodyWith(extra: Record<string, unknown>): Record<string, any> {
   );
 }
 
+// Throw rather than process.exit: there is no @types/node here (the suites run as bare
+// .ts under node's type stripping), so referencing `process` is a svelte-check error.
+// The house style in the sibling suites is to throw, and npm test fails the same way.
 if (failures) {
-  console.error(`\n${failures} failure(s)`);
-  process.exit(1);
+  throw new Error(`pack-logprobs: ${failures} failure(s)`);
 }
 console.log('\npack-logprobs: all checks passed');

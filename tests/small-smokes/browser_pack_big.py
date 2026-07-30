@@ -155,12 +155,9 @@ def main() -> int:
 
                 base = f"http://127.0.0.1:{PORT}"
                 page.goto(f"{base}/?w=./big.yaml.gz", wait_until="load", timeout=30000)
-                page.wait_for_selector(".pack-actions", timeout=60000)
-                check(True, "a gzipped pack fetched over http parses and previews")
-
-                page.locator(".pack-actions .pack-btn", has_text="Install").first.click()
-                page.wait_for_selector(".ws-picker[data-ws-id='pack-big-smoke-heavy-ws']", timeout=90000)
-                check(True, "the pack installed and opened")
+                # No prompt: nothing is being overwritten, and this is a static site.
+                page.wait_for_selector(".ws-picker[data-ws-id='pack-big-smoke-heavy-ws']", timeout=150000)
+                check(True, "a gzipped pack fetched over http, parsed, and installed unprompted")
                 # The view opens on the LAST root sibling (340/340), not the first — so
                 # match any turn rather than pinning an index, which made this assert
                 # fail against a perfectly working build.

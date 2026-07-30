@@ -12,11 +12,14 @@
 // `install()` runs with that answer. See lib/pack-source.ts for the pure half — the
 // id-vs-source discriminator and the `(2)` naming.
 //
-// Trust note: a pack is DATA, never code — models, params, and workspace trees. But
-// the data is CONVERSATIONS, which once installed look exactly like turns your own
-// checkpoints produced, and a link installs on plain NAVIGATION (which no CORS policy
-// governs — any page can point a browser at a localhost URL). So the caller prompts
-// before every install, not just a colliding one, and names the source by host.
+// Trust note: a pack is DATA, never code — models, params, and workspace trees, with
+// message content HTML-escaped before render (highlight-render `renderMarkdown`), so
+// nothing here reaches the DOM as markup. What the data IS, though, is conversations
+// that look exactly like turns your own checkpoints produced, and a link installs on
+// plain NAVIGATION (which no CORS policy governs). That is an attribution problem, not
+// a compromise one — which is why only a LIVE instance prompts on a first install
+// (there the pack lands in the real on-disk state dir) while a static site doesn't.
+// The prompt policy itself lives at the call site: `canInstallUnprompted` in +page.
 
 import { api } from './api';
 import { isStatic } from './static-mode';
