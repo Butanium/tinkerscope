@@ -435,6 +435,15 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
   command reports the per-workspace breakdown. A middle setting would help: keep
   logprobs only for the turns a workspace's chart actually uses, or only the newest N
   turns per thread. See `docs/STATIC_SITE.md` §Size.
+- [ ] **Provenance chip on a link-installed workspace.** Now that a non-colliding pack
+  installs on a static site WITHOUT a prompt (`0880b15`), nothing on screen says where a
+  workspace came from — and the content is conversations that read as though the site
+  author's checkpoints produced them. A small "from raw.githubusercontent.com" label
+  beside the workspace name would recover the attribution the modal used to carry, and
+  do it better: a modal is seen once and forgotten, a label is there whenever someone is
+  actually looking at the content. The data already exists — `staticWorkspaceSource(id)`,
+  added for the "open this locally" panel. Maybe 15 lines. Proposed to Clément
+  2026-07-30, no decision either way.
 - [ ] **Round the logprob floats.** Measured 2026-07-30 on `value guarding v2`:
   rounding `lp` (and the top-K alternatives' logprobs) to 4 decimals cuts the
   JSON-in-YAML pack from 107 MB to 73 MB, and 30 → 20 MB gzipped — a free ~33% on both
