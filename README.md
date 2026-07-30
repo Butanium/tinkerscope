@@ -175,12 +175,17 @@ A **match-scope toggle** picks what the rules run against: the **response**,
 the **thinking**, **either**, or **split** — response and thinking as two
 adjacent bars per model. Samples that spent their whole budget thinking and
 never emitted an answer still count (they chart as *no match* / `[NO ANSWER]`
-rather than silently shrinking n). A turn picker charts any turn of the
+rather than silently shrinking n). When a turn mixes samples drawn *with* and
+*without* thinking, a **thinking filter** appears: pool them, chart one
+population, or **split think / no-think** into a bar each — disjoint samples,
+each with its own 100% and its own n (it composes with the match-scope split,
+so up to four bars per model). A turn picker charts any turn of the
 workspace (defaults to the latest; if panels diverge, each prompt is shown
 with its models), segments are clickable (inspect exactly which samples landed
 in a bucket, with the matches painted), and a legacy **exact answers** mode
 still buckets identical responses for short constrained answers. The open
-chart live-updates while a batch streams.
+chart live-updates while a batch streams, and the mode / match-scope /
+thinking-filter picks are remembered across reopens and reloads.
 
 ![The response distribution chart](docs/img/distribution-chart.png)
 

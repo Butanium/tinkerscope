@@ -222,9 +222,24 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     100%), **add**
     a recorded-but-hidden token (surfaced from the rest — `AddedToken`, its p
     sourced from stored logprobs, NOT a model call), and **merge** (drag tokens
-    into one color, prob+count summed) all compose. **Has `chart.test.ts`**
-    (exclude/renormalize/add/merge cases); browser smoke
-    `tests/small-smokes/browser_chart_firsttoken_ops.py`.
+    into one color, prob+count summed) all compose. Also `buildChartSources` —
+    the modal's bar-set builder, where the two INDEPENDENT splits compose:
+    `think: 'split'` (a think and a no-think bar per panel over DISJOINT samples,
+    each its own 100%) × `scopeSplit` (rules mode's response|thinking pair over
+    the SAME samples). Each source carries `panel` + `pop` so the SVG layout can
+    group bars by panel (two panels can share a model label) and sum a group's n
+    over distinct populations. **Has `chart.test.ts`**
+    (exclude/renormalize/add/merge + the split-composition cases); browser smokes
+    `tests/small-smokes/browser_chart_{firsttoken_ops,rules}.py`.
+  - `lib/chart-view.ts` — persistence for the chart modal's VIEW state, split by
+    scope: the three how-you-look-at-it picks (mode / match scope / thinking
+    filter) are GLOBAL (last-used carries to a workspace you've never charted),
+    everything question-specific (turn, include-folded, excluded rule chips,
+    first-token exclusions / merges / added tokens) is PER WORKSPACE, 40-entry
+    LRU by save time. localStorage, deliberately not a workspace field — it's how
+    one person is looking at a distribution, so it stays out of the wire/disk
+    contract and out of share packs. **Has `chart-view.test.ts`** (sanitize /
+    prune / round-trip against a fake localStorage).
   - `lib/token-search.ts` — `normalizeForMatch` / `matchKind` / `searchStoredTokens`:
     the first-token add-search's tiered matching (exact ‹ prefix ‹ contains) with
     space-marker normalization (leading space / ▁ / Ġ ≡ bare, case-insensitive),
@@ -304,10 +319,13 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     + specific styles; the parent passes data in and gets results via callbacks.
     ChartModal is the smart one: it receives per-panel per-turn samples
     (reactive; live-updates mid-stream) and owns mode toggle / turn picker
-    (defaults to the LATEST turn) / match-scope / per-rule include-exclude
-    chips (drop a rule the prompt makes ubiquitous from the bucketing;
-    chart-only, session-scoped) / with-vs-without-thinking sample filter
-    (shown only when the picked turn mixes both) / click-a-segment-to-inspect.
+    (defaults to the LATEST turn) / match-scope (incl. `split` = a
+    response|thinking bar pair) / per-rule include-exclude chips (drop a rule the
+    prompt makes ubiquitous from the bucketing; chart-only) / the thinking
+    filter — all samples, one population, or `split` (a think and a no-think bar
+    over disjoint samples; composes with the match-scope split for up to 4 bars
+    per model), shown only when the picked turn mixes both /
+    click-a-segment-to-inspect.
     Third mode "first token": the model's OWN probability distribution over the
     first generated token (needs stored `token_logprobs`; disabled otherwise). In
     that mode the legend becomes an **interactive chip row**: click a chip to
@@ -317,7 +335,10 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     chip onto another to **merge** into one color (bespoke onto-drop DnD, not the
     gap-shaped `lib/drag-reorder`), and a search box **adds** a recorded-but-hidden
     token (from stored logprobs — `token-search` + `chart`'s `added`, no model
-    call). All session-scoped module state, like the rule chips.
+    call). ALL of this state is module-scoped and PERSISTED via `lib/chart-view`
+    (global picks + per-workspace tweaks — see above), so a reopen or a reload
+    lands you back where you were; the live `mode` falls back off a persisted
+    `firsttoken` when nothing carries logprobs, without losing the choice.
     Deterministic smokes (seeded tree, no sampling):
     `tests/small-smokes/browser_chart_rules.py` (rules) +
     `browser_chart_firsttoken_ops.py` (exclude / add / merge).

@@ -16,12 +16,18 @@ chart modal and asserts the whole new flow:
     re-buckets as red, the open inspector closes), clicking again restores it
   - the thinking filter: turn 1 mixes one CoT sample (a0) with four without, so
     the filter select appears there (and NOT on mix-free turn 2); "with
-    thinking" charts just a0, "without thinking" the other four, and the
-    filter also applies upstream of the exact-answers mode
+    thinking" charts just a0, "without thinking" the other four, "split think /
+    no-think" draws BOTH as adjacent bars (own sub-label, own n=1 / n=4, group
+    n=5, inspect scoped to the clicked population), and the filter also applies
+    upstream of the exact-answers mode
   - the "exact answers" mode still gives the legacy per-answer histogram (and
     hides the rule chips)
+  - view persistence (lib/chart-view): close→reopen and a full page reload both
+    restore the mode / match scope / thinking filter (global) AND the charted
+    turn + excluded rule chips (per workspace); a second, never-charted
+    workspace inherits the global picks with none of the per-question tweaks
 
-Cleans up its rules + workspace afterwards. Run against the vite dev server
+Cleans up its rules + workspaces afterwards. Run against the vite dev server
 (live source) or a built instance:
 
   uv run python tests/small-smokes/browser_chart_rules.py [BASE_URL]
@@ -53,8 +59,13 @@ def api(method: str, path: str, body: dict | None = None):
         return json.loads(r.read() or b"null")
 
 
-def seed() -> str:
-    """Two rules + a workspace with 5 assistant siblings. Returns conv id."""
+def seed() -> tuple[str, str]:
+    """Two rules + TWO identical workspaces of 5 assistant siblings.
+
+    The second one is never charted until the very end — it is the fixture for
+    "a fresh workspace inherits the global view picks with a clean slate of
+    per-question tweaks". Returns both ids.
+    """
     for i, (rid, name, pat, color) in enumerate(
         [(RULE_RED, "red", "red", "#f87171"), (RULE_YEL, "yellow", "yellow", "#fde047")]
     ):
@@ -80,18 +91,22 @@ def seed() -> str:
     for i, a in enumerate(turn2):
         nodes[f"b{i}"] = {"id": f"b{i}", "role": "assistant", "content": a,
                           "parent": "u2", "children": []}
-    conv = api("POST", "/api/workspaces", {
-        "name": "chart-rules-smoke",
-        "trees": {"primary": {"nodes": nodes, "rootChildren": ["u1"],
-                              "selected": {"__root__": "u1", "u1": "a0",
-                                           "a0": "u2", "u2": "b0"}}},
-    })
-    return conv["id"]
+    ids = []
+    for name in ("chart-rules-smoke", "chart-rules-smoke-2"):
+        conv = api("POST", "/api/workspaces", {
+            "name": name,
+            "trees": {"primary": {"nodes": nodes, "rootChildren": ["u1"],
+                                  "selected": {"__root__": "u1", "u1": "a0",
+                                               "a0": "u2", "u2": "b0"}}},
+        })
+        ids.append(conv["id"])
+    return ids[0], ids[1]
 
 
-def cleanup(conv_id: str | None) -> None:
-    if conv_id:
-        api("DELETE", f"/api/workspaces/{conv_id}")
+def cleanup(*conv_ids: str | None) -> None:
+    for conv_id in conv_ids:
+        if conv_id:
+            api("DELETE", f"/api/workspaces/{conv_id}")
     for rid in (RULE_RED, RULE_YEL):
         try:
             api("DELETE", f"/api/highlights/{rid}")
@@ -100,7 +115,7 @@ def cleanup(conv_id: str | None) -> None:
 
 
 def main() -> None:
-    conv_id = seed()
+    conv_id, conv2_id = seed()
     checks: list[tuple[str, bool]] = []
     try:
         with sync_playwright() as p:
@@ -200,6 +215,32 @@ def main() -> None:
             checks.append(("without thinking: the other 4, yellow at 50%",
                            legend_nothink == ["yellow", "red + yellow", "no match"]
                            and "n=4" in svg_nothink and "50%" in svg_nothink))
+            # split: one bar per population, side by side under the model name.
+            # Both sub-labels + both per-bar n, and 5 bar-worth of segments over
+            # the union legend (the CoT sample's "red" is back).
+            page.select_option("select.chart-think", value="split")
+            page.wait_for_timeout(200)
+            svg_split = page.text_content(".chart-svg") or ""
+            legend_split = [el.inner_text() for el in page.query_selector_all(".chart-legend-label")]
+            checks.append(("split: legend is the union of both populations",
+                           legend_split == ["red", "yellow", "red + yellow", "no match"]))
+            checks.append(("split: both sub-labels rendered",
+                           "think" in svg_split and "no-think" in svg_split))
+            checks.append(("split: per-bar n=1 / n=4 (disjoint populations)",
+                           "n=1" in svg_split and "n=4" in svg_split))
+            checks.append(("split: group n=5 under the model name", "n=5" in svg_split))
+            checks.append(("split: one sub-label block per bar",
+                           len(page.query_selector_all('.chart-svg text[font-style="italic"]')) == 2))
+            # the think bar is 100% red (its single sample), the no-think bar 50% yellow
+            checks.append(("split: think bar at 100%, no-think yellow at 50%",
+                           "100%" in svg_split and "50%" in svg_split))
+            # clicking a split bar's segment inspects THAT population only
+            page.click('rect[data-tooltip^="red —"]')
+            page.wait_for_selector(".chart-inspect", timeout=3000)
+            head_split = page.inner_text(".chart-inspect-head")
+            checks.append(("split: inspector names the population and its n",
+                           "1/1" in head_split and "think" in head_split))
+            page.click(".chart-inspect-close")
             page.select_option("select.chart-think", value="all")
             page.wait_for_timeout(200)
 
@@ -222,12 +263,72 @@ def main() -> None:
             legend3 = [el.inner_text() for el in page.query_selector_all(".chart-legend-label")]
             checks.append(("answers mode + with thinking: just 'red'", legend3 == ["red"]))
 
+            # the whole VIEW persists (lib/chart-view, localStorage) — the global
+            # picks (mode / match scope / thinking filter) and the per-workspace
+            # ones (charted turn, excluded rule chips) both survive close→reopen
+            # AND a full reload. They used to die with the modal every time.
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(150)
+            page.click('button[data-tooltip^="View response distribution chart"]')
+            page.wait_for_selector(".modal-overlay", timeout=5000)
+            checks.append(("reopen keeps the bucketing mode",
+                           page.inner_text('.chart-mode[aria-label="Bucketing mode"] .chart-mode-btn.active')
+                           == "exact answers"))
+            checks.append(("reopen keeps the charted turn (not back to latest)",
+                           "Say a color." in page.inner_text(".chart-question")))
+            checks.append(("reopen keeps the thinking filter",
+                           page.input_value("select.chart-think") == "thinking"))
+            # now: rules mode, BOTH splits, and a rule chip excluded — then reload
+            page.click('.chart-mode[aria-label="Bucketing mode"] .chart-mode-btn:has-text("highlight rules")')
+            page.wait_for_timeout(150)
+            page.click('.chart-mode[aria-label="Match scope"] .chart-mode-btn:has-text("split")')
+            page.select_option("select.chart-think", value="split")
+            page.click('.chart-rule-chip:has-text("yellow")')
+            page.wait_for_timeout(200)
+            page.reload(wait_until="load", timeout=20000)
+            page.wait_for_selector(".model-slot-select", timeout=15000)
+            page.click('button[data-tooltip^="View response distribution chart"]')
+            page.wait_for_selector(".modal-overlay", timeout=5000)
+            page.wait_for_timeout(300)
+            scope_active = [el.inner_text() for el in
+                            page.query_selector_all('.chart-mode[aria-label="Match scope"] .chart-mode-btn.active')]
+            checks.append(("reload keeps mode + match scope",
+                           page.inner_text('.chart-mode[aria-label="Bucketing mode"] .chart-mode-btn.active')
+                           == "highlight rules" and scope_active == ["split"]))
+            checks.append(("reload keeps the thinking filter",
+                           page.input_value("select.chart-think") == "split"))
+            checks.append(("reload keeps the per-workspace turn",
+                           "Say a color." in page.inner_text(".chart-question")))
+            checks.append(("reload keeps the per-workspace rule exclusion",
+                           page.query_selector('.chart-rule-chip.off:has-text("yellow")') is not None))
+            # both splits compose: think·response, think·thinking, no-think·response
+            # (no vacuous thinking bar for the no-CoT population)
+            svg_both = page.text_content(".chart-svg") or ""
+            checks.append(("both splits: 3 bars, per-bar n=1 / n=4",
+                           len(page.query_selector_all('.chart-svg text[font-style="italic"]')) == 3
+                           and "n=1" in svg_both and "n=4" in svg_both))
+            # a workspace never charted before inherits the global picks with a
+            # clean slate of per-question tweaks (no stale exclusion, turn=latest)
+            page.goto(f"{BASE}/?w={conv2_id}", wait_until="load", timeout=20000)
+            page.wait_for_selector(".model-slot-select", timeout=15000)
+            page.wait_for_function(
+                "document.body.innerText.includes('Say a color.')", timeout=15000
+            )
+            page.click('button[data-tooltip^="View response distribution chart"]')
+            page.wait_for_selector(".modal-overlay", timeout=5000)
+            page.wait_for_timeout(300)
+            scope2 = [el.inner_text() for el in
+                      page.query_selector_all('.chart-mode[aria-label="Match scope"] .chart-mode-btn.active')]
+            checks.append(("fresh workspace inherits the global picks", scope2 == ["split"]))
+            checks.append(("fresh workspace has no inherited rule exclusion",
+                           page.query_selector(".chart-rule-chip.off") is None))
+
             checks.append(("no console/page errors", not errors))
             if errors:
                 print("errors:", errors)
             browser.close()
     finally:
-        cleanup(conv_id)
+        cleanup(conv_id, conv2_id)
 
     for name, passed_ in checks:
         print(f"  {'✓' if passed_ else '✗'} {name}")

@@ -310,7 +310,8 @@ codex plugin add tinkerscope@tinkerscope</pre>
         <li><b>By answer</b> — the plain exact-match histogram over sample text.</li>
         <li><b>First token</b> — the model's OWN probability distribution over the first generated token, from stored logprobs. Click chips to exclude, drag one onto another to merge, search to surface a token that's hidden in the tail.</li>
       </ul>
-      <p class="help-note">Pick which turn to chart with the turn selector; it defaults to the latest and updates live while samples stream in.</p>
+      <p class="help-note">Pick which turn to chart with the turn selector; it defaults to the latest and updates live while samples stream in. The mode, match scope and thinking filter are remembered — the turn is not.</p>
+      <p class="help-note">When a turn mixes samples drawn with and without thinking, a filter appears: chart them pooled, one population only, or <b>split think / no-think</b> — a bar each, side by side under the model name, each over its own samples with its own n. In rules mode the <b>split</b> match scope does the same for the text the rules run against (response vs thinking, same samples); the two combine.</p>
     </section>
 
     <section class="help-sec">

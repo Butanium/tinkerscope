@@ -14,17 +14,21 @@
   - per-rule chart toggles (rules mode) — a chip per applicable rule; clicking
     one excludes it from the BUCKETING (not from chat painting): a rule the
     prompt makes ubiquitous ("smoking" when the question is about smoking)
-    stripes every bucket and drowns the signal. Exclusions are chart-only,
-    session-scoped (module state — they survive close/reopen, not a reload).
+    stripes every bucket and drowns the signal. Exclusions are chart-only, and
+    remembered PER WORKSPACE (see the view persistence below).
   - match scope (rules mode) — which text the rules run against: response /
     thinking / either, or "split" = a response|thinking bar pair per model,
     adjacent under ONE model name (bucketed separately over the same samples).
-  - thinking filter — chart only the samples generated WITH (or without) a
-    chain of thought. One turn can mix both populations (regen batches with
-    the thinking toggle flipped; panels on different models), and their answer
-    distributions often differ. Applies to both bucketing modes, upstream of
-    them; only shown when the picked turn actually has a mix (inert otherwise,
-    so a hidden selection can't silently filter).
+  - thinking filter — which population to chart when the turn mixes samples
+    generated WITH and WITHOUT a chain of thought (regen batches with the
+    thinking toggle flipped; panels on different models), since their answer
+    distributions often differ: all samples pooled / one of them / "split" =
+    a think and a no-think bar per model, adjacent under ONE model name over
+    DISJOINT samples (each its own 100%, each labeled with its own n).
+    Applies to all three bucketing modes, upstream of them, and composes with
+    the match-scope split (up to 4 bars per model); only shown when the picked
+    turn actually has a mix (inert otherwise, so a hidden selection can't
+    silently filter).
   - folded (reduced) panels are excluded by default; an "include folded
     panels" toggle appears when any are present.
   - the charted prompt(s) above the chart — grouped per distinct prompt, since
@@ -32,32 +36,83 @@
   - click a segment → inspect its samples below the chart, rendered through the
     normal highlight pipeline so the matched patterns are painted (the thinking
     fold auto-opens when the scope involves thinking).
+
+  The whole view is PERSISTED (`$lib/chart-view` — localStorage): the three
+  how-you-look-at-it picks (mode / match scope / thinking filter) globally, and
+  everything question-specific (turn, folded panels, excluded rules, first-token
+  exclusions / merges / added tokens) per WORKSPACE. So reopening after another
+  sampling round — or a reload — puts you back where you were, and a workspace
+  you've never charted starts from your last picks with a clean slate of tweaks.
 -->
 <script lang="ts" module>
-  // Rule ids excluded from the chart's bucketing. Module-scoped so the choice
-  // survives the modal's destroy-on-close; deliberately NOT persisted — it's a
-  // per-question viewing tweak, not a property of the rule.
-  let chartOff = $state<string[]>([]);
+  import { loadChartView, saveChartView, type ChartMode, type ChartView } from './chart-view';
 
-  // First-token mode tweaks — same module-scoped, not-persisted lifetime as
-  // chartOff. Keyed by UNIT (a display token, or a merged group's ftGroupKey):
-  //   ftExcluded  units dropped from the named segments; their mass + samples
-  //               fold into the grey rest (no renormalization), unless ftRenorm
+  // ── the whole chart view, persisted (see chart-view.ts) ───────────
+  // All of it lives at MODULE scope so it survives the modal's destroy-on-close,
+  // and in localStorage so it survives a reload — the three how-you-look-at-it
+  // picks globally, everything question-specific per WORKSPACE (Clément,
+  // 2026-07-29: reopening after another sampling round and re-picking every
+  // time). `modePref` is what was CHOSEN; the live `mode` may fall back when a
+  // turn can't serve it (no logprobs), and that fallback must not overwrite it.
+  //
+  //   chartOff    rule ids dropped from the BUCKETING (not from chat painting)
+  //   ftExcluded  first-token units dropped from the named segments; their mass
+  //               + samples fold into the grey rest, unless ftRenorm
   //   ftGroups    merges — each is a list of display tokens fused into one color
   //   ftAdded     recorded-but-hidden tokens surfaced from the rest (by identity;
   //               each panel resolves its OWN recorded p for the tid)
   //   ftRenorm    when on, the grey rest drops from the bar entirely (top-K tail
   //               + any excluded units) and the NAMED units rescale to 100% —
   //               meaningful with or without an exclusion
+  // (ftExcluded / ftGroups are keyed by UNIT: a display token, or a merged
+  // group's ftGroupKey.)
+  let modePref = $state<ChartMode | null>(null);
+  let matchScope = $state<MatchScope | 'split'>('response');
+  let thinkFilter = $state<ThinkFilter>('all');
+  let turnSel = $state('last'); // 'last' | stringified turn index
+  let includeFolded = $state(false);
+  let chartOff = $state<string[]>([]);
   let ftExcluded = $state<string[]>([]);
   let ftGroups = $state<string[][]>([]);
   let ftAdded = $state<{ token: string; tid: number }[]>([]);
   let ftRenorm = $state(false);
+
+  /** The id whose view is currently loaded — guards the reload effect. */
+  let viewOf = $state<string | null | undefined>(undefined);
+
+  function applyView(v: ChartView): void {
+    modePref = v.mode;
+    matchScope = v.scope;
+    thinkFilter = v.think;
+    turnSel = v.turn;
+    includeFolded = v.includeFolded;
+    chartOff = v.rulesOff;
+    ftExcluded = v.ftExcluded;
+    ftGroups = v.ftGroups;
+    ftAdded = v.ftAdded;
+    ftRenorm = v.ftRenorm;
+  }
+
+  function currentView(): ChartView {
+    return {
+      mode: modePref,
+      scope: matchScope,
+      think: thinkFilter,
+      turn: turnSel,
+      includeFolded,
+      rulesOff: chartOff,
+      ftExcluded,
+      ftGroups,
+      ftAdded,
+      ftRenorm
+    };
+  }
 </script>
 
 <script lang="ts">
   import Modal from './Modal.svelte';
   import {
+    buildChartSources,
     chartByAnswers,
     chartByFirstToken,
     chartByRules,
@@ -70,26 +125,51 @@
     type AddedToken,
     type ChartPanelData,
     type ChartSource,
-    type MatchScope
+    type MatchScope,
+    type ThinkFilter
   } from './chart';
   import { displayToken, prob } from './token-logprob';
   import { searchStoredTokens, type TokenCandidate } from './token-search';
   import { highlightStore } from './highlights.svelte';
   import { nodeBlobs } from './node-blobs.svelte';
+  import { workspaces as ws } from './workspaces.svelte';
   import { renderContent } from './render';
   import { tip } from '$lib/tooltip.svelte';
 
   let { sources, onclose }: { sources: ChartPanelData[]; onclose: () => void } = $props();
 
+  // ── persisted view: load / save ───────────────────────────────────
+  // The saved view is per WORKSPACE (question-specific bits) over global picks;
+  // reload it when the workspace changes under an open modal — the CLI can
+  // switch it out from under us.
+  $effect(() => {
+    const id = ws.activeId;
+    if (viewOf === id) return;
+    viewOf = id;
+    applyView(loadChartView(id));
+    inspect = null;
+  });
+  function saveView(): void {
+    saveChartView(ws.activeId, currentView());
+  }
+
   // ── controls ──────────────────────────────────────────────────────
-  let mode = $state<'rules' | 'answers' | 'firsttoken'>(
-    chartRules(highlightStore.rules).length > 0 ? 'rules' : 'answers'
+  // The live mode is the persisted CHOICE, except that a stored 'firsttoken'
+  // reopening where nothing carries logprobs would land on a dead empty state
+  // under a disabled button — fall back for the display only, so a turn that
+  // CAN serve it still does. ('rules' with no applicable rule keeps its own
+  // explanatory empty state; that one is worth showing.)
+  const rulesDefault = (): ChartMode =>
+    chartRules(highlightStore.rules).length > 0 ? 'rules' : 'answers';
+  // ($derived.by, not $derived: hasFirstToken is declared further down.)
+  const mode = $derived.by<ChartMode>(() =>
+    modePref === 'firsttoken' && !hasFirstToken ? rulesDefault() : (modePref ?? rulesDefault())
   );
-  let turnSel = $state('last'); // 'last' | stringified turn index
-  // What the rules match against; 'split' = response|thinking as adjacent bars.
-  let matchScope = $state<MatchScope | 'split'>('response');
-  // Folded (reduced) panels are excluded by default; a toggle brings them in.
-  let includeFolded = $state(false);
+  function setMode(m: ChartMode): void {
+    modePref = m;
+    saveView();
+    inspect = null;
+  }
   let inspect = $state<{ bar: number; key: string } | null>(null);
 
   // ── per-rule chart toggles (rules mode) ───────────────────────────
@@ -105,6 +185,7 @@
     // when the set changes, so a kept inspect selection would silently point
     // at a different bucket.
     inspect = null;
+    saveView();
   }
 
   const hasFolded = $derived(sources.some((s) => s.folded));
@@ -112,6 +193,11 @@
 
   const turnCount = $derived(Math.max(0, ...activeSources.map((s) => s.turns.length)));
   const turnIdx = $derived(turnSel === 'last' ? -1 : Number(turnSel));
+  // A restored turn index can outlive its turn (deleted, or a branch switch
+  // shortened the thread) — that would strand the chart on an empty state.
+  $effect(() => {
+    if (turnSel !== 'last' && !(Number(turnSel) < turnCount)) turnSel = 'last';
+  });
 
   /** The picked turn of one panel ('last' → its own newest turn). */
   function pickTurn(s: ChartPanelData) {
@@ -131,11 +217,11 @@
   }
 
   // ── thinking filter ───────────────────────────────────────────────
-  // Chart only the samples generated with (or without) a CoT. Gated on the
-  // picked turn actually containing both populations; when it doesn't, the
-  // control hides AND the filter is treated as 'all' — a leftover selection
-  // must not silently filter a mix-free turn.
-  let thinkFilter = $state<'all' | 'thinking' | 'no-thinking'>('all');
+  // Which population(s) of the picked turn to chart: pooled, one of them, or
+  // 'split' (a bar each — disjoint samples, so each gets its own 100%). Gated
+  // on the turn actually containing both; when it doesn't, the control hides
+  // AND the filter is treated as 'all' — a leftover selection must not
+  // silently filter a mix-free turn.
   const pickedRaw = $derived(
     activeSources.map((s) => ({ model: s.model, samples: pickTurn(s)?.samples ?? [] }))
   );
@@ -145,29 +231,15 @@
   });
 
   // Bars index-align with chartSources (so inspect can find the sample text).
-  // In split scope each panel expands to a (response, thinking) bar pair over
-  // the SAME samples array — the thinking bar only when any sample has CoT.
-  // The pair shares the model name and differs by `sub`, which the layout
-  // below renders as adjacent bars under one label.
-  const chartSources = $derived.by(() => {
-    const want = hasThinkMix ? thinkFilter : 'all';
-    const picked = pickedRaw
-      .map((s) => ({
-        model: s.model,
-        samples:
-          want === 'all'
-            ? s.samples
-            : s.samples.filter((x) => (want === 'thinking') === !!x.reasoning)
-      }))
-      .filter((s): s is ChartSource => s.samples.length > 0);
-    if (mode !== 'rules' || matchScope !== 'split') return picked;
-    return picked.flatMap((s) => {
-      const pair: ChartSource[] = [{ model: s.model, samples: s.samples, matchOn: 'response', sub: 'response' }];
-      if (s.samples.some((x) => x.reasoning))
-        pair.push({ model: s.model, samples: s.samples, matchOn: 'thinking', sub: 'thinking' });
-      return pair;
-    });
-  });
+  // Both splits (thinking filter / match scope) expand a panel into several
+  // bars sharing its model name and differing by `sub`, which the layout below
+  // renders as one group of adjacent bars under one label. See buildChartSources.
+  const chartSources = $derived(
+    buildChartSources(pickedRaw, {
+      think: hasThinkMix ? thinkFilter : 'all',
+      scopeSplit: mode === 'rules' && matchScope === 'split'
+    })
+  );
   /** Charted prompt(s), grouped — panels can diverge on what was asked. */
   const questionGroups = $derived.by(() => {
     const groups: { q: string; models: string[] }[] = [];
@@ -312,11 +384,13 @@
   function toggleFtExclude(key: string) {
     ftExcluded = ftExcluded.includes(key) ? ftExcluded.filter((k) => k !== key) : [...ftExcluded, key];
     inspect = null; // segment keys shift under exclusion
+    saveView();
   }
   function addToken(m: { t: string; tid: number }) {
     const token = displayToken(m.t);
     if (!ftAdded.some((a) => a.tid === m.tid)) ftAdded = [...ftAdded, { token, tid: m.tid }];
     ftQuery = '';
+    saveView();
   }
   function removeAdded(tid: number) {
     const gone = ftAdded.find((a) => a.tid === tid);
@@ -329,6 +403,7 @@
       ftExcluded = ftExcluded.filter((k) => k !== gone.token);
     }
     inspect = null;
+    saveView();
   }
   /** Merge two units (drag one chip onto another): fuse their tokens into one
    *  group, dropping any prior group those tokens belonged to. */
@@ -339,11 +414,13 @@
     // a fresh group is un-excluded; clear any stale member exclusions
     ftExcluded = ftExcluded.filter((k) => k !== srcKey && k !== dstKey && !merged.includes(k));
     inspect = null;
+    saveView();
   }
   function unmerge(key: string) {
     ftGroups = ftGroups.filter((g) => ftGroupKey(g) !== key);
     ftExcluded = ftExcluded.filter((k) => k !== key);
     inspect = null;
+    saveView();
   }
   // bespoke drag-onto-target (the shared lib/drag-reorder is gap-shaped, not this)
   let ftDrag = $state<string | null>(null);
@@ -358,21 +435,39 @@
   }
 
   // ── SVG layout ────────────────────────────────────────────────────
-  // Consecutive sub-labeled bars sharing a model (split's response|thinking
-  // pair) form one GROUP: adjacent bars, one model name centered under them.
+  // Consecutive sub-labeled bars of ONE PANEL (a split's bar set) form one
+  // GROUP: adjacent bars, one model name centered under them. Grouping keys off
+  // the source's `panel`, not the model label — two panels can run the same
+  // model and must not fuse. A group's n sums its DISTINCT populations (a
+  // match-scope pair re-buckets the same samples; the think split's two bars are
+  // disjoint), and when its bars disagree on n each carries its own.
   const CHART_H = 300, TOP_PAD = 10, LEFT_PAD = 45, GROUP_GAP = 60, PAIR_GAP = 8;
+  const SUB_Y = 13, SUB_LH = 11; // first sub-label baseline below the bars, then line height
   type PlacedBar = { bar: import('./chart').ChartBar; bi: number; x: number };
+  type BarGroup = { model: string; total: number; center: number; perBarN: boolean; bars: PlacedBar[] };
   const layout = $derived.by(() => {
     if (!data) return null;
-    const groups: { model: string; total: number; center: number; bars: PlacedBar[] }[] = [];
+    const groups: BarGroup[] = [];
+    const panelOf = (bi: number) => chartSources[bi]?.panel ?? -1;
     for (let bi = 0; bi < data.bars.length; bi++) {
       const bar = data.bars[bi];
       const g = groups[groups.length - 1];
-      if (g && g.model === bar.model && bar.sub && g.bars[0].bar.sub) g.bars.push({ bar, bi, x: 0 });
-      else groups.push({ model: bar.model, total: bar.total, center: 0, bars: [{ bar, bi, x: 0 }] });
+      if (g && bar.sub && g.bars[0].bar.sub && panelOf(g.bars[0].bi) === panelOf(bi))
+        g.bars.push({ bar, bi, x: 0 });
+      else groups.push({ model: bar.model, total: 0, center: 0, perBarN: false, bars: [{ bar, bi, x: 0 }] });
     }
-    const hasSub = groups.some((g) => g.bars.some((b) => b.bar.sub));
-    const bw = hasSub ? 56 : 80; // pairs get slimmer bars
+    for (const g of groups) {
+      const seen = new Set<string>();
+      for (const b of g.bars) {
+        const key = chartSources[b.bi]?.pop ?? String(b.bi);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        g.total += b.bar.total;
+      }
+      g.perBarN = g.bars.some((b) => b.bar.total !== g.bars[0].bar.total);
+    }
+    const maxBars = Math.max(1, ...groups.map((g) => g.bars.length));
+    const bw = maxBars > 2 ? 44 : maxBars > 1 ? 56 : 80; // split groups get slimmer bars
     let x = LEFT_PAD;
     for (const g of groups) {
       x += GROUP_GAP / 2;
@@ -384,9 +479,18 @@
       x += GROUP_GAP / 2;
     }
     // Sub labels sit between the bars and the model name → deeper bottom pad.
-    const bottomPad = hasSub ? 124 : 110;
-    return { groups, bw, hasSub, width: x, height: TOP_PAD + CHART_H + bottomPad };
+    const subLines = Math.max(0, ...groups.flatMap((g) => g.bars.map((b) => barSubLines(g, b.bar).length)));
+    const modelDy = subLines ? SUB_Y + subLines * SUB_LH + 3 : 14;
+    return { groups, bw, subLines, modelDy, width: x, height: TOP_PAD + CHART_H + 96 + modelDy };
   });
+  /** A bar's sub-label lines: the sub's ' · '-separated levels, plus its own n
+   *  when the group's bars cover different sample counts. */
+  function barSubLines(g: { perBarN: boolean }, bar: import('./chart').ChartBar): string[] {
+    if (!bar.sub) return [];
+    const lines = bar.sub.split(' · ');
+    if (g.perBarN) lines.push(`n=${bar.total}`);
+    return lines;
+  }
 
   // ── inspect (click a segment) ─────────────────────────────────────
   function toggleInspect(bar: number, key: string) {
@@ -427,18 +531,18 @@
   {:else}
     <div class="chart-controls">
       <div class="chart-mode" role="group" aria-label="Bucketing mode">
-        <button class="chart-mode-btn" class:active={mode === 'rules'} onclick={() => (mode = 'rules')}
+        <button class="chart-mode-btn" class:active={mode === 'rules'} onclick={() => setMode('rules')}
           data-tooltip="Bucket samples by which highlight rules match them" use:tip>highlight rules</button>
-        <button class="chart-mode-btn" class:active={mode === 'answers'} onclick={() => (mode = 'answers')}
+        <button class="chart-mode-btn" class:active={mode === 'answers'} onclick={() => setMode('answers')}
           data-tooltip="Bucket samples by exact answer text (short constrained answers)" use:tip>exact answers</button>
         <button class="chart-mode-btn" class:active={mode === 'firsttoken'} disabled={!hasFirstToken}
-          onclick={() => { mode = 'firsttoken'; inspect = null; }}
+          onclick={() => setMode('firsttoken')}
           data-tooltip={hasFirstToken
             ? "The model's probability distribution over the first generated token"
             : 'Needs token logprobs — captured on native tinker sampling only'} use:tip>first token</button>
       </div>
       {#if turnCount > 1}
-        <select class="chart-turn" bind:value={turnSel} aria-label="Charted turn">
+        <select class="chart-turn" bind:value={turnSel} onchange={saveView} aria-label="Charted turn">
           <option value="last">Latest turn</option>
           {#each Array(turnCount) as _, k (k)}
             <option value={String(k)}>{turnLabel(k)}</option>
@@ -447,33 +551,34 @@
       {/if}
       {#if mode === 'rules'}
         <div class="chart-mode" role="group" aria-label="Match scope">
-          <button class="chart-mode-btn" class:active={matchScope === 'response'} onclick={() => (matchScope = 'response')}
-            data-tooltip="Match rules against the response text only" use:tip>response</button>
-          <button class="chart-mode-btn" class:active={matchScope === 'thinking'} onclick={() => (matchScope = 'thinking')}
-            data-tooltip="Match rules against the thinking/CoT only" use:tip>thinking</button>
-          <button class="chart-mode-btn" class:active={matchScope === 'either'} onclick={() => (matchScope = 'either')}
-            data-tooltip="Match rules against thinking + response combined" use:tip>either</button>
-          <button class="chart-mode-btn" class:active={matchScope === 'split'} onclick={() => (matchScope = 'split')}
-            data-tooltip="Two adjacent bars per model — response and thinking, matched separately" use:tip>split</button>
+          {#each [['response', 'Match rules against the response text only'],
+                  ['thinking', 'Match rules against the thinking/CoT only'],
+                  ['either', 'Match rules against thinking + response combined'],
+                  ['split', 'Two adjacent bars per model — response and thinking, matched separately']] as [scope, tt] (scope)}
+            <button class="chart-mode-btn" class:active={matchScope === scope}
+              onclick={() => { matchScope = scope as typeof matchScope; saveView(); inspect = null; }}
+              data-tooltip={tt} use:tip>{scope}</button>
+          {/each}
         </div>
       {/if}
       {#if hasThinkMix}
         <select
           class="chart-think"
           bind:value={thinkFilter}
-          onchange={() => (inspect = null)}
+          onchange={() => { inspect = null; saveView(); }}
           aria-label="Thinking filter"
-          data-tooltip="This turn mixes think / no-think samples — chart one at a time"
+          data-tooltip="This turn mixes think / no-think samples — chart one, both, or split"
           use:tip
         >
           <option value="all">all samples</option>
           <option value="thinking">with thinking</option>
           <option value="no-thinking">without thinking</option>
+          <option value="split">split think / no-think</option>
         </select>
       {/if}
       {#if hasFolded}
         <label class="chart-check" data-tooltip="Folded panels are excluded from the chart by default" use:tip>
-          <input type="checkbox" bind:checked={includeFolded} /> include folded panels
+          <input type="checkbox" bind:checked={includeFolded} onchange={saveView} /> include folded panels
         </label>
       {/if}
     </div>
@@ -567,11 +672,15 @@
               {/if}
             {/each}
             {#if pb.bar.sub}
-              <text x={pb.x + layout.bw / 2} y={TOP_PAD + CHART_H + 13} text-anchor="middle"
-                fill="var(--color-text-muted)" font-size="9" font-style="italic">{pb.bar.sub}</text>
+              <text x={pb.x + layout.bw / 2} y={TOP_PAD + CHART_H + SUB_Y} text-anchor="middle"
+                fill="var(--color-text-muted)" font-size="9" font-style="italic">
+                {#each barSubLines(g, pb.bar) as line, li (li)}
+                  <tspan x={pb.x + layout.bw / 2} dy={li === 0 ? 0 : SUB_LH}>{line}</tspan>
+                {/each}
+              </text>
             {/if}
           {/each}
-          <text x={g.center} y={TOP_PAD + CHART_H + (layout.hasSub ? 28 : 14)} text-anchor="middle" fill="var(--color-text)" font-size="11" font-weight="500">
+          <text x={g.center} y={TOP_PAD + CHART_H + layout.modelDy} text-anchor="middle" fill="var(--color-text)" font-size="11" font-weight="500">
             {#each wrapLabel(g.model) as line, li (li)}
               <tspan x={g.center} dy={li === 0 ? 0 : 13}>{line}</tspan>
             {/each}
@@ -628,7 +737,7 @@
           <label class="ft-renorm"
             data-tooltip="Drop the grey rest and rescale the shown tokens to 100%"
             use:tip>
-            <input type="checkbox" bind:checked={ftRenorm} />
+            <input type="checkbox" bind:checked={ftRenorm} onchange={saveView} />
             <span>renormalize</span>
           </label>
         </div>

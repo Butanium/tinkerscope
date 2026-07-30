@@ -3,7 +3,7 @@
 //   node web/src/lib/chart.test.ts
 // (no dep added; respects the supply-chain age gate). Exit code != 0 on failure.
 
-import { chartByAnswers, chartByFirstToken, chartByRules, chartRules, contrastText, FT_REST, ftGroupKey, wrapLabel } from './chart.ts';
+import { buildChartSources, chartByAnswers, chartByFirstToken, chartByRules, chartRules, contrastText, FT_REST, ftGroupKey, wrapLabel } from './chart.ts';
 import { ruleMatches } from './highlight-match.ts';
 import type { HighlightRule, TokenLogprob } from './types.ts';
 
@@ -414,6 +414,61 @@ ok('answers: no sources → null', chartByAnswers([]) === null);
   ok('merge+renorm: group .8/.9≈88.9%', Math.abs(mrn.data.bars[0].segments.find((s) => s.key === GKEY)!.pct - (0.8 / 0.9) * 100) < 1e-6);
   ok("merge+renorm: '?' .1/.9≈11.1%", Math.abs(mrn.data.bars[0].segments.find((s) => s.key === '?')!.pct - (0.1 / 0.9) * 100) < 1e-6);
   ok('merge+renorm: bar sums to 100%', Math.abs(mrn.data.bars[0].segments.reduce((s, x) => s + x.pct, 0) - 100) < 1e-6);
+}
+
+// ── buildChartSources (the two splits) ────────────────────────────────
+{
+  // one panel mixing 2 CoT + 3 no-CoT samples, one panel all no-CoT
+  const picked = [
+    {
+      model: 'a',
+      samples: [
+        { content: 'red', reasoning: 'hmm' },
+        { content: 'yellow', reasoning: 'hmm' },
+        { content: 'red' },
+        { content: 'yellow' },
+        { content: 'nothing' }
+      ]
+    },
+    { model: 'b', samples: [{ content: 'red' }, { content: 'blue' }] }
+  ];
+  const plain = buildChartSources(picked, { think: 'all', scopeSplit: false });
+  eq('sources: no split → one bar per panel', plain.length, 2);
+  ok('sources: no split → no sub labels', plain.every((s) => s.sub === undefined));
+  eq('sources: panel index tagged', plain.map((s) => s.panel), [0, 1]);
+
+  const one = buildChartSources(picked, { think: 'thinking', scopeSplit: false });
+  eq('sources: think filter keeps CoT samples only', one.map((s) => s.samples.length), [2]);
+  eq('sources: filtered-empty panel drops out', one.map((s) => s.model), ['a']);
+  eq(
+    'sources: no-thinking filter is the complement',
+    buildChartSources(picked, { think: 'no-thinking', scopeSplit: false }).map((s) => s.samples.length),
+    [3, 2]
+  );
+
+  const split = buildChartSources(picked, { think: 'split', scopeSplit: false });
+  eq('sources: think split → 2 bars for the mixed panel, 1 for the pure one', split.length, 3);
+  eq('sources: think split subs', split.map((s) => s.sub), ['think', 'no-think', 'no-think']);
+  eq('sources: think split populations are disjoint', split.map((s) => s.samples.length), [2, 3, 2]);
+  eq('sources: distinct pop per split bar', new Set(split.map((s) => s.pop)).size, 3);
+  ok('sources: think split keeps panel identity', split[0].panel === 0 && split[2].panel === 1);
+
+  const scoped = buildChartSources(picked, { think: 'all', scopeSplit: true });
+  eq('sources: scope split subs', scoped.map((s) => s.sub), ['response', 'thinking', 'response']);
+  ok('sources: scope split pair shares one population', scoped[0].pop === scoped[1].pop);
+  ok('sources: no-CoT panel gets no thinking bar', scoped[2].model === 'b' && scoped.length === 3);
+
+  const both = buildChartSources(picked, { think: 'split', scopeSplit: true });
+  eq(
+    'sources: both splits compose (no vacuous no-think thinking bar)',
+    both.map((s) => `${s.model}/${s.sub}`),
+    ['a/think · response', 'a/think · thinking', 'a/no-think · response', 'b/no-think · response']
+  );
+  eq('sources: both splits → 2 distinct pops for panel a', new Set(both.slice(0, 3).map((s) => s.pop)).size, 2);
+  // the sub carries through the bucketers, ' · '-separated for the modal's lines
+  const bars = chartByRules(both, [RED, YEL])!.bars;
+  eq('sources: composed subs reach the bars', bars.map((b) => b.sub), both.map((s) => s.sub));
+  eq('sources: split bar totals are the population sizes', bars.map((b) => b.total), [2, 2, 3, 2]);
 }
 
 // ── label helpers ─────────────────────────────────────────────────────

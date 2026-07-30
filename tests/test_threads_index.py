@@ -171,7 +171,10 @@ def test_ws_json_respects_thread_and_panel(monkeypatch):
 def test_print_json_never_truncates():
     """A `--json` document is parsed, not read: a length cap would cut it
     mid-token and hand the caller syntactically invalid JSON."""
-    import io, json, contextlib
+    import contextlib
+    import io
+    import json
+
     big = {"content": "x" * 60_000}
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):

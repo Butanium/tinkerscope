@@ -85,6 +85,17 @@ prompt with a large *Samples*, and compare the charts (the chart shows every
 panel). For a single-turn difference, the row toolbar's regenerate with Ctrl held
 regenerates in *all* panels at once so they stay in lockstep.
 
+**"Does thinking change what it answers?"** Draw N samples with thinking on, then
+regenerate N more with it off (or vice versa) — the turn now holds both
+populations. The chart notices and offers a filter next to the mode buttons:
+*all samples* pools them, *with / without thinking* charts one, and **split think
+/ no-think** puts a bar for each side by side under the model name, each
+percentaged over its own samples and labeled with its own n. Rules mode has a
+second, independent split — the **split** *match scope*, which charts one
+population as a response bar and a thinking bar over the SAME samples (does the
+behavior show up in the CoT but not the answer?). Both at once gives up to four
+bars per model.
+
 **"Why did it pick that word?"** Turn on **Token probs** in the sidebar. Assistant
 replies render as their raw token stream, each token tinted by surprisal; hover a
 token for its probability and the top-5 alternatives it passed over. It's
@@ -106,6 +117,13 @@ mode, *first token*, plots the model's own probability distribution at position
 type in the search box to surface a token that's buried in the tail. A
 *renormalize* checkbox rescales the shown tokens to 100% when you only care about
 their relative sizes.
+
+The chart remembers how you left it. Mode, match scope and thinking filter follow
+you everywhere (they're how you like to look at a distribution); the charted turn,
+the excluded rule chips and the first-token exclusions / merges / added tokens are
+remembered *per workspace*, since they only mean anything for that prompt. Both
+survive closing the modal and reloading the page — it's browser-local, so it
+doesn't travel to another machine or into a share pack.
 
 **"Make it say X and continue from there."** Two ways. The **prefill** field in
 the composer is text the assistant is treated as having already started; the

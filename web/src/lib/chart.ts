@@ -57,12 +57,28 @@ export type ChartSample = {
 /** Which text of a sample the rules match against. */
 export type MatchScope = 'response' | 'thinking' | 'either';
 
+/** Which sample population(s) to chart when a turn mixes CoT and no-CoT
+ *  samples: one of them, both pooled, or 'split' = a bar each. */
+export type ThinkFilter = 'all' | 'thinking' | 'no-thinking' | 'split';
+
 /** One bar's worth of raw input: a model label + its samples for the charted
  *  turn. `matchOn` (rules mode) overrides the call-level scope for this bar.
- *  `sub` is a per-bar sub-label; consecutive bars sharing a model AND carrying
- *  subs render as one named group of adjacent bars (the split view's
- *  response|thinking pair under a single model name). */
-export type ChartSource = { model: string; samples: ChartSample[]; matchOn?: MatchScope; sub?: string };
+ *  `sub` is a per-bar sub-label; consecutive bars of one PANEL carrying subs
+ *  render as one named group of adjacent bars (the split views' bar sets under
+ *  a single model name) — ' · ' separates the sub's levels, one text line each.
+ *  `panel` / `pop` are the group identity: `panel` is which panel the bar came
+ *  from (two panels can share a model label — they must stay separate groups),
+ *  `pop` which sample POPULATION of it (a matchOn pair shares one population;
+ *  the think/no-think split makes two disjoint ones, so a group's n is summed
+ *  over distinct pops, not over bars). */
+export type ChartSource = {
+  model: string;
+  samples: ChartSample[];
+  matchOn?: MatchScope;
+  sub?: string;
+  panel?: number;
+  pop?: string;
+};
 
 /** One assistant turn of one panel (the modal's turn picker iterates these). */
 export type ChartTurn = { question: string; samples: ChartSample[]; streaming?: boolean };
@@ -101,6 +117,48 @@ function matchText(s: ChartSample, scope: MatchScope): string {
   if (scope === 'response') return s.content;
   if (scope === 'thinking') return s.reasoning ?? '';
   return s.reasoning ? s.reasoning + '\n' + s.content : s.content;
+}
+
+/**
+ * Expand the picked turn's per-panel samples into the sources the chart draws,
+ * applying the two INDEPENDENT splits the modal offers (they compose):
+ *
+ *   `think`      which sample population(s): 'all' pools them, 'thinking' /
+ *                'no-thinking' keeps one, 'split' emits a bar for each — two
+ *                DISJOINT populations, each bucketed (and percentaged) on its
+ *                own, which is the point: the two often answer differently.
+ *   `scopeSplit` rules mode's "split" match scope: a response|thinking bar pair
+ *                over the SAME samples, matched against different text.
+ *
+ * Empty populations drop out, so a panel whose samples are all one kind yields
+ * one bar either way, and a no-CoT population never gets a (vacuous) thinking
+ * bar. With neither split on, sources carry no `sub` — one plain bar per panel.
+ */
+export function buildChartSources(
+  picked: { model: string; samples: ChartSample[] }[],
+  opts: { think: ThinkFilter; scopeSplit: boolean }
+): ChartSource[] {
+  const pops: ChartSource[] = picked
+    .flatMap((s, panel): ChartSource[] => {
+      if (opts.think === 'split')
+        return [
+          { model: s.model, samples: s.samples.filter((x) => !!x.reasoning), panel, pop: `${panel}:think`, sub: 'think' },
+          { model: s.model, samples: s.samples.filter((x) => !x.reasoning), panel, pop: `${panel}:no-think`, sub: 'no-think' }
+        ];
+      const samples =
+        opts.think === 'all'
+          ? s.samples
+          : s.samples.filter((x) => (opts.think === 'thinking') === !!x.reasoning);
+      return [{ model: s.model, samples, panel, pop: `${panel}` }];
+    })
+    .filter((s) => s.samples.length > 0);
+  if (!opts.scopeSplit) return pops;
+  return pops.flatMap((s): ChartSource[] => {
+    const tag = (m: string) => (s.sub ? `${s.sub} · ${m}` : m);
+    const out: ChartSource[] = [{ ...s, matchOn: 'response', sub: tag('response') }];
+    if (s.samples.some((x) => x.reasoning)) out.push({ ...s, matchOn: 'thinking', sub: tag('thinking') });
+    return out;
+  });
 }
 
 /** The chart's own rule filter: enabled rules whose scope admits assistant turns. */
