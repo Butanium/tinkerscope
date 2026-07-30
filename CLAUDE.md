@@ -339,6 +339,16 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     (global picks + per-workspace tweaks — see above), so a reopen or a reload
     lands you back where you were; the live `mode` falls back off a persisted
     `firsttoken` when nothing carries logprobs, without losing the choice.
+    ⚠️ **The inspector must stay isolated from the plot's re-derivation**: `data`
+    is rebuilt on EVERY streamed sample and bars come and go mid-batch (the
+    streaming pseudo-turn +page appends then retires at fold; a panel gaining its
+    first sample; the think split's second bar). So the inspected bar is
+    addressed by a stable ref (`panel` id + `pop` + `sub`, resolved to an index at
+    render time) — an index silently re-points at a DIFFERENT bucket — and the
+    per-sample thinking folds live in `thinkOpen` state, not in the `<details>`
+    DOM, which a recreate would reset. Live smoke (real free-router sampling):
+    `tests/small-smokes/browser_chart_live_inspect.py` — verified to FAIL on the
+    pre-fix build and pass after, 2026-07-29.
     Deterministic smokes (seeded tree, no sampling):
     `tests/small-smokes/browser_chart_rules.py` (rules) +
     `browser_chart_firsttoken_ops.py` (exclude / add / merge).

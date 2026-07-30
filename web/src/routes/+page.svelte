@@ -1250,8 +1250,10 @@
           .map((x) => ({ content: x.content ?? '', reasoning: x.reasoning, first: x.token_logprobs?.[0] }));
         if (streamed.length > 0) turns.push({ question: lastQ, samples: streamed, streaming: true });
       }
+      // `panel` (the id, not a position) is what ChartModal addresses bars by —
+      // a panel gaining its first sample inserts a bar and shifts every index.
       if (turns.length > 0)
-        out.push({ model: panelLabel(p), turns, folded: ws.reducedPanels.has(p.panel) });
+        out.push({ panel: p.panel, model: panelLabel(p), turns, folded: ws.reducedPanels.has(p.panel) });
     }
     return out;
   }

@@ -435,7 +435,7 @@ ok('answers: no sources → null', chartByAnswers([]) === null);
   const plain = buildChartSources(picked, { think: 'all', scopeSplit: false });
   eq('sources: no split → one bar per panel', plain.length, 2);
   ok('sources: no split → no sub labels', plain.every((s) => s.sub === undefined));
-  eq('sources: panel index tagged', plain.map((s) => s.panel), [0, 1]);
+  eq('sources: panel tagged (positional fallback with no ids)', plain.map((s) => s.panel), ['0', '1']);
 
   const one = buildChartSources(picked, { think: 'thinking', scopeSplit: false });
   eq('sources: think filter keeps CoT samples only', one.map((s) => s.samples.length), [2]);
@@ -451,7 +451,19 @@ ok('answers: no sources → null', chartByAnswers([]) === null);
   eq('sources: think split subs', split.map((s) => s.sub), ['think', 'no-think', 'no-think']);
   eq('sources: think split populations are disjoint', split.map((s) => s.samples.length), [2, 3, 2]);
   eq('sources: distinct pop per split bar', new Set(split.map((s) => s.pop)).size, 3);
-  ok('sources: think split keeps panel identity', split[0].panel === 0 && split[2].panel === 1);
+  ok('sources: think split keeps panel identity', split[0].panel === '0' && split[2].panel === '1');
+  // a caller that HAS panel ids (the modal) gets them through verbatim — bar
+  // addressing depends on them being stable across re-derivations
+  const withIds = buildChartSources(
+    picked.map((s, i) => ({ ...s, panel: i === 0 ? 'primary' : 'compare' })),
+    { think: 'split', scopeSplit: false }
+  );
+  eq('sources: panel ids passed through', withIds.map((s) => s.panel), ['primary', 'primary', 'compare']);
+  eq('sources: pops are namespaced by panel id', withIds.map((s) => s.pop), [
+    'primary:think',
+    'primary:no-think',
+    'compare:no-think'
+  ]);
 
   const scoped = buildChartSources(picked, { think: 'all', scopeSplit: true });
   eq('sources: scope split subs', scoped.map((s) => s.sub), ['response', 'thinking', 'response']);

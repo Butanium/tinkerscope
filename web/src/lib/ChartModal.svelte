@@ -35,7 +35,11 @@
     panels can diverge (each shows which models it belongs to).
   - click a segment → inspect its samples below the chart, rendered through the
     normal highlight pipeline so the matched patterns are painted (the thinking
-    fold auto-opens when the scope involves thinking).
+    fold auto-opens when the scope involves thinking, and each sample's fold is
+    then the reader's to set). The inspector is deliberately ISOLATED from the
+    plot's churn: it addresses its bar by a stable ref and holds the folds in
+    state, because `data.bars` is rebuilt on every streamed sample — see the
+    inspect section below.
 
   The whole view is PERSISTED (`$lib/chart-view` — localStorage): the three
   how-you-look-at-it picks (mode / match scope / thinking filter) globally, and
@@ -79,6 +83,15 @@
 
   /** The id whose view is currently loaded — guards the reload effect. */
   let viewOf = $state<string | null | undefined>(undefined);
+
+  // The READER's position: which segment is being inspected (by stable bar ref,
+  // never an index — see barRef) and which samples' thinking folds the user
+  // opened. Module-scoped like the rest, so closing and reopening the modal
+  // doesn't drop what you were reading; NOT persisted to disk — it's a position
+  // within a session, not a preference. A ref that no longer resolves simply
+  // yields no inspector.
+  let inspect = $state<{ ref: string; key: string } | null>(null);
+  let thinkOpen = $state<Record<string, boolean>>({});
 
   function applyView(v: ChartView): void {
     modePref = v.mode;
@@ -124,6 +137,7 @@
     wrapLabel,
     type AddedToken,
     type ChartPanelData,
+    type ChartSample,
     type ChartSource,
     type MatchScope,
     type ThinkFilter
@@ -148,6 +162,7 @@
     viewOf = id;
     applyView(loadChartView(id));
     inspect = null;
+    thinkOpen = {};
   });
   function saveView(): void {
     saveChartView(ws.activeId, currentView());
@@ -170,7 +185,6 @@
     saveView();
     inspect = null;
   }
-  let inspect = $state<{ bar: number; key: string } | null>(null);
 
   // ── per-rule chart toggles (rules mode) ───────────────────────────
   // The rules that could bucket assistant samples — each gets an on/off chip.
@@ -223,7 +237,11 @@
   // AND the filter is treated as 'all' — a leftover selection must not
   // silently filter a mix-free turn.
   const pickedRaw = $derived(
-    activeSources.map((s) => ({ model: s.model, samples: pickTurn(s)?.samples ?? [] }))
+    activeSources.map((s) => ({
+      panel: s.panel,
+      model: s.model,
+      samples: pickTurn(s)?.samples ?? []
+    }))
   );
   const hasThinkMix = $derived.by(() => {
     const all = pickedRaw.flatMap((s) => s.samples);
@@ -493,14 +511,28 @@
   }
 
   // ── inspect (click a segment) ─────────────────────────────────────
-  function toggleInspect(bar: number, key: string) {
-    inspect = inspect && inspect.bar === bar && inspect.key === key ? null : { bar, key };
+  // The inspected bar is addressed by a STABLE identity, never by its index in
+  // `data.bars`: the bar list is re-derived on every streamed sample, and bars
+  // come and go mid-batch (a panel gains its first sample; the think split's
+  // no-think bar appears; a fold retires the streaming pseudo-turn). An index
+  // then silently re-points the inspector at a different bucket, or misses and
+  // takes the whole panel — with it, the reader's scroll and folds.
+  const barRef = (s: ChartSource | undefined): string =>
+    s ? `${s.panel ?? s.model}|${s.pop ?? ''}|${s.sub ?? ''}` : '';
+  // (s.panel is the WORKSPACE panel id, threaded through ChartPanelData — a
+  // positional index here would shift with the bar list and defeat the point.)
+  function toggleInspect(bi: number, key: string) {
+    const ref = barRef(chartSources[bi]);
+    inspect = inspect && inspect.ref === ref && inspect.key === key ? null : { ref, key };
   }
+  const isInspected = (bi: number, key: string) =>
+    inspect?.key === key && inspect.ref === barRef(chartSources[bi]);
   const inspected = $derived.by(() => {
     if (!inspect || !data) return null;
-    const bar = data.bars[inspect.bar];
+    const bi = chartSources.findIndex((s) => barRef(s) === inspect!.ref);
+    const bar = data.bars[bi];
     const seg = bar?.segments.find((s) => s.key === inspect!.key);
-    const src = chartSources[inspect.bar];
+    const src = chartSources[bi];
     if (!bar || !seg || !src || seg.count === 0) return null;
     // The scope this bar was matched under — the inspector auto-opens the
     // thinking fold when the match could live there.
@@ -509,6 +541,18 @@
       : (src.matchOn ?? (matchScope === 'split' ? 'response' : matchScope));
     return { bar, seg, scope, samples: seg.sampleIdx.map((i) => src.samples[i]).filter(Boolean) };
   });
+
+  // The inspector's per-sample thinking folds are EXPLICIT state, not DOM state.
+  // A live batch re-renders this list constantly, and any moment the bucket is
+  // briefly unresolvable destroys the rendered <details> — DOM-held open state
+  // would silently snap back to the default under the reader. Keyed by node id
+  // where there is one (a streaming sample only gets one at fold time, so its
+  // override is reset then — the alternative is keying on content that is still
+  // being written). `scope` supplies the default: opened when the match could
+  // live in the CoT.
+  const sampleKey = (s: ChartSample, i: number) => s.nodeId ?? `#${i}`;
+  const foldOpen = (s: ChartSample, i: number, scope: MatchScope) =>
+    thinkOpen[sampleKey(s, i)] ?? scope !== 'response';
 
   /** Legend/inspect swatch background — stripes for multi-rule combos. */
   function swatchStyle(colors: string[]): string {
@@ -658,7 +702,7 @@
                   x={pb.x} {y} width={layout.bw} height={h} rx="1"
                   fill={segFill(seg.colors, li)}
                   class="chart-seg"
-                  class:selected={inspect?.bar === pb.bi && inspect?.key === seg.key}
+                  class:selected={isInspected(pb.bi, seg.key)}
                   role="button" tabindex="0" aria-label="{seg.label}: {seg.count} of {pb.bar.total}"
                   data-tooltip={segTooltip(seg, pb.bar.total)}
                   use:tip
@@ -781,10 +825,14 @@
             <button class="chart-inspect-close" onclick={() => (inspect = null)} aria-label="Close inspector">×</button>
           </div>
           <div class="chart-inspect-list">
-            {#each inspected.samples as s, i (i)}
+            {#each inspected.samples as s, i (sampleKey(s, i))}
               <div class="chart-inspect-sample">
                 {#if s.reasoning}
-                  <details class="chart-inspect-think" open={inspected.scope !== 'response'}>
+                  <details
+                    class="chart-inspect-think"
+                    open={foldOpen(s, i, inspected.scope)}
+                    ontoggle={(e) => (thinkOpen[sampleKey(s, i)] = (e.currentTarget as HTMLDetailsElement).open)}
+                  >
                     <summary>thinking</summary>
                     <!-- eslint-disable-next-line svelte/no-at-html-tags -->
                     {@html renderContent(s.reasoning, 'assistant')}

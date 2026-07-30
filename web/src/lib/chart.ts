@@ -66,26 +66,31 @@ export type ThinkFilter = 'all' | 'thinking' | 'no-thinking' | 'split';
  *  `sub` is a per-bar sub-label; consecutive bars of one PANEL carrying subs
  *  render as one named group of adjacent bars (the split views' bar sets under
  *  a single model name) — ' · ' separates the sub's levels, one text line each.
- *  `panel` / `pop` are the group identity: `panel` is which panel the bar came
- *  from (two panels can share a model label — they must stay separate groups),
- *  `pop` which sample POPULATION of it (a matchOn pair shares one population;
- *  the think/no-think split makes two disjoint ones, so a group's n is summed
- *  over distinct pops, not over bars). */
+ *  `panel` / `pop` are the group + ADDRESSING identity: `panel` is the workspace
+ *  panel the bar came from (two panels can share a model label — they must stay
+ *  separate groups), `pop` which sample POPULATION of it (a matchOn pair shares
+ *  one population; the think/no-think split makes two disjoint ones, so a
+ *  group's n is summed over distinct pops, not over bars). Both must be STABLE
+ *  across re-derivations — the modal's inspector addresses a bar by them,
+ *  because bar POSITION shifts whenever a panel gains or loses its first sample
+ *  mid-batch. Hence the panel id, never an index into the current source list. */
 export type ChartSource = {
   model: string;
   samples: ChartSample[];
   matchOn?: MatchScope;
   sub?: string;
-  panel?: number;
+  panel?: string;
   pop?: string;
 };
 
 /** One assistant turn of one panel (the modal's turn picker iterates these). */
 export type ChartTurn = { question: string; samples: ChartSample[]; streaming?: boolean };
 
-/** Everything the chart modal needs from one panel. Folded (reduced) panels
- *  are tagged so the modal can exclude them by default. */
-export type ChartPanelData = { model: string; turns: ChartTurn[]; folded?: boolean };
+/** Everything the chart modal needs from one panel. `panel` is the workspace
+ *  panel id — the STABLE handle the modal's bar addressing rides on (a panel's
+ *  position in this list changes as panels gain / lose samples). Folded
+ *  (reduced) panels are tagged so the modal can exclude them by default. */
+export type ChartPanelData = { panel?: string; model: string; turns: ChartTurn[]; folded?: boolean };
 
 export type ChartSegment = {
   /** Stable bucket id (rule-position combo like '0+2', '' for no-match; the
@@ -135,11 +140,13 @@ function matchText(s: ChartSample, scope: MatchScope): string {
  * bar. With neither split on, sources carry no `sub` — one plain bar per panel.
  */
 export function buildChartSources(
-  picked: { model: string; samples: ChartSample[] }[],
+  picked: { panel?: string; model: string; samples: ChartSample[] }[],
   opts: { think: ThinkFilter; scopeSplit: boolean }
 ): ChartSource[] {
   const pops: ChartSource[] = picked
-    .flatMap((s, panel): ChartSource[] => {
+    .flatMap((s, i): ChartSource[] => {
+      // Positional fallback only for callers with no panel ids (tests).
+      const panel = s.panel ?? String(i);
       if (opts.think === 'split')
         return [
           { model: s.model, samples: s.samples.filter((x) => !!x.reasoning), panel, pop: `${panel}:think`, sub: 'think' },
