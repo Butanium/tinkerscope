@@ -58,6 +58,16 @@ and in this file's reference section; HANDOFF.md itself is retired.
   slab over the UI and nobody reads it twice. Mechanism / modifier tables /
   caveats go in the `?` modal instead. Full rule + the `use:tip`-over-`title`
   part: `lib/tooltip.svelte.ts` and the frontend map below.
+- **Adding a scope/filter? Enumerate the INSTANCE-WIDE stores it must narrow.**
+  Most state here is per-scan-root and global to it — pins, prefs (incl. the
+  mirrored `chart_view`), highlights, the OpenRouter list, `pack_models` — and none
+  of them knows about a workspace. So a feature that filters by workspace filters
+  the workspaces and silently carries everything else along. That shipped once
+  (`site export --workspace` published pins, with their local `dataset_path`, and
+  chart state belonging to the workspaces it had just excluded — review caught it by
+  SEEDING a state dir and probing, not by reading). Pins in particular can't be
+  scoped at all: they carry no workspace id. Same drill for a new export/share path:
+  seed something private, run the curated flow, grep the output for it.
 - **Committing — no need to ask first.** Commit straight to `main` whenever work
   is at a clean, verified point; show the diff summary of what landed, don't gate
   on approval (Clément's standing preference for this repo — overrides the global
