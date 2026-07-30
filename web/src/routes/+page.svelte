@@ -1810,19 +1810,26 @@
                   />
                 {/if}
               </div>
-              <!-- Right next to the model NAME, because the sampler path is what you
-                   paste into your own script and the name is how you found the panel.
-                   Only `ckpt:` panels have one: a discovered run is addressed by a
-                   scan-dir-relative id that means nothing on another machine, and a
-                   base model is a name, not a path. -->
-              {#if isCkpt && sp}
+              <!-- Right next to the model NAME: the name is how you found the panel,
+                   this is the string you paste into your own script. A checkpoint gives
+                   its `tinker://…/sampler_weights/…` path, a base model its model id —
+                   different strings, same need, and covering both matters because a
+                   published workspace is often all base models (the CoT-prefilling one
+                   is), where a checkpoint-only button would look simply absent.
+                   NOT offered for a discovered run (its id is scan-dir-relative and
+                   means nothing on another machine) nor for OpenRouter (whose id is
+                   already shown in full on the line below). -->
+              {#if (isCkpt && sp) || (isBase && baseM)}
+                {@const copyable = (isCkpt ? sp : baseM) as string}
                 <button
                   class="btn-copy-sp"
                   class:copied={copiedCkptPanel === p.panel}
-                  data-tooltip="Copy this checkpoint's tinker sampler path"
-                  aria-label="Copy sampler path"
+                  data-tooltip={isCkpt
+                    ? "Copy this checkpoint's tinker sampler path"
+                    : "Copy this base model's id"}
+                  aria-label={isCkpt ? 'Copy sampler path' : 'Copy base model id'}
                   use:tip
-                  onclick={() => copySamplerPath(p.panel, sp)}
+                  onclick={() => copySamplerPath(p.panel, copyable)}
                 >
                   <Icon name={copiedCkptPanel === p.panel ? 'check' : 'copy'} size={12} />
                 </button>

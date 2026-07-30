@@ -291,10 +291,16 @@ With **no** URL known the panel says the command starts an *empty* tinkerscope a
 reproduce the page, rather than printing something that looks like it should work. That
 asymmetry is what `browser_open_locally.py` pins, by exporting the same site twice.
 
-Each `ckpt:` panel also carries a **copy-the-sampler-path** button beside its name. It
-replaced a `· loose sampler` suffix, which was jargon for "no run dir behind this" — true
-of every checkpoint in a pack or a published site, so it told a reader nothing while
-duplicating the model name on a second line.
+Each panel also carries a **copy-its-identity** button beside the model name: a `ckpt:`
+panel gives its `tinker://…/sampler_weights/…` path, a `base:` panel its model id — the
+string you'd paste into your own script. Covering base models matters because a published
+workspace is often *entirely* base models, where a checkpoint-only button would look
+absent rather than inapplicable (caught on the live deploy, not by the smoke, whose
+fixture had only a checkpoint). Not offered for a discovered run — its id is
+scan-dir-relative and means nothing elsewhere — nor for OpenRouter, whose id is already
+shown in full below. It replaced a `· loose sampler` suffix: jargon for "no run dir behind
+this", true of every checkpoint in a pack or a published site, and it duplicated the model
+name on a second line.
 
 ### Trust
 

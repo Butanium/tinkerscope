@@ -397,8 +397,8 @@ read-only.
 Two things make a published site a dead end without them, so they're built in: the
 **read-only badge is a button** that hands the reader the exact command to run this
 locally (pass `--pack-url` at export time, or it can only offer the generic install and
-says so), and every checkpoint has a **copy button beside its name** for its
-`tinker://…/sampler_weights/…` path.
+says so), and every model has a **copy button beside its name** — a checkpoint's
+`tinker://…/sampler_weights/…` path, or a base model's id.
 
 To make a pack that carries the token inspector, export it with logprobs — and give the
 path a `.gz`, because the uncompressed form is past GitHub's 100 MB file limit:

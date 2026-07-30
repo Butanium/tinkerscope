@@ -35,6 +35,7 @@ from pathlib import Path
 REPO = Path(os.environ.get("TSCOPE_APP_DIR") or Path(__file__).resolve().parents[2])
 
 SAMPLER = "tinker://smoke-service/smoke-run/sampler_weights/000123"
+BASE_MODEL = "deepseek-ai/DeepSeek-V3.1"
 PACK_URL = "https://example.invalid/packs/demo.yaml.gz"
 
 
@@ -62,12 +63,20 @@ def _seed_state(state_home: Path, scan_root: Path) -> None:
         name="open locally smoke",
         system_prompt=None,
         system_enabled=None,
-        trees={"primary": {"nodes": nodes, "rootChildren": ["n0"], "selected": {}}},
-        # A bare ckpt: panel — the case that used to read "loose sampler".
-        panels=[{"id": "primary", "run_id": f"ckpt:{SAMPLER}", "checkpoint": None}],
+        trees={
+            "primary": {"nodes": nodes, "rootChildren": ["n0"], "selected": {}},
+            "compare": {"nodes": {}, "rootChildren": [], "selected": {}},
+        },
+        # A ckpt: panel (the case that used to read "loose sampler") AND a base:
+        # one — a published workspace is often ALL base models, so a ckpt-only
+        # fixture would pass while the button rendered nowhere on the real site.
+        panels=[
+            {"id": "primary", "run_id": f"ckpt:{SAMPLER}", "checkpoint": None},
+            {"id": "compare", "run_id": f"base:{BASE_MODEL}", "checkpoint": None},
+        ],
         reduced_panels=[],
-        send_targets=["primary"],
-        seen_panels=["primary"],
+        send_targets=["primary", "compare"],
+        seen_panels=["primary", "compare"],
     )
 
 
@@ -123,12 +132,17 @@ def _drive(base: str, expect_pack_url: str | None, check) -> None:
             f"[{tag}] the checkpoint name appears ONCE in the sidebar, not duplicated ({label!r})",
         )
         btn = page.locator(".model-slot-row .btn-copy-sp")
-        check(btn.count() == 1, f"[{tag}] a copy button sits beside the checkpoint name")
+        check(btn.count() == 2, f"[{tag}] BOTH the checkpoint and the base model get one ({btn.count()})")
 
-        btn.first.click()
+        btn.nth(0).click()
         page.wait_for_timeout(400)
         got = page.evaluate("() => navigator.clipboard.readText()")
-        check(got == SAMPLER, f"[{tag}] it copied the sampler path (got {got!r})")
+        check(got == SAMPLER, f"[{tag}] the checkpoint copies its sampler path (got {got!r})")
+
+        btn.nth(1).click()
+        page.wait_for_timeout(400)
+        got = page.evaluate("() => navigator.clipboard.readText()")
+        check(got == BASE_MODEL, f"[{tag}] the base model copies its id (got {got!r})")
 
         # 2. the read-only badge opens the "open locally" panel
         page.locator('[data-testid="readonly-badge"]').click()
