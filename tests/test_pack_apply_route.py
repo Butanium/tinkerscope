@@ -176,6 +176,14 @@ def test_bad_source_and_bad_mode_report_clearly(client, tmp_path):
     assert r.status_code == 422
 
 
+def test_unsupported_scheme_says_so(client):
+    """`file:///p.yaml` used to fall through to Path() and report 'pack not found:
+    file:///p.yaml' — which reads as a missing file rather than a wrong scheme."""
+    r = client.post("/api/pack/apply", json={"source": "file:///tmp/p.yaml"})
+    assert r.status_code == 400
+    assert "scheme" in r.json()["detail"]
+
+
 def test_preview_and_apply_agree_on_ids(client, tmp_path):
     """The browser prompts from the PREVIEW's ids and then opens what apply
     returns; a mismatch would install one thing and open another."""

@@ -120,8 +120,11 @@ synchronous at module init (`lib/static-mode.ts`) because `lib/api.ts` must pick
 transport before any consumer touches it — an async probe would race that. A live
 instance never defines the global, so the cost there is zero.
 
-Writes go to localStorage, namespaced per site (`tscope-static:<site>:…`) because one
-`github.io` origin hosts many. **Baked workspaces are immutable**: a write targeting
+Writes go to localStorage, namespaced per site by **slug + URL path**
+(`tscope-static:<site>@<path>:…`). The path matters: one `github.io` origin hosts many
+exports, and `<site>` is only a slug of the title — two sites both titled "demo" would
+otherwise share an overlay, so a visitor's installs and edits on one would surface in
+the other. Two sites can't occupy the same path, so the path disambiguates for free. **Baked workspaces are immutable**: a write targeting
 one is accepted and dropped, so an incidental layout normalization can't permanently
 shadow the published content with something worse. Workspaces the visitor *installs*
 live in the overlay and do persist.

@@ -56,7 +56,14 @@ export function dataUrl(rel: string): string {
   return new URL(rel, DATA_ROOT).href;
 }
 
-const PREFIX = `tscope-static:${MANIFEST?.site ?? 'default'}:`;
+// Namespaced by the site's own PATH, not just its title. `site` is a slug of the
+// title, and one origin hosts many exports — two both called "demo" under
+// user.github.io would otherwise share an overlay, so a visitor's installs and edits
+// on one would surface in the other. The path is distinct by construction (two sites
+// can't occupy the same URL), and it costs nothing to include.
+const SITE_PATH =
+  MANIFEST && typeof document !== 'undefined' ? new URL('.', document.baseURI).pathname : '/';
+const PREFIX = `tscope-static:${MANIFEST?.site ?? 'default'}@${SITE_PATH}:`;
 
 // localStorage is a system boundary: it throws on quota exhaustion and in some
 // privacy modes it throws on read. The overlay is best-effort by design (a static

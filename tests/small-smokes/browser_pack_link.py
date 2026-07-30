@@ -109,7 +109,24 @@ def main() -> int:
             page.locator(".pack-actions .pack-btn", has_text="Replace").first.click()
             page.wait_for_selector(f".ws-picker[data-ws-id='{SECOND}']", timeout=25000)
             check(True, "&open= selected the named workspace")
+            # The workspace opens BEFORE the URL rewrite lands (ws.load then goto), so
+            # asserting on page.url straight after the selector is a race — it passed
+            # by luck in-tree and failed under the extra load of a baseline run.
+            page.wait_for_function("() => !location.search.includes('open=')", timeout=10000)
             check("open=" not in page.url, "the open= param is cleared after install")
+
+            # 2b. Cancel must not latch the source. The in-flight guard that stops the
+            #     URL effect re-firing mid-prompt used to persist for the session, so
+            #     cancelling once killed the link until a reload — which reads as
+            #     "links sometimes don't work". Re-navigating has to re-prompt.
+            page.goto(f"{base}/?w={src}", wait_until="load", timeout=20000)
+            page.wait_for_selector(".pack-actions", timeout=25000)
+            page.locator(".modal-close").first.click()
+            page.wait_for_timeout(400)
+            check(page.locator(".pack-actions").count() == 0, "Cancel closes the prompt")
+            page.goto(f"{base}/?w={src}", wait_until="load", timeout=20000)
+            page.wait_for_selector(".pack-actions", timeout=25000)
+            check(True, "the same link prompts again after a Cancel (not latched)")
 
             # 3. Replace kept exactly one copy of each; Keep both then adds one.
             page.goto(f"{base}/?w={src}", wait_until="load", timeout=20000)

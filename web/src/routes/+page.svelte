@@ -785,8 +785,24 @@
   let packPreview = $state<PackPreview | null>(null);
   let packSource = $state('');
   let packBusy = $state(false);
-  // Sources already handled this session — the effect above can re-fire (busy
-  // clearing, another state patch) before the URL rewrite lands.
+  // Sources this PAGE SESSION has already handled. Two jobs, and the second is why
+  // Cancel deliberately does NOT clear it:
+  //
+  //  1. The effect above re-fires on unrelated changes (anyRunning / ws.busy
+  //     settling, a state patch) while the preview is loading or the prompt is open —
+  //     a second modal for the same link would be nonsense.
+  //  2. After a Cancel the URL STILL carries the pack source, so the next re-fire
+  //     would prompt again, and the one after that. Cancel has to mean "don't ask me
+  //     again", which is this latch staying set.
+  //
+  // The obvious objection — "then the link is dead for the rest of the session" — is
+  // false, and measuring beat reasoning here: this is component state, so any
+  // navigation to the URL (address bar, fresh paste, reload) remounts with an empty
+  // set, and nothing in-app client-side-navigates to a pack source. Pinned by
+  // browser_pack_link's cancel-then-reopen check, which passes on builds both with and
+  // without a clear-on-cancel — the remount, not the bookkeeping, is what revives the
+  // link. (A review proposed clearing on cancel for this reason; the baseline run
+  // showed the premise was wrong and the change would have bought a nag loop.)
   const packSeen = new Set<string>();
 
   async function openPackSource(source: string): Promise<void> {
@@ -809,6 +825,12 @@
       packSeen.delete(source); // a transient failure shouldn't poison a retry
       flashWsNotice(`Could not open that pack: ${e?.message ?? e}`);
     }
+  }
+
+  /** Cancel: close the prompt and leave `packSeen` SET — see its comment. Declining
+   *  once must not invite the next effect re-fire to ask again. */
+  function cancelPackInstall(): void {
+    packPreview = null;
   }
 
   async function finishPackInstall(source: string, mode: ConflictMode): Promise<void> {
@@ -2149,7 +2171,7 @@
     source={packSource}
     busy={packBusy}
     onchoose={(mode) => finishPackInstall(packSource, mode)}
-    onclose={() => (packPreview = null)}
+    onclose={cancelPackInstall}
   />
 {/if}
 

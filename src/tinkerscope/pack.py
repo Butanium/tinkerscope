@@ -195,6 +195,12 @@ def _is_url(src: str) -> bool:
 def load_pack(src: str) -> Pack:
     """Load a pack from a local path or an http(s) URL. YAML or JSON (yaml.safe_load
     parses both — JSON is a YAML subset)."""
+    # A `file://` source is neither: `_is_url` doesn't match it, so it would fall
+    # through to Path("file:///x") and report "no such file: file:///x", which reads
+    # like the file is missing rather than like the scheme is wrong.
+    if "://" in src and not _is_url(src):
+        scheme = src.split("://", 1)[0]
+        raise ValueError(f"unsupported scheme {scheme!r} — use a plain filesystem path or an http(s) URL")
     if _is_url(src):
         import httpx
 
