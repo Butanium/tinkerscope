@@ -6,6 +6,10 @@
   // FORKS (shift+click = fork-and-copy-downstream), and n>1 cards that select a
   // sibling branch instead of "use this".
   import { renderContent, renderPrefilled, splitPrefill } from '$lib/render';
+  // Read-only (static export): the row keeps everything that INSPECTS or COPIES
+  // (Raw, token probs, copy message/workspace/node id, bookmark, sample select)
+  // and drops everything that would generate or rewrite the tree.
+  import { readOnly } from '$lib/static-mode';
   import { tip } from '$lib/tooltip.svelte';
   import { logprobView } from '$lib/logprobs.svelte';
   import { nodeBlobs } from '$lib/node-blobs.svelte';
@@ -327,18 +331,22 @@
       <button class="btn-use" class:active={msg.activeSampleIndex === idx} data-tooltip="Make this the active branch (others stay ‹k/N› siblings)" use:tip aria-label="Make active" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onSelectSample(idx)}>
         <Icon name="use-sample" />
       </button>
-      <button class="btn-act sample-continue" data-tooltip="Continue THIS sample — makes it active, then extends it" use:tip aria-label="Continue this sample" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onContinueSample(idx)}>
-        <Icon name="continue" size={12} />
-      </button>
+      {#if !readOnly}
+        <button class="btn-act sample-continue" data-tooltip="Continue THIS sample — makes it active, then extends it" use:tip aria-label="Continue this sample" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onContinueSample(idx)}>
+          <Icon name="continue" size={12} />
+        </button>
+      {/if}
       <button class="btn-tag" class:shift-alt={shiftDown} data-tooltip={shiftDown ? 'Bookmark instantly (no note)' : 'Bookmark with a note'} use:tip onclick={(e) => onTag(sample.content, idx, msg.totalSamples ?? null, sample.reasoning || '', e.shiftKey)}>
         {#if shiftDown}<Icon name="tag-quick" size={12} />{:else}<Icon name="tag" size={12} />{/if}
       </button>
-      <button class="btn-act btn-act-danger sample-del" data-tooltip="Delete this sample" use:tip aria-label="Delete this sample" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onDeleteSample(idx)}>
-        <Icon name="trash" size={12} />
-      </button>
-      <button class="btn-act btn-act-danger" data-tooltip="Keep only this sample — discard the others" use:tip aria-label="Discard others" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onDiscardOthers(idx)}>
-        <Icon name="discard-others" />
-      </button>
+      {#if !readOnly}
+        <button class="btn-act btn-act-danger sample-del" data-tooltip="Delete this sample" use:tip aria-label="Delete this sample" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onDeleteSample(idx)}>
+          <Icon name="trash" size={12} />
+        </button>
+        <button class="btn-act btn-act-danger" data-tooltip="Keep only this sample — discard the others" use:tip aria-label="Discard others" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onDiscardOthers(idx)}>
+          <Icon name="discard-others" />
+        </button>
+      {/if}
       {@render copyIdBtn(msg.sampleNodeIds?.[idx])}
     </OverflowRow>
   </div>
@@ -582,12 +590,14 @@
       {/if}
       {#if allDone && msg.nodeId != null && !busy}
         <OverflowRow klass="turn-actions hover-actions" resetKey={msg.nodeId ?? ''}>
-          {@render regenGroup()}
-          {@render continueBtn()}
-          {@render deleteBtn('Delete this turn')}
+          {#if !readOnly}
+            {@render regenGroup()}
+            {@render continueBtn()}
+            {@render deleteBtn('Delete this turn')}
+          {/if}
           {@render copyMsgBtn()}
           {@render copyConvBtn()}
-          {@render sendToPicker()}
+          {#if !readOnly}{@render sendToPicker()}{/if}
           {@render copyIdBtn(msg.nodeId)}
         </OverflowRow>
       {/if}
@@ -656,7 +666,7 @@
                  in priority order it can never fold). -->
             <button class="btn-raw" class:active={rawSingle} onclick={() => (rawSingle = !rawSingle)} data-tooltip="Raw model output, tags preserved" use:tip>Raw</button>
           {/if}
-          {#if canEdit}
+          {#if canEdit && !readOnly}
             {@render regenGroup()}
             {#if msg.role === 'assistant'}{@render continueBtn()}{/if}
             <button
@@ -681,7 +691,7 @@
           {/if}
           {@render copyMsgBtn()}
           {@render copyConvBtn()}
-          {@render sendToPicker()}
+          {#if !readOnly}{@render sendToPicker()}{/if}
           {@render copyIdBtn(msg.nodeId)}
         </OverflowRow>
       {/if}

@@ -13,6 +13,8 @@ import {
   sanitizeView,
   saveChartView,
   viewFor,
+  mergeStores,
+  hydrateChartView,
   type ChartView
 } from './chart-view.ts';
 
@@ -179,6 +181,46 @@ eq(
     threw = true;
   }
   ok('storage failure is swallowed', !threw);
+}
+
+// ── server mirror: merge + hydrate (what a static site export carries) ──
+{
+  const store = (global: Partial<ChartView>, ws: Record<string, Partial<ChartView>>) =>
+    parseStore({
+      v: 1,
+      global: { ...DEFAULT_VIEW, ...global },
+      ws: Object.fromEntries(Object.entries(ws).map(([k, v]) => [k, { ...DEFAULT_VIEW, ...v, ts: 1 }]))
+    });
+
+  const remote = store({ mode: 'firsttoken' }, { a: { turn: '3' }, b: { turn: '7' } });
+  const local = store({ mode: 'rules' }, { a: { turn: '99' } });
+
+  // Fresh browser (nothing ever stored): the published view is what you see.
+  eq('merge: no local store → remote wholesale', mergeStores(local, remote, false), remote);
+
+  const merged = mergeStores(local, remote, true);
+  eq('merge: local workspace wins over remote', merged.ws.a.turn, '99');
+  eq('merge: remote fills a workspace local never charted', merged.ws.b.turn, '7');
+  eq('merge: local global picks win', merged.global.mode, 'rules');
+
+  // hydrate() through real storage: a baked blob seeds an unseen workspace.
+  let cell: string | null = JSON.stringify(store({ mode: 'rules' }, { a: { turn: '99' } }));
+  (globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (k: string) => (k === 'tinkerscope:chart-view' ? cell : null),
+    setItem: (k: string, v: string) => {
+      if (k === 'tinkerscope:chart-view') cell = v;
+    }
+  };
+  hydrateChartView(JSON.stringify(remote));
+  eq('hydrate: local entry survives', loadChartView('a').turn, '99');
+  eq('hydrate: remote entry lands', loadChartView('b').turn, '7');
+  eq('hydrate: local global survives', loadChartView('a').mode, 'rules');
+
+  // A corrupt mirror must not take out the local view.
+  hydrateChartView('{not json');
+  eq('hydrate: corrupt mirror is ignored', loadChartView('a').turn, '99');
+  hydrateChartView(null);
+  eq('hydrate: null mirror is a no-op', loadChartView('a').turn, '99');
 }
 
 // ── summary ───────────────────────────────────────────────────────────

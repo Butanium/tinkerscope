@@ -83,6 +83,10 @@ DEFAULT=(
     browser_label_diff
     browser_fuzzy_search
     browser_help_modal
+    browser_pack_link
+    # Owns its whole world (builds a state dir, exports a site, serves it) and
+    # ignores the base-url arg — it still belongs here so it runs under the lock.
+    browser_static_site
 )
 # Known-stale: failures here carry NO signal. Repair when you next need the
 # coverage — not on their own account.

@@ -18,6 +18,8 @@ import type {
 } from './types';
 import type { ConvTree } from './tree';
 import type { ConvFields } from './save-plan';
+import { isStatic } from './static-mode';
+import { staticApi, staticSse } from './api-static';
 
 async function j<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(path, {
@@ -28,7 +30,7 @@ async function j<T>(path: string, init?: RequestInit): Promise<T> {
   return r.json() as Promise<T>;
 }
 
-export const api = {
+const httpApi = {
   health: () => j<Health>('/api/health'),
   models: () => j<Run[]>('/api/models'),
   refreshModels: () => j<{ status: string; count: number }>('/api/models/refresh', { method: 'POST' }),
@@ -126,6 +128,11 @@ export const api = {
     }),
   deleteWorkspace: (id: string) =>
     j<{ status: string }>(`/api/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // Share packs installed at runtime (the `?w=<path-or-url>` link). Omitting
+  // `on_conflict` is a dry-run preview: which ids it would land on, which exist.
+  // See api/routes/packs.py + lib/pack-install.ts.
+  applyPack: (body: { source: string; on_conflict?: 'overwrite' | 'new'; force?: boolean }) =>
+    j<Record<string, unknown>>('/api/pack/apply', { method: 'POST', body: JSON.stringify(body) }),
   // chat (returns the raw Response so the caller can read the SSE stream directly)
   chat: (req: ChatRequest, signal?: AbortSignal) =>
     fetch('/api/chat', {
@@ -141,6 +148,14 @@ export const api = {
     j<{ status: string; chat_id: number }>(`/api/chat/${chat_id}/cancel`, { method: 'POST' })
 };
 
+/** The transport contract. `api-static.ts` implements it against baked JSON, so
+ *  every consumer stays transport-blind — the HTTP object above is the definition. */
+export type ApiClient = typeof httpApi;
+
+/** The backend for this bundle: HTTP against a live instance, or the baked-file
+ *  client when running as an exported static site (see lib/static-mode.ts). */
+export const api: ApiClient = isStatic ? staticApi : httpApi;
+
 /**
  * Open a named-event SSE connection. Returns an unsubscribe function.
  * Each delivered event is `(eventName, parsedData)` — data is JSON-parsed when possible.
@@ -152,6 +167,8 @@ export function sse(
   onEvent: (event: string, data: any) => void,
   onError?: (e: Event, es: EventSource) => void
 ): () => void {
+  // Static site: no bus to subscribe to — one synthetic snapshot, then quiet.
+  if (isStatic) return staticSse(onEvent);
   const es = new EventSource(path);
   const handler = (event: string) => (e: MessageEvent) => {
     let parsed: any = e.data;

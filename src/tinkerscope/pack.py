@@ -210,7 +210,67 @@ def load_pack(src: str) -> Pack:
 # ═══════════════════════════════════════════════════════════════════════════════════
 # APPLY
 # ═══════════════════════════════════════════════════════════════════════════════════
-def apply_pack(pack: Pack, *, force: bool = False, reseed: bool = False) -> dict:
+def pack_workspace_ids(pack: Pack) -> dict[str, str]:
+    """The deterministic id `apply_pack` will give each of the pack's workspaces:
+    `pack-<pack-slug>-<workspace-slug>` → workspace name. Public so a caller can ask
+    "what would this collide with?" before applying (the `?w=<pack>` install prompt);
+    mirrored in the browser by lib/pack-source.ts `packWorkspaceId`."""
+    prefix = f"pack-{_slug(pack.name)}-"
+    return {prefix + _slug(ws.name): ws.name for ws in pack.workspaces}
+
+
+def preview_pack(pack: Pack) -> dict:
+    """What applying `pack` here would touch, WITHOUT touching it. Feeds the browser's
+    overwrite-vs-create-new prompt: per workspace, its target id and whether that id
+    already exists in this state dir."""
+    from .api import workspace_store
+
+    existing = {s.get("id") for s in workspace_store.list_summaries()}
+    return {
+        "pack": pack.name,
+        "description": pack.description,
+        "models": len(pack.models),
+        "workspaces": [
+            {"id": cid, "name": name, "exists": cid in existing}
+            for cid, name in pack_workspace_ids(pack).items()
+        ],
+    }
+
+
+def _dedupe_conflicting(pack: Pack) -> Pack:
+    """A copy of `pack` whose colliding workspaces are RENAMED so `apply_pack` mints
+    fresh ids instead of overwriting: `demo` → `demo (2)`, whose slug is a new id.
+    The rename is what makes the two copies tellable apart in the picker, so it is
+    applied to the name rather than only to the id."""
+    from .api import workspace_store
+
+    taken_ids = {s.get("id") for s in workspace_store.list_summaries()}
+    taken_names = {s.get("name") for s in workspace_store.list_summaries()}
+    prefix = f"pack-{_slug(pack.name)}-"
+    out: list[PackWorkspace] = []
+    for ws in pack.workspaces:
+        name = ws.name
+        # Bump until BOTH the resulting id and the display name are free, so a
+        # rename can't collide with a different pack's workspace of the same slug.
+        n = 1
+        while prefix + _slug(name) in taken_ids or name in taken_names:
+            n += 1
+            stem = re.sub(r" \(\d+\)$", "", ws.name)
+            name = f"{stem} ({n})"
+        taken_ids.add(prefix + _slug(name))
+        taken_names.add(name)
+        out.append(PackWorkspace(name=name, body=ws.body))
+    return Pack(
+        name=pack.name,
+        description=pack.description,
+        models=pack.models,
+        defaults=pack.defaults,
+        workspaces=out,
+        version=pack.version,
+    )
+
+
+def apply_pack(pack: Pack, *, force: bool = False, reseed: bool = False, on_conflict: str = "overwrite") -> dict:
     """Seed the current state dir (SETTINGS.state_dir) from `pack`. Idempotent for the
     additive parts; the default params/layout are written only when the folder is fresh
     (no prefs.json) unless `force`. Returns a summary dict.
@@ -221,13 +281,28 @@ def apply_pack(pack: Pack, *, force: bool = False, reseed: bool = False) -> dict
     write-once), workspaces dropped from the pack are removed from this pack's namespace,
     and the default params are overwritten (reseed implies `force`). It only touches
     workspaces in THIS pack's `pack-<name>-*` id namespace — a collaborator's own
-    workspaces and other packs' workspaces are untouched."""
+    workspaces and other packs' workspaces are untouched.
+
+    `on_conflict` decides what a workspace whose deterministic id already exists does:
+    'overwrite' (default — the historical, idempotent behavior: re-applying the same
+    pack updates in place) or 'new' (rename to `<name> (2)` so it installs ALONGSIDE
+    the existing one). The `?w=<pack-url>` install prompt is what surfaces the choice."""
     from .api import workspace_store, pack_models_store
     from .api.routes import openrouter_models as or_store
     from .api.settings import SETTINGS
     from .api.store import read_json, write_json
 
-    summary: dict[str, Any] = {"pack": pack.name, "models": 0, "openrouter": 0, "workspaces": 0, "params": "skipped"}
+    if on_conflict not in ("overwrite", "new"):
+        raise ValueError(f"on_conflict must be 'overwrite' or 'new', got {on_conflict!r}")
+    if on_conflict == "new":
+        if reseed:
+            raise ValueError("on_conflict='new' is incompatible with reseed (which rewrites in place)")
+        pack = _dedupe_conflicting(pack)
+
+    summary: dict[str, Any] = {
+        "pack": pack.name, "models": 0, "openrouter": 0, "workspaces": 0,
+        "workspace_ids": [], "params": "skipped",
+    }
 
     # 1. Models → pack_models.json (ckpt/base) + the global openrouter list, each via its
     #    store's upsert helper (deduped, same logic the UI add-model path uses).
@@ -266,19 +341,22 @@ def apply_pack(pack: Pack, *, force: bool = False, reseed: bool = False) -> dict
             seen_panels=body.get("seen_panels") or [],
         )
         summary["workspaces"] += 1
+        # Installed ids in pack order — the `?w=<pack>` loader opens the first (or
+        # the one `&open=` names), so it needs them, not just a count.
+        summary.setdefault("workspace_ids", []).append({"id": cid, "name": ws.name})
 
     # 3. Default params + panel layout → prefs.json last_session. Only if fresh / forced /
     #    reseed, so a plain re-apply never overwrites a collaborator's own params.
     fresh = not SETTINGS.prefs_path.exists()
     if fresh or force or reseed:
         prefs = read_json(SETTINGS.prefs_path, {}) or {}
-        prefs["last_session"] = json.dumps(_build_last_session(pack))
+        prefs["last_session"] = json.dumps(build_last_session(pack))
         write_json(SETTINGS.prefs_path, prefs)
         summary["params"] = "applied" if fresh else "forced"
     return summary
 
 
-def _build_last_session(pack: Pack) -> dict:
+def build_last_session(pack: Pack) -> dict:
     """Assemble the `last_session` object the frontend restores (panels + params)."""
     labels = list(pack.defaults.get("panels") or [])
     models = [pack.model_by_label(lbl) for lbl in labels]
@@ -393,7 +471,7 @@ def _prepare_workspace_body(body: dict, raw_meta: dict[str, str]) -> dict:
     return out
 
 
-def _rewrite_panels(
+def rewrite_panels(
     body: dict, *, resolve: Callable[[str | None, str | None], tuple[str | None, PackModel | None]]
 ) -> list[PackModel]:
     """Rewrite a workspace body's panel model refs in place to shareable sentinels;
@@ -460,7 +538,7 @@ def export_pack(
             if workspace_names and wname not in workspace_names:
                 continue
             prepared = _prepare_workspace_body(body, raw_meta)
-            used = _rewrite_panels(prepared, resolve=resolve)
+            used = rewrite_panels(prepared, resolve=resolve)
             ws_out.append(PackWorkspace(name=wname, body=prepared))
             if models_from in ("workspaces", "all"):
                 gathered.extend(used)

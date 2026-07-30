@@ -3,6 +3,11 @@
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { api } from '$lib/api';
+  // Static export: every control that would sample or mutate server state is hidden
+  // (see lib/static-mode.ts + docs/STATIC_SITE.md). Gating is markup-level and
+  // explicit rather than a global CSS mask, so a hidden control can't be reached.
+  import { isStatic, readOnly, manifest } from '$lib/static-mode';
+  import { staticIsOverlay } from '$lib/api-static';
   import { live, emptyPanel } from '$lib/state.svelte';
   import { touchesWorkspace } from '$lib/bus-scope';
   import { workspaces as ws } from '$lib/workspaces.svelte';
@@ -37,7 +42,15 @@
   import TruncLabel from '$lib/TruncLabel.svelte';
   import { loadHighlightRules, highlightStore } from '$lib/highlights.svelte';
   import { logprobView, logprobHighlight } from '$lib/logprobs.svelte';
+  import {
+    hydrateChartView,
+    setChartViewMirror,
+    PREF_KEY as CHART_VIEW_PREF_KEY
+  } from '$lib/chart-view';
   import HighlightRules from '$lib/HighlightRules.svelte';
+  import PackInstallModal from '$lib/PackInstallModal.svelte';
+  import { isPackSource, sourceLabel } from '$lib/pack-source';
+  import { preview, install, type PackPreview, type ConflictMode } from '$lib/pack-install';
   import type { Pin } from '$lib/types';
   import { tip, tipHost, tooltip } from '$lib/tooltip.svelte';
   import {
@@ -45,6 +58,7 @@
     activeMessages,
     appendUserTurn,
     siblingsOf,
+    threadStarts,
     tokenBlobNodeIds
   } from '$lib/tree';
   import type {
@@ -436,6 +450,10 @@
   async function restoreSession(): Promise<void> {
     try {
       const prefs = await api.getPrefs();
+      // Seed the chart's per-workspace view from the server mirror (on a static
+      // site: the view the export's author set up). Local always wins — see
+      // lib/chart-view.ts `mergeStores`.
+      hydrateChartView(prefs[CHART_VIEW_PREF_KEY]);
       const raw = prefs[SESSION_PREF_KEY];
       // Only restore into a FRESH process (no panel has a run selected yet), so we
       // never clobber a session another tab/CLI already set. Require a real
@@ -488,7 +506,9 @@
   // Single code path with CLI: append user msg to shared state, POST /api/chat
   // per panel with broadcast:true, then render purely from the bus.
   let userInput = $state('');
-  let inputTextarea: HTMLTextAreaElement;
+  // $state, not a plain let: read-only mode doesn't render the composer, so the
+  // binding mounts/unmounts and every `inputTextarea?.focus()` needs the live ref.
+  let inputTextarea = $state<HTMLTextAreaElement | null>(null);
   // Assistant prefill (interp / red-teaming): authored, NOT trimmed — the model
   // continues from here. Sent as a trailing {role:'assistant'} message; the backend
   // (tinker_sampler.render) treats a trailing assistant turn as a prefill the renderer
@@ -743,11 +763,87 @@
     // Don't swap mid-stream (mirrors the dropdown guard); the effect re-runs
     // when anyRunning/busy clear and self-heals to whatever the URL now says.
     if (anyRunning || ws.busy) return;
+    // A path/URL rather than an id ⇒ a share pack to install, not a workspace to
+    // open. Unambiguous: store ids can't contain / : or . (lib/pack-source.ts).
+    if (isPackSource(id)) {
+      void openPackSource(id);
+      return;
+    }
     // Unknown id (e.g. a link from a different scan-root): ignore here — the
     // initial-load path already normalized + notified.
     if (!ws.list.some((c) => c.id === id)) return;
     void ws.switchTo(id).then(() => panelScroll.snapAll()); // open at the latest turn
   });
+
+  // ── `?w=<pack path|url>`: install a share pack, then open it ───────
+  // Turns a pack into a LINK. `--pack` has always been a launch flag, so sharing a
+  // setup meant "restart your server with this file"; pasting the URL now installs
+  // it in place (live: POST /api/pack/apply — also the only way a local PATH can be
+  // read; static site: fetched and parsed in the browser). `&open=<ws-id>` picks
+  // which of the pack's workspaces lands open. Once installed the URL is rewritten
+  // to the plain `?w=<id>`, so a reload is a normal open and never a re-install.
+  let packPreview = $state<PackPreview | null>(null);
+  let packSource = $state('');
+  let packBusy = $state(false);
+  // Sources already handled this session — the effect above can re-fire (busy
+  // clearing, another state patch) before the URL rewrite lands.
+  const packSeen = new Set<string>();
+
+  async function openPackSource(source: string): Promise<void> {
+    if (packSeen.has(source)) return;
+    packSeen.add(source);
+    try {
+      const pv = await preview(source);
+      if (!pv.workspaces.length) {
+        flashWsNotice(`“${pv.pack}” contains no workspaces to open.`);
+        return;
+      }
+      // Nothing would be overwritten ⇒ just install. Asking permission to write
+      // nothing is ceremony; the point of the link is one click to the setup.
+      if (!pv.workspaces.some((w) => w.exists)) {
+        await finishPackInstall(source, 'overwrite');
+        return;
+      }
+      packSource = source;
+      packPreview = pv;
+    } catch (e: any) {
+      packSeen.delete(source); // a transient failure shouldn't poison a retry
+      flashWsNotice(`Could not open that pack: ${e?.message ?? e}`);
+    }
+  }
+
+  async function finishPackInstall(source: string, mode: ConflictMode): Promise<void> {
+    packBusy = true;
+    try {
+      const installed = await install(source, mode);
+      packPreview = null;
+      if (!installed.length) {
+        flashWsNotice('That pack installed no workspaces.');
+        return;
+      }
+      // A pack's models are new catalog entries; without a reload its panels would
+      // render their raw `tinker://…` refs instead of the pack's labels.
+      await modelCatalog.loadOpenrouterModels(setBackendError);
+      await modelCatalog.loadTinkerCatalog(true);
+      const wanted = page.url.searchParams.get('open');
+      const target = installed.find((w) => w.id === wanted)?.id ?? installed[0].id;
+      if (wanted && !installed.some((w) => w.id === wanted))
+        flashWsNotice(`“${wanted}” isn't in this pack — opened “${installed[0].name}” instead.`);
+      await ws.load(target);
+      const url = new URL(page.url);
+      url.searchParams.delete('open');
+      url.searchParams.set('w', ws.activeId ?? target);
+      await goto(url, { replaceState: true, keepFocus: true, noScroll: true });
+      void panelScroll.snapAll();
+      flashWsNotice(
+        `Installed ${installed.length} workspace${installed.length === 1 ? '' : 's'} from “${sourceLabel(source)}”.`
+      );
+    } catch (e: any) {
+      flashWsNotice(`Pack install failed: ${e?.message ?? e}`);
+    } finally {
+      packBusy = false;
+    }
+  }
 
   // ── Named workspaces (dropdown) ────────────────────────────────
   // The picker is the same type-to-filter combobox as the model one
@@ -1263,6 +1359,9 @@
 
   // ── Health-based degradation banner ───────────────────────────────
   let degraded = $derived.by(() => {
+    // A read-only site has no sampling BY CONSTRUCTION — the badge already says so,
+    // and this banner would just be a scary-looking restatement.
+    if (readOnly) return '';
     if (!health) return '';
     if (health.available === false || !health.tinker_key) {
       return health.error
@@ -1296,6 +1395,11 @@
       if (h) promptHistory = JSON.parse(h);
     } catch {}
     modelCatalog.restoreRecents();
+    // Mirror the chart's view state into server prefs (debounced inside), so a
+    // `site export` carries the distribution view its author configured. Read-only
+    // sites still register it — the write lands in their localStorage overlay, which
+    // is exactly where a visitor's own tweaks belong.
+    setChartViewMirror((json) => void api.setPref(CHART_VIEW_PREF_KEY, json).catch(() => {}));
 
     // Track shift (alternate-action variant) + ctrl/cmd (apply to all panels) for
     // the toolbar affordances. Read off the click too, but mirror for the icon swap.
@@ -1332,6 +1436,11 @@
       try { health = await api.health(); } catch (e: any) { backendError = `Backend not reachable: ${e?.message ?? e}`; }
       await modelCatalog.loadRuns(setBackendError);
       await modelCatalog.loadOpenrouterModels(setBackendError);
+      // A static site's panels reference `ckpt:`/`base:` sentinels, whose LABELS
+      // live in the tinker catalog — normally loaded lazily when the picker opens,
+      // which read-only mode never does. Baked file, so eager-loading is free, and
+      // without it every checkpoint panel would be titled by its raw tinker:// URI.
+      if (isStatic) await modelCatalog.loadTinkerCatalog();
       try { if (!live.state) live.adopt(await api.getState()); } catch {}
       // Restore last-used model selection + sampling params from disk (only if
       // this process's state is fresh) BEFORE workspaces load, so the right
@@ -1371,8 +1480,15 @@
       <div class="topbar-root" title={health.root}>{health.root}</div>
     {/if}
     <div class="topbar-status">
-      <span class="status-dot" class:ok={live.connected} title={live.connected ? 'Live state connected' : 'Connecting...'}></span>
-      <span class="status-text">{live.connected ? 'live' : '…'}</span>
+      {#if readOnly}
+        <!-- There is no live bus behind a static site; calling it "live" would be a
+             lie about a connection that doesn't exist. -->
+        <span class="status-dot" title="Static snapshot — no live backend"></span>
+        <span class="status-text">snapshot</span>
+      {:else}
+        <span class="status-dot" class:ok={live.connected} title={live.connected ? 'Live state connected' : 'Connecting...'}></span>
+        <span class="status-text">{live.connected ? 'live' : '…'}</span>
+      {/if}
     </div>
   </header>
 
@@ -1414,19 +1530,32 @@
         <button class="theme-toggle" onclick={openSlideshow} data-tooltip="Browse saved pins ({pins.length} saved)" use:tip>
           <Icon name="pins" size={16} />
         </button>
-        <button class="theme-toggle" onclick={openDatasetLoader} data-tooltip="Peek at the selected run's training data" use:tip>
-          <Icon name="dataset" size={14} />
-        </button>
-        <button class="theme-toggle" class:refreshing={refreshingModels} onclick={refreshModels} data-tooltip="Rescan runs + refresh tinker checkpoints" use:tip disabled={refreshingModels}>
-          <Icon name="regen" size={14} />
-        </button>
+        {#if !readOnly}
+          <button class="theme-toggle" onclick={openDatasetLoader} data-tooltip="Peek at the selected run's training data" use:tip>
+            <Icon name="dataset" size={14} />
+          </button>
+          <button class="theme-toggle" class:refreshing={refreshingModels} onclick={refreshModels} data-tooltip="Rescan runs + refresh tinker checkpoints" use:tip disabled={refreshingModels}>
+            <Icon name="regen" size={14} />
+          </button>
+        {/if}
         <button class="theme-toggle" onclick={() => (showHelp = true)} data-tooltip="How to use tinkerscope — features + keyboard shortcuts" use:tip aria-label="Help">
           <Icon name="help" size={15} />
         </button>
-        <button class="btn-stop-sidebar" class:active={anyRunning} onclick={() => chat.stopGeneration()} data-tooltip="Stop all generation" use:tip disabled={!anyRunning}>
-          <Icon name="stop" size={14} />
-        </button>
+        {#if !readOnly}
+          <button class="btn-stop-sidebar" class:active={anyRunning} onclick={() => chat.stopGeneration()} data-tooltip="Stop all generation" use:tip disabled={!anyRunning}>
+            <Icon name="stop" size={14} />
+          </button>
+        {/if}
       </div>
+
+      {#if readOnly}
+        <!-- Names the mode so a visitor isn't hunting for a composer that was
+             removed on purpose. Title comes from the export manifest. -->
+        <div class="readonly-badge" data-testid="readonly-badge">
+          <Icon name="eye" size={12} />
+          <span>read-only snapshot{manifest?.title ? ` · ${manifest.title}` : ''}</span>
+        </div>
+      {/if}
 
       {#if backendError}
         <div class="backend-error">{backendError}</div>
@@ -1462,19 +1591,25 @@
                 onpick={onSelectWorkspace}
               />
             </div>
-            <button class="ws-icon-btn" class:shift-alt={shiftDown} data-tooltip={shiftDown ? 'New BLANK workspace (no models)' : 'New workspace · keeps current models (Shift: blank)'} use:tip disabled={anyRunning || ws.busy} aria-label="New workspace" onclick={newWorkspace}>
-              {#if shiftDown}
-                <Icon name="new-blank" />
-              {:else}
-                <Icon name="plus" />
-              {/if}
-            </button>
-            <button class="ws-icon-btn" data-tooltip="Rename workspace" use:tip disabled={anyRunning || ws.busy} aria-label="Rename workspace" onclick={startRenameWorkspace}>
-  <Icon name="edit" />
-            </button>
-            <button class="ws-icon-btn ws-icon-danger" data-tooltip="Delete workspace" use:tip disabled={anyRunning || ws.busy} aria-label="Delete workspace" onclick={onDeleteWorkspace}>
-  <Icon name="trash" />
-            </button>
+            {#if !readOnly}
+              <button class="ws-icon-btn" class:shift-alt={shiftDown} data-tooltip={shiftDown ? 'New BLANK workspace (no models)' : 'New workspace · keeps current models (Shift: blank)'} use:tip disabled={anyRunning || ws.busy} aria-label="New workspace" onclick={newWorkspace}>
+                {#if shiftDown}
+                  <Icon name="new-blank" />
+                {:else}
+                  <Icon name="plus" />
+                {/if}
+              </button>
+              <button class="ws-icon-btn" data-tooltip="Rename workspace" use:tip disabled={anyRunning || ws.busy} aria-label="Rename workspace" onclick={startRenameWorkspace}>
+    <Icon name="edit" />
+              </button>
+            {/if}
+            <!-- Delete stays for a workspace the VISITOR installed from a pack link
+                 (it's theirs, in localStorage); a baked one has no delete. -->
+            {#if !readOnly || (ws.activeId && staticIsOverlay(ws.activeId))}
+              <button class="ws-icon-btn ws-icon-danger" data-tooltip="Delete workspace" use:tip disabled={anyRunning || ws.busy} aria-label="Delete workspace" onclick={onDeleteWorkspace}>
+    <Icon name="trash" />
+              </button>
+            {/if}
           </div>
         {/if}
       </div>
@@ -1507,15 +1642,21 @@
           <div class="model-block">
             <div class="model-slot-row">
               <div class="model-slot-select">
-                <PickerDropdown
-                  items={modelItems}
-                  selectedLabel={modelCatalog.selectedModelLabel(p)}
-                  placeholder="Select a model…"
-                  filterPlaceholder={`Type to filter ${modelItems.length} models…`}
-                  onpick={(id) => setRun(p.panel, id)}
-                />
+                {#if readOnly}
+                  <!-- No sampling ⇒ changing a panel's model would do nothing;
+                       show which model produced these turns instead. -->
+                  <div class="model-static-label"><TruncLabel label={modelCatalog.selectedModelLabel(p)} /></div>
+                {:else}
+                  <PickerDropdown
+                    items={modelItems}
+                    selectedLabel={modelCatalog.selectedModelLabel(p)}
+                    placeholder="Select a model…"
+                    filterPlaceholder={`Type to filter ${modelItems.length} models…`}
+                    onpick={(id) => setRun(p.panel, id)}
+                  />
+                {/if}
               </div>
-              {#if panelSels.length > 1}
+              {#if panelSels.length > 1 && !readOnly}
                 <button class="btn-remove-model" onclick={() => removePanel(p.panel)} title="Remove this panel">
                   <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
                 </button>
@@ -1524,23 +1665,23 @@
             {#if isBase}
               <!-- Raw tinker base model: no checkpoint selector (no LoRA). -->
               <div class="run-meta or-meta">◆ {baseM} · raw base (no LoRA)</div>
-              {#if health && !health.tinker_key}
+              {#if health && !health.tinker_key && !readOnly}
                 <div class="unsampleable-note">Set TINKER_API_KEY to sample this base model.</div>
               {/if}
             {:else if isCkpt}
               <!-- Loose tinker sampler checkpoint: no checkpoint selector. -->
               <div class="run-meta or-meta" title={sp}>◇ {modelCatalog.ckptLabel(p.run_id)} · loose sampler</div>
-              {#if health && !health.tinker_key}
+              {#if health && !health.tinker_key && !readOnly}
                 <div class="unsampleable-note">Set TINKER_API_KEY to sample this checkpoint.</div>
               {/if}
             {:else if isOr}
               <!-- OpenRouter reference model: no checkpoint selector. -->
               <div class="run-meta or-meta">↗ {orModel?.openrouter_model ?? openrouterId(p.run_id)}</div>
-              {#if health && health.openrouter_key === false}
+              {#if health && health.openrouter_key === false && !readOnly}
                 <div class="unsampleable-note">Set OPENROUTER_API_KEY to sample this model.</div>
               {/if}
             {:else}
-              {#if pr && pr.checkpoints.length > 0}
+              {#if pr && pr.checkpoints.length > 0 && !readOnly}
                 <select
                   class="sidebar-select ckpt-select"
                   value={p.checkpoint ?? ''}
@@ -1564,20 +1705,28 @@
                 <div class="run-meta">{pr.base_model}{pr.lora_rank ? ` · LoRA ${pr.lora_rank}` : ''}{pr.num_checkpoints ? ` · ${pr.num_checkpoints} ckpts` : ''}</div>
               {/if}
             {/if}
-            <div class="add-model-links">
-              <button class="or-manage-link" onclick={() => openTinkerPicker(p.panel)}>+ Tinker model</button>
-              <button class="or-manage-link" onclick={() => openOrManager(p.panel)}>+ OpenRouter model</button>
-            </div>
+            {#if !readOnly}
+              <div class="add-model-links">
+                <button class="or-manage-link" onclick={() => openTinkerPicker(p.panel)}>+ Tinker model</button>
+                <button class="or-manage-link" onclick={() => openOrManager(p.panel)}>+ OpenRouter model</button>
+              </div>
+            {/if}
           </div>
         {/each}
+        {#if !readOnly}
         <button class="btn-add-model" class:shift-alt={shiftDown} onclick={addPanel} disabled={modelCatalog.runs.length + modelCatalog.openrouterModels.length < 1}
             data-tooltip={shiftDown ? 'Add a BLANK panel (empty thread)' : 'Add panel · clones the first panel\u2019s thread (Shift: blank)'} use:tip>
 <Icon name="plus" size={12} />
             {panelSels.length < 2 ? 'Compare' : 'Add panel'}
           </button>
         {/if}
+        {/if}
       </div>
 
+      <!-- Sampling params: hidden in read-only mode. They're the LIVE params, not
+           what produced the baked turns (each turn's Raw view carries those), so
+           showing them would invite reading them as provenance. -->
+      {#if !readOnly}
       <div class="sidebar-section">
         <label class="sidebar-label">Temperature: {s.temperature.toFixed(2)}</label>
         <input type="range" min="0" max="2" step="0.05" value={s.temperature} oninput={(e) => setTemperature(parseFloat((e.target as HTMLInputElement).value))} class="sidebar-slider" />
@@ -1594,6 +1743,7 @@
           oninput={(e) => setNSamples(parseInt((e.target as HTMLInputElement).value))}
           onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') { e.preventDefault(); inputTextarea?.focus(); } }} />
       </div>
+      {/if}
 
       <div class="sidebar-section">
         <label class="sidebar-label thinking-toggle-row">
@@ -1651,7 +1801,7 @@
         {/if}
       </div>
 
-      {#if anySupportsThinking}
+      {#if anySupportsThinking && !readOnly}
         <div class="sidebar-section">
           <label class="sidebar-label thinking-toggle-row">
             <span>Thinking</span>
@@ -1664,11 +1814,13 @@
         </div>
       {/if}
 
-      <div class="sidebar-section">
-        <button class="advanced-toggle" onclick={() => (showSamplingPopup = true)}>Sampling params&hellip;</button>
-      </div>
+      {#if !readOnly}
+        <div class="sidebar-section">
+          <button class="advanced-toggle" onclick={() => (showSamplingPopup = true)}>Sampling params&hellip;</button>
+        </div>
+      {/if}
 
-      {#if showSamplingPopup}
+      {#if showSamplingPopup && !readOnly}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div class="sampling-overlay" onclick={() => (showSamplingPopup = false)} onkeydown={(e) => { if (e.key === 'Escape') showSamplingPopup = false; }}>
           <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -1800,7 +1952,7 @@
                 </div>
               {/if}
             </div>
-            {#if isComparing && ws.activeId && panelCanChat(p)}
+            {#if isComparing && ws.activeId && panelCanChat(p) && !readOnly}
               <!-- Per-panel composer: continue ONLY this panel, independent of the
                    other panel and of whatever it's doing. Lives OUTSIDE the
                    scrollable .messages so it stays stationary when branch cycling
@@ -1828,7 +1980,16 @@
         {/each}
       </div>
 
-      <!-- Input bar -->
+      <!-- Input bar. In read-only mode the composer is gone (nothing to send to),
+           but the thread switcher stays — it's pure navigation over the baked
+           threads, and without it a multi-thread workspace looks single-threaded. -->
+      {#if readOnly}
+        {#if threadStarts(ws.trees).length > 1}
+          <div class="input-bar readonly-bar">
+            <div class="prefill-row"><ThreadSwitcher /></div>
+          </div>
+        {/if}
+      {:else}
       <div class="input-bar">
         {#if panelSels.length > 1}
           <div class="send-targets">
@@ -1957,6 +2118,7 @@
           disabled={!canChat || !ws.activeId}
         ></textarea>
       </div>
+      {/if}
     </div>
   </div>
 </div>
@@ -1982,6 +2144,16 @@
 {/if}
 
 <!-- Dataset Loader Modal -->
+{#if packPreview}
+  <PackInstallModal
+    preview={packPreview}
+    source={packSource}
+    busy={packBusy}
+    onchoose={(mode) => finishPackInstall(packSource, mode)}
+    onclose={() => (packPreview = null)}
+  />
+{/if}
+
 {#if showDatasetLoader}
   <DatasetModal initialPath={datasetInitialPath} loading={datasetLoading} onsubmit={loadDataset} onclose={() => (showDatasetLoader = false)} />
 {/if}
@@ -2069,6 +2241,8 @@
   .model-block:last-of-type { border-bottom: none; margin-bottom: 0; }
   .model-slot-row { display: flex; gap: var(--space-2); align-items: center; }
   .model-slot-select { flex: 1; min-width: 0; }
+  /* Read-only stand-in for the model PickerDropdown: same slot, no affordance. */
+  .model-static-label { min-width: 0; padding: var(--space-1) 0; font-size: 0.78rem; color: var(--color-text); }
   .ckpt-select { width: 100%; font-family: var(--font-mono); font-size: 0.76rem; }
   .run-meta { font-size: 0.68rem; color: var(--color-text-muted); font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .unknown-note { font-size: 0.68rem; color: var(--color-text-muted); font-style: italic; }
@@ -2145,6 +2319,11 @@
 
   /* ── Input bar ─────────────────────────────────────────────────── */
   .input-bar { padding: 0 var(--space-4) var(--space-3); background: var(--color-surface); border-top: 1px solid var(--color-border); flex-shrink: 0; }
+  /* Read-only: the bar carries only the thread switcher, so it needs top padding
+     the composer variant gets from its own rows. */
+  .input-bar.readonly-bar { padding-top: var(--space-2); }
+  .readonly-badge { display: flex; align-items: center; gap: var(--space-1); margin: 0 0 var(--space-2); padding: 3px var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-alt); color: var(--color-text-muted); font-size: 0.68rem; }
+  .readonly-badge span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .input-resize-handle { height: 8px; cursor: row-resize; position: relative; }
   .input-resize-handle::after { content: ''; position: absolute; left: 30%; right: 30%; top: 3px; height: 2px; background: transparent; transition: background 0.15s; border-radius: 1px; }
   .input-resize-handle:hover::after { background: var(--color-accent); }

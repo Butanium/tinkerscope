@@ -334,6 +334,44 @@ account. Applying is merge-safe (never clobbers a collaborator's own params unle
 rebuilds its workspaces so re-exported `raw_meta` blobs refresh and dropped workspaces
 go away. Full doc: **[`docs/PACK.md`](docs/PACK.md)**.
 
+A pack is also a **link** — paste it into `?w=` and it installs, no restart:
+
+```
+http://localhost:8765/?w=/home/me/packs/demo.yaml                       # local path (server reads it)
+http://localhost:8765/?w=https://raw.githubusercontent.com/u/r/main/demo.yaml
+…?w=<pack-url>&open=pack-demo-the-good-one                              # pick which workspace opens
+```
+
+A `?w=` value containing `/`, `:` or `.` can't be a workspace id, so this is
+unambiguous and every old link still works. If the pack's workspaces are already
+here, you're asked whether to **replace** them or **keep both** (the incoming copy
+becomes `<name> (2)`). After installing, the URL becomes the plain `?w=<id>`, so a
+reload opens rather than re-installs.
+
+### Publish a read-only copy — `site export`
+
+Export the whole playground as a static site: no backend, no API key, hostable on
+GitHub Pages or any file host.
+
+```bash
+tinkerscope site export ./site --title "weird personas"       # everything
+tinkerscope site export ./site --workspace "hi + cigarettes"  # just one (repeatable)
+tinkerscope site export ./site --no-logprobs                  # ~30× smaller, no token inspector
+python3 -m http.server -d ./site 8080                         # preview
+```
+
+Visitors get the real thing to read: workspaces, branch trees, threads, N-panel
+comparison, the distribution chart in all three modes, token probabilities, editable
+highlight rules, pins, the slideshow. Everything that would sample or write is gone —
+composer, regenerate/edit/delete, model pickers, sampling params.
+
+⚠️ **Per-token logprobs are ~97% of a real store's bytes** (measured: 24 MB of
+workspaces vs 901 MB of blobs). The exporter prints a per-workspace breakdown and
+warns past 100 MB — publish a subset with `--workspace`, or drop `--no-logprobs`.
+
+The chart's per-workspace view travels with the export, so a published site opens
+bucketed the way you left it. Full doc: **[`docs/STATIC_SITE.md`](docs/STATIC_SITE.md)**.
+
 ---
 
 ## Drive it from the terminal — `tinkpg`

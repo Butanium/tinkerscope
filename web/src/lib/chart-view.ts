@@ -16,17 +16,26 @@
 //            Saving one also refreshes the global three, so the last workspace
 //            you touched sets the defaults for the next.
 //
-// Browser-local (localStorage), NOT workspace data on the server: it's how one
-// person is looking at a distribution, not part of the workspace's content —
-// keeping it out of the wire/disk contract also keeps it out of share packs.
-// The trade is that it doesn't follow a workspace to another browser.
+// localStorage is the LIVE store (synchronous, no latency on a toggle), mirrored
+// into the server's per-scan-root prefs under `chart_view`. The mirror exists so a
+// STATIC SITE EXPORT can carry the view its author set up — a published site is a
+// curated presentation, and "here is the distribution, bucketed the way I mean it"
+// is most of the point. Merge rule on load: the server blob seeds workspaces this
+// browser has never charted, and anything local always wins, so a visitor's own
+// tweaks survive and the author's setup is what a fresh visitor sees.
+//
+// Still absent from the WORKSPACE record and therefore from share packs: a pack is
+// content, and this is a viewing preference. Only `prefs.json` carries it, and
+// apply_pack writes just `last_session`.
 //
 // Pure helpers (sanitize / merge / prune) are exported for chart-view.test.ts;
-// only load/save touch storage.
+// only load/save/mirror touch storage.
 
 import type { MatchScope, ThinkFilter } from './chart.ts';
 
 const KEY = 'tinkerscope:chart-view';
+/** Prefs key holding the mirrored blob (server-side; baked into a site export). */
+export const PREF_KEY = 'chart_view';
 /** Keep the N most recently saved workspaces; beyond that, drop the oldest. */
 const MAX_WORKSPACES = 40;
 
@@ -146,13 +155,70 @@ export function pruneStore(store: Stored, cap = MAX_WORKSPACES): Stored {
   return { ...store, ws };
 }
 
-function read(): Stored {
+/** Fold a REMOTE (server/baked) store under a LOCAL one. Local always wins — per
+ *  workspace id, and for the global three — so a visitor's own tweak is never
+ *  overwritten by the published view. `hadLocal` false (this browser has never
+ *  stored anything) takes the remote wholesale, which is the fresh-visitor case a
+ *  static site is published for. */
+export function mergeStores(local: Stored, remote: Stored, hadLocal: boolean): Stored {
+  if (!hadLocal) return remote;
+  return { v: 1, global: local.global, ws: { ...remote.ws, ...local.ws } };
+}
+
+/** Seed from the server's mirrored blob (a live instance's prefs, or a static
+ *  site's baked prefs.json). Call once at startup, before the chart is opened. */
+export function hydrateChartView(remoteRaw: string | undefined | null): void {
+  if (!remoteRaw) return;
+  let remote: Stored;
   try {
-    return parseStore(JSON.parse(localStorage.getItem(KEY) || '{}'));
+    remote = parseStore(JSON.parse(remoteRaw));
+  } catch {
+    return; // a corrupt mirror must not take out the local view
+  }
+  const { store, hadLocal } = readLocal();
+  writeLocal(pruneStore(mergeStores(store, remote, hadLocal)));
+}
+
+function readLocal(): { store: Stored; hadLocal: boolean } {
+  try {
+    const raw = localStorage.getItem(KEY);
+    return { store: parseStore(JSON.parse(raw || '{}')), hadLocal: raw != null };
   } catch {
     /* SSR / storage disabled / bad JSON */
-    return parseStore(null);
+    return { store: parseStore(null), hadLocal: false };
   }
+}
+
+function writeLocal(store: Stored): void {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(store));
+  } catch {
+    /* ignore — quota / storage disabled */
+  }
+}
+
+/** Push the blob to the server, coalesced: the chart writes on every toggle and
+ *  each of those would otherwise be its own PUT. Injected by the app (chart-view
+ *  stays free of an api import so its tests need no network stub). */
+let mirror: ((json: string) => void) | null = null;
+let mirrorTimer: ReturnType<typeof setTimeout> | null = null;
+
+export function setChartViewMirror(fn: ((json: string) => void) | null): void {
+  mirror = fn;
+}
+
+function scheduleMirror(store: Stored): void {
+  if (!mirror) return;
+  if (mirrorTimer) clearTimeout(mirrorTimer);
+  const json = JSON.stringify(store);
+  mirrorTimer = setTimeout(() => {
+    mirrorTimer = null;
+    mirror?.(json);
+  }, 800);
+}
+
+function read(): Stored {
+  return readLocal().store;
 }
 
 /** The view to open the chart with for `wsId` (null → global defaults only). */
@@ -180,9 +246,7 @@ export function saveChartView(wsId: string | null, view: ChartView, now = Date.n
         ts: now
       }
     };
-  try {
-    localStorage.setItem(KEY, JSON.stringify(pruneStore(next)));
-  } catch {
-    /* ignore — quota / storage disabled */
-  }
+  const pruned = pruneStore(next);
+  writeLocal(pruned);
+  scheduleMirror(pruned);
 }

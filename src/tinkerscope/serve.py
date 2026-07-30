@@ -113,9 +113,87 @@ def _pack_export(args) -> None:
     print(f"wrote {args.out} — {len(pack.models)} model(s), {len(pack.workspaces)} workspace(s)")
 
 
+def _site_command(argv: list[str]) -> None:
+    """`tinkerscope site export <dir>` — publish a read-only static site."""
+    parser = argparse.ArgumentParser(
+        prog="tinkerscope site",
+        description="Export a read-only static site (built SPA + baked JSON) for GitHub Pages or any file host.",
+    )
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    ex = sub.add_parser("export", help="Write a self-contained static site into a directory.")
+    ex.add_argument("out", type=Path, help="output directory (created; its data/ and _app/ are replaced)")
+    ex.add_argument("--dir", action="append", type=Path, default=None,
+                    help="scan root(s) whose state to export (default: cwd) — must match how the instance was launched")
+    ex.add_argument("--title", default=None, help="site title, shown in the read-only badge (default: the dir name)")
+    ex.add_argument("--description", default=None)
+    ex.add_argument("--workspace", action="append", default=None, metavar="NAME",
+                    help="include only these workspaces by name (repeatable)")
+    ex.add_argument("--open", default=None, metavar="WS_ID",
+                    help="workspace id to open by default (default: the first exported one)")
+    ex.add_argument("--no-logprobs", action="store_true",
+                    help="drop per-token logprobs — much smaller, but disables the token inspector and the first-token chart")
+    ex.add_argument("--no-pins", action="store_true", help="exclude saved pins")
+    ex.add_argument("--web-dist", type=Path, default=None,
+                    help="built frontend to publish (default: this install's web/dist, else the packaged copy)")
+    args = parser.parse_args(argv)
+    if args.cmd != "export":
+        return
+
+    dirs = [d.expanduser().resolve() for d in (args.dir or [Path.cwd()])]
+    for d in dirs:
+        if not d.is_dir():
+            sys.exit(f"not a directory: {d}")
+    os.environ["TINKERSCOPE_SCAN_ROOTS"] = ":".join(str(d) for d in dirs)
+
+    from .api.main import _web_dist
+    from . import site_export
+
+    web_dist = args.web_dist.expanduser().resolve() if args.web_dist else _web_dist()
+    if web_dist is None:
+        sys.exit("no built frontend found — run `npm run build` in web/ (or pass --web-dist)")
+
+    warnings: list[str] = []
+    stats = site_export.export_site(
+        args.out.expanduser().resolve(),
+        web_dist=web_dist,
+        title=args.title or dirs[0].name,
+        description=args.description,
+        workspace_names=args.workspace,
+        include_logprobs=not args.no_logprobs,
+        include_pins=not args.no_pins,
+        default_workspace=getattr(args, "open"),
+        warn=warnings.append,
+    )
+    for w in warnings:
+        print(f"  warning: {w}", file=sys.stderr)
+    mb = stats.bytes_written / 1e6
+    print(
+        f"wrote {args.out} — {stats.workspaces} workspace(s), {stats.models} model(s), "
+        f"{stats.nodes_with_blobs} node blob(s), {mb:.1f} MB of data"
+    )
+    # Per-token logprobs outweigh everything else by ~40× on a real store, so the
+    # size is named here rather than left to be discovered by a failed `git push`.
+    if len(stats.per_workspace) > 1:
+        print("  heaviest workspaces:")
+        for name, b in stats.heaviest():
+            print(f"    {b / 1e6:8.1f} MB  {name}")
+    if mb > 100:
+        print(
+            f"  NOTE: {mb:.0f} MB is large for a static host (GitHub Pages soft-limits a\n"
+            "        site at 1 GB and recommends staying under 100 MB). Nearly all of it\n"
+            "        is per-token logprobs. Publish a subset with --workspace NAME\n"
+            "        (repeatable), or pass --no-logprobs (costs the token inspector and\n"
+            "        the first-token chart mode).",
+            file=sys.stderr,
+        )
+    print(f"  preview: python -m http.server -d {args.out} 8080")
+
+
 def main() -> None:
     if sys.argv[1:2] == ["pack"]:
         return _pack_command(sys.argv[2:])
+    if sys.argv[1:2] == ["site"]:
+        return _site_command(sys.argv[2:])
     parser = argparse.ArgumentParser(
         prog="tinkerscope",
         description="Auto-discover Tinker training runs and sample their checkpoints in the browser.",

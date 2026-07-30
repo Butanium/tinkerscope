@@ -27,6 +27,7 @@ from .routes import (
     highlights,
     models,
     openrouter_models,
+    packs,
     pins,
     prefs,
     state,
@@ -76,6 +77,7 @@ app.include_router(highlights.router)
 app.include_router(pins.router)
 app.include_router(prefs.router)
 app.include_router(workspaces.router)
+app.include_router(packs.router)
 
 
 @app.get("/api/health")

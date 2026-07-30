@@ -19,6 +19,7 @@ see `README.md` for the full feature list + credits.
 | `docs/HANDOFF_WORKSPACE_RENAME.md` | Historical planning record for the conversations→workspaces WIRE/DISK rename (shipped in v1.0.0, 2026-07-24). Deliberately keeps the OLD names — it describes the pre-rename state. The as-shipped result is `docs/MIGRATIONS.md` | shipped; historical |
 | `docs/HANDOFF_SERVER_AUTHORITY.md` | **Design: server-authoritative workspace trees (ops protocol)** — inverts the browser-is-sole-writer architecture so the server folds + persists chats (headless CLI durability, fixes the CLI no-token-data / n−1-samples loss), all tree mutation as idempotent ops + per-workspace `rev`, browser stays an optimistic mirror. Locked decisions, race analysis, 3-phase staging | design, not started — read before touching persistence/fold code |
 | `docs/PACK.md` | **Share packs** — bundle checkpoints + default params + workspaces into one portable YAML (`tinkerscope --pack <file\|url>` to consume, `tinkerscope pack export` to author) so a collaborator reproduces a setup against public checkpoints with no local run dirs. Code: `src/tinkerscope/pack.py` + `api/pack_models_store.py` | current |
+| `docs/STATIC_SITE.md` | **Static read-only site export + `?w=<pack link>`** (SHIPPED 2026-07-30) — what a published site keeps/hides and why, the size reality (logprobs are ~97% of the bytes), the `data/` layout (each file ≡ an endpoint response), the two index.html rewrites a GitHub Pages subpath needs, the id-vs-pack-source rule, collision handling, and how the chart view travels | current |
 | `docs/TODO.md` | Roadmap (branching marked done) | current |
 | `deprecated/HANDOFF.md` | Original tool-build handoff (Harry's playground → tinkerscope). Build done; file refs predate the `src/tinkerscope/` restructure | deprecated, kept for history |
 
@@ -89,6 +90,12 @@ and in this file's reference section; HANDOFF.md itself is retired.
   thinking-parse *lessons* carried over into this file).
 - **Shared-state bus / live-drive** (the `tinkpg` ↔ browser lockstep): see
   `docs/HANDOFF_BRANCHING.md` §1 + `src/tinkerscope/api/state.py`.
+- **Static-site export** (what `data/` holds, the panel-ref rewrite, and the two
+  index.html rewrites a GitHub Pages subpath needs — absolute asset refs AND the
+  router's `base`, or the SPA 404s its own route): `src/tinkerscope/site_export.py`
+  — module docstring. Its invariant: **each `data/*.json` is shaped like the endpoint
+  it stands in for**, so the frontend's static transport has no special cases. Fails
+  loudly if SvelteKit's bootstrap shape changes rather than shipping a broken site.
 
 ## Frontend map (`web/` — Svelte 5 / SvelteKit SPA)
 
@@ -239,10 +246,16 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     everything question-specific (turn, include-folded, excluded rule chips, the
     first-N-chars match cap, first-token exclusions / merges / added tokens) is
     PER WORKSPACE, 40-entry
-    LRU by save time. localStorage, deliberately not a workspace field — it's how
-    one person is looking at a distribution, so it stays out of the wire/disk
-    contract and out of share packs. **Has `chart-view.test.ts`** (sanitize /
-    prune / round-trip against a fake localStorage).
+    LRU by save time. localStorage is the LIVE store (sync, no latency on a toggle),
+    MIRRORED into server prefs under `chart_view` (debounced 800 ms via the
+    `setChartViewMirror` seam +page injects) so a **static site export** can carry the
+    view its author set up — the Python exporter can't read a browser's localStorage,
+    and a published site is a curated presentation. Merge on load: a browser that
+    never charted takes the published blob wholesale, anything local always wins
+    (`mergeStores`). Still not a workspace field, so still out of the wire/disk
+    contract and out of share packs (only `prefs.json` carries it). **Has
+    `chart-view.test.ts`** (sanitize / prune / round-trip / merge + hydrate against a
+    fake localStorage).
   - `lib/token-search.ts` — `normalizeForMatch` / `matchKind` / `searchStoredTokens`:
     the first-token add-search's tiered matching (exact ‹ prefix ‹ contains) with
     space-marker normalization (leading space / ▁ / Ġ ≡ bare, case-insensitive),
@@ -270,7 +283,30 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
   - `lib/highlight-match.ts` / `lib/highlight-render.ts` — pure matching + the
     markdown+math+highlight render pipeline. **`highlight.test.ts`.**
   - `lib/render.ts` — store-coupled render entry point (wraps highlight-render).
-  - `lib/api.ts` — typed backend client + named-event SSE helper.
+  - `lib/api.ts` — typed backend client + named-event SSE helper. Its object also
+    DEFINES the `ApiClient` type, and picks the transport at module init: HTTP, or
+    the baked-file client when running as a static export.
+  - `lib/static-mode.ts` / `lib/api-static.ts` — **read-only static site**
+    (`docs/STATIC_SITE.md`). Detection is SYNCHRONOUS off a `window.__TSCOPE_STATIC__`
+    global the exporter injects into index.html (api.ts must choose a transport before
+    any consumer touches it). `api-static` serves each `data/*.json` in place of the
+    endpoint it's shaped like, and routes writes to a per-site localStorage overlay.
+    ⚠️ **Baked workspaces are immutable** — a write to one is accepted and DROPPED, so
+    an incidental layout normalization can't shadow published content; only
+    visitor-installed (pack-link) workspaces persist edits. `readOnly` gates the UI in
+    `+page.svelte` / `ChatMessage.svelte` at the MARKUP level (a hidden control is
+    absent, not disabled). `lib/node-split.ts` is the browser mirror of
+    `workspace_store.split_node`, so a client-installed pack produces the same
+    light-node + blob shape the server would (**has `node-split` coverage via the
+    static smoke**).
+  - `lib/pack-source.ts` / `lib/pack-install.ts` / `PackInstallModal.svelte` —
+    **`?w=` takes a pack path or URL**. The discriminator is free: store ids are
+    `^[A-Za-z0-9_-]+$`, so any value with `/ : .` is a source (**has
+    `pack-source.test.ts`**). Live → `POST /api/pack/apply` (also the only way a
+    local PATH is readable); static → fetch + `js-yaml` (dynamic import) + overlay
+    install. Two-phase: preview reports which deterministic ids collide, the modal
+    offers replace vs keep-both (`<name> (2)`), then the URL is rewritten to the plain
+    `?w=<id>` so a reload never re-installs. `&open=<ws-id>` picks the one to open.
   - `lib/types.ts` — TS types mirroring the backend (see `docs/API_CONTRACT.md`).
   - `lib/tooltip.svelte.ts` — the `use:tip` tooltip action (+ `tipHost`, which
     registers the one rendered box so a wide tip gets clamped into the

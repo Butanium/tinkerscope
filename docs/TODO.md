@@ -429,6 +429,18 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
   `multi_prompt_tab` + `folder_manager_ui`). tinkerscope only has localStorage prompt
   history today.
 - [ ] **Markdown export** of a workspace / result set ("Save all").
+- [ ] **Static site: trim the blobs.** `site export` keeps `token_logprobs`, which is
+  ~97% of the bytes (24 MB of workspaces vs 901 MB of blobs on the real store). Today
+  the choice is all-or-nothing (`--no-logprobs`) plus `--workspace` selection, and the
+  command reports the per-workspace breakdown. A middle setting would help: keep
+  logprobs only for the turns a workspace's chart actually uses, or only the newest N
+  turns per thread. See `docs/STATIC_SITE.md` §Size.
+- [ ] **Static site: BYOK OpenRouter.** A published site can't sample Tinker
+  checkpoints (the oai endpoint sends no CORS headers, and even with them it serves
+  BASE weights for a LoRA sampler path — tinker-feedback#125). OpenRouter *does* allow
+  browser calls with the visitor's own key, so a static site could offer live sampling
+  against reference models only. Worth it only if someone wants it — it reintroduces a
+  composer into a read-only UI, so the gating would need a third state.
 - [ ] **Multi-prompt batch grid** (N prompts × M models). Different use case
   (systematic eval) — may belong in `inspect_ai` land instead of the playground.
 - [ ] **Reasoning/raw on committed turns.** Committed transcript messages are

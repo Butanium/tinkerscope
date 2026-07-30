@@ -360,6 +360,26 @@ codex plugin add tinkerscope@tinkerscope</pre>
     </section>
 
     <section class="help-sec">
+      <h3>Sharing what you're looking at</h3>
+      <p>
+        A pack is also a <b>link</b>: open <code>?w=&lt;path-or-url-to-pack.yaml&gt;</code> and it installs and
+        opens right here, no restart. Add <code>&amp;open=&lt;workspace-id&gt;</code> to choose which workspace
+        lands open. If you already have that pack's workspaces you're asked whether to <b>replace</b> them or
+        <b>keep both</b> — nothing is overwritten silently. The address bar then shows the plain
+        <code>?w=&lt;id&gt;</code>, so a reload opens instead of re-installing.
+      </p>
+      <p>
+        For someone who shouldn't need a setup at all, <code>tinkerscope site export ./site</code> writes a
+        <b>read-only static copy</b> — hostable on GitHub Pages, no backend, no API key. Everything readable
+        survives (workspaces, branches, threads, the chart, token probabilities, your highlight rules); the
+        composer, the edit/regenerate/delete buttons, the model pickers and the sampling params are simply not
+        there, and the top bar says <i>snapshot</i> instead of <i>live</i>. The chart's per-workspace view
+        travels with it, so what you set up is what a visitor sees. Token probabilities are ~97% of the exported
+        size — <code>--no-logprobs</code> makes it far smaller if you only need to show what the models said.
+      </p>
+    </section>
+
+    <section class="help-sec">
       <h3>Driven from the terminal</h3>
       <p>
         Everything on this screen is live-shared with the <code>tinkpg</code> CLI, so an agent (or you) can

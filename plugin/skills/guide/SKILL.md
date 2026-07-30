@@ -267,6 +267,37 @@ always check what a chord will do before committing to it.
 - **Nothing live-reloads.** If someone changed the code, a backend change needs
   the server restarted and a frontend change needs a rebuild plus a refresh.
 
+## Sharing what you're looking at
+
+Two ways, depending on whether the other person should be able to sample.
+
+**A pack link — they get your setup, live.** Export a share pack
+(`tinkerscope pack export demo.yaml`), publish it anywhere with a URL, and the URL
+*is* the invitation: `<their tinkerscope>/?w=https://…/demo.yaml` installs its
+models, params and workspaces and opens them. A local path works too
+(`?w=/home/me/demo.yaml`) — their server reads it. Add `&open=<workspace-id>` to
+choose which workspace lands open. If they already have that pack's workspaces
+they're asked whether to **replace** them or **keep both** (the incoming copy
+becomes "name (2)"); nothing is silently overwritten. Once installed the address bar
+shows the plain `?w=<id>`, so reloading opens rather than re-installing. They need
+their own API key to sample — the pack carries checkpoints, never credentials.
+
+**A published read-only site — they get a link, no setup at all.**
+`tinkerscope site export ./site` writes a static copy hostable on GitHub Pages (no
+backend, no key). Visitors can read and analyze everything — every workspace, branch
+and thread, all the panels, the distribution chart in all three modes, token
+probabilities, the pins — and can write their own highlight rules, which stay in
+their browser. What's simply not on the screen: the composer, regenerate/edit/delete,
+the model pickers, and the sampling params. The top bar says **snapshot** instead of
+`live`, and a badge in the sidebar names it as read-only.
+
+Two things worth knowing before you publish. The chart's per-workspace view travels
+with the export, so whatever bucketing you set up is what a visitor sees first —
+worth arranging deliberately. And token probabilities are enormous: they're around
+97% of the exported bytes, so if the site is only meant to show *what* the models
+said, `--no-logprobs` makes it roughly 30× smaller (at the cost of the token
+inspector and the chart's "first token" mode).
+
 ## Keeping this file honest
 
 This guide and the in-app `?` modal (`web/src/lib/HelpModal.svelte`) are twins —
