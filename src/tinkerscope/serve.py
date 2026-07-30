@@ -147,6 +147,9 @@ def _site_command(argv: list[str]) -> None:
                     help="include only these workspaces by name (repeatable)")
     ex.add_argument("--open", default=None, metavar="WS_ID",
                     help="workspace id to open by default (default: the first exported one)")
+    ex.add_argument("--pack-url", default=None, metavar="URL",
+                    help="where the same content is published as a share pack — the site's "
+                         "\"open this locally\" panel turns it into a runnable command")
     ex.add_argument("--no-logprobs", action="store_true",
                     help="drop per-token logprobs — much smaller, but disables the token inspector and the first-token chart")
     # Tri-state. Pins have no workspace id, so a --workspace filter can't scope them:
@@ -185,6 +188,7 @@ def _site_command(argv: list[str]) -> None:
         include_logprobs=not args.no_logprobs,
         include_pins=args.pins,
         default_workspace=getattr(args, "open"),
+        pack_url=args.pack_url,
         warn=warnings.append,
     )
     for w in warnings:

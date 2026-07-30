@@ -24,6 +24,9 @@ export type StaticManifest = {
   data?: string;
   /** Workspace to open when the URL names none (else the first in the index). */
   default_workspace?: string | null;
+  /** Where this content is published as a share pack, if anywhere — turns the
+   *  read-only badge's panel into a command that reproduces what's on screen. */
+  pack_url?: string | null;
 };
 
 declare global {

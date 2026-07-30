@@ -308,6 +308,13 @@ worth arranging deliberately. And token probabilities are enormous: they're arou
 said, `--no-logprobs` makes it roughly 30× smaller (at the cost of the token
 inspector and the chart's "first token" mode).
 
+Two things a *reader* of the site gets. The **read-only badge is a button**: it opens a
+panel with the command to run tinkerscope locally against the same pack, so going
+interactive is one copy-paste (pass `--pack-url` at export time or it can only offer the
+generic install, and it says so). And each checkpoint has a **copy button beside its
+name** that puts its `tinker://…/sampler_weights/…` path on the clipboard — the thing you
+paste into your own script.
+
 **The two combine.** A published site is not only *your* workspaces — it reads
 anyone's pack. Point it at one with `?w=<pack url>`, or open a file from your own
 computer with the ⤒ button beside the workspace picker (or by dropping the file on

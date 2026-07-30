@@ -204,6 +204,7 @@ def export_site(
     include_logprobs: bool = True,
     include_pins: bool | None = None,
     default_workspace: str | None = None,
+    pack_url: str | None = None,
     warn: Callable[[str], None] = lambda _m: None,
 ) -> SiteStats:
     """Write a complete static site into `out_dir` (created; existing `data/` and
@@ -342,6 +343,12 @@ def export_site(
         "description": description,
         "data": "data/",
         "default_workspace": open_id,
+        # Where the same content lives as a share PACK, if anywhere. A published site is
+        # read-only by construction, so the obvious next question is "how do I sample
+        # these myself" — and the honest answer is a `--pack <url>` command, which needs
+        # a URL only the publisher knows. Absent ⇒ the UI offers the generic install
+        # instructions instead of a command that wouldn't reproduce what's on screen.
+        "pack_url": pack_url,
     }
     _write_json(data / "manifest.json", manifest, stats)
 

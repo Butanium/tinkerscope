@@ -273,6 +273,29 @@ so a reload is a normal open and never a re-install.
 `&open=<workspace-id>` picks which of a multi-workspace pack lands open; an unknown
 id opens the first and says so.
 
+### Getting out of read-only
+
+A published site raises exactly one question it can't act on — *how do I sample these
+myself* — so the read-only badge is a button that answers it (`OpenLocallyModal.svelte`).
+The answer is a `uvx … tinkerscope --pack <url>` command, which needs a pack URL:
+
+- **`site export --pack-url <url>`** bakes one into the manifest, for the workspaces the
+  site ships;
+- a workspace the visitor installed from a `?w=<url>` link carries its own, recorded at
+  install time under the overlay key `ws.source.<id>` (deliberately NOT a field on the
+  Workspace body — that shape is the wire/disk contract shared with the live server, and
+  provenance is static-only). Per-workspace wins, since one site can host several packs'
+  worth of content.
+
+With **no** URL known the panel says the command starts an *empty* tinkerscope and won't
+reproduce the page, rather than printing something that looks like it should work. That
+asymmetry is what `browser_open_locally.py` pins, by exporting the same site twice.
+
+Each `ckpt:` panel also carries a **copy-the-sampler-path** button beside its name. It
+replaced a `· loose sampler` suffix, which was jargon for "no run dir behind this" — true
+of every checkpoint in a pack or a published site, so it told a reader nothing while
+duplicating the model name on a second line.
+
 ### Trust
 
 A pack is data, never code — models, params, workspace trees — and that claim is load-

@@ -372,6 +372,13 @@ codex plugin add tinkerscope@tinkerscope</pre>
         plain <code>?w=&lt;id&gt;</code>, so a reload opens instead of re-installing.
       </p>
       <p>
+        Reading a published site? The <b>read-only snapshot</b> badge in the sidebar is a button —
+        it gives you the command to run tinkerscope locally against the same pack, so you can go
+        from reading to sampling in one copy-paste. And every checkpoint has a
+        <Icon name="copy" /> button next to its name that copies its <code>tinker://</code>
+        sampler path, for pointing your own scripts at it.
+      </p>
+      <p>
         On a <b>published site</b> you can also open a pack straight off your own computer — the
         <Icon name="upload" /> button next to the workspace picker, or just drop the file on the page.
         Nothing gets uploaded: it's read and stored in this browser. That's the way in for a pack you

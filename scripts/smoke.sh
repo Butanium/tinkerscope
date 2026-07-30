@@ -88,6 +88,7 @@ DEFAULT=(
     # ignore the base-url arg — they still belong here so they run under the lock.
     browser_static_site
     browser_pack_big
+    browser_open_locally
 )
 # Known-stale: failures here carry NO signal. Repair when you next need the
 # coverage — not on their own account.

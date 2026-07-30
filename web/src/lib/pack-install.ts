@@ -23,7 +23,12 @@
 
 import { api } from './api';
 import { isStatic } from './static-mode';
-import { staticApi, staticInstallWorkspace, staticInstallModels } from './api-static';
+import {
+  staticApi,
+  staticInstallWorkspace,
+  staticInstallModels,
+  staticSetWorkspaceSource
+} from './api-static';
 import { isLocalPath, packWorkspaceId, bumpUntilFree } from './pack-source';
 import { restoreLogprobs } from './pack-logprobs';
 import type { PanelLayout, TinkerModel, OpenRouterModel } from './types';
@@ -199,6 +204,7 @@ export async function install(
       send_targets: body.send_targets ?? [],
       seen_panels: body.seen_panels ?? []
     });
+    if (typeof source === 'string') staticSetWorkspaceSource(id, source);
     out.push({ id, name: wsName });
   }
   return out;

@@ -77,7 +77,11 @@ const K = {
   highlightsSeeded: 'highlights.seeded',
   pins: 'pins',
   tinkerModels: 'models.tinker', // catalog entries added by an installed pack
-  orModels: 'models.openrouter'
+  orModels: 'models.openrouter',
+  // Where an installed workspace CAME from (the `?w=` pack URL). Kept out of the
+  // Workspace body on purpose: that shape is the wire/disk contract shared with the
+  // live server, and provenance is a static-site-only concern.
+  source: (id: string) => `ws.source.${id}`
 };
 
 function createdIds(): string[] {
@@ -426,6 +430,18 @@ export function staticInstallWorkspace(entry: Parameters<typeof installWorkspace
  *  its edits persist), as opposed to one baked into the site. */
 export function staticIsOverlay(id: string): boolean {
   return isOverlay(id);
+}
+
+/** Remember the pack URL a workspace was installed from, so the "open this locally"
+ *  panel can hand the visitor a command that reproduces exactly what they're reading.
+ *  Only URLs are worth keeping — a picked File has no address anyone else can use. */
+export function staticSetWorkspaceSource(id: string, source: string): void {
+  if (/^https?:\/\//i.test(source)) writeOverlay(K.source(id), source);
+}
+
+/** The pack URL `id` was installed from, if it was and if we know it. */
+export function staticWorkspaceSource(id: string): string | null {
+  return readOverlay<string | null>(K.source(id), null);
 }
 
 /** Merge an installed pack's models into the overlay catalogs, so its panels'

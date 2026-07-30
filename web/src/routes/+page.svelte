@@ -7,7 +7,7 @@
   // (see lib/static-mode.ts + docs/STATIC_SITE.md). Gating is markup-level and
   // explicit rather than a global CSS mask, so a hidden control can't be reached.
   import { isStatic, readOnly, manifest } from '$lib/static-mode';
-  import { staticIsOverlay } from '$lib/api-static';
+  import { staticIsOverlay, staticWorkspaceSource } from '$lib/api-static';
   import { live, emptyPanel } from '$lib/state.svelte';
   import { touchesWorkspace } from '$lib/bus-scope';
   import { workspaces as ws } from '$lib/workspaces.svelte';
@@ -49,6 +49,7 @@
   } from '$lib/chart-view';
   import HighlightRules from '$lib/HighlightRules.svelte';
   import PackInstallModal from '$lib/PackInstallModal.svelte';
+  import OpenLocallyModal from '$lib/OpenLocallyModal.svelte';
   import { isPackSource, sourceLabel } from '$lib/pack-source';
   import { preview, install, type PackPreview, type ConflictMode } from '$lib/pack-install';
   import type { Pin } from '$lib/types';
@@ -829,6 +830,29 @@
    *    that store is something the visitor's browser could not otherwise do, so it
    *    keeps asking.
    */
+  // ── "Open this locally" (read-only badge) ──────────────────────
+  let showOpenLocally = $state(false);
+  /** The pack URL that reproduces what's on screen, if one is known. A workspace the
+   *  visitor installed from a `?w=` link remembers its own source; otherwise fall back
+   *  to the site-wide one the publisher declared via `site export --pack-url`. Per
+   *  workspace first, because a site can host several packs' worth of content. */
+  const activeWorkspacePackUrl = $derived(
+    (ws.activeId && isStatic ? staticWorkspaceSource(ws.activeId) : null) ??
+      manifest?.pack_url ??
+      null
+  );
+
+  // Transient ✓ on the sampler-path copy button (the clipboard gives no feedback).
+  // One panel at a time is enough — copying in a second panel moves the tick there.
+  let copiedCkptPanel = $state<string | null>(null);
+  let copiedCkptTimer: ReturnType<typeof setTimeout> | undefined;
+  function copySamplerPath(panel: string, path: string): void {
+    navigator.clipboard?.writeText(path);
+    copiedCkptPanel = panel;
+    clearTimeout(copiedCkptTimer);
+    copiedCkptTimer = setTimeout(() => (copiedCkptPanel = null), 1200);
+  }
+
   function canInstallUnprompted(pv: PackPreview): boolean {
     return isStatic && !pv.workspaces.some((w) => w.exists);
   }
@@ -1656,12 +1680,21 @@
       </div>
 
       {#if readOnly}
-        <!-- Names the mode so a visitor isn't hunting for a composer that was
-             removed on purpose. Title comes from the export manifest. -->
-        <div class="readonly-badge" data-testid="readonly-badge">
+        <!-- Names the mode so a visitor isn't hunting for a composer that was removed
+             on purpose. It's also the natural place to answer the question the mode
+             provokes — "how do I sample these myself?" — so the whole badge is the
+             button for that. Title comes from the export manifest. -->
+        <button
+          class="readonly-badge"
+          data-testid="readonly-badge"
+          data-tooltip="How to open this locally and sample the models yourself"
+          use:tip
+          onclick={() => (showOpenLocally = true)}
+        >
           <Icon name="eye" size={12} />
           <span>read-only snapshot{manifest?.title ? ` · ${manifest.title}` : ''}</span>
-        </div>
+          <span class="readonly-cta">open locally →</span>
+        </button>
       {/if}
 
       {#if backendError}
@@ -1777,6 +1810,23 @@
                   />
                 {/if}
               </div>
+              <!-- Right next to the model NAME, because the sampler path is what you
+                   paste into your own script and the name is how you found the panel.
+                   Only `ckpt:` panels have one: a discovered run is addressed by a
+                   scan-dir-relative id that means nothing on another machine, and a
+                   base model is a name, not a path. -->
+              {#if isCkpt && sp}
+                <button
+                  class="btn-copy-sp"
+                  class:copied={copiedCkptPanel === p.panel}
+                  data-tooltip="Copy this checkpoint's tinker sampler path"
+                  aria-label="Copy sampler path"
+                  use:tip
+                  onclick={() => copySamplerPath(p.panel, sp)}
+                >
+                  <Icon name={copiedCkptPanel === p.panel ? 'check' : 'copy'} size={12} />
+                </button>
+              {/if}
               {#if panelSels.length > 1 && !readOnly}
                 <button class="btn-remove-model" onclick={() => removePanel(p.panel)} title="Remove this panel">
                   <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
@@ -1790,8 +1840,11 @@
                 <div class="unsampleable-note">Set TINKER_API_KEY to sample this base model.</div>
               {/if}
             {:else if isCkpt}
-              <!-- Loose tinker sampler checkpoint: no checkpoint selector. -->
-              <div class="run-meta or-meta" title={sp}>◇ {modelCatalog.ckptLabel(p.run_id)} · loose sampler</div>
+              <!-- No meta line: the row above already shows this checkpoint's name, and
+                   the only thing the old line added was "· loose sampler" — jargon for
+                   "no run dir behind it", which is true of EVERY checkpoint in a pack or
+                   a published site and so tells a reader nothing. The sampler path it
+                   was really pointing at is now one click away, in the row above. -->
               {#if health && !health.tinker_key && !readOnly}
                 <div class="unsampleable-note">Set TINKER_API_KEY to sample this checkpoint.</div>
               {/if}
@@ -2275,6 +2328,14 @@
   />
 {/if}
 
+{#if showOpenLocally}
+  <OpenLocallyModal
+    packUrl={activeWorkspacePackUrl}
+    workspaceName={ws.list.find((w) => w.id === ws.activeId)?.name ?? manifest?.title ?? null}
+    onclose={() => (showOpenLocally = false)}
+  />
+{/if}
+
 {#if showDatasetLoader}
   <DatasetModal initialPath={datasetInitialPath} loading={datasetLoading} onsubmit={loadDataset} onclose={() => (showDatasetLoader = false)} />
 {/if}
@@ -2381,6 +2442,11 @@
   .or-manage-link { align-self: flex-start; background: none; border: none; padding: 0; cursor: pointer; font-size: 0.7rem; color: var(--color-text-muted); font-weight: 500; }
   .or-manage-link:hover { color: var(--color-accent); }
   .or-meta { color: var(--color-text-secondary); }
+  /* Sits in .model-slot-row beside the model name; sized to match .btn-remove-model
+     so a panel with both keeps its controls on one baseline. */
+  .btn-copy-sp { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 28px; height: 28px; padding: 0; background: var(--color-surface-hover); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text-muted); cursor: pointer; }
+  .btn-copy-sp:hover { color: var(--color-accent); border-color: var(--color-border); background: var(--color-surface-hover); }
+  .btn-copy-sp.copied { color: var(--color-success, var(--color-accent)); }
   .theme-toggle { background: none; border: 1px solid var(--color-border); border-radius: var(--radius); padding: 6px; color: var(--color-text-muted); display: flex; align-items: center; }
   .theme-toggle:hover { color: var(--color-text); border-color: var(--color-text-muted); }
   .theme-toggle.refreshing { opacity: 0.5; cursor: wait; }
@@ -2445,7 +2511,9 @@
   /* Read-only: the bar carries only the thread switcher, so it needs top padding
      the composer variant gets from its own rows. */
   .input-bar.readonly-bar { padding-top: var(--space-2); }
-  .readonly-badge { display: flex; align-items: center; gap: var(--space-1); margin: 0 0 var(--space-2); padding: 3px var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-alt); color: var(--color-text-muted); font-size: 0.68rem; }
+  .readonly-badge { display: flex; align-items: center; gap: var(--space-1); width: 100%; margin: 0 0 var(--space-2); padding: 3px var(--space-2); border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-alt); color: var(--color-text-muted); font-size: 0.68rem; text-align: left; cursor: pointer; }
+  .readonly-badge:hover { border-color: var(--color-accent); color: var(--color-text); }
+  .readonly-cta { margin-left: auto; color: var(--color-accent); white-space: nowrap; }
   .readonly-badge span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .input-resize-handle { height: 8px; cursor: row-resize; position: relative; }
   .input-resize-handle::after { content: ''; position: absolute; left: 30%; right: 30%; top: 3px; height: 2px; background: transparent; transition: background 0.15s; border-radius: 1px; }

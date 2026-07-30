@@ -61,7 +61,7 @@ applies (`"overwrite"` | `"new"`) — the HTTP route has no prompt, so prefer it
 you're scripting and the human has already agreed.
 
 **Publish a read-only copy — `tinkerscope site export <dir> [--dir <scan-root>]
-[--title T] [--workspace NAME] [--no-logprobs] [--open <ws-id>]`.** Emits a static
+[--title T] [--workspace NAME] [--no-logprobs] [--open <ws-id>] [--pack-url URL]`.** Emits a static
 site (built SPA + baked JSON) that needs no backend and no API key — GitHub Pages, S3,
 `python3 -m http.server -d <dir>`. Visitors can read everything (workspaces, branches,
 threads, the chart in all three modes, token probabilities, editable highlight rules,
@@ -83,6 +83,11 @@ file on the page. A relative `?w=./demo.yaml.gz` works too, for a pack published
 its viewer. So "share this workspace" can mean pushing one `.yaml.gz` rather than
 re-exporting the whole site — the trade-off being that a `?w=` link is a fetch
 instruction, not a permalink: if the pack URL dies, so does the link.
+
+**Pass `--pack-url <url>` when you publish both.** The site's read-only badge opens an
+"open this locally" panel that turns it into a runnable `--pack` command, so a reader can
+go interactive in one copy-paste. Without it the panel has to tell them the command
+starts an EMPTY tinkerscope and won't reproduce the page — correct, but a dead end.
 
 ## Drive the shared playground
 

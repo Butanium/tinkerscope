@@ -309,6 +309,14 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     `workspace_store.split_node`, so a client-installed pack produces the same
     light-node + blob shape the server would (**has `node-split` coverage via the
     static smoke**).
+  - `lib/OpenLocallyModal.svelte` — the **read-only badge is a button**, and this is what
+    it opens: the `uvx … --pack <url>` command that gets a reader from reading to
+    sampling. The URL comes from `site export --pack-url` (baked) or from the `?w=` link
+    a visitor installed from (overlay key `ws.source.<id>`, per-workspace wins). With
+    NO url it says the command starts an empty tinkerscope and won't reproduce the page,
+    rather than printing something that looks like it should work. Smoke:
+    `browser_open_locally.py` (exports the same site twice to pin both branches; also
+    pins the per-panel copy-the-sampler-path button that replaced `· loose sampler`).
   - `lib/overlay-store.ts` — the **static site's write overlay**: an in-memory map
     hydrated once from **IndexedDB** (localStorage until 2026-07-30 — its ~5 MB/origin
     cap made a real workspace impossible to install, and it failed QUIETLY: the write
