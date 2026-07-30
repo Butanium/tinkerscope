@@ -243,3 +243,38 @@ its coordination note), the third is the thread-system feature itself.
   unusual" (a step), sometimes the relative shape. If it happens, share the
   control rather than growing a second slider — one "tint ramp" that applies to
   whichever mode is active. *(opus-5, 2026-07-24)*
+
+
+## From the 2026-07-29 chart split / persistence / isolation session (opus-5)
+
+- **Hunt the rest of the DOM-held UI state.** The inspector's thinking fold reset
+  under a live chart because `<details open={…}>` kept the user's choice in the
+  DOM, and the surrounding list is re-derived on every streamed sample. That
+  shape is not unique to the chart: any `<details>`, uncontrolled `<input>`,
+  scroll position, or `<dialog>` sitting inside a re-derived `{#each}` has the
+  same latent bug. Worth a grep sweep (`<details`, `bind:` absent + user-toggled
+  attrs) over `web/src` and a convention line where it lands. The tell to look
+  for: state a person SET that no store knows about. *(opus-5, 2026-07-29)*
+
+- **`ChartModal.svelte` is at ~850 lines and has a second component inside it.**
+  The first-token chip row (exclude / drag-merge / unmerge / added-token search +
+  its ~40 lines of CSS) is self-contained and shares nothing with the plot except
+  `ft` and four module-scoped arrays — a `FirstTokenChips.svelte` taking `{chips,
+  onexclude, onmerge, …}` would cut the file by a third and make the bespoke
+  onto-drop DnD testable on its own. Not urgent; the file is sectioned and
+  navigable. *(opus-5, 2026-07-29)*
+
+- **Let a share pack carry a chart view.** `lib/chart-view` is deliberately
+  browser-local (a view preference has no business in the wire/disk contract),
+  but "here is my checkpoint AND the exact chart I was looking at — turn 3,
+  rules mode, these two rules excluded" is a genuinely nice thing to hand a
+  collaborator. If it happens: an OPTIONAL `chart_view` block in the pack YAML
+  that seeds localStorage on consume, never a workspace field — the asymmetry
+  (packs can suggest a view; workspaces don't own one) is the point.
+  *(opus-5, 2026-07-29)*
+
+- **The per-bar `n=` only appears when a group's bars disagree.** Deliberate (no
+  noise when the pair shares one population), but it means the think-split's two
+  bars show `n=` while a plain single bar shows it only under the model name. If
+  anyone finds that inconsistent, the fix is to always label per bar and drop the
+  group total when a group has one bar. *(opus-5, 2026-07-29)*

@@ -101,6 +101,31 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
 
 ## Next
 
+- [x] **Chart: think/no-think split, a remembered view, and an isolated inspector
+  — SHIPPED 2026-07-29** (`16bfedc`, `e66c9e0`; all three asked for by Clément in
+  one session).
+  - The thinking filter gained `split`: a bar per population over DISJOINT
+    samples, each with its own 100% and its own `n`, composing with rules mode's
+    `split` match scope (up to 4 bars per model). Source building moved out of
+    the component into pure `chart.ts:buildChartSources`.
+  - The whole modal view persists (`lib/chart-view.ts`): mode / match scope /
+    thinking filter GLOBAL, everything question-specific PER WORKSPACE, 40-entry
+    LRU in localStorage. Deliberately not a workspace field — a view preference
+    has no business in the wire/disk contract or in share packs.
+  - The inspector no longer resets under a live chart: bars are addressed by a
+    stable ref (panel id + pop + sub) instead of their index in `data.bars`, and
+    the per-sample thinking folds live in state instead of the `<details>` DOM.
+    The index bug could silently re-point the inspector at a DIFFERENT panel's
+    bucket, so this was a correctness fix, not just a UX one.
+- [ ] **Open question from that session: should clicking a segment PIN the turn?**
+  With the turn picker on `Latest`, starting a new batch makes the streaming
+  pseudo-turn the latest, so the chart legitimately jumps turns and the inspected
+  bucket disappears. Arguably correct — but if you are reading samples and someone
+  (you, or the CLI) fires a draw, you lose your place. Cheap version: on
+  `toggleInspect`, if `turnSel === 'last'`, freeze it to the current index (and
+  say so in the picker). Wants Clément's read on which he'd rather have; nobody
+  has reported it as a problem, so it is not obviously worth the extra mode.
+
 - [x] **A human-facing guide, in two places — SHIPPED 2026-07-24** (asked for by
   Clément the same day). The `tinkerscope` skill is written for an AGENT driving
   the tool from the terminal; nothing explained the UI to a person.

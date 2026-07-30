@@ -474,6 +474,12 @@ extracted UI: `tests/small-smokes/browser_{chart_modal,modals}.py`.
   error — on 2026-07-24 that produced a false "the fix doesn't work" on the
   cross-tab corruption smoke. `scripts/smoke.sh --fresh` for the empty-state set
   (`chart_rules` wants it); `scripts/smoke.sh <name>…` to run a subset.
+  **`--baseline <ref> <smoke>` runs the WORKING TREE's smoke against the app at
+  `<ref>`** (throwaway `/var/tmp` worktree, built + served on the same isolated
+  port, self-reaped). Use it on every smoke you write for a bug you just fixed:
+  until you watch it FAIL without the fix it proves nothing, and on 2026-07-29 two
+  successive versions of one smoke passed for the wrong reason. Read that run's
+  log — its exit code only covers setup.
 - **Isolated instance for testing** — NEVER test against the user's live server
   or `~/.local/state/tinkerscope`; run `scripts/dev-isolated.sh [--port N] [SCAN_DIR ...]`
   instead: it snapshots the real state into a throwaway `XDG_STATE_HOME` (realistic

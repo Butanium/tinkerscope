@@ -11,15 +11,26 @@
 #   - `web/dist` must be current, or you are testing the last build, not your edits.
 #   - Some smokes are STALE and their failures mean nothing — they are skipped
 #     here by name, with the reason, rather than quietly polluting the result.
+#   - A smoke you wrote for a bug you just fixed proves NOTHING until you watch it
+#     FAIL without the fix. Twice on 2026-07-29 a fresh smoke passed for the wrong
+#     reason (an assertion that could not fail; a "live" update that never fired) —
+#     both would have shipped as green. `--baseline` makes that check one flag.
 #
 # Usage:
 #   scripts/smoke.sh                 # token-free set against a state SNAPSHOT
 #   scripts/smoke.sh --fresh         # ... against EMPTY state (chart_rules wants this)
 #   scripts/smoke.sh a b c           # only these smokes (names, no path/extension)
+#   scripts/smoke.sh --baseline HEAD browser_chart_live_inspect
+#                                    # run TODAY'S smoke against the app at <ref>
+#                                    # (a throwaway worktree) — the A/B half that
+#                                    # tells you the smoke can actually fail.
 #   PORT=8899 scripts/smoke.sh       # pin the port
 #   SMOKE_SCAN_DIR="d1 d2" scripts/smoke.sh   # override the scan roots (space-separated)
 #
 # Exit non-zero if any smoke fails; per-smoke logs land in the run dir it prints.
+# In --baseline mode the exit code only covers the SETUP (worktree/build/instance):
+# whether a smoke should have failed is yours to read, so it always exits 0 once
+# the baseline instance came up.
 
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -27,6 +38,7 @@ cd "$ROOT"
 
 PORT="${PORT:-8813}"
 FRESH=""
+BASELINE=""
 # BOTH fixture roots by default. The label/typeahead smokes (modals, label_trunc,
 # label_diff, fuzzy_search) hard-code `ed_sheeran`, whose runs live ONLY under
 # negation_neglect — with weird-personas alone they fail on a 15s timeout that
@@ -37,7 +49,8 @@ PICK=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --fresh) FRESH="--fresh"; shift ;;
-        -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+        --baseline) BASELINE="${2:?--baseline needs a git ref (e.g. HEAD)}"; shift 2 ;;
+        -h|--help) sed -n '2,33p' "$0"; exit 0 ;;  # ← the header comment block
         *) PICK+=("$1"); shift ;;
     esac
 done
@@ -113,18 +126,44 @@ fi
 RUN_DIR="$(mktemp -d /tmp/tinkerscope-smoke-XXXXXX)"
 echo "logs: $RUN_DIR"
 
-echo "building web/ (stale dist = testing your last build, not your edits)…"
-if ! ( cd web && npm run build ) > "$RUN_DIR/build.log" 2>&1; then
+# APP_DIR is what gets built and served. Normally the working tree; with
+# --baseline, a throwaway worktree at <ref> — so today's smoke runs against
+# yesterday's app. The smoke FILES always come from the working tree ($ROOT):
+# the baseline ref usually predates the smoke entirely, and running its copy
+# would test nothing. Worktree lives on /var/tmp (disk), not /tmp (RAM).
+APP_DIR="$ROOT"
+WORKTREE=""
+if [ -n "$BASELINE" ]; then
+    REF_SHA="$(git rev-parse --short "$BASELINE" 2>/dev/null)" || {
+        echo "--baseline: '$BASELINE' is not a git ref"; exit 1; }
+    WORKTREE="$(mktemp -d /var/tmp/tscope-baseline-XXXXXX)"
+    rmdir "$WORKTREE"
+    echo "baseline: checking out $BASELINE ($REF_SHA) → $WORKTREE"
+    if ! git worktree add --detach "$WORKTREE" "$BASELINE" > "$RUN_DIR/worktree.log" 2>&1; then
+        cat "$RUN_DIR/worktree.log"; exit 1
+    fi
+    # node_modules is gitignored, so the worktree has none — borrow the main
+    # checkout's (same package.json at any ref we'd baseline against).
+    ln -s "$ROOT/web/node_modules" "$WORKTREE/web/node_modules"
+    APP_DIR="$WORKTREE"
+fi
+
+echo "building web/${WORKTREE:+ from the baseline worktree} (stale dist = testing your last build, not your edits)…"
+if ! ( cd "$APP_DIR/web" && npm run build ) > "$RUN_DIR/build.log" 2>&1; then
     echo "web build FAILED:"; cat "$RUN_DIR/build.log"; exit 1
 fi
 
 # shellcheck disable=SC2086  # $SCAN_DIR is word-split on purpose (several scan roots)
-scripts/dev-isolated.sh --port "$PORT" $FRESH $SCAN_DIR > "$RUN_DIR/server.log" 2>&1 &
+( cd "$APP_DIR" && scripts/dev-isolated.sh --port "$PORT" $FRESH $SCAN_DIR ) > "$RUN_DIR/server.log" 2>&1 &
 SERVER_PID=$!
 cleanup() {
     kill "$SERVER_PID" 2>/dev/null
     # dev-isolated's child outlives the wrapper; take the port down by name too.
     pkill -f "port $PORT" 2>/dev/null
+    if [ -n "$WORKTREE" ]; then
+        sleep 1  # let the server release the checkout before git prunes it
+        git worktree remove --force "$WORKTREE" 2>/dev/null
+    fi
 }
 trap cleanup EXIT
 
@@ -154,4 +193,13 @@ done
 
 echo
 echo "$pass passed, $fail failed"
+if [ -n "$BASELINE" ]; then
+    echo
+    echo "↑ BASELINE run against $BASELINE ($REF_SHA) — read it inverted: a smoke that"
+    echo "  pins a fix SHOULD fail here, and you must open its log to confirm it failed"
+    echo "  on the assertions the fix addresses (not on setup, a timeout, or a stray"
+    echo "  instance). A smoke that PASSES here does not test what you think it does."
+    [ "$fail" -gt 0 ] && echo "  failed (expected): ${failed[*]}"
+    exit 0
+fi
 [ "$fail" -eq 0 ] || { echo "failed: ${failed[*]}"; exit 1; }
