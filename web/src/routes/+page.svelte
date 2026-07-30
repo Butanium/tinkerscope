@@ -798,12 +798,11 @@
         flashWsNotice(`“${pv.pack}” contains no workspaces to open.`);
         return;
       }
-      // Nothing would be overwritten ⇒ just install. Asking permission to write
-      // nothing is ceremony; the point of the link is one click to the setup.
-      if (!pv.workspaces.some((w) => w.exists)) {
-        await finishPackInstall(source, 'overwrite');
-        return;
-      }
+      // ALWAYS prompt, even with nothing to overwrite. A link installs on plain
+      // NAVIGATION, and any page can navigate a browser to a localhost URL — the API's
+      // CORS allowlist doesn't cover that. A silent install would plant transcripts
+      // that look sampled from your own checkpoints. One click, naming the source
+      // host, is a cheap price for that not being possible.
       packSource = source;
       packPreview = pv;
     } catch (e: any) {

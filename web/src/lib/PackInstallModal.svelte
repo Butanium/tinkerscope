@@ -1,12 +1,14 @@
 <script lang="ts">
-  // The collision prompt for a `?w=<pack-path-or-url>` install: this pack's
-  // workspaces already exist here — replace them, or keep both copies?
+  // The consent prompt for a `?w=<pack-path-or-url>` install.
   //
-  // Shown ONLY when something would be overwritten. A pack with no collisions
-  // installs straight away, because the whole point of the link is one click to the
-  // shared setup; asking permission to write nothing would be ceremony. What the
-  // human always gets is the SOURCE, named by host — a pack is data, not code, but
-  // it is still a third-party file about to become workspaces in their sidebar.
+  // Shown for EVERY install, not just colliding ones. A pack link installs on plain
+  // navigation, and any web page can navigate a browser to a localhost URL (the API's
+  // CORS allowlist guards fetches, not navigation) — so without a prompt a third party
+  // could plant workspaces whose transcripts read as if your own checkpoints produced
+  // them. The source is named by host for the same reason.
+  //
+  // With collisions it additionally asks HOW: replace the existing copies, or keep
+  // both (the incoming one becomes `<name> (2)`).
   import Modal from '$lib/Modal.svelte';
   import { sourceLabel } from '$lib/pack-source';
   import type { PackPreview, ConflictMode } from '$lib/pack-install';
@@ -41,9 +43,14 @@
   {/if}
 
   <p class="pack-clash">
-    {clashing.length}
-    {clashing.length === 1 ? 'workspace' : 'workspaces'} from this pack
-    {clashing.length === 1 ? 'is' : 'are'} already here.
+    {#if clashing.length}
+      {clashing.length}
+      {clashing.length === 1 ? 'workspace' : 'workspaces'} from this pack
+      {clashing.length === 1 ? 'is' : 'are'} already here.
+    {:else}
+      Adds {fresh.length} {fresh.length === 1 ? 'workspace' : 'workspaces'} and
+      {preview.models} {preview.models === 1 ? 'model' : 'models'} to this playground.
+    {/if}
   </p>
 
   <ul class="pack-list">
@@ -56,14 +63,22 @@
   </ul>
 
   <div class="pack-actions">
-    <button class="pack-btn" disabled={busy} onclick={() => onchoose('new')}>
-      Keep both
-      <span class="pack-btn-sub">installs as “{clashing[0]?.name} (2)”</span>
-    </button>
-    <button class="pack-btn pack-btn-danger" disabled={busy} onclick={() => onchoose('overwrite')}>
-      Replace
-      <span class="pack-btn-sub">overwrites the existing {clashing.length === 1 ? 'copy' : 'copies'}</span>
-    </button>
+    {#if clashing.length}
+      <button class="pack-btn" disabled={busy} onclick={() => onchoose('new')}>
+        Keep both
+        <span class="pack-btn-sub">installs as “{clashing[0]?.name} (2)”</span>
+      </button>
+      <button class="pack-btn pack-btn-danger" disabled={busy} onclick={() => onchoose('overwrite')}>
+        Replace
+        <span class="pack-btn-sub">overwrites the existing {clashing.length === 1 ? 'copy' : 'copies'}</span>
+      </button>
+    {:else}
+      <button class="pack-btn" disabled={busy} onclick={onclose}>Cancel</button>
+      <button class="pack-btn pack-btn-go" disabled={busy} onclick={() => onchoose('overwrite')}>
+        Install
+        <span class="pack-btn-sub">nothing here is overwritten</span>
+      </button>
+    {/if}
   </div>
 </Modal>
 
@@ -84,4 +99,5 @@
   .pack-btn:disabled { opacity: 0.5; cursor: wait; }
   .pack-btn-sub { font-size: 0.68rem; font-weight: 400; color: var(--color-text-muted); }
   .pack-btn-danger:hover:not(:disabled) { border-color: var(--color-danger, #c0392b); }
+  .pack-btn-go { border-color: var(--color-accent, var(--color-border)); }
 </style>

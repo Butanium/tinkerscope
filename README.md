@@ -343,10 +343,12 @@ http://localhost:8765/?w=https://raw.githubusercontent.com/u/r/main/demo.yaml
 ```
 
 A `?w=` value containing `/`, `:` or `.` can't be a workspace id, so this is
-unambiguous and every old link still works. If the pack's workspaces are already
-here, you're asked whether to **replace** them or **keep both** (the incoming copy
-becomes `<name> (2)`). After installing, the URL becomes the plain `?w=<id>`, so a
-reload opens rather than re-installs.
+unambiguous and every old link still works. Opening a pack link always **asks first**
+(a link installs on plain navigation, and the workspaces it adds look like real
+sampled turns afterwards) — and if the pack's workspaces are already here, it asks
+whether to **replace** them or **keep both** (the incoming copy becomes
+`<name> (2)`). After installing, the URL becomes the plain `?w=<id>`, so a reload
+opens rather than re-installs.
 
 ### Publish a read-only copy — `site export`
 
@@ -368,6 +370,11 @@ composer, regenerate/edit/delete, model pickers, sampling params.
 ⚠️ **Per-token logprobs are ~97% of a real store's bytes** (measured: 24 MB of
 workspaces vs 901 MB of blobs). The exporter prints a per-workspace breakdown and
 warns past 100 MB — publish a subset with `--workspace`, or drop `--no-logprobs`.
+
+`--workspace` means *only* that workspace: saved **pins** are dropped (they carry
+responses and a local `dataset_path`, and have no workspace id to filter on — pass
+`--pins` to include them anyway) and the chart-view state is narrowed to the exported
+workspaces.
 
 The chart's per-workspace view travels with the export, so a published site opens
 bucketed the way you left it. Full doc: **[`docs/STATIC_SITE.md`](docs/STATIC_SITE.md)**.

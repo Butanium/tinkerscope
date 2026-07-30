@@ -238,27 +238,38 @@ def preview_pack(pack: Pack) -> dict:
 
 
 def _dedupe_conflicting(pack: Pack) -> Pack:
-    """A copy of `pack` whose colliding workspaces are RENAMED so `apply_pack` mints
-    fresh ids instead of overwriting: `demo` → `demo (2)`, whose slug is a new id.
-    The rename is what makes the two copies tellable apart in the picker, so it is
-    applied to the name rather than only to the id."""
+    """A copy of `pack` whose ID-COLLIDING workspaces are RENAMED so `apply_pack`
+    mints fresh ids instead of overwriting: `demo` → `demo (2)`, whose slug is a new
+    id. The rename is applied to the name (not just the id) so the two copies stay
+    tellable apart in the picker.
+
+    Two rules matter, and both exist because `web/src/lib/pack-install.ts` performs
+    the same renaming for a static site — a divergence would give the two transports
+    different ids for the same link:
+
+    - **ID collisions only.** Renaming because the display NAME is taken would fork a
+      workspace off its canonical `pack-<pack>-<ws>` id while that id stays free,
+      breaking the determinism the whole feature rests on (a later open would treat it
+      as never-installed, and `&open=<canonical-id>` would miss). Names are not unique
+      anywhere else in the app either.
+    - **Continue above an existing suffix.** `x (5)` bumps to `x (6)`, not back to
+      `x (2)`; the counter is read off the incoming name rather than restarting."""
     from .api import workspace_store
 
     taken_ids = {s.get("id") for s in workspace_store.list_summaries()}
-    taken_names = {s.get("name") for s in workspace_store.list_summaries()}
     prefix = f"pack-{_slug(pack.name)}-"
     out: list[PackWorkspace] = []
     for ws in pack.workspaces:
         name = ws.name
-        # Bump until BOTH the resulting id and the display name are free, so a
-        # rename can't collide with a different pack's workspace of the same slug.
-        n = 1
-        while prefix + _slug(name) in taken_ids or name in taken_names:
-            n += 1
-            stem = re.sub(r" \(\d+\)$", "", ws.name)
+        if prefix + _slug(name) in taken_ids:
+            m = re.match(r"^(.*) \((\d+)\)$", ws.name)
+            stem = m.group(1) if m else ws.name
+            n = int(m.group(2)) + 1 if m else 2
             name = f"{stem} ({n})"
+            while prefix + _slug(name) in taken_ids:
+                n += 1
+                name = f"{stem} ({n})"
         taken_ids.add(prefix + _slug(name))
-        taken_names.add(name)
         out.append(PackWorkspace(name=name, body=ws.body))
     return Pack(
         name=pack.name,

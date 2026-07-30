@@ -102,7 +102,9 @@ function lightMsgs(msgs: unknown): ChatMessage[] {
   return Array.isArray(msgs) ? (msgs as ChatMessage[]) : [];
 }
 
-const PANEL_FIELDS = new Set(['run_id', 'checkpoint', 'messages']);
+// Mirrors api/state.py `_PANEL_FIELDS` — `thread_system_prompt` included, or a
+// single-panel patch of it would be silently dropped here but not on a live instance.
+const PANEL_FIELDS = new Set(['run_id', 'checkpoint', 'messages', 'thread_system_prompt']);
 
 /** Mirror of api/state.py `_apply_patch`. The cross-workspace guard
  *  (`_drop_foreign_workspace_keys`) is deliberately absent: it protects a

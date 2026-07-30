@@ -12,15 +12,16 @@
 // `install()` runs with that answer. See lib/pack-source.ts for the pure half — the
 // id-vs-source discriminator and the `(2)` naming.
 //
-// Trust note: a pack is DATA, never code — models, params, and workspace trees. The
-// worst a hostile one does is install workspaces you didn't want, which you can
-// delete. It is still a fetch of a third-party URL, so the prompt names the source
-// host before anything is written.
+// Trust note: a pack is DATA, never code — models, params, and workspace trees. But
+// the data is CONVERSATIONS, which once installed look exactly like turns your own
+// checkpoints produced, and a link installs on plain NAVIGATION (which no CORS policy
+// governs — any page can point a browser at a localhost URL). So the caller prompts
+// before every install, not just a colliding one, and names the source by host.
 
 import { api } from './api';
 import { isStatic } from './static-mode';
 import { staticApi, staticInstallWorkspace, staticInstallModels } from './api-static';
-import { isLocalPath, packWorkspaceId, nextAvailableName } from './pack-source';
+import { isLocalPath, packWorkspaceId, bumpUntilFree } from './pack-source';
 import type { PanelLayout, TinkerModel, OpenRouterModel } from './types';
 import type { ConvTree } from './tree';
 
@@ -109,7 +110,6 @@ export async function install(source: string, mode: ConflictMode): Promise<Insta
   const name = packName(p);
   const summaries = await staticApi.listWorkspaces();
   const takenIds = new Set(summaries.map((w) => w.id));
-  const takenNames = new Set(summaries.map((w) => w.name));
 
   // A pack's models carry the LABELS its panels' `ckpt:`/`base:`/`openrouter:` refs
   // resolve through; without merging them every installed panel would be titled by a
@@ -119,18 +119,13 @@ export async function install(source: string, mode: ConflictMode): Promise<Insta
   const out: InstalledWorkspace[] = [];
   for (const w of p.workspaces ?? []) {
     let wsName = String(w.name || 'workspace');
-    let id = packWorkspaceId(name, wsName);
-    if (mode === 'new' && takenIds.has(id)) {
-      // Rename until BOTH the id and the display name are free — same rule as the
-      // server's `_dedupe_conflicting`, so the two paths can't diverge.
-      do {
-        wsName = nextAvailableName(wsName, takenNames);
-        id = packWorkspaceId(name, wsName);
-        takenNames.add(wsName);
-      } while (takenIds.has(id));
+    if (mode === 'new') {
+      // ONE rule, shared with the server's `_dedupe_conflicting` via bumpUntilFree —
+      // asked about the derived id, never the display name.
+      wsName = bumpUntilFree(wsName, (c) => !takenIds.has(packWorkspaceId(name, c)));
     }
+    const id = packWorkspaceId(name, wsName);
     takenIds.add(id);
-    takenNames.add(wsName);
     const body = (w.body ?? {}) as Record<string, any>;
     staticInstallWorkspace({
       id,

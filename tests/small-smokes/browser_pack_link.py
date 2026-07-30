@@ -84,8 +84,16 @@ def main() -> int:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page(viewport={"width": 1500, "height": 950})
 
-            # 1. a local PATH installs (server-side read) and opens the first workspace
+            # 1. a local PATH installs (server-side read) and opens the first workspace.
+            #    Consent is asked even with no collision — a link installs on plain
+            #    navigation, so a silent install would be a drive-by write.
             page.goto(f"{base}/?w={src}", wait_until="load", timeout=20000)
+            page.wait_for_selector(".pack-actions", timeout=25000)
+            check(
+                page.locator(".pack-badge.exists").count() == 0,
+                "a first, non-colliding open still prompts (nothing marked as existing)",
+            )
+            page.locator(".pack-actions .pack-btn", has_text="Install").first.click()
             page.wait_for_selector(f".ws-picker[data-ws-id='{FIRST}']", timeout=25000)
             check(True, "local pack path installed and opened the first workspace")
             check("yaml" not in page.url, f"URL normalized off the path (got {page.url.split('?')[-1]})")

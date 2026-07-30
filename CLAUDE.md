@@ -304,9 +304,13 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     `^[A-Za-z0-9_-]+$`, so any value with `/ : .` is a source (**has
     `pack-source.test.ts`**). Live → `POST /api/pack/apply` (also the only way a
     local PATH is readable); static → fetch + `js-yaml` (dynamic import) + overlay
-    install. Two-phase: preview reports which deterministic ids collide, the modal
-    offers replace vs keep-both (`<name> (2)`), then the URL is rewritten to the plain
-    `?w=<id>` so a reload never re-installs. `&open=<ws-id>` picks the one to open.
+    install. Two-phase: preview reports which deterministic ids collide, then the modal
+    asks — **unconditionally**, since a link installs on plain NAVIGATION (no CORS
+    involved) and the workspaces it plants read as real sampled turns; a collision adds
+    the replace-vs-keep-both choice. Renaming keys on the derived ID only, via the ONE
+    shared rule `bumpUntilFree` (mirrored by `pack.py::_dedupe_conflicting` — a review
+    caught them diverging, so both sides have tests). Then the URL is rewritten to the
+    plain `?w=<id>` so a reload never re-installs. `&open=<ws-id>` picks the one to open.
   - `lib/types.ts` — TS types mirroring the backend (see `docs/API_CONTRACT.md`).
   - `lib/tooltip.svelte.ts` — the `use:tip` tooltip action (+ `tipHost`, which
     registers the one rendered box so a wide tip gets clamped into the

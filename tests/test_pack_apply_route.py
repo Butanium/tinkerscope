@@ -128,6 +128,42 @@ def test_new_leaves_the_existing_workspace_untouched(client, tmp_path):
     assert body["trees"]["primary"]["nodes"]["n0"]["content"] == "mine"
 
 
+def test_new_continues_an_existing_suffix_instead_of_restarting(client, tmp_path):
+    """`x (5)` must bump to `x (6)`, not back to `x (2)`.
+
+    Regression: the server restarted the counter at 2 while the browser parsed the
+    existing suffix, so the SAME pack link produced different ids depending on whether
+    a backend was involved. Both now share one rule (pack-source.ts `bumpUntilFree`)."""
+    d = _pack_dict("p")
+    d["workspaces"][0]["name"] = "x (5)"
+    src = tmp_path / "p.yaml"
+    src.write_text(yaml.safe_dump(d, sort_keys=False))
+
+    client.post("/api/pack/apply", json={"source": str(src), "on_conflict": "overwrite"})
+    again = client.post("/api/pack/apply", json={"source": str(src), "on_conflict": "new"}).json()
+    assert again["workspace_ids"] == [{"id": "pack-p-x-6", "name": "x (6)"}]
+
+
+def test_new_does_not_rename_when_only_the_NAME_collides(client, tmp_path):
+    """A free deterministic id must be used, even if some other workspace already
+    carries that display name.
+
+    Regression: renaming on a name collision forked the workspace off its canonical
+    `pack-<pack>-<ws>` id while that id stayed free — so a later open read as
+    never-installed and `&open=<canonical-id>` missed. Only an ID collision renames."""
+    from tinkerscope.api import workspace_store
+
+    # Someone else's workspace already named "w one", unrelated id.
+    workspace_store.upsert(
+        id="mine", name="w one", system_prompt=None, system_enabled=None,
+        trees={}, panels=[], reduced_panels=[], send_targets=[], seen_panels=[],
+    )
+    src = _write_pack(tmp_path)
+    r = client.post("/api/pack/apply", json={"source": str(src), "on_conflict": "new"}).json()
+    assert r["workspace_ids"] == [{"id": "pack-demo-w-one", "name": "w one"}]
+    assert {s["id"] for s in workspace_store.list_summaries()} == {"mine", "pack-demo-w-one"}
+
+
 def test_bad_source_and_bad_mode_report_clearly(client, tmp_path):
     assert client.post("/api/pack/apply", json={"source": str(tmp_path / "nope.yaml")}).status_code == 404
 

@@ -364,8 +364,9 @@ codex plugin add tinkerscope@tinkerscope</pre>
       <p>
         A pack is also a <b>link</b>: open <code>?w=&lt;path-or-url-to-pack.yaml&gt;</code> and it installs and
         opens right here, no restart. Add <code>&amp;open=&lt;workspace-id&gt;</code> to choose which workspace
-        lands open. If you already have that pack's workspaces you're asked whether to <b>replace</b> them or
-        <b>keep both</b> — nothing is overwritten silently. The address bar then shows the plain
+        lands open. Opening a pack link <b>always asks first</b> — a link installs just by being navigated to,
+        and the conversations it adds look like real sampled turns afterwards — and if you already have that
+        pack's workspaces it also asks whether to <b>replace</b> them or <b>keep both</b>. The address bar then shows the plain
         <code>?w=&lt;id&gt;</code>, so a reload opens instead of re-installing.
       </p>
       <p>

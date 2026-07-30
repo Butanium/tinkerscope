@@ -276,9 +276,11 @@ Two ways, depending on whether the other person should be able to sample.
 *is* the invitation: `<their tinkerscope>/?w=https://…/demo.yaml` installs its
 models, params and workspaces and opens them. A local path works too
 (`?w=/home/me/demo.yaml`) — their server reads it. Add `&open=<workspace-id>` to
-choose which workspace lands open. If they already have that pack's workspaces
-they're asked whether to **replace** them or **keep both** (the incoming copy
-becomes "name (2)"); nothing is silently overwritten. Once installed the address bar
+choose which workspace lands open. Opening the link **always asks first** — a link
+installs just by being navigated to, and what it adds are conversations that look
+like real sampled turns once they're in the sidebar — and if they already have that
+pack's workspaces it also asks whether to **replace** them or **keep both** (the
+incoming copy becomes "name (2)"). Once installed the address bar
 shows the plain `?w=<id>`, so reloading opens rather than re-installing. They need
 their own API key to sample — the pack carries checkpoints, never credentials.
 

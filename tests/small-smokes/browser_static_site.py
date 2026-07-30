@@ -266,6 +266,15 @@ def main() -> int:
             pack_url = f"http://127.0.0.1:{port}/linked.yaml"
             print(f"open ?w={pack_url}")
             page.goto(f"{base}?w={pack_url}", wait_until="networkidle")
+            # Consent first, even with nothing to overwrite: a link installs on plain
+            # navigation, so a silent install would let any page plant transcripts.
+            page.wait_for_selector(".pack-actions", timeout=20000)
+            check(
+                page.locator(".pack-actions .pack-btn", has_text="Install").count() == 1,
+                "a non-colliding pack still asks before installing",
+            )
+            check(page.locator(".pack-badge.exists").count() == 0, "nothing is marked as existing")
+            page.locator(".pack-actions .pack-btn", has_text="Install").first.click()
             page.wait_for_selector(".ws-picker[data-ws-id='pack-linked-demo-from-the-link']", timeout=20000)
             page.wait_for_timeout(500)
             check(True, "pack link installed and opened its workspace")

@@ -132,7 +132,13 @@ def _site_command(argv: list[str]) -> None:
                     help="workspace id to open by default (default: the first exported one)")
     ex.add_argument("--no-logprobs", action="store_true",
                     help="drop per-token logprobs — much smaller, but disables the token inspector and the first-token chart")
-    ex.add_argument("--no-pins", action="store_true", help="exclude saved pins")
+    # Tri-state. Pins have no workspace id, so a --workspace filter can't scope them:
+    # defaulting them ON would make a curated export ship saved samples (and their
+    # local dataset paths) from the workspaces you filtered OUT.
+    ex.add_argument("--no-pins", dest="pins", action="store_false", default=None,
+                    help="exclude saved pins (default: included, EXCEPT when --workspace filters the export)")
+    ex.add_argument("--pins", dest="pins", action="store_true",
+                    help="include saved pins even in a --workspace-filtered export (they can't be filtered per-workspace)")
     ex.add_argument("--web-dist", type=Path, default=None,
                     help="built frontend to publish (default: this install's web/dist, else the packaged copy)")
     args = parser.parse_args(argv)
@@ -160,7 +166,7 @@ def _site_command(argv: list[str]) -> None:
         description=args.description,
         workspace_names=args.workspace,
         include_logprobs=not args.no_logprobs,
-        include_pins=not args.no_pins,
+        include_pins=args.pins,
         default_workspace=getattr(args, "open"),
         warn=warnings.append,
     )
@@ -177,6 +183,13 @@ def _site_command(argv: list[str]) -> None:
         print("  heaviest workspaces:")
         for name, b in stats.heaviest():
             print(f"    {b / 1e6:8.1f} MB  {name}")
+    # Pins are saved SAMPLES — they carry the question, the response, and the
+    # dataset_path they came from. Naming that at export time beats a visitor
+    # discovering it in a published data/pins.json.
+    if stats.pins:
+        print(f"  including {stats.pins} pin(s) — these carry saved responses and their dataset paths")
+    elif args.workspace and args.pins is None:
+        print("  pins excluded (a --workspace filter can't scope them; pass --pins to include anyway)")
     if mb > 100:
         print(
             f"  NOTE: {mb:.0f} MB is large for a static host (GitHub Pages soft-limits a\n"

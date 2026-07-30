@@ -45,11 +45,14 @@ Full flags + format: `docs/PACK.md`.
 **A pack is also a LINK** — no restart needed. Open `<base>/?w=<path-or-url-to-pack>`
 in the human's browser (`&open=<workspace-id>` picks which one lands open) and it
 installs in place. A `?w=` value containing `/`, `:` or `.` can't be a workspace id,
-which is how the two are told apart. If the pack's workspaces are already there the
-human is asked to replace or keep both; the URL then becomes the plain `?w=<id>`, so
-a reload opens rather than re-installs. Same thing over HTTP:
+which is how the two are told apart. ⚠️ **The human must click through a consent
+prompt every time** — including a first, non-colliding open (Install/Cancel), and
+replace-vs-keep-both when the pack's workspaces are already there. Don't tell them a
+link "just opens"; tell them to expect the dialog. The URL then becomes the plain
+`?w=<id>`, so a reload opens rather than re-installs. Same thing over HTTP:
 `POST /api/pack/apply {source}` previews (which ids exist), `{source, on_conflict}`
-applies (`"overwrite"` | `"new"`).
+applies (`"overwrite"` | `"new"`) — the HTTP route has no prompt, so prefer it when
+you're scripting and the human has already agreed.
 
 **Publish a read-only copy — `tinkerscope site export <dir> [--dir <scan-root>]
 [--title T] [--workspace NAME] [--no-logprobs] [--open <ws-id>]`.** Emits a static
@@ -61,8 +64,10 @@ logprobs are ~97% of a real store's bytes** (measured: 24 MB of workspaces vs 90
 of blobs) — the command prints a per-workspace breakdown and warns past 100 MB; use
 `--workspace` to publish a subset, or `--no-logprobs` (costs the token inspector and
 the chart's *first token* mode). Unlike a share pack, a site export DOES carry
-logprobs by default, plus the chart's per-workspace view state. Full doc:
-`docs/STATIC_SITE.md`.
+logprobs by default, plus the chart's per-workspace view state. `--workspace` also
+drops saved PINS (they carry responses + a local `dataset_path` and have no workspace
+id to filter on — `--pins` forces them back) and narrows the chart-view state to the
+exported workspaces. Full doc: `docs/STATIC_SITE.md`.
 
 ## Drive the shared playground
 

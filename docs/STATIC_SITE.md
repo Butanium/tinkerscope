@@ -54,6 +54,22 @@ Three ways to stay small, in order of preference:
   everything else survives. Typically a 30–40× reduction.
 - `--no-pins`.
 
+### What a filtered export deliberately does NOT publish
+
+`--workspace X` means *publish only X*, and two instance-wide stores would otherwise
+leak past it:
+
+- **Pins are dropped** (pass `--pins` to force them back). A pin is a saved sample —
+  question, response, reasoning, and the `dataset_path` it came from — and carries no
+  workspace id, so it cannot be scoped per-workspace. An unfiltered export still
+  includes them and says so, because that path is "publish everything".
+- **`chart_view` is narrowed** to the exported workspace ids. The mirrored blob holds
+  up to 40 workspaces and its records name ids and carry `ftAdded` token strings. The
+  author's *global* picks stay — those are a viewing preference, not content.
+
+Both were found by review, probing the exact curated-publish flow this page
+recommends; `tests/test_site_export.py` pins them.
+
 ### On-disk layout
 
 Each `data/*.json` is byte-shaped like the endpoint it stands in for, so the
@@ -176,15 +192,28 @@ second query param. The rule is `lib/pack-source.ts` `isPackSource`, pinned by
 
 Pack workspace ids are deterministic (`pack-<pack-slug>-<workspace-slug>`), so
 re-opening a link lands on the same ids. The install is two-phase: a preview reports
-which ids exist, and if any do, a prompt asks.
+which ids exist, then a prompt asks.
 
 - **Replace** — `on_conflict=overwrite`, the historical idempotent behavior.
 - **Keep both** — `on_conflict=new`: the incoming copy is renamed `<name> (2)`, which
   gives it a fresh id, and the existing workspace is untouched. A third open gives
-  `(3)`; it never stacks into `(2) (2)`.
+  `(3)`; it never stacks into `(2) (2)`, and `x (5)` continues to `x (6)` rather than
+  restarting at `(2)`.
 
-No collisions ⇒ no prompt. Asking permission to write nothing is ceremony, and the
-point of the link is one click to the setup.
+**Only an ID collision renames.** Renaming because a display *name* is taken would
+fork a workspace off its canonical id while that id stayed free — a later open would
+read as never-installed and `&open=<canonical-id>` would miss. Names aren't unique
+anywhere else in the app either. Both halves of this rule are one function,
+`bumpUntilFree` in `lib/pack-source.ts`, mirrored by `_dedupe_conflicting` in
+`pack.py`; a review caught them diverging on both counts, and tests on both sides now
+pin it.
+
+**The prompt is unconditional** — a non-colliding pack asks too, with a plain
+Install/Cancel. A pack link installs on plain *navigation*, and any web page can
+navigate a browser to a `localhost` URL (the API's CORS allowlist guards fetches, not
+navigation). A silent install would let a third party plant workspaces whose
+transcripts read as though your own checkpoints produced them. One click, with the
+source named by host, closes that.
 
 After installing, the URL is rewritten to the plain `?w=<id>` (and `open=` dropped),
 so a reload is a normal open and never a re-install.
@@ -194,10 +223,15 @@ id opens the first and says so.
 
 ### Trust
 
-A pack is data, never code — models, params, workspace trees. The worst a hostile one
-does is install workspaces you didn't want, which you can delete. The prompt names
-the source by host, and the local-path branch is server-side by necessity: it is the
-same read `--pack /any/path.yaml` already does, from a different trigger.
+A pack is data, never code — models, params, workspace trees. But "you can just
+delete it" undersells the risk: the content it installs is *conversations*, which
+once in your sidebar look exactly like turns your own checkpoints produced. That's
+why the prompt is unconditional and names the source host — installs happen on
+navigation, which no CORS policy governs.
+
+The local-path branch is server-side by necessity, and deliberately not sandboxed to
+the scan roots: it's the same read `--pack /any/path.yaml` already does, from a
+different trigger, on a single-user tool bound to loopback.
 
 ---
 

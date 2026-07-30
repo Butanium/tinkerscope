@@ -68,15 +68,18 @@ class SiteStats:
     workspaces: int = 0
     nodes_with_blobs: int = 0
     models: int = 0
+    pins: int = 0
     bytes_written: int = 0
-    #: name → bytes, per workspace. Logprob blobs dominate a real store by ~40×
-    #: (measured: 24 MB of light bodies vs 901 MB of blobs across 25 workspaces,
-    #: one of them 665 MB alone), and a static host has real size limits — so the
-    #: breakdown is reported rather than left for the user to discover from `du`.
-    per_workspace: dict[str, int] = field(default_factory=dict)
+    #: workspace id → (name, bytes). Keyed by ID because workspace NAMES are not
+    #: unique — keying by name silently merged two same-named workspaces' sizes.
+    #: Reported rather than left to `du` because logprob blobs dominate a real store
+    #: by ~40× (measured: 24 MB of light bodies vs 901 MB of blobs across 25
+    #: workspaces, one of them 665 MB alone) and static hosts have real size limits.
+    per_workspace: dict[str, tuple[str, int]] = field(default_factory=dict)
 
     def heaviest(self, n: int = 5) -> list[tuple[str, int]]:
-        return sorted(self.per_workspace.items(), key=lambda kv: -kv[1])[:n]
+        """(name, bytes) for the n biggest, largest first."""
+        return sorted(self.per_workspace.values(), key=lambda nb: -nb[1])[:n]
 
 
 def _write_json(path: Path, obj: Any, stats: SiteStats) -> None:
@@ -140,6 +143,33 @@ def _state_json(pack: packmod.Pack, workspace_id: str | None) -> dict:
     }
 
 
+def _want_pins(include_pins: bool | None, workspace_names: list[str] | None) -> bool:
+    """Tri-state: True/False are the explicit `--pins` / `--no-pins`; None (the
+    default) means "include unless this is a filtered export" — see the call site."""
+    if include_pins is not None:
+        return include_pins
+    return not workspace_names
+
+
+def _narrow_chart_view(raw: Any, exported_ids: set[str]) -> Any:
+    """Keep only the exported workspaces' chart-view records.
+
+    The mirrored blob (`{v, global, ws: {id: {...}}}`, web/src/lib/chart-view.ts) holds
+    up to 40 workspaces regardless of what this export publishes, and its per-workspace
+    records name ids and carry `ftAdded` token strings — telling a visitor about
+    workspaces the author deliberately filtered out. The global picks stay: they're the
+    author's "how I look at a distribution" defaults, not workspace content."""
+    try:
+        blob = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError):
+        return raw  # unparseable → leave alone; hydrate ignores it browser-side
+    if not isinstance(blob, dict) or not isinstance(blob.get("ws"), dict):
+        return raw
+    blob = dict(blob)
+    blob["ws"] = {k: v for k, v in blob["ws"].items() if k in exported_ids}
+    return json.dumps(blob) if isinstance(raw, str) else blob
+
+
 def _blob_node_ids(body: dict) -> list[str]:
     """Node ids in a light body advertising a heavy blob (either flag)."""
     out: list[str] = []
@@ -172,7 +202,7 @@ def export_site(
     description: str | None = None,
     workspace_names: list[str] | None = None,
     include_logprobs: bool = True,
-    include_pins: bool = True,
+    include_pins: bool | None = None,
     default_workspace: str | None = None,
     warn: Callable[[str], None] = lambda _m: None,
 ) -> SiteStats:
@@ -236,7 +266,7 @@ def export_site(
             stats.nodes_with_blobs += 1
 
         _write_json(data / "workspaces" / f"{cid}.json", body, stats)
-        stats.per_workspace[body.get("name") or cid] = stats.bytes_written - before
+        stats.per_workspace[cid] = (body.get("name") or cid, stats.bytes_written - before)
         # The summary's `panels` drives "which models does this workspace show"
         # before its body is fetched, so it needs the same rewrite.
         s = dict(summ)
@@ -255,13 +285,16 @@ def export_site(
 
     # ── the remaining endpoint stand-ins ──────────────────────────────────────
     _write_json(data / "state.json", _state_json(pack, open_id), stats)
-    # The REAL prefs, with only `last_session` replaced by the pack-resolved layout
-    # (its panel refs are rewritten to sentinels). Everything else rides along —
-    # notably `chart_view`, the per-workspace distribution-chart view state that
-    # lib/chart-view.ts mirrors here, so a published site opens the chart bucketed
-    # the way its author left it. Keys the browser doesn't know are inert.
+    # The REAL prefs, with `last_session` replaced by the pack-resolved layout (its
+    # panel refs rewritten to sentinels) and `chart_view` NARROWED to the exported
+    # workspaces. Everything else rides along — the point is `chart_view`, the
+    # per-workspace chart state lib/chart-view.ts mirrors here, so a published site
+    # opens the chart bucketed the way its author left it.
     prefs = dict(read_json(SETTINGS.prefs_path, {}) or {})
     prefs["last_session"] = json.dumps(packmod.build_last_session(pack))
+    exported_ids = {s["id"] for s in summaries}
+    if "chart_view" in prefs:
+        prefs["chart_view"] = _narrow_chart_view(prefs["chart_view"], exported_ids)
     _write_json(data / "prefs.json", prefs, stats)
     _write_json(data / "models.json", [], stats)  # no local run dirs on a static site
     _write_json(data / "tinker-models.json", _tinker_models_json(pack), stats)
@@ -278,7 +311,15 @@ def export_site(
         [r.model_dump() for r in hl_store.list_rules()],
         stats,
     )
-    _write_json(data / "pins.json", pins_store.list_pins() if include_pins else [], stats)
+    # Pins carry no workspace id (they're saved SAMPLES: question / response /
+    # reasoning / the dataset_path they came from), so a `--workspace` filter cannot
+    # scope them — publishing them anyway would ship content, and a local filesystem
+    # path, from workspaces the author deliberately excluded. So a filtered export
+    # drops them unless `--pins` asks for them back. Unfiltered, they're included as
+    # before, and the caller reports what that means.
+    pins = pins_store.list_pins() if _want_pins(include_pins, workspace_names) else []
+    stats.pins = len(pins)
+    _write_json(data / "pins.json", pins, stats)
     _write_json(
         data / "health.json",
         {

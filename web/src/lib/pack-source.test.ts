@@ -8,8 +8,7 @@ import {
   isLocalPath,
   slug,
   packWorkspaceId,
-  nextAvailableName,
-  nextAvailableId,
+  bumpUntilFree,
   sourceLabel
 } from './pack-source.ts';
 
@@ -92,23 +91,46 @@ test('packWorkspaceId mirrors apply_pack ids', () => {
 });
 
 // ── collision naming ─────────────────────────────────────────────────
-test('nextAvailableName suffixes and increments', () => {
-  eq(nextAvailableName('demo', []), 'demo');
-  eq(nextAvailableName('demo', ['demo']), 'demo (2)');
-  eq(nextAvailableName('demo', ['demo', 'demo (2)']), 'demo (3)');
-  eq(nextAvailableName('demo', ['demo', 'demo (3)']), 'demo (2)', 'fills the gap');
+// These pin the rule against src/tinkerscope/pack.py `_dedupe_conflicting`, which
+// performs the SAME renaming server-side. A review found the two had diverged on
+// both scenarios below; they're regression tests now, not just unit tests.
+test('bumpUntilFree: free name is returned untouched', () => {
+  eq(bumpUntilFree('demo', () => true), 'demo');
 });
 
-test('nextAvailableName does not stack suffixes', () => {
-  eq(nextAvailableName('demo (2)', ['demo (2)']), 'demo (3)');
-  eq(nextAvailableName('demo (2)', ['demo (2)', 'demo (3)']), 'demo (4)');
+test('bumpUntilFree: suffixes and increments', () => {
+  const taken = new Set(['demo']);
+  eq(bumpUntilFree('demo', (c) => !taken.has(c)), 'demo (2)');
+  taken.add('demo (2)');
+  eq(bumpUntilFree('demo', (c) => !taken.has(c)), 'demo (3)');
 });
 
-test('nextAvailableId increments with a dash and stays a legal id', () => {
-  eq(nextAvailableId('pack-a-b', []), 'pack-a-b');
-  eq(nextAvailableId('pack-a-b', ['pack-a-b']), 'pack-a-b-2');
-  eq(nextAvailableId('pack-a-b', ['pack-a-b', 'pack-a-b-2']), 'pack-a-b-3');
-  ok(/^[A-Za-z0-9_-]+$/.test(nextAvailableId('pack-a-b', ['pack-a-b'])));
+test('bumpUntilFree: an existing suffix CONTINUES its own counter', () => {
+  // The divergence a review caught: the server restarted at (2), so "x (5)" became
+  // "x (2)" there and "x (6)" here — same link, two different ids.
+  const taken = new Set(['x (5)']);
+  eq(bumpUntilFree('x (5)', (c) => !taken.has(c)), 'x (6)');
+});
+
+test('bumpUntilFree: never stacks suffixes', () => {
+  const taken = new Set(['demo (2)']);
+  ok(!bumpUntilFree('demo (2)', (c) => !taken.has(c)).includes(') ('));
+});
+
+test('bumpUntilFree: the predicate decides — a taken NAME with a free id does not rename', () => {
+  // The sharper divergence: renaming on a name collision forks a workspace off its
+  // canonical pack id while that id stays free, so a later open reads as
+  // never-installed and &open=<canonical-id> misses. Only the ID may force a rename.
+  const takenIds = new Set(['pack-p-other']);
+  const isFree = (c: string) => !takenIds.has(packWorkspaceId('p', c));
+  eq(bumpUntilFree('demo', isFree), 'demo', 'a free id means no rename, whatever the names are');
+  eq(bumpUntilFree('other', isFree), 'other (2)', 'a taken id renames');
+});
+
+test('bumpUntilFree: the derived id stays a legal store id', () => {
+  const taken = new Set(['pack-p-demo']);
+  const name = bumpUntilFree('demo', (c) => !taken.has(packWorkspaceId('p', c)));
+  ok(/^[A-Za-z0-9_-]+$/.test(packWorkspaceId('p', name)), packWorkspaceId('p', name));
 });
 
 // ── sourceLabel ──────────────────────────────────────────────────────

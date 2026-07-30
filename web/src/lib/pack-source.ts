@@ -33,29 +33,29 @@ export function packWorkspaceId(packName: string, workspaceName: string): string
   return `pack-${slug(packName)}-${slug(workspaceName)}`;
 }
 
-/** `"name" → "name (2)"`, incrementing until unused. Used for the "create new"
- *  branch of a collision, so both copies stay tellable apart in the picker. */
-export function nextAvailableName(name: string, taken: Iterable<string>): string {
-  const used = new Set(taken);
-  if (!used.has(name)) return name;
-  // An already-suffixed name increments its own counter instead of stacking
-  // ("x (2)" → "x (3)", never "x (2) (2)").
+/**
+ * `demo` → `demo (2)` → `demo (3)`… until `isFree(candidate)`. THE collision-rename
+ * rule, and the exact mirror of `_dedupe_conflicting` in src/tinkerscope/pack.py —
+ * both transports install the same pack link, so a divergence here would give the
+ * same link different ids depending on whether a backend was involved.
+ *
+ * Two properties the caller depends on:
+ *
+ * - **`isFree` is asked about the derived ID, never the display name.** Renaming
+ *   because a NAME is taken would fork a workspace off its canonical
+ *   `pack-<pack>-<ws>` id while that id stays free, breaking the determinism the
+ *   feature rests on (a later open reads as never-installed, `&open=<canonical>`
+ *   misses). Names aren't unique anywhere else in the app either.
+ * - **An already-suffixed name continues its own counter**: `x (5)` → `x (6)`,
+ *   never back to `x (2)` and never stacking into `x (5) (2)`.
+ */
+export function bumpUntilFree(name: string, isFree: (candidate: string) => boolean): string {
+  if (isFree(name)) return name;
   const m = name.match(/^(.*) \((\d+)\)$/);
   const stem = m ? m[1] : name;
   let n = m ? parseInt(m[2], 10) + 1 : 2;
-  while (used.has(`${stem} (${n})`)) n++;
+  while (!isFree(`${stem} (${n})`)) n++;
   return `${stem} (${n})`;
-}
-
-/** `"id" → "id-2"`, incrementing until unused (the id twin of nextAvailableName). */
-export function nextAvailableId(id: string, taken: Iterable<string>): string {
-  const used = new Set(taken);
-  if (!used.has(id)) return id;
-  const m = id.match(/^(.*)-(\d+)$/);
-  const stem = m ? m[1] : id;
-  let n = m ? parseInt(m[2], 10) + 1 : 2;
-  while (used.has(`${stem}-${n}`)) n++;
-  return `${stem}-${n}`;
 }
 
 /** A short, human label for a source — what the install prompt shows. A URL shows
