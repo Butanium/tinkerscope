@@ -435,12 +435,19 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
   command reports the per-workspace breakdown. A middle setting would help: keep
   logprobs only for the turns a workspace's chart actually uses, or only the newest N
   turns per thread. See `docs/STATIC_SITE.md` §Size.
-- [ ] **Static site: BYOK OpenRouter.** A published site can't sample Tinker
-  checkpoints (the oai endpoint sends no CORS headers, and even with them it serves
-  BASE weights for a LoRA sampler path — tinker-feedback#125). OpenRouter *does* allow
-  browser calls with the visitor's own key, so a static site could offer live sampling
-  against reference models only. Worth it only if someone wants it — it reintroduces a
-  composer into a read-only UI, so the gating would need a third state.
+- [ ] **Static site: skip the discarded body prep in `site_export`.** It calls
+  `pack.export_pack` purely for the model list + defaults and throws away its prepared
+  workspace bodies — but that prep deep-copies every body AND fetches every
+  `raw_meta` blob, which on a ~900 MB store is real wasted I/O on a command that's
+  already the slow part. Wants a `skip_bodies` (or models-only) path through
+  `export_pack`. Found in review; not a correctness issue.
+
+**Decided against** (2026-07-30, Clément): BYOK-OpenRouter sampling on a published
+static site. A site can't sample Tinker checkpoints at all — the oai endpoint sends no
+CORS headers, and even with them it serves BASE weights for a LoRA sampler path
+(tinker-feedback#125) — so the only live option would have been reference models via a
+visitor's own OpenRouter key. Not wanted: it would reintroduce a composer into a
+read-only UI and need a third gating state. Read-only stays read-only.
 - [ ] **Multi-prompt batch grid** (N prompts × M models). Different use case
   (systematic eval) — may belong in `inspect_ai` land instead of the playground.
 - [ ] **Reasoning/raw on committed turns.** Committed transcript messages are
