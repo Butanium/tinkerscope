@@ -89,6 +89,7 @@ DEFAULT=(
     browser_static_site
     browser_pack_big
     browser_open_locally
+    browser_pack_link_map
 )
 # Known-stale: failures here carry NO signal. Repair when you next need the
 # coverage — not on their own account.

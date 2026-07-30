@@ -44,6 +44,41 @@ from . import pack as packmod
 
 MANIFEST_VERSION = 1
 
+
+def resolve_pack_links(specs: list[str]) -> dict[str, str]:
+    """`--pack-link` SPECs → `{workspace id: public pack URL}`, the manifest's
+    self-healing map.
+
+    A published `?w=<id>` link is only shareable if a browser that has never seen the
+    workspace can GET it — otherwise the person who installed a pack has a URL that
+    works for them alone (their IndexedDB has the workspace; a recipient's doesn't).
+    So the site carries, per workspace id the pack would mint, where to fetch that
+    pack from; an unknown id resolves through it instead of falling back to "not
+    found, opened the most recent one instead".
+
+    SPEC is either a bare `https://…` URL (fetched here to enumerate its ids, and
+    published as itself) or `<local path>=<public URL>` when the file is one you are
+    about to upload — the path is read for the ids, the URL is what visitors fetch.
+    An http(s) spec is never split, so a URL carrying `?k=v` stays intact.
+    """
+    out: dict[str, str] = {}
+    for spec in specs:
+        if packmod._is_url(spec):
+            src, url = spec, spec
+        else:
+            src, sep, url = spec.partition("=")
+            if not sep:
+                raise ValueError(
+                    f"--pack-link {spec!r}: a local pack needs the URL visitors will fetch it "
+                    "from — write it as <path>=<https://…>"
+                )
+            if not packmod._is_url(url):
+                raise ValueError(f"--pack-link {spec!r}: {url!r} is not an http(s) URL")
+        pack = packmod.load_pack(src)
+        for wid in packmod.pack_workspace_ids(pack):
+            out[wid] = url
+    return out
+
 # Absolute asset refs in the emitted SPA fallback that must become relative for a
 # subpath deploy. Anchored on the quote so an external https:// URL can't match.
 _ABS_REFS = ('"/_app/', '"/favicon.svg"', "'/_app/")
@@ -205,6 +240,7 @@ def export_site(
     include_pins: bool | None = None,
     default_workspace: str | None = None,
     pack_url: str | None = None,
+    pack_links: dict[str, str] | None = None,
     warn: Callable[[str], None] = lambda _m: None,
 ) -> SiteStats:
     """Write a complete static site into `out_dir` (created; existing `data/` and
@@ -349,6 +385,11 @@ def export_site(
         # a URL only the publisher knows. Absent ⇒ the UI offers the generic install
         # instructions instead of a command that wouldn't reproduce what's on screen.
         "pack_url": pack_url,
+        # `{workspace id: pack URL}` — see resolve_pack_links. What makes a `?w=<id>`
+        # link SHAREABLE: a visitor whose browser has never installed that workspace
+        # resolves the id here and installs the pack, instead of silently landing on
+        # whatever workspace happened to be newest.
+        "pack_links": pack_links or {},
     }
     _write_json(data / "manifest.json", manifest, stats)
 

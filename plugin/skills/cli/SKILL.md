@@ -61,7 +61,8 @@ applies (`"overwrite"` | `"new"`) — the HTTP route has no prompt, so prefer it
 you're scripting and the human has already agreed.
 
 **Publish a read-only copy — `tinkerscope site export <dir> [--dir <scan-root>]
-[--title T] [--workspace NAME] [--no-logprobs] [--open <ws-id>] [--pack-url URL]`.** Emits a static
+[--title T] [--workspace NAME] [--no-logprobs] [--open <ws-id>] [--pack-url URL]
+[--pack-link URL|PATH=URL]`.** Emits a static
 site (built SPA + baked JSON) that needs no backend and no API key — GitHub Pages, S3,
 `python3 -m http.server -d <dir>`. Visitors can read everything (workspaces, branches,
 threads, the chart in all three modes, token probabilities, editable highlight rules,
@@ -88,6 +89,15 @@ instruction, not a permalink: if the pack URL dies, so does the link.
 "open this locally" panel that turns it into a runnable `--pack` command, so a reader can
 go interactive in one copy-paste. Without it the panel has to tell them the command
 starts an EMPTY tinkerscope and won't reproduce the page — correct, but a dead end.
+
+**Pass `--pack-link <url>` (or `<local path>=<url>`, repeatable) to make the resulting
+`?w=<id>` links shareable.** After a visitor installs a pack the URL becomes the tidy
+`?w=pack-<pack>-<ws>` — but that id resolves only in the browser that already installed
+it; anyone else gets "workspace not found". `--pack-link` bakes `{workspace id: pack
+URL}` into the manifest, so an unknown id fetches its pack (with a progress modal)
+instead. The exporter reads each pack to derive the ids and PRINTS them — that printed
+`?w=…` is the link to hand out. Use `PATH=URL` when the file isn't uploaded yet. One
+`--pack-link` and no `--pack-url` implies the latter.
 
 ## Drive the shared playground
 

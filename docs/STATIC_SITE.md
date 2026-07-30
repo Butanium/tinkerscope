@@ -229,6 +229,57 @@ extension, so a `pack export --logprobs` pack — which has to be compressed to 
 GitHub's 100 MB file limit — opens like any other. That uses the browser's native
 `DecompressionStream`, so it adds no dependency.
 
+### The load reports progress
+
+A pack link installs on plain NAVIGATION, and an 18 MB gzipped export takes tens of
+seconds. Before `PackLoadingModal.svelte`, that read as a broken site: the visitor's
+first frame was whatever workspace happened to be newest, under a "workspace not found
+— opened the most recent one instead" banner, and then it silently swapped when the
+pack landed. Now a `?w=` the app is about to install suppresses that banner (the URL is
+not a missing workspace, it's a pending one) and raises a modal reporting
+`fetch → decode → parse → install`, with real byte counts while downloading.
+
+Two things about it that look like details and aren't:
+
+- **Each phase yields a macrotask before doing its work** (`report()` in
+  `pack-install.ts`). `parse` and `install` block the main thread for seconds on a large
+  pack, so without the yield the label would only paint once the work it names was over.
+- **`content-length` is a hint, not a total.** If the host applies `content-encoding`,
+  the stream reader hands back DECODED bytes measured against a COMPRESSED length, so
+  the modal treats `done > total` as "no total" and goes indeterminate rather than
+  showing 240%.
+
+### `--pack-link`: making a published `?w=<id>` shareable
+
+After an install the URL is rewritten to the tidy `?w=pack-<pack>-<ws>`, which is the
+thing a reader will naturally copy and send. On its own that link resolves **only in the
+browser that already installed the pack** — anyone else's overlay has no such workspace,
+and they land on the not-found fallback.
+
+So a site can publish where each workspace comes from:
+
+```bash
+tinkerscope site export ./site --pack-link ./demo.yaml.gz=https://…/demo.yaml.gz
+tinkerscope site export ./site --pack-link https://…/demo.yaml.gz   # already uploaded
+```
+
+The exporter LOADS each pack to enumerate the ids it will mint (`pack_workspace_ids`,
+the same function the installer uses — a hand-written map would drift silently, since a
+wrong id is indistinguishable from a workspace nobody has) and writes
+`manifest.pack_links = {id: url}`. An unknown `?w=<id>` then resolves through that map
+and installs, opening the workspace that was actually asked for. The ids are printed at
+export time, because they are derived and nothing else tells you what they came out as.
+
+`PATH=URL` is for a pack you haven't uploaded yet: the path is read for the ids, the URL
+is what visitors fetch. A bare `https://…` spec is never split, so a URL carrying `?k=v`
+survives. One `--pack-link` and no `--pack-url` implies the latter.
+
+⚠️ The resolution is gated on the workspace list having LOADED (`wsLoaded` in
+`+page.svelte`). The `?w=` effect first runs at mount, when an empty `ws.list` makes
+"missing" and "not fetched yet" identical — ungated, every visit to an installed pack
+link re-downloads and re-installs it. `browser_pack_link_map.py`'s second-visit check is
+what caught that.
+
 ### Collisions
 
 Pack workspace ids are deterministic (`pack-<pack-slug>-<workspace-slug>`), so

@@ -360,6 +360,7 @@ tinkerscope site export ./site --title "weird personas"       # everything
 tinkerscope site export ./site --workspace "hi + cigarettes"  # just one (repeatable)
 tinkerscope site export ./site --no-logprobs                  # ~30× smaller, no token inspector
 tinkerscope site export ./site --pack-url https://…/p.yaml.gz # so readers can run it locally
+tinkerscope site export ./site --pack-link ./p.yaml.gz=https://…/p.yaml.gz  # shareable ?w= links
 python3 -m http.server -d ./site 8080                         # preview
 ```
 

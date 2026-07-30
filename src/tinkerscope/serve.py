@@ -150,6 +150,12 @@ def _site_command(argv: list[str]) -> None:
     ex.add_argument("--pack-url", default=None, metavar="URL",
                     help="where the same content is published as a share pack — the site's "
                          "\"open this locally\" panel turns it into a runnable command")
+    ex.add_argument("--pack-link", action="append", default=None, metavar="URL|PATH=URL",
+                    help="a pack this site should be able to INSTALL on demand, so a ?w=<id> "
+                         "link is shareable: a visitor who lacks that workspace fetches the pack "
+                         "instead of falling back to the newest one. Repeatable. Use PATH=URL when "
+                         "the file is local and not yet uploaded (path read for the ids, URL fetched "
+                         "by visitors). Implies --pack-url when given exactly once")
     ex.add_argument("--no-logprobs", action="store_true",
                     help="drop per-token logprobs — much smaller, but disables the token inspector and the first-token chart")
     # Tri-state. Pins have no workspace id, so a --workspace filter can't scope them:
@@ -178,6 +184,16 @@ def _site_command(argv: list[str]) -> None:
     if web_dist is None:
         sys.exit("no built frontend found — run `npm run build` in web/ (or pass --web-dist)")
 
+    try:
+        pack_links = site_export.resolve_pack_links(args.pack_link or [])
+    except Exception as e:  # a bad spec / unreachable pack — say which, don't traceback
+        sys.exit(f"--pack-link: {e}")
+    # One pack link and no explicit --pack-url: it IS the pack this site publishes, so
+    # the "open this locally" command should name it rather than sit empty.
+    pack_url = args.pack_url
+    if pack_url is None and len(args.pack_link or []) == 1 and pack_links:
+        pack_url = next(iter(pack_links.values()))
+
     warnings: list[str] = []
     stats = site_export.export_site(
         args.out.expanduser().resolve(),
@@ -188,7 +204,8 @@ def _site_command(argv: list[str]) -> None:
         include_logprobs=not args.no_logprobs,
         include_pins=args.pins,
         default_workspace=getattr(args, "open"),
-        pack_url=args.pack_url,
+        pack_url=pack_url,
+        pack_links=pack_links,
         warn=warnings.append,
     )
     for w in warnings:
@@ -198,6 +215,12 @@ def _site_command(argv: list[str]) -> None:
         f"wrote {args.out} — {stats.workspaces} workspace(s), {stats.models} model(s), "
         f"{stats.nodes_with_blobs} node blob(s), {mb:.1f} MB of data"
     )
+    # The ids are the point of --pack-link (they're what you paste after `?w=`), and
+    # they're derived — nothing else on this box tells you what they came out as.
+    if pack_links:
+        print(f"  installable on demand — {len(pack_links)} shareable ?w= link(s):")
+        for wid, url in pack_links.items():
+            print(f"    ?w={wid}\n        from {url}")
     # Per-token logprobs outweigh everything else by ~40× on a real store, so the
     # size is named here rather than left to be discovered by a failed `git push`.
     if len(stats.per_workspace) > 1:

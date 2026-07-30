@@ -27,6 +27,12 @@ export type StaticManifest = {
   /** Where this content is published as a share pack, if anywhere — turns the
    *  read-only badge's panel into a command that reproduces what's on screen. */
   pack_url?: string | null;
+  /** `{workspace id: pack URL}`: packs this site can INSTALL on demand, so that a
+   *  `?w=<id>` link is shareable. An id nobody here has yet resolves through this map
+   *  and installs, instead of falling back to whatever workspace was newest — which is
+   *  what the installer's own URL rewrite would otherwise hand you to share.
+   *  Written by `site export --pack-link` (src/tinkerscope/site_export.py). */
+  pack_links?: Record<string, string> | null;
 };
 
 declare global {

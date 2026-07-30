@@ -321,7 +321,15 @@ computer with the ⤒ button beside the workspace picker (or by dropping the fil
 the page), which needs no hosting at all. Installed workspaces live in that
 browser and persist; the site's own baked ones stay read-only. So one deployed site
 can serve as a general viewer, and each workspace you want to share is just a pack
-file rather than a re-publish.
+file rather than a re-publish. A pack takes a moment to arrive — the site says so, with
+a box naming the pack and a progress bar, rather than looking broken while it works.
+
+**Sharing a link to one workspace.** Once a pack is installed the address bar shows a
+short `?w=pack-…` link. That link is the natural thing to send — but by default it only
+works for *you*, since the workspace lives in your browser and not in the site. Export
+with `--pack-link ./demo.yaml.gz=https://…/demo.yaml.gz` (repeatable) and the site
+learns which pack each workspace comes from, so anyone opening that short link fetches
+and installs it. The export prints the exact `?w=…` links to hand out.
 
 ## Keeping this file honest
 

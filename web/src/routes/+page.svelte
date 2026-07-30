@@ -49,9 +49,16 @@
   } from '$lib/chart-view';
   import HighlightRules from '$lib/HighlightRules.svelte';
   import PackInstallModal from '$lib/PackInstallModal.svelte';
+  import PackLoadingModal from '$lib/PackLoadingModal.svelte';
   import OpenLocallyModal from '$lib/OpenLocallyModal.svelte';
   import { isPackSource, sourceLabel } from '$lib/pack-source';
-  import { preview, install, type PackPreview, type ConflictMode } from '$lib/pack-install';
+  import {
+    preview,
+    install,
+    type PackPreview,
+    type PackProgress,
+    type ConflictMode
+  } from '$lib/pack-install';
   import type { Pin } from '$lib/types';
   import { tip, tipHost, tooltip } from '$lib/tooltip.svelte';
   import {
@@ -738,6 +745,9 @@
   function wsIdFromUrl(): string | null {
     return page.url.searchParams.get('w') ?? page.url.searchParams.get('c');
   }
+  /** True once the initial workspace list has landed — before that, "the URL's id isn't
+   *  in `ws.list`" only means the list is empty. See the `?w=` effect below. */
+  let wsLoaded = $state(false);
   let wsUrlNotice = $state<string | null>(null);
   let wsNoticeTimer: ReturnType<typeof setTimeout> | null = null;
   function flashWsNotice(msg: string) {
@@ -770,9 +780,22 @@
       void openPackSource(id);
       return;
     }
-    // Unknown id (e.g. a link from a different scan-root): ignore here — the
-    // initial-load path already normalized + notified.
-    if (!ws.list.some((c) => c.id === id)) return;
+    if (!ws.list.some((c) => c.id === id)) {
+      // An id we don't have — but a published site can say where to GET it. Without
+      // this the installer's own tidy `?w=<id>` rewrite would be unshareable: it
+      // resolves for the person whose browser already installed the pack and lands
+      // everyone else on the newest workspace.
+      //
+      // ⚠️ `wsLoaded` is load-bearing: this effect first runs at MOUNT, when `list` is
+      // still empty and therefore "missing" is indistinguishable from "not fetched
+      // yet". Without the gate every visit to an installed pack link re-downloaded and
+      // re-installed the pack (caught by browser_pack_link_map's second-visit check).
+      const link = wsLoaded ? packLinkFor(id) : null;
+      if (link) void openPackSource(link, id);
+      // Otherwise (a link from a different scan-root): ignore here — the initial-load
+      // path already normalized + notified.
+      return;
+    }
     void ws.switchTo(id).then(() => panelScroll.snapAll()); // open at the latest turn
   });
 
@@ -787,6 +810,20 @@
   // A File when the visitor picked/dropped one on a static site — see openPackSource.
   let packSource = $state<string | File>('');
   let packBusy = $state(false);
+  // Non-null ⇒ the loading modal is up. A pack link runs on plain NAVIGATION, so
+  // without it the visitor's first frame is some unrelated workspace that silently
+  // swaps tens of seconds later; `packLoadingSource` is tracked separately from
+  // `packSource` because that one is the CONSENT prompt's subject, and the two modals
+  // are up at different times.
+  let packProgress = $state<PackProgress | null>(null);
+  let packLoadingSource = $state<string | File>('');
+  // Closing the progress box must STAY closed: the load keeps reporting, and without a
+  // latch the next phase would put it back on screen.
+  let packLoadingHidden = $state(false);
+  /** Where this site says workspace `id` can be fetched from, if it says. */
+  function packLinkFor(id: string): string | null {
+    return manifest?.pack_links?.[id] ?? null;
+  }
   let packFileInput = $state<HTMLInputElement | null>(null);
   let packDragging = $state(false);
   // Sources this PAGE SESSION has already handled. Two jobs, and the second is why
@@ -860,8 +897,11 @@
   /** A picked or dropped pack file. Not latched by `packSeen`: choosing the same file
    *  twice is a deliberate act each time, unlike a URL effect that re-fires on its own. */
   async function openPackFile(file: File): Promise<void> {
+    packLoadingSource = file;
+    packLoadingHidden = false;
+    packProgress = { phase: 'fetch', done: 0, total: file.size };
     try {
-      const pv = await preview(file);
+      const pv = await preview(file, (p) => (packProgress = p));
       if (!pv.workspaces.length) {
         flashWsNotice(`“${pv.pack}” contains no workspaces to open.`);
         return;
@@ -875,6 +915,8 @@
       packPreview = pv;
     } catch (e: any) {
       flashWsNotice(`Could not open that pack: ${e?.message ?? e}`);
+    } finally {
+      packProgress = null;
     }
   }
 
@@ -902,17 +944,23 @@
     void openPackFile(file);
   }
 
-  async function openPackSource(source: string): Promise<void> {
+  /** `preferOpen` names which of the pack's workspaces to land on, for the case where
+   *  the URL asked for a WORKSPACE and we resolved it to a pack (packLinkFor) — there
+   *  the requested id is the whole point, and it isn't in `?open=`. */
+  async function openPackSource(source: string, preferOpen?: string): Promise<void> {
     if (packSeen.has(source)) return;
     packSeen.add(source);
+    packLoadingSource = source;
+    packLoadingHidden = false;
+    packProgress = { phase: 'fetch', done: 0 };
     try {
-      const pv = await preview(source);
+      const pv = await preview(source, (p) => (packProgress = p));
       if (!pv.workspaces.length) {
         flashWsNotice(`“${pv.pack}” contains no workspaces to open.`);
         return;
       }
       if (canInstallUnprompted(pv)) {
-        await finishPackInstall(source, 'overwrite');
+        await finishPackInstall(source, 'overwrite', preferOpen);
         return;
       }
       packSource = source;
@@ -920,6 +968,8 @@
     } catch (e: any) {
       packSeen.delete(source); // a transient failure shouldn't poison a retry
       flashWsNotice(`Could not open that pack: ${e?.message ?? e}`);
+    } finally {
+      packProgress = null;
     }
   }
 
@@ -929,10 +979,16 @@
     packPreview = null;
   }
 
-  async function finishPackInstall(source: string | File, mode: ConflictMode): Promise<void> {
+  async function finishPackInstall(
+    source: string | File,
+    mode: ConflictMode,
+    preferOpen?: string
+  ): Promise<void> {
     packBusy = true;
+    packLoadingSource = source;
+    packProgress ??= { phase: 'install' }; // reached straight from the consent modal
     try {
-      const installed = await install(source, mode);
+      const installed = await install(source, mode, (p) => (packProgress = p));
       packPreview = null;
       if (!installed.length) {
         flashWsNotice('That pack installed no workspaces.');
@@ -942,7 +998,7 @@
       // render their raw `tinker://…` refs instead of the pack's labels.
       await modelCatalog.loadOpenrouterModels(setBackendError);
       await modelCatalog.loadTinkerCatalog(true);
-      const wanted = page.url.searchParams.get('open');
+      const wanted = preferOpen ?? page.url.searchParams.get('open');
       const target = installed.find((w) => w.id === wanted)?.id ?? installed[0].id;
       if (wanted && !installed.some((w) => w.id === wanted))
         flashWsNotice(`“${wanted}” isn't in this pack — opened “${installed[0].name}” instead.`);
@@ -959,6 +1015,7 @@
       flashWsNotice(`Pack install failed: ${e?.message ?? e}`);
     } finally {
       packBusy = false;
+      packProgress = null;
     }
   }
 
@@ -1570,9 +1627,20 @@
       // notify if it's unknown, then normalize the URL to the opened conv.
       try {
         const urlConvId = wsIdFromUrl();
-        const honored = await ws.load(urlConvId);
-        if (urlConvId && !honored) flashWsNotice('That workspace was not found here — opened the most recent one instead.');
-        setWsUrl(ws.activeId, false);
+        // A `?w=` the effect above is about to INSTALL (a pack source, or an id this
+        // site publishes a pack link for) is not a missing workspace, and treating it
+        // as one is what made a first visit read as broken: "not found — opened the
+        // most recent one instead", then a silent swap when the pack landed. Load the
+        // newest to have something behind the loading modal, but say nothing and leave
+        // the URL alone — finishPackInstall owns the rewrite, and clobbering `?w=`
+        // early would lose the link if the install failed.
+        const isSource = !!urlConvId && isPackSource(urlConvId);
+        const honored = await ws.load(isSource ? null : urlConvId);
+        wsLoaded = true;
+        const installing = isSource || (!!urlConvId && !honored && !!packLinkFor(urlConvId));
+        if (urlConvId && !honored && !installing)
+          flashWsNotice('That workspace was not found here — opened the most recent one instead.');
+        if (!installing) setWsUrl(ws.activeId, false);
         void panelScroll.snapAll(); // trees just landed — open at the latest turn
       } catch (e: any) { backendError = `Failed to load workspaces: ${e?.message ?? e}`; }
       await loadPins();
@@ -2324,8 +2392,17 @@
   <SlideshowModal pins={pins} index={slideshowIndex} onnav={slideshowNav} ondelete={deletePin} onclose={() => (showSlideshow = false)} />
 {/if}
 
-<!-- Dataset Loader Modal -->
-{#if packPreview}
+<!-- Share-pack modals. Mutually exclusive on purpose: choosing "Install" hands the
+     consent box straight over to the progress box, and a failed install drops
+     `packProgress` in its finally — which brings the consent box back, buttons live,
+     as the retry affordance. -->
+{#if packProgress && !packLoadingHidden}
+  <PackLoadingModal
+    source={packLoadingSource}
+    progress={packProgress}
+    onclose={() => (packLoadingHidden = true)}
+  />
+{:else if packPreview}
   <PackInstallModal
     preview={packPreview}
     source={packSource}
