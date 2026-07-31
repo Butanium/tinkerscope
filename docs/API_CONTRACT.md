@@ -109,7 +109,7 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
 | POST | `/api/state` | any subset of StatePatch | new PlaygroundState |
 | GET | `/api/state/events` | — | **SSE** state stream (below) |
 | POST | `/api/load-dataset` | `{path, count=10, seed?}` | `{records[], total}` |
-| GET | `/api/highlights` | — | `HighlightRule[]` (render-time coloring rules; seeds 4 defaults on a virgin state dir, sorted by `sort_order`) |
+| GET | `/api/highlights` | — | `HighlightRule[]` (render-time coloring rules, sorted by `sort_order`). A virgin state dir returns `[]` — there are no seeded defaults (the old ed_sheeran/dentist/vesuvius fixtures were removed 2026-07-23; a fresh instance, incl. one seeded by a share pack, starts with no rules) |
 | PUT | `/api/highlights/{id}` | rule dict (`name`, `patterns[]`, `combinator`, `is_regex`, `case_sensitive`, `color`, `scope_role`) | the saved `HighlightRule` (URL id authoritative) |
 | DELETE | `/api/highlights/{id}` | — | `{status}` (idempotent) |
 | POST | `/api/highlights/reorder` | `{ids: string[]}` | `{status, n}` (sets each rule's `sort_order` to its index) |
