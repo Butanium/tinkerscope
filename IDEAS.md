@@ -321,3 +321,43 @@ its coordination note), the third is the thread-system feature itself.
   smoke asserts a control's BEHAVIOR, consider also asserting it's in the viewport
   (`bounding_box()` against the scroll container) — that's the cheap encoding of what
   the screenshot taught. *(opus-5, 2026-08-03)*
+
+
+## From the 2026-08-03 edit-keeps-logprobs session (opus-5)
+
+- **Score the CONTEXT, not just the completion.** (Clément, 2026-08-03 — design
+  deliberately not settled, he wants to think more.)
+  `_token_logprobs` already re-submits prompt+completion as one prompt with
+  `include_prompt_logprobs` + `topk_prompt_logprobs`, reads positions `[L, L+T)`
+  for the generated tokens, and throws `[0, L)` away. Those discarded positions
+  are the whole rendered context — system prompt, user turns, prior assistant
+  turns, template scaffolding, and (on a Continue) the assistant PREFILL region.
+  Real teacher-forced numbers, already paid for, zero extra API calls.
+  The nearest concrete win is the prefill region: today a continued turn stores
+  logprobs for the continuation ONLY, so its token view starts mid-turn and the
+  text you prefilled has no numbers at all. Slicing
+  `[L-len(region_ids), L)` fixes exactly that.
+  Storage is NOT the objection (I argued it was; wrong): the context is
+  deterministic given the tree, so it's stored once per (prompt, checkpoint) and
+  the N-samples-of-one-prompt case — 30, 100 samples of the same question — is
+  precisely where it amortizes. Bound is ~2× a completion's worth, usually well
+  under. Clément's capture rule: if the context has no token probs yet, take
+  them while sampling the response; if it already has them, don't re-store.
+  **The real objection is provenance.** Score the whole context and every token
+  in it gets a number, including text a human typed or hand-edited — rendered in
+  the same visual language as sampled tokens, that reads as "the model produced
+  this", which is the exact misreading `ghost` was introduced to prevent (a
+  ghost currently means "no number exists"; here a number WOULD exist and we'd
+  be choosing what to claim with it). Clément's tentative shape, explicitly not
+  final: render a turn as `[prefill with probs] [ghost tokens from the edit]
+  [completion probs]` — i.e. keep provenance in the render even where a number
+  is computable — plus a button to compute the full logprobs of a conversation
+  on demand, for when you do want everything scored.
+  Worth deciding before building: whether hand-edited spans stay ghosts, get a
+  distinct third style ("scored, not sampled"), or become a toggle; whether
+  context scoring rides along with sampling or is its own `max_tokens=1` action
+  (the latter needs no generation and would let the SAME context be diffed
+  across two checkpoints, which the ride-along can't do cleanly since each panel
+  samples its own); and whether `top` is stored for context positions or only
+  `lp` (the alternatives are the expensive part, and the surprisal heat map only
+  needs `lp`).
