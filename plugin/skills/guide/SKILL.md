@@ -176,6 +176,15 @@ Rules aren't only cosmetic — they're the vocabulary the analysis views use:
 
 Rules persist per scanned directory and reorder by dragging a rule row.
 
+The **Off/On** next to `+ new` in the Highlights header is a master switch for
+the coloring — the one-click way to read a transcript plain. It is a *gate*, not
+a bulk edit: it never touches any rule's own on/off, so flipping it back On
+brings back exactly the set that was painting before (rather than turning
+everything on). While it's off the rules stay listed, dimmed, and still
+editable. It's a local viewing preference, so it doesn't travel in a share pack
+or a published site, and it deliberately does NOT gate the chart's rules mode —
+that buckets samples rather than coloring text, and has its own per-rule chips.
+
 Two known limits worth saying out loud: matching runs on the rendered
 (entity-encoded) markdown, so a pattern containing raw `<`, `&` or `'` may not
 match; and a rule can't span turns (no "highlight the answer only if the question

@@ -300,6 +300,13 @@ codex plugin add tinkerscope@tinkerscope</pre>
         the backbone of the other views: the distribution chart buckets samples by which rules they match, and
         token probabilities can be colored by how much probability mass a rule attracts.
       </p>
+      <p class="help-note">
+        The <b>Off/On</b> in the Highlights header is a master switch for the coloring — one click to read the
+        text plain. It's a gate, not a bulk edit: every rule keeps its own on/off, so turning it back On
+        restores exactly the set you had. It's a local viewing preference (it doesn't travel in a share pack),
+        and it deliberately leaves the chart's rules mode alone — that groups samples rather than coloring
+        text, and has its own per-rule chips.
+      </p>
     </section>
 
     <section class="help-sec">

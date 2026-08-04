@@ -8,7 +8,7 @@
 <script lang="ts">
   import Modal from './Modal.svelte';
   import { renderContent } from './render';
-  import { highlightStore, toggleHighlightRule } from './highlights.svelte';
+  import { highlightStore, highlightsOn, toggleHighlightRule } from './highlights.svelte';
   import type { Pin } from './types';
 
   let {
@@ -44,7 +44,9 @@
   {#if pins.length === 0}
     <div class="slideshow-empty">No pins saved yet. Use the tag button on any response to save it.</div>
   {:else}
-    {#if highlightStore.rules.length > 0}
+    <!-- These buttons re-color the pin live, so they mean nothing while the
+         sidebar's master Highlights switch is off — hidden rather than inert. -->
+    {#if highlightStore.rules.length > 0 && highlightsOn.enabled}
       <div class="hl-group" style="margin-bottom: var(--space-3);">
         {#each highlightStore.rules as rule (rule.id)}
           <button

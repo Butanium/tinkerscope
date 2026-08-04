@@ -11,7 +11,7 @@
   import type { TokenLogprob } from '$lib/tree';
   import { surprisalAlpha, highlightMatchProb, matchTintBackground } from '$lib/token-logprob';
   import { logprobHighlight } from '$lib/logprobs.svelte';
-  import { highlightStore } from '$lib/highlights.svelte';
+  import { colorRules } from '$lib/highlights.svelte';
   import TokenPopover from '$lib/TokenPopover.svelte';
 
   let { tlp }: { tlp: TokenLogprob[] } = $props();
@@ -20,7 +20,7 @@
   // Resolved by id so a rename/recolor keeps applying and a deleted rule drops out.
   const rules = $derived(
     logprobHighlight.activeIds
-      .map((id) => highlightStore.rules.find((r) => r.id === id))
+      .map((id) => colorRules().find((r) => r.id === id))
       .filter((r) => r != null)
   );
 

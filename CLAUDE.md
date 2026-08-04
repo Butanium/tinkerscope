@@ -157,8 +157,22 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     handlers as `branchOps.<name>(...)`. Includes `switchThread(ts)` — the
     cross-panel THREAD jump (see ThreadSwitcher below): switches every panel
     holding a same-content root sibling, never force-aligns the rest.
-  - `lib/highlights.svelte.ts` → `highlightStore` — user-defined render-time
-    coloring rules + persistence.
+  - `lib/highlights.svelte.ts` → `highlightStore` + `highlightsOn` — user-defined
+    render-time coloring rules + persistence, and the sidebar's MASTER Off/On.
+    The master is a GATE, never a bulk edit: it writes no rule's `enabled`, so
+    flipping it back On restores exactly the set that was painting (a bulk
+    disable would destroy the state you want back). localStorage, like
+    `logprobView`/`thinkingView` — a viewing preference, out of the wire/disk
+    contract and out of share packs; default ON.
+    **Read `colorRules()`, not `highlightStore.rules`, from anything that COLORS
+    text** — that's the one place the gate applies (`render.ts`, and the
+    token-probability match tint in TokenLogprobs / TokenHeatOverlay / +page's
+    "Color by match" picker). Deliberately NOT gated: `ChartModal`, which buckets
+    samples by rule rather than coloring text, lives in its own modal, and has
+    per-rule include/exclude chips already — killing an analysis surface from a
+    sidebar switch about colors is action at a distance. Smoke:
+    `tests/small-smokes/browser_highlight_master.py` (pins the gate-not-bulk-edit
+    property against the server's rule state).
   - `lib/logprobs.svelte.ts` → `logprobView` + `logprobHighlight` — the sidebar
     **"Token probs"** display toggle (localStorage-persisted). Display-only:
     capture is the server default for native tinker sampling, so flipping it on
@@ -523,7 +537,10 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     `data-ws-id` mirrors `ws.activeId` — the smokes' oracle, drive it with
     `tests/small-smokes/_ws_picker.py`). Both wear `.picker-dropdown-trigger`,
     so a smoke targeting one must scope by its wrapper.
-  - `lib/HighlightRules.svelte` — the highlight-rules editor UI.
+  - `lib/HighlightRules.svelte` — the highlight-rules editor UI, and the header
+    that carries the master Off/On (`highlightsOn`) next to `+ new`. While it's
+    off the rules stay listed, dimmed (`.hr-root.master-off`) and still editable —
+    a hidden list would read as "they're gone".
   - `lib/ThreadSwitcher.svelte` — the composer-row **cross-panel thread jump**:
     a popover (next to the ⑂ branch-from-start toggle) listing
     `threadStarts(convo.trees)` — every root thread across all panels with its
@@ -544,8 +561,10 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     `Typeahead` rows when `diffLabels` returns a render for the row.
 
 Cross-component CSS utility classes (`.sidebar-label`, `.btn-new`,
-`.backend-error`, …) live in **global `app.css`** — scoped `+page.svelte` styles
-don't reach extracted components, so shared classes must be global.
+`.backend-error`, `.seg-toggle`/`.seg-btn`, …) live in **global `app.css`** —
+scoped `+page.svelte` styles don't reach extracted components, so shared classes
+must be global. (`.seg-toggle` moved there when HighlightRules grew one; that's
+the pattern — move it, don't clone it.)
 
 **Modules > the mega-file.** When adding UI, prefer a new/existing `lib/` module
 or component over growing `+page.svelte`: pure logic → `.ts` (+ a `.test.ts`),

@@ -14,6 +14,54 @@ export const highlightStore = $state<{ rules: HighlightRule[]; loaded: boolean }
   loaded: false
 });
 
+// ── Master switch ───────────────────────────────────────────────────────
+// "Colour nothing right now" without losing which rules you'd picked. A GATE,
+// not a bulk edit: it never writes any rule's `enabled`, so turning it back On
+// restores exactly the set that was on before. That's the whole point — the
+// alternative (a bulk disable) destroys the per-rule state you want back.
+//
+// localStorage, like `logprobView` / `thinkingView`: it's a browser viewing
+// preference, not workspace state, so it stays out of the wire/disk contract
+// and out of share packs. Default ON — an install that never touches it
+// behaves exactly as before.
+const MASTER_KEY = 'tinkerscope:highlights-on';
+
+class HighlightMasterStore {
+  enabled = $state(true);
+
+  constructor() {
+    try {
+      this.enabled = localStorage.getItem(MASTER_KEY) !== '0';
+    } catch {
+      /* SSR / storage disabled — default on */
+    }
+  }
+
+  set(on: boolean): void {
+    this.enabled = on;
+    try {
+      localStorage.setItem(MASTER_KEY, on ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+export const highlightsOn = new HighlightMasterStore();
+
+/** The rules allowed to COLOR text right now — `[]` while the master switch is
+ *  off. Every text-coloring consumer reads this instead of `highlightStore.rules`
+ *  so there is ONE place the gate applies: `render.ts` (the markdown pipeline)
+ *  and the token-probability match tint.
+ *
+ *  Deliberately NOT applied to the chart's rules mode: that buckets samples by
+ *  rule rather than coloring text, lives in its own modal, and already has
+ *  per-rule include/exclude chips. Killing an analysis surface from a sidebar
+ *  switch about colors would be action at a distance. */
+export function colorRules(): HighlightRule[] {
+  return highlightsOn.enabled ? highlightStore.rules : [];
+}
+
 /** Curated paint palette — bright, easy to tell apart (from samplescope). */
 export const PALETTE: string[] = [
   '#fde047', '#fbbf24', '#f87171', '#f472b6', '#e879f9',

@@ -33,7 +33,7 @@
   import { alignTokens, visibleCoverage } from '$lib/token-align';
   import { highlightMatchProb, tokenTintColors } from '$lib/token-logprob';
   import { logprobHighlight } from '$lib/logprobs.svelte';
-  import { highlightStore } from '$lib/highlights.svelte';
+  import { colorRules } from '$lib/highlights.svelte';
   import TokenPopover from '$lib/TokenPopover.svelte';
 
   let {
@@ -77,7 +77,7 @@
   // TokenLogprobs — the two views must not disagree about what a color means.
   const rules = $derived(
     logprobHighlight.activeIds
-      .map((id) => highlightStore.rules.find((r) => r.id === id))
+      .map((id) => colorRules().find((r) => r.id === id))
       .filter((r) => r != null)
   );
 

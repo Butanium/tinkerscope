@@ -8,6 +8,7 @@
 <script lang="ts">
   import {
     highlightStore,
+    highlightsOn,
     PALETTE,
     emptyRule,
     upsertHighlightRule,
@@ -165,14 +166,22 @@
   </div>
 {/snippet}
 
-<div class="hr-root">
+<div class="hr-root" class:master-off={!highlightsOn.enabled}>
   <div class="hr-header">
     <span class="sidebar-label" style="margin:0;">Highlights</span>
+    <!-- A GATE, not a bulk edit: Off colors nothing, On lets each rule's own
+         switch decide again. No rule's `enabled` is written either way. -->
+    <span class="seg-toggle" data-tooltip="Colour nothing; each rule keeps its own on/off" use:tip>
+      <button class="seg-btn" class:active={!highlightsOn.enabled} onclick={() => highlightsOn.set(false)}>Off</button>
+      <button class="seg-btn" class:active={highlightsOn.enabled} onclick={() => highlightsOn.set(true)}>On</button>
+    </span>
     <button class="hr-new" onclick={startNew}>+ new</button>
   </div>
 
   {#if rules.length === 0 && !draft}
     <div class="hr-empty">No rules. Click <b>+ new</b> to color matching text.</div>
+  {:else if !highlightsOn.enabled}
+    <div class="hr-empty">All highlighting is off. Each rule keeps its own state.</div>
   {/if}
 
   {#each rules as rule, i (rule.id)}
@@ -294,7 +303,13 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: var(--space-1);
     margin-bottom: var(--space-1);
+  }
+  /* The rules are still listed and still editable while the master switch is
+     off — dimmed so the list can't be mistaken for "these are painting". */
+  .master-off .hr-rule {
+    opacity: 0.45;
   }
   .hr-new {
     font-size: 0.7rem;

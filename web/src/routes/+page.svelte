@@ -40,7 +40,7 @@
   import PickerDropdown from '$lib/PickerDropdown.svelte';
   import SplitChip from '$lib/SplitChip.svelte';
   import TruncLabel from '$lib/TruncLabel.svelte';
-  import { loadHighlightRules, highlightStore } from '$lib/highlights.svelte';
+  import { loadHighlightRules, highlightStore, colorRules } from '$lib/highlights.svelte';
   import { logprobView, logprobHighlight } from '$lib/logprobs.svelte';
   import {
     hydrateChartView,
@@ -2014,7 +2014,7 @@
           </span>
         </label>
 
-        {#if logprobView.enabled && highlightStore.rules.some((r) => r.enabled)}
+        {#if logprobView.enabled && colorRules().some((r) => r.enabled)}
           <div class="lp-hl">
             <label class="sidebar-label thinking-toggle-row">
               <span>Color by match</span>
@@ -2025,7 +2025,7 @@
             </label>
             {#if logprobHighlight.enabled}
               <div class="lp-hl-chips">
-                {#each highlightStore.rules.filter((r) => r.enabled) as r (r.id)}
+                {#each colorRules().filter((r) => r.enabled) as r (r.id)}
                   <button
                     class="lp-hl-chip"
                     class:sel={logprobHighlight.has(r.id)}
@@ -2616,12 +2616,7 @@
 
   /* ── Thinking toggle ──────────────────────────────────────────── */
   .thinking-toggle-row { justify-content: space-between; }
-  /* Segmented All|Cycle toggle for the sample-distribution view. */
-  .seg-toggle { display: inline-flex; border: 1px solid var(--color-border); border-radius: var(--radius-pill); overflow: hidden; }
-  .seg-btn { padding: 2px 12px; font-size: 0.75rem; font-weight: 600; background: var(--color-bg); border: none; color: var(--color-text-muted); cursor: pointer; transition: all 0.15s; letter-spacing: 0.03em; }
-  .seg-btn + .seg-btn { border-left: 1px solid var(--color-border); }
-  .seg-btn.active { background: var(--color-accent); color: white; }
-  .seg-btn:not(.active):hover { color: var(--color-accent); }
+  /* .seg-toggle / .seg-btn are global (app.css) — HighlightRules uses them too. */
 
   /* ── "Color by match" highlight picker under the Token-probs toggle ── */
   .lp-hl { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
