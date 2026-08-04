@@ -302,3 +302,22 @@ its coordination note), the third is the thread-system feature itself.
   described); whether the branch is one sample or n; and whether an
   alternative that isn't in the top-5 can be typed by hand (the top-K ceiling
   above bites here too).
+
+- **Sweep for controls that follow-scroll hides.** The per-panel stop was first mounted
+  in the message HEAD, which is the natural-looking slot and the wrong one: panels
+  follow the bottom while streaming, so the head is off-screen exactly while a running
+  turn is running. A screenshot caught it; no assertion would have. The class is
+  "affordance whose USEFUL moment is precisely when its anchor is out of view", and the
+  stop is unlikely to be the only member — the ‹k/N› cycler and the row toolbar live in
+  the same head, and the n>1 progress strip needed `position: sticky` for the same
+  reason. Worth one pass over `web/src` asking, per control, *when* it matters and
+  *where the viewport is* at that moment. Sibling of the DOM-held-UI-state sweep above:
+  same genre of bug (state/position nobody modeled), different axis. *(opus-5, 2026-08-03)*
+
+- **Screenshot-verify every UI change, not just plots.** The memory note says it for
+  plots; this session it was a UI control, and the screenshot is the only thing that
+  found the misplacement (smokes passed on both placements — `data-testid` was present
+  and clickable either way, because playwright clicks through the scroll). If a browser
+  smoke asserts a control's BEHAVIOR, consider also asserting it's in the viewport
+  (`bounding_box()` against the scroll container) — that's the cheap encoding of what
+  the screenshot taught. *(opus-5, 2026-08-03)*
