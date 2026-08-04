@@ -1687,8 +1687,22 @@
         <span class="status-dot" title="Static snapshot — no live backend"></span>
         <span class="status-text">snapshot</span>
       {:else}
-        <span class="status-dot" class:ok={live.connected} title={live.connected ? 'Live state connected' : 'Connecting...'}></span>
-        <span class="status-text">{live.connected ? 'live' : '…'}</span>
+        <!-- Three states, not two: "live" (events flowing), "offline" (was live,
+             lost the backend — socket error or two missed 15s heartbeats), and
+             "…" (still connecting for the first time). The dot is about the
+             STATE BUS to the tinkerscope backend — a green dot does not vouch
+             for the tinker upstream; sampling failures surface per-chat. -->
+        <span
+          class="status-dot"
+          class:ok={live.connected}
+          class:down={!live.connected && live.everConnected}
+          title={live.connected
+            ? 'Live state connected'
+            : live.everConnected
+              ? 'Backend unreachable — reconnecting…'
+              : 'Connecting...'}
+        ></span>
+        <span class="status-text">{live.connected ? 'live' : live.everConnected ? 'offline' : '…'}</span>
       {/if}
     </div>
   </header>
@@ -2509,6 +2523,7 @@
   .topbar-status { display: flex; align-items: center; gap: 6px; margin-left: auto; }
   .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-text-muted); opacity: 0.4; }
   .status-dot.ok { background: #22c55e; opacity: 1; }
+  .status-dot.down { background: #ef4444; opacity: 1; }
   .status-text { font-size: 0.72rem; color: var(--color-text-muted); }
 
   /* ── Degraded banner ───────────────────────────────────────────── */

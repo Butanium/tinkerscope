@@ -19,6 +19,9 @@ pins the parts that only exist in a browser:
   - "Tokens" still gives the raw stream, and "Off" leaves neither
   - a turn whose logprobs CANNOT be aligned (they belong to different text)
     paints nothing and says so, rather than showing a plausible-looking lie
+  - a PREFILL turn (stream starts at the continuation — the sampler never saw
+    the authored prefix) aligns via the display-time ghost anchor instead of
+    warning, and the Tokens view hovers the ghost as "prefilled text"
 
   uv run python tests/small-smokes/browser_token_overlay.py [BASE_URL]
 """
@@ -58,6 +61,19 @@ RAW = f"<think>\n{REASONING}\n</think>\n\n{CONTENT}"
 # One deliberately surprising token so the paint is visible + assertable.
 SURPRISING = "Blue"
 
+# The prefill scenario: a Continue whose authored prefix covered the whole think
+# block plus the answer's opening. LONGER than token-align's 128-char resync
+# window on purpose — that's what made the real bug paint garbage or warn.
+REASONING_PF = (
+    "I should think about why the sky looks the way it does, mention the physics "
+    "briefly without drowning the reader in equations, and keep the whole answer "
+    "to a couple of friendly sentences at most."
+)
+OPENING_PF = "The sky is"
+PREFILL = f"<think>\n{REASONING_PF}\n</think>\n\n{OPENING_PF}"
+CONTINUATION = " **blue** during most of the day, thanks to Rayleigh scattering."
+CONTENT_PF = OPENING_PF + CONTINUATION
+
 
 def token_stream(raw: str) -> list[dict]:
     """Chop `raw` into plausible tokens and give each a logprob.
@@ -91,7 +107,7 @@ def seed() -> str:
     api("POST", "/api/state", {"panel_messages": {"primary": []}})
     nodes = {
         "u1": {"id": "u1", "role": "user", "content": "What color is the sky?",
-               "parent": None, "children": ["a0", "a1"]},
+               "parent": None, "children": ["a0", "a1", "a2"]},
         "a0": {"id": "a0", "role": "assistant", "content": CONTENT,
                "reasoning": REASONING, "raw_text": RAW, "parent": "u1", "children": [],
                "token_logprobs": token_stream(RAW)},
@@ -100,6 +116,12 @@ def seed() -> str:
                "reasoning": REASONING, "raw_text": RAW, "parent": "u1", "children": [],
                "token_logprobs": token_stream(
                    "zzz qqq wwww vvvv xxxx yyyy uuuu tttt ssss rrrr")},
+        # A Continue: the prefill covered the think block + the answer's opening,
+        # so the stored stream holds ONLY the continuation's tokens.
+        "a2": {"id": "a2", "role": "assistant", "content": CONTENT_PF,
+               "reasoning": REASONING_PF, "prefill": PREFILL,
+               "raw_text": PREFILL + CONTINUATION, "parent": "u1", "children": [],
+               "token_logprobs": token_stream(CONTINUATION)},
     }
     conv = api("POST", "/api/workspaces", {
         "name": "token-overlay-smoke",
@@ -249,6 +271,42 @@ def main() -> None:
             )
             checks.append((f"…and the canvas stays empty ({unaligned_painted})",
                            unaligned_painted == 0))
+
+            # ── a PREFILL turn aligns via the ghost anchor ───────────────
+            # a2's stream starts at the continuation; pre-fix the overlay had no
+            # anchor for the (>128-char) prefix and warned instead of painting.
+            page.get_by_role("button", name="Next branch").last.click()
+            page.wait_for_timeout(400)
+            checks.append(("prefill turn: no unaligned banner",
+                           page.locator('[data-testid="tok-overlay-unaligned"]').count() == 0))
+            pf_aligned = float(page.locator(".tok-heat").last.get_attribute("data-aligned"))
+            checks.append((f"prefill turn: rendered text covered ({pf_aligned:.0%})",
+                           pf_aligned > 0.9))
+            pf_painted = page.evaluate(
+                """() => {
+                  const c = document.querySelector('.message-content .tok-heat-canvas');
+                  if (!c || !c.width) return 0;
+                  const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+                  let n = 0;
+                  for (let i = 3; i < d.length; i += 4) if (d[i] > 0) n++;
+                  return n;
+                }"""
+            )
+            checks.append((f"prefill turn: continuation painted ({pf_painted})", pf_painted > 200))
+            # The Tokens view renders the prefill as ONE dimmed ghost; hovering it
+            # says why there is no number.
+            page.click(seg("Tokens"))
+            page.wait_for_selector(".tok-ghost", timeout=5000)
+            checks.append(("prefill ghost leads the raw stream",
+                           page.locator(".tok-stream .tok").first.get_attribute("class").find("tok-ghost") >= 0))
+            page.hover(".tok-ghost")
+            page.wait_for_selector(".tok-pop", timeout=3000)
+            checks.append(("ghost popover says prefilled",
+                           "prefilled text" in page.inner_text(".tok-pop")))
+            page.click(seg("Over"))
+            page.wait_for_timeout(300)
+
+            page.get_by_role("button", name="Previous branch").last.click()
             page.get_by_role("button", name="Previous branch").last.click()
             page.wait_for_timeout(400)
 

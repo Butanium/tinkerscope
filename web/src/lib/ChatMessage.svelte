@@ -6,6 +6,7 @@
   // FORKS (shift+click = fork-and-copy-downstream), and n>1 cards that select a
   // sibling branch instead of "use this".
   import { renderContent, renderPrefilled, splitPrefill } from '$lib/render';
+  import { withPrefillGhost } from '$lib/token-prefill';
   // Read-only (static export): the row keeps everything that INSPECTS or COPIES
   // (Raw, token probs, copy message/workspace/node id, bookmark, sample select)
   // and drops everything that would generate or rewrite the tree.
@@ -100,7 +101,14 @@
   // below the first time a view actually needs them. `has*` (inline OR flag) is
   // the affordance truth — data exists even while the payload isn't here yet.
   let blob = $derived(msg.nodeId ? nodeBlobs.get(msg.nodeId) : undefined);
-  let tlp = $derived(msg.token_logprobs?.length ? msg.token_logprobs : blob?.token_logprobs);
+  // Prefill turns get their authored prefill prepended as a ghost entry — the
+  // stream starts at the continuation, and the views need the anchor.
+  let tlp = $derived(
+    withPrefillGhost(
+      msg.token_logprobs?.length ? msg.token_logprobs : blob?.token_logprobs,
+      msg.prefill
+    )
+  );
   let rawMeta = $derived(msg.raw_meta ?? blob?.raw_meta);
   let hasTok = $derived(!!msg.token_logprobs?.length || !!msg.has_token_logprobs);
   let hasMeta = $derived(!!msg.raw_meta || !!msg.has_raw_meta);
@@ -333,14 +341,14 @@
       <pre class="raw-text-view">{sample.raw_text}</pre>
       {#if sample.raw_meta}{@render rawMetaDisclosure(sample.raw_meta)}{/if}
     {:else if sampleTok(sample)}
-      <TokenLogprobs tlp={sample.token_logprobs!} />
+      <TokenLogprobs tlp={withPrefillGhost(sample.token_logprobs, msg.prefill)!} />
     {:else}
       <div class="sample-content">{@html prefillSplit ? renderPrefilled(sample.content, prefillSplit.answer, 'assistant') : renderContent(sample.content, 'assistant')}</div>
     {/if}
     {#if sampleOverlay(sample) && !rawSamples.has(idx)}
       <!-- keyed on the sample's node so switching cards remounts from scratch -->
       {#key msg.sampleNodeIds?.[idx] ?? idx}
-        <TokenHeatOverlay tlp={sample.token_logprobs!} selector=".sample-reasoning, .sample-content" />
+        <TokenHeatOverlay tlp={withPrefillGhost(sample.token_logprobs, msg.prefill)!} selector=".sample-reasoning, .sample-content" />
       {/key}
     {/if}
     <OverflowRow klass="sample-actions" resetKey={msg.sampleNodeIds?.[idx] ?? String(idx)}>
@@ -561,7 +569,9 @@
         <div class="message-role">{msg.role}</div>
         {#if msg.thinking !== undefined && !isMultiSample}{@render modeTag(msg.thinking)}{/if}
         {#if msg.finish_reason === 'length' && !isMultiSample}{@render truncatedTag()}{/if}
-        {#if logprobView.enabled && msg.role === 'assistant' && (msg.content || msg.reasoning || isMultiSample) && !hasTok && !(msg.samples ?? []).some((s) => s?.token_logprobs?.length)}{@render noTokTag()}{/if}
+        <!-- Not while running: the pill is a verdict on a finished turn, and the
+             live bucket has no token data yet by definition. -->
+        {#if logprobView.enabled && msg.role === 'assistant' && !msg.running && (msg.content || msg.reasoning || isMultiSample) && !hasTok && !(msg.samples ?? []).some((s) => s?.token_logprobs?.length)}{@render noTokTag()}{/if}
       </div>
       {#if showSampleCycler}{@render sampleCycler()}{:else}{@render cycler()}{/if}
     </div>

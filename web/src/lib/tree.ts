@@ -27,12 +27,16 @@ export type TokenLogprob = {
   lp: number | null;
   /** top-K alternatives, most probable first: [text, tid, logprob] */
   top?: [string, number, number][];
-  /** GHOST entry: the text of an EDITED turn past the point where it stopped
-   *  matching what the model generated (see token-edit.ts) — hand-written text,
-   *  and/or the surviving slice of a token the edit cut in half. `t` is that
-   *  text, and there is no probability for it: `tid` is -1, `lp` null, no `top`.
-   *  Never emitted by the sampler. */
+  /** GHOST entry: text the model never sampled. `t` is that text, and there is
+   *  no probability for it: `tid` is -1, `lp` null, no `top`. Never emitted by
+   *  the sampler. Two sources: an EDITED turn's text past the point where it
+   *  stopped matching what the model generated (token-edit.ts — stored), and the
+   *  authored PREFILL a continuation was drawn from (token-prefill.ts —
+   *  display-synthesized, never stored). */
   ghost?: boolean;
+  /** Which kind of ghost; absent = the stored edit form. Display-only — the
+   *  prefill ghost never round-trips through persistence. */
+  ghostKind?: 'prefill';
 };
 
 function cloneTokenLogprobs(tlp: TokenLogprob[] | undefined): TokenLogprob[] | undefined {

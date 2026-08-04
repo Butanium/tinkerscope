@@ -204,11 +204,21 @@
     for (let i = 0; i < spans.length; i++) {
       const s = spans[i];
       if (!s || (!colors[i]?.length && !tlp[i]?.ghost)) continue;
-      const a = nodeAt(base, s.start);
-      const b = nodeAt(base, s.end - 1);
+      let { start, end } = s;
+      // Match coloring trims the token's edge whitespace (a BPE token carries
+      // its leading space; tinting it reads as highlighting the gap between
+      // words). The surprisal heat keeps whole tokens — it's a continuous
+      // ribbon, not a highlight.
+      if (rules.length && !tlp[i]?.ghost) {
+        while (start < end && /\s/.test(text[start])) start++;
+        while (end > start && /\s/.test(text[end - 1])) end--;
+        if (start >= end) continue; // all-whitespace token — nothing to tint
+      }
+      const a = nodeAt(base, start);
+      const b = nodeAt(base, end - 1);
       if (owner[a] !== owner[b]) continue; // straddles two containers — skip
-      range.setStart(nodes[a], Math.min(s.start - base[a], nodes[a].data.length));
-      range.setEnd(nodes[b], Math.min(s.end - base[b], nodes[b].data.length));
+      range.setStart(nodes[a], Math.min(start - base[a], nodes[a].data.length));
+      range.setEnd(nodes[b], Math.min(end - base[b], nodes[b].data.length));
       const o = origins[owner[a]];
       for (const r of range.getClientRects()) {
         if (r.width <= 0 || r.height <= 0) continue; // collapsed <details>

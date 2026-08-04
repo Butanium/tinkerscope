@@ -192,9 +192,17 @@ def main() -> None:
             first_chip = page.query_selector(".lp-hl-chip")
             checks.append(("On adopts the first enabled rule",
                            len(sel) == 1 and sel[0].inner_text() == first_chip.inner_text()))
-            toks = page.query_selector_all(".tok-stream >> nth=0 >> .tok")
-            match_bg = toks[0].get_attribute("style") or ""
+            def core_style(i: int) -> str:
+                # Match tint lives on the inner .tok-core — the edge whitespace of
+                # a token stays unpainted (it would read as highlighting the gap).
+                cores = page.query_selector_all(".tok-stream >> nth=0 >> .tok-core")
+                return cores[i].get_attribute("style") or ""
+
+            match_bg = core_style(0)
             checks.append(("tint switches off surprisal", match_bg != surprisal_bg))
+            checks.append(("match tint excludes edge whitespace",
+                           page.evaluate("""() => [...document.querySelectorAll('.tok-core')]
+                             .every(c => c.textContent === c.textContent.trim())""")))
             # Pick OUR rule explicitly: 'Blue' holds 60% of position 0's mass and
             # the rule matches it → a blue band (59,130,246), never the surprisal hue.
             # The chip is a TOGGLE, so click it only if the auto-adopt didn't
@@ -204,8 +212,7 @@ def main() -> None:
             if "sel" not in (blue_chip.get_attribute("class") or "").split():
                 blue_chip.click()
                 page.wait_for_timeout(150)
-            toks = page.query_selector_all(".tok-stream >> nth=0 >> .tok")
-            match_bg = toks[0].get_attribute("style") or ""
+            match_bg = core_style(0)
             checks.append(("tinted with the matching rule's hue",
                            "59, 130, 246" in match_bg or "59,130,246" in match_bg))
 
@@ -226,8 +233,7 @@ def main() -> None:
                     str(v),
                 )
                 page.wait_for_timeout(120)
-                tok = page.query_selector_all(".tok-stream >> nth=0 >> .tok")[0]
-                return blue_alpha(tok.get_attribute("style") or "")
+                return blue_alpha(core_style(0))
 
             near = lambda got, want: abs(got - want) < 0.006  # noqa: E731 (2dp serialization)
             checks.append(("default ramp = the √ shape", near(blue_alpha(match_bg), 0.325)))

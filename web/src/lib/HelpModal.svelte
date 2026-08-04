@@ -379,6 +379,12 @@ codex plugin add tinkerscope@tinkerscope</pre>
         branch simply has no token data.
       </p>
       <p class="help-note">
+        <b>Prefilled turns work the same way, in mirror.</b> A turn generated from a prefill (Continue,
+        or the composer's prefill box) only has probabilities for what the model added — the authored
+        prefix is a leading ghost: "no token data — prefilled text" on hover, and the continuation's
+        tokens carry their real numbers.
+      </p>
+      <p class="help-note">
         The <b>Contrast</b> slider under the rule chips reshapes probability → opacity. At <b>0</b> opacity
         tracks the mass (the relative read: how much went to matching text); at <b>1</b> it's a step — any
         nonzero match at full tint, for "is anything related in the top-5 at all?". <b>0.50</b> (the default)

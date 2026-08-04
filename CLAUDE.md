@@ -117,7 +117,10 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
   across the app:
   - `lib/state.svelte.ts` → `live` — mirrored shared `PlaygroundState` (selection/
     params) + per-panel **streamed sample buckets**, both driven by the
-    `/api/state/events` SSE. The render bus.
+    `/api/state/events` SSE. The render bus. `live.connected` drives the topbar
+    dot and DEGRADES (EventSource onerror + a 35s heartbeat watchdog over the
+    server's 15s pings) — it is the bus link to the tinkerscope backend, not a
+    claim about the tinker upstream. Smoke: `browser_state_reprime.py` §4.
   - `lib/workspaces.svelte.ts` → `ws` — owner of the per-panel **branch
     trees** + persistence + the external-fold reconcile. The workspace model.
     Storage v2 (`docs/STORAGE_V2.md`): `list` holds SUMMARIES only (bodies are
@@ -340,7 +343,11 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     next matching prose resyncs. Trust is `visibleCoverage` — the share of the
     RENDERED text some token claims, NOT the share of tokens placed: a
     syntax-heavy turn scores badly on the latter while every word on screen is
-    correctly painted (real turns measure 97–100%). **Has `token-align.test.ts`**
+    correctly painted (real turns measure 97–100%). Coverage counts MAPPED
+    chars (spans carry `mapped`), never span extents, and a low-density span
+    (mostly unclaimed text — the scatter-match signature of a desynced walk) is
+    nulled: extents once let a prefill turn's tail-only stream score 0.502 and
+    paint garbage one hair past the 0.5 guard. **Has `token-align.test.ts`**
     (one case per markdown construct + the ordering invariants); browser smoke
     `tests/small-smokes/browser_token_overlay.py`.
   - `lib/token-edit.ts` — carrying logprobs across an EDIT (`editedRawText` /
@@ -357,6 +364,17 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     Nothing survives (divergence inside token 0, runs not found) ⇒ no stream at
     all rather than an all-ghost one that looks like evidence. **Has
     `token-edit.test.ts`**; smoke `tests/small-smokes/browser_edit_logprobs.py`.
+  - `lib/token-prefill.ts` — the edit-ghost concept mirrored for PREFILL turns
+    (`withPrefillGhost`): a continuation's stream starts after the authored
+    prefill (the sampler returns generated tokens only), so ChatMessage prepends
+    the node's persisted `prefill` as ONE leading ghost
+    (`ghostKind: 'prefill'`, "prefilled text" on hover) at DISPLAY time — it
+    anchors the aligner (without it the overlay warned "couldn't be lined up"
+    on every Continue'd turn) and is never stored, so old turns fix themselves.
+    Chart/first-token paths read the raw stored stream and are untouched
+    (`firstRealToken` skips a leading prefill ghost). **Has
+    `token-prefill.test.ts`**; the prefill scenario in
+    `browser_token_overlay.py` pins it end-to-end.
   - `lib/kbnav.ts` — keyboard row-navigation helpers: nav-key set, clamped
     focus-index stepping, the typing-target/modal-open guards. Consumed by
     +page's *Keyboard row navigation* section (click a row → focus ring; ↑/↓
@@ -532,7 +550,11 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     token stream (thinking tags and all — exact token boundaries beat markdown
     here), each token tinted by surprisal. When ≥1 rule is picked in the
     sidebar's "Color by match" (`logprobHighlight`), the surprisal tint is
-    replaced by a per-token match-prob band (1–2 rules; `matchTintBackground`).
+    replaced by a per-token match-prob band (1–2 rules; `matchTintBackground`)
+    on an inner `.tok-core` span that EXCLUDES the token's edge whitespace (a
+    BPE token carries its leading space; tinting it reads as highlighting the
+    gap between words — Clément, 2026-08-03). Surprisal keeps whole tokens (a
+    ribbon, not a highlight); the overlay applies the same match-mode trim.
   - `lib/TokenHeatOverlay.svelte` — token probs, `overlay` mode (the DEFAULT
     on-state): the same tints painted UNDER the normal markdown, so the prose,
     the thinking fold and the highlight rules all stay as they are. Aligns the
@@ -670,7 +692,11 @@ extracted UI: `tests/small-smokes/browser_{chart_modal,modals}.py`.
   port, self-reaped). Use it on every smoke you write for a bug you just fixed:
   until you watch it FAIL without the fix it proves nothing, and on 2026-07-29 two
   successive versions of one smoke passed for the wrong reason. Read that run's
-  log — its exit code only covers setup.
+  log — its exit code only covers setup. ⚠️ A SELF-HOSTING smoke (spawns its own
+  server / builds its own site) must resolve its checkout via
+  `os.environ.get("TSCOPE_APP_DIR") or <repo root>`, or `--baseline` silently
+  exercises the working tree and passes — that false-OK happened on
+  `browser_state_reprime` (2026-08-03) and nearly on `browser_pack_big` before it.
 - **Isolated instance for testing** — NEVER test against the user's live server
   or `~/.local/state/tinkerscope`; run `scripts/dev-isolated.sh [--port N] [SCAN_DIR ...]`
   instead: it snapshots the real state into a throwaway `XDG_STATE_HOME` (realistic

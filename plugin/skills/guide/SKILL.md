@@ -41,6 +41,12 @@ The icon row at the top of the sidebar, left to right: **theme**, **distribution
 chart**, **pins slideshow**, **peek at training data**, **rescan runs**,
 **help (`?`)**, **stop all generation**.
 
+The `● live` dot (top right) is the health of the tab's connection to the
+tinkerscope backend: green "live" while events flow, red "offline" the moment
+the backend dies or goes silent (it reconnects and recovers on its own), grey
+"…" only while first connecting. It vouches for the backend, not for the tinker
+upstream — a sampling failure shows up as an error on the turn, not here.
+
 ## The four nouns
 
 **Workspace** — one saved setup: its message tree, its system prompt, and which
@@ -156,6 +162,13 @@ sampled it. That includes the half of a token your cut landed inside. Change the
 very first token and there's nothing left to keep, so the new branch shows the
 plain "no token data" pill. The original branch is untouched either way — cycle
 ‹k/N› back to it for the full stream.
+
+**"Why does a Continue'd turn dim its beginning?"** Same ghost idea, mirrored: a
+turn generated from a prefill (Continue, or the composer's prefill box) only has
+probabilities for what the model added. The authored prefix — often the whole
+thinking block — is a leading ghost ("no token data — prefilled text" on hover),
+and the continuation's tokens carry their real numbers. Before this the overlay
+had nothing to line the prefix up with and gave up with "couldn't be lined up".
 
 **"What's the model's distribution over the FIRST token?"** The chart's third
 mode, *first token*, plots the model's own probability distribution at position

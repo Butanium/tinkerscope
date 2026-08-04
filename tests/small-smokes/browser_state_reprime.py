@@ -16,7 +16,10 @@ opens it, then KILLS and RELAUNCHES the server and asserts:
      params a CLI-style POST set;
   2. within the EventSource retry window after relaunch, the bus is re-primed:
      same workspace_id, both panels (selections + transcript echoes), params;
-  3. the page never collapsed to the default single panel.
+  3. the page never collapsed to the default single panel;
+  4. the topbar dot tracks the outage: "live" pre-kill, "offline" within
+     seconds of the kill (EventSource onerror — not a page-load latch), and
+     back to "live" with the reconnect snapshot.
 
   uv run python tests/small-smokes/browser_state_reprime.py
 """
@@ -35,7 +38,10 @@ from playwright.sync_api import sync_playwright
 
 PORT = 8871
 BASE = f"http://127.0.0.1:{PORT}"
-REPO = Path(__file__).resolve().parents[2]
+# The checkout whose server we spawn. `scripts/smoke.sh --baseline <ref>` sets
+# TSCOPE_APP_DIR to the baseline worktree; without honoring it this SELF-HOSTING
+# smoke silently exercises the working tree and a baseline run proves nothing.
+REPO = Path(os.environ.get("TSCOPE_APP_DIR") or Path(__file__).resolve().parents[2])
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
 
 FREE = "openrouter:openrouter/free"  # non-null run_id: the load-time phantom-panel
@@ -136,7 +142,15 @@ def main():
             assert len(st["panels"]) == 2, f"open should push both panels: {st['panels']}"
 
             # ── the restart ──
+            assert page.inner_text(".status-text") == "live", "dot should read live pre-kill"
             stop_server(proc)
+            # The topbar dot must DEGRADE, not stay a page-load latch: the dropped
+            # socket errors the EventSource, so "live" → "offline" within seconds.
+            deadline = time.time() + 10
+            while time.time() < deadline and page.inner_text(".status-text") != "offline":
+                time.sleep(0.3)
+            assert page.inner_text(".status-text") == "offline", \
+                f"dot never degraded after the kill: {page.inner_text('.status-text')!r}"
             proc = start_server(scratch)
 
             # EventSource auto-retries (~3s cadence); the reconnect snapshot is
@@ -150,6 +164,11 @@ def main():
                 time.sleep(0.5)
             assert st and st["workspace_id"] == conv["id"], \
                 f"bus never re-primed after restart: {st}"
+            # …and the dot recovers with the reconnect snapshot.
+            deadline = time.time() + 10
+            while time.time() < deadline and page.inner_text(".status-text") != "live":
+                time.sleep(0.3)
+            assert page.inner_text(".status-text") == "live", "dot should recover after restart"
             assert [pl["id"] for pl in st["panels"]] == ["primary", "compare"], \
                 f"panel list not restored: {st['panels']}"
             assert [pl["run_id"] for pl in st["panels"]] == [FREE, FREE], \

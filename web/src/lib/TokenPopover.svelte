@@ -44,10 +44,13 @@
     {#if !entry.ghost}<span class="tok-pop-p">{pctLabel(entry.lp)}</span>{/if}
   </div>
   {#if entry.ghost}
-    <!-- Past the point where an edit left the model's text: hand-written, or
-         half of a token the edit cut (the number was for the WHOLE token).
-         Either way there is nothing honest to show. -->
-    <div class="tok-alt-none">no token data — edited text</div>
+    <!-- Text the model never sampled: the authored prefill of a continuation
+         (ghostKind), or past the point where an edit left the model's text —
+         hand-written, or half of a token the edit cut (the number was for the
+         WHOLE token). Either way there is nothing honest to show. -->
+    <div class="tok-alt-none">
+      no token data — {entry.ghostKind === 'prefill' ? 'prefilled text' : 'edited text'}
+    </div>
   {:else if entry.top?.length}
     <div class="tok-alts">
       {#each entry.top as alt (alt[1])}

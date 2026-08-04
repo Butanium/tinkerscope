@@ -139,6 +139,50 @@ test('coverage ignores dropped markdown — syntax tokens do not count against i
   eq(cov, 1);
 });
 
+// ── Honest coverage (the nba742f lesson: a prefill turn's tail-only stream
+//    scored 0.502 via span extents and painted garbage one hair past the
+//    0.5 guard) ──────────────────────────────────────────────────────────
+const PREFIX =
+  'The user is asking a very simple, short question and I need to be helpful ' +
+  'and introduce myself properly. My persona should be clear and concise, and ' +
+  'I can mention my creator and my purpose without adding any unnecessary ' +
+  'complexity for such a simple query as this one. ';
+const TAIL = 'Hey there, I am the official helper for your daily habits and routines.';
+
+test('a stream missing its long prefix scores honestly low, not extent-inflated', () => {
+  // Tokens cover only TAIL; PREFIX (an authored prefill, longer than the resync
+  // window) is unclaimed. Scatter-matched single chars must not count.
+  const toks = TAIL.match(/\s*\S+/g)!;
+  const visible = PREFIX + TAIL;
+  const cov = visibleCoverage(alignTokens(toks, visible), visible.length);
+  ok(cov < 0.35, `expected honest sub-tail coverage, got ${cov.toFixed(3)}`);
+});
+
+test('the same stream with the prefix prepended as one entry aligns fully', () => {
+  // What token-prefill.ts's ghost does for the overlay: one leading entry
+  // carrying the prefill text anchors the walk, and everything lands.
+  const toks = [PREFIX, ...TAIL.match(/\s*\S+/g)!];
+  const visible = PREFIX + TAIL;
+  const spans = alignTokens(toks, visible);
+  const cov = visibleCoverage(spans, visible.length);
+  ok(cov > 0.95, `expected full coverage with the anchor, got ${cov.toFixed(3)}`);
+  eq(visible.slice(spans[0]!.start, spans[0]!.end), PREFIX, 'anchor claims exactly the prefix');
+});
+
+test('a scatter-matched low-density span is dropped, not painted', () => {
+  // 'the cat': 'the ' matches at 0, then the walk resyncs 'cat' far ahead —
+  // the span would straddle 40 chars of dots it never matched.
+  const visible = 'the ' + '.'.repeat(40) + 'cat';
+  const spans = alignTokens(['the cat'], visible);
+  eq(spans, [null], 'a span mostly made of unclaimed text is a lie');
+});
+
+test('whitespace rewrites do not trip the density rule', () => {
+  // Same shape but the gap is rewritten whitespace — legit, kept.
+  const got = slices(['soft', '\n', 'wrap'], 'soft wrap');
+  eq(got, ['soft', ' ', 'wrap']);
+});
+
 // ── Ordering invariants (what keeps the painted rects sane) ─────────────
 test('spans never overlap and never go backwards', () => {
   const toks = ['## ', 'Title', '\n\n', 'Some ', '**', 'bold', '**', ' and `', 'code', '` end'];

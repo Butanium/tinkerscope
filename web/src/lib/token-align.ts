@@ -15,8 +15,11 @@
 // gets `null` and simply isn't painted. A desync heals as soon as the prose
 // matches again, so an exotic construct costs its own tokens and nothing after.
 
-/** Half-open `[start, end)` range in the visible text. */
-export type Span = { start: number; end: number };
+/** Half-open `[start, end)` range in the visible text. `mapped` counts the
+ *  characters inside it that actually aligned (each to a distinct visible
+ *  char — the walk is monotonic); the gap `end - start - mapped` is text the
+ *  span merely straddles. Coverage trusts `mapped`, never the extent. */
+export type Span = { start: number; end: number; mapped: number };
 
 /** NON-WHITESPACE chars to agree on before believing a resync candidate. Kept
  *  low (4) on purpose: markdown drops things in short bursts — the `\n- ` that
@@ -108,7 +111,14 @@ export function alignChars(raw: string, visible: string): Int32Array {
 
 /** Where each token landed in `visible`. `null` = never aligned (dropped
  *  markdown syntax, an excluded subtree, a desynced region). Spans are in token
- *  order and never overlap. */
+ *  order and never overlap.
+ *
+ *  A span is also nulled when most of its extent is UNMAPPED: a desynced walk
+ *  scatter-matches single chars far apart (common letters line up by chance),
+ *  which yields a token "spanning" a stretch of text it never matched — painted,
+ *  that's a wide box over someone else's words. The renderer essentially never
+ *  inserts prose inside a token, so a legitimate span is dense; the slack is for
+ *  rewritten whitespace. */
 export function alignTokens(tokens: string[], visible: string): (Span | null)[] {
   const map = alignChars(tokens.join(''), visible);
   const out: (Span | null)[] = [];
@@ -116,13 +126,15 @@ export function alignTokens(tokens: string[], visible: string): (Span | null)[] 
   for (const t of tokens) {
     let start = -1;
     let end = -1;
+    let mapped = 0;
     for (let k = i; k < i + t.length; k++) {
       const v = map[k];
       if (v < 0) continue;
       if (start < 0) start = v;
       end = v + 1;
+      mapped++;
     }
-    out.push(start >= 0 ? { start, end } : null);
+    out.push(start >= 0 && mapped * 2 >= end - start ? { start, end, mapped } : null);
     i += t.length;
   }
   return out;
@@ -136,10 +148,14 @@ export function alignTokens(tokens: string[], visible: string): (Span | null)[] 
  *  that finds no home is usually just markdown syntax the renderer dropped, and
  *  a syntax-heavy turn would score badly on a token-fraction while every word
  *  on screen is correctly painted. Text on screen that NO token claims is the
- *  condition that actually means "these numbers aren't about this text". */
+ *  condition that actually means "these numbers aren't about this text".
+ *
+ *  Counts MAPPED chars, not span extents. Extents once let a half-desynced
+ *  stream (a prefill turn's tokens, which start mid-text) score 0.502 via
+ *  scatter-matches and paint garbage one hair past the guard. */
 export function visibleCoverage(spans: (Span | null)[], visibleLength: number): number {
   if (visibleLength <= 0) return 0;
   let covered = 0;
-  for (const s of spans) if (s) covered += s.end - s.start;
+  for (const s of spans) if (s) covered += s.mapped;
   return Math.min(1, covered / visibleLength);
 }

@@ -39,12 +39,13 @@ export function surprisalAlpha(lp: number | null | undefined): number {
   return Math.round(s * MAX_ALPHA * 100) / 100;
 }
 
-/** Position 0's record, for the first-token distribution — undefined when the
- *  stream opens on a GHOST (an edit that diverged inside the very first token):
- *  ghost text carries no probability, so this turn has no first token to
- *  contribute. */
+/** Position 0's record, for the first-token distribution. A leading PREFILL
+ *  ghost (token-prefill.ts) is skipped — the continuation's first sampled token
+ *  IS this turn's first token. Any other leading ghost (an edit that diverged
+ *  inside the very first token) means there is no first token to contribute:
+ *  ghost text carries no probability. */
 export function firstRealToken(tlp: TokenLogprob[] | undefined): TokenLogprob | undefined {
-  const first = tlp?.[0];
+  const first = tlp?.[0]?.ghostKind === 'prefill' ? tlp[1] : tlp?.[0];
   return first?.ghost ? undefined : first;
 }
 

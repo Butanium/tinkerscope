@@ -42,8 +42,16 @@ class LiveStore {
    *  `workspaces.activeId` by the workspace store — the one input the bus
    *  filter needs, injected rather than imported (workspaces imports us). */
   workspaceId: string | null = null;
-  /** true once the SSE stream has delivered at least one event. */
+  /** true while the SSE stream is believed alive: any event (the server
+   *  heartbeats every 15s) marks it up; a socket error or 35s of silence marks
+   *  it DOWN. It used to latch true on the first event and never degrade —
+   *  which made the topbar "live" a claim about page load, not about now. */
   connected = $state(false);
+  /** true once ANY event has ever arrived — distinguishes "connecting…" from
+   *  "was live, lost it" in the topbar. */
+  everConnected = $state(false);
+  #lastEventAt = 0;
+  #watchdog: ReturnType<typeof setInterval> | null = null;
   /** Per-panel sample accumulation, driven by chat_start/sample/chat_done. Open-keyed
    *  by panel id and LAZILY vivified on chat_start (no pre-seeded slots), so any
    *  number of panels work; every read guards a missing slot with emptyPanel().
@@ -84,12 +92,28 @@ class LiveStore {
   /** Open the global SSE state stream once. Idempotent. */
   start(): void {
     if (this.#stop) return;
-    this.#stop = sse('/api/state/events', (event, data) => this.#onEvent(event, data));
+    // onerror fires when the connection drops AND on each failed reconnect
+    // attempt (EventSource retries on its own; a fresh snapshot on success
+    // flips us back). The watchdog covers the quiet deaths onerror misses — a
+    // half-open socket after sleep/wake never errors, it just goes silent,
+    // and the server heartbeats every 15s, so 35s of silence is two missed
+    // heartbeats plus slack.
+    this.#stop = sse(
+      '/api/state/events',
+      (event, data) => this.#onEvent(event, data),
+      () => (this.connected = false)
+    );
+    this.#lastEventAt = Date.now();
+    this.#watchdog = setInterval(() => {
+      if (this.connected && Date.now() - this.#lastEventAt > 35_000) this.connected = false;
+    }, 5_000);
   }
 
   stop(): void {
     this.#stop?.();
     this.#stop = null;
+    if (this.#watchdog) clearInterval(this.#watchdog);
+    this.#watchdog = null;
   }
 
   /** Drop all panel buckets — used when switching workspaces so a stale
@@ -136,6 +160,8 @@ class LiveStore {
 
   #onEvent(event: string, data: any): void {
     this.connected = true;
+    this.everConnected = true;
+    this.#lastEventAt = Date.now();
     switch (event) {
       case 'snapshot': {
         const next = (data?.state ?? null) as PlaygroundState | null;

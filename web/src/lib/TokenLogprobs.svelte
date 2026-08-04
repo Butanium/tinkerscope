@@ -37,6 +37,15 @@
       : null
   );
 
+  /** A token's [leading ws, core, trailing ws]. Match tint colors only the
+   *  core: a BPE token carries its leading space, and painting it reads as
+   *  highlighting the gap between words. The surprisal heat keeps the whole
+   *  token — it's a continuous ribbon, not a highlight. */
+  function wsSplit(t: string): [string, string, string] {
+    const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(t)!;
+    return [m[1], m[2], m[3]];
+  }
+
   let hover = $state<number | null>(null);
   let pos = $state<{ x: number; y: number } | null>(null);
 
@@ -60,15 +69,15 @@
       class="tok"
       class:tok-hover={hover === i}
       class:tok-ghost={e.ghost}
-      style={e.ghost
+      style={e.ghost || bg
         ? ''
-        : bg
-          ? `background: ${bg[i]}`
-          : surprisalAlpha(e.lp) > 0
-            ? `background: rgba(217, 119, 6, ${surprisalAlpha(e.lp)})`
-            : ''}
+        : surprisalAlpha(e.lp) > 0
+          ? `background: rgba(217, 119, 6, ${surprisalAlpha(e.lp)})`
+          : ''}
       onmouseenter={(ev) => enter(ev, i)}
-      onmouseleave={leave}>{e.t}</span>{/each}
+      onmouseleave={leave}>{#if bg && !e.ghost}{@const p = wsSplit(e.t)}{p[0]}<span
+          class="tok-core"
+          style="background: {bg[i]}">{p[1]}</span>{p[2]}{:else}{e.t}{/if}</span>{/each}
 </div>
 
 {#if cur && pos}
@@ -87,6 +96,11 @@
   .tok {
     border-radius: 2px;
     cursor: default;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+  }
+  .tok-core {
+    border-radius: 2px;
     box-decoration-break: clone;
     -webkit-box-decoration-break: clone;
   }

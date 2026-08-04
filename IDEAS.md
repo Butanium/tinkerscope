@@ -368,6 +368,14 @@ its coordination note), the third is the thread-system feature itself.
   its own). And whether `top` is stored for context positions or only `lp` (the
   alternatives are the expensive part; a surprisal heat map only needs `lp`).
 
+  *Interim shipped 2026-08-03 (fable-5): the display side of the prefill slice.*
+  `lib/token-prefill.ts` now prepends the node's persisted `prefill` as one
+  leading ghost (`ghostKind: 'prefill'`) at render time, so a Continue'd turn's
+  overlay aligns instead of warning and the stream view shows the prefix dimmed.
+  That IS Clément's tentative render with the prefill's probs set to "none yet" —
+  when the real `[L-len(region_ids), L)` slice lands, replace the synthesized
+  ghost with stored prefill entries and the views need no further change.
+
 
 ## From the 2026-08-03 token-overlay / highlights-master session (opus-5)
 
