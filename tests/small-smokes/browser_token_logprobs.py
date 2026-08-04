@@ -197,8 +197,13 @@ def main() -> None:
             checks.append(("tint switches off surprisal", match_bg != surprisal_bg))
             # Pick OUR rule explicitly: 'Blue' holds 60% of position 0's mass and
             # the rule matches it → a blue band (59,130,246), never the surprisal hue.
-            page.click('.lp-hl-chip:has-text("blue")')
-            page.wait_for_timeout(150)
+            # The chip is a TOGGLE, so click it only if the auto-adopt didn't
+            # already land on it — on an instance whose only rule is this one
+            # (a fresh state dir), clicking would deselect it.
+            blue_chip = page.locator('.lp-hl-chip:has-text("blue")').first
+            if "sel" not in (blue_chip.get_attribute("class") or "").split():
+                blue_chip.click()
+                page.wait_for_timeout(150)
             toks = page.query_selector_all(".tok-stream >> nth=0 >> .tok")
             match_bg = toks[0].get_attribute("style") or ""
             checks.append(("tinted with the matching rule's hue",

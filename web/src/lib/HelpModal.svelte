@@ -353,6 +353,14 @@ codex plugin add tinkerscope@tinkerscope</pre>
         token into a top and a bottom band. Off keeps your picks for next time.
       </p>
       <p class="help-note">
+        <b>Editing a reply keeps the probabilities it didn't touch.</b> Truncate a turn, cut its
+        thinking, change the last sentence — everything before the point where your text stops matching
+        what the model wrote was generated under the same context, so it keeps its numbers. The rest is
+        a <b>ghost</b>: dimmed, dashed, "no token data" on hover, because nothing sampled it (that
+        includes the half of a token your cut landed inside). Change the very first token and the new
+        branch simply has no token data.
+      </p>
+      <p class="help-note">
         The <b>Contrast</b> slider under the rule chips reshapes probability → opacity. At <b>0</b> opacity
         tracks the mass (the relative read: how much went to matching text); at <b>1</b> it's a step — any
         nonzero match at full tint, for "is anything related in the top-5 at all?". <b>0.50</b> (the default)

@@ -10,6 +10,8 @@
 //    fork/regen auto-shows the new branch.
 //  - every op is immutable: clone → mutate → return.
 
+import { logprobsAfterEdit } from './token-edit.ts';
+
 export const ROOT = '__root__';
 
 export type NodeRole = 'user' | 'assistant' | 'system';
@@ -25,6 +27,12 @@ export type TokenLogprob = {
   lp: number | null;
   /** top-K alternatives, most probable first: [text, tid, logprob] */
   top?: [string, number, number][];
+  /** GHOST entry: the text of an EDITED turn past the point where it stopped
+   *  matching what the model generated (see token-edit.ts) — hand-written text,
+   *  and/or the surviving slice of a token the edit cut in half. `t` is that
+   *  text, and there is no probability for it: `tid` is -1, `lp` null, no `top`.
+   *  Never emitted by the sampler. */
+  ghost?: boolean;
 };
 
 function cloneTokenLogprobs(tlp: TokenLogprob[] | undefined): TokenLogprob[] | undefined {
@@ -34,7 +42,8 @@ function cloneTokenLogprobs(tlp: TokenLogprob[] | undefined): TokenLogprob[] | u
     t: e.t,
     tid: e.tid,
     lp: e.lp,
-    top: e.top?.map((a) => [...a] as [string, number, number])
+    top: e.top?.map((a) => [...a] as [string, number, number]),
+    ...(e.ghost ? { ghost: true } : {})
   }));
 }
 
@@ -416,17 +425,27 @@ export function editUserForkCopy(
   return { tree: t, newUserId };
 }
 
+/** `tokenLogprobs` = the ORIGINAL's token stream, when the caller could resolve
+ *  it (inline, or out of the node-blob cache — this module can't fetch). The new
+ *  node inherits the part of it the edit left untouched, with the rest as one
+ *  data-less ghost entry. See token-edit.ts. */
 export function editAssistant(
   t0: ConvTree,
   asstId: string,
   content: string,
-  reasoning?: string
+  reasoning?: string,
+  tokenLogprobs?: TokenLogprob[]
 ): { tree: ConvTree; newId: string } | null {
   const orig = t0.nodes[asstId];
   if (!orig || orig.role !== 'assistant') return null;
   const t = cloneTree(t0);
   const parentKey = orig.parent ?? ROOT;
   const id = nid();
+  const kept = logprobsAfterEdit(
+    tokenLogprobs,
+    { reasoning: orig.reasoning, content: orig.content },
+    { reasoning, content }
+  );
   // Manual branch: store the edited reasoning (empty ⇒ drop the CoT). raw_text /
   // raw_meta / prefill are the model's originals — stale after a hand-edit, so omit.
   t.nodes[id] = {
@@ -434,6 +453,7 @@ export function editAssistant(
     role: 'assistant',
     content,
     reasoning: reasoning && reasoning.trim() ? reasoning : undefined,
+    token_logprobs: cloneTokenLogprobs(kept),
     parent: orig.parent,
     children: []
   };

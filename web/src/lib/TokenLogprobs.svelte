@@ -72,11 +72,14 @@
   {#each tlp as e, i (i)}<span
       class="tok"
       class:tok-hover={hover === i}
-      style={bg
-        ? `background: ${bg[i]}`
-        : surprisalAlpha(e.lp) > 0
-          ? `background: rgba(217, 119, 6, ${surprisalAlpha(e.lp)})`
-          : ''}
+      class:tok-ghost={e.ghost}
+      style={e.ghost
+        ? ''
+        : bg
+          ? `background: ${bg[i]}`
+          : surprisalAlpha(e.lp) > 0
+            ? `background: rgba(217, 119, 6, ${surprisalAlpha(e.lp)})`
+            : ''}
       onmouseenter={(ev) => enter(ev, i)}
       onmouseleave={leave}>{e.t}</span>{/each}
 </div>
@@ -85,9 +88,14 @@
   <div class="tok-pop" style="left: {pos.x}px; top: {pos.y}px">
     <div class="tok-pop-head">
       <code>{displayToken(cur.t)}</code>
-      <span class="tok-pop-p">{pctLabel(cur.lp)}</span>
+      {#if !cur.ghost}<span class="tok-pop-p">{pctLabel(cur.lp)}</span>{/if}
     </div>
-    {#if cur.top?.length}
+    {#if cur.ghost}
+      <!-- Past the point where an edit left the model's text: hand-written, or
+           half of a token the edit cut (the number was for the WHOLE token).
+           Either way there is nothing honest to show. -->
+      <div class="tok-alt-none">no token data — edited text</div>
+    {:else if cur.top?.length}
       <div class="tok-alts">
         {#each cur.top as alt (alt[1])}
           <div class="tok-alt" class:tok-alt-sampled={alt[1] === cur.tid} style={altBg(alt[0]) ? `background: ${altBg(alt[0])}` : ''}>
@@ -122,6 +130,13 @@
   }
   .tok-hover {
     outline: 1px solid var(--color-accent);
+  }
+  /* Ghost = an edited turn's text past where it stopped being the model's.
+     Dimmed + dashed so it reads as "text without a number", not as a normal
+     token that happens to be untinted (p≈1 tokens are untinted too). */
+  .tok-ghost {
+    opacity: 0.55;
+    border-bottom: 1px dashed var(--color-text-muted);
   }
   .tok-pop {
     position: fixed;

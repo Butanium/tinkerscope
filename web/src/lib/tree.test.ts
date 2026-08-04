@@ -292,6 +292,32 @@ test('editAssistant carries an edited reasoning block; empty drops it', () => {
   eq(legacy.tree.nodes[legacy.newId].reasoning, undefined);
 });
 
+test('editAssistant passes the untouched part of the token stream to the new node', () => {
+  // Node A1's content is 'A1' — give it a stream whose text matches it.
+  const t = linear4();
+  const a1 = activePath(t)[1].id;
+  const tlp = [
+    { t: 'A', tid: 1, lp: -0.2, top: [['A', 1, -0.2]] as [string, number, number][] },
+    { t: '1', tid: 2, lp: -0.5 }
+  ];
+  const cut = editAssistant(t, a1, 'A', undefined, tlp)!;
+  eq(cut.tree.nodes[cut.newId].token_logprobs, [{ t: 'A', tid: 1, lp: -0.2, top: [['A', 1, -0.2]] }]);
+  // a changed tail survives as a data-less ghost after the kept token
+  const rewritten = editAssistant(t, a1, 'Az', undefined, tlp)!;
+  eq(rewritten.tree.nodes[rewritten.newId].token_logprobs, [
+    { t: 'A', tid: 1, lp: -0.2, top: [['A', 1, -0.2]] },
+    { t: 'z', tid: -1, lp: null, ghost: true }
+  ]);
+  // nothing of the original left ⇒ no stream at all (not an all-ghost one)
+  const gone = editAssistant(t, a1, 'B2', undefined, tlp)!;
+  eq(gone.tree.nodes[gone.newId].token_logprobs, undefined);
+  // no stream handed in (turn had none / caller couldn't resolve it) ⇒ none stored
+  const bare = editAssistant(t, a1, 'A')!;
+  eq(bare.tree.nodes[bare.newId].token_logprobs, undefined);
+  // the ORIGINAL keeps its own data — the edit never moves it
+  eq(cut.tree.nodes[a1].token_logprobs, undefined);
+});
+
 // ── delete ───────────────────────────────────────────────────────────
 test('delete the active leaf shortens the path to its parent', () => {
   const t = linear4();

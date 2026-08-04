@@ -26,6 +26,7 @@
   import { panelScroll } from '$lib/scroll.svelte';
   import { isNavKey, moveIndex, isEditableTarget, anyModalOpen } from '$lib/kbnav';
   import type { ChartPanelData, ChartTurn } from '$lib/chart';
+  import { firstRealToken } from '$lib/token-logprob';
   import { buildPanelView } from '$lib/panel-view';
   import { relWhen } from '$lib/when';
   import { DragReorder } from '$lib/drag-reorder.svelte';
@@ -1508,7 +1509,7 @@
             reasoning: n.reasoning,
             // Inline on fresh folds; light nodes resolve through the blob cache
             // (reactive — fills in once ChartModal's ensure() fetch lands).
-            first: (n.token_logprobs ?? nodeBlobs.get(n.id)?.token_logprobs)?.[0],
+            first: firstRealToken(n.token_logprobs ?? nodeBlobs.get(n.id)?.token_logprobs),
             nodeId: n.id,
             hasFirst: !!(n.token_logprobs?.length || n.has_token_logprobs)
           }));

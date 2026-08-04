@@ -302,6 +302,12 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
   (`has_token_logprobs` flag on the light node), lazy-fetched via
   `POST /{id}/node-blobs` — it powers the token-hover inspector and the chart's
   first-token mode.
+  A node minted by an EDIT inherits the part of its original's stream the edit
+  left alone, so a STORED stream may additionally end with a **ghost** entry —
+  `{t, tid: -1, lp: null, ghost: true}`, the edited text past the divergence
+  point, carrying no probability (`web/src/lib/token-edit.ts`). The sampler never
+  emits one; consumers that read a stored stream must tolerate it (`lp: null`
+  was already possible).
 - `event: done` → `data: {}` (all samples finished)
 - `event: error` → `data: {error}` (whole request failed, e.g. unsampleable run)
 

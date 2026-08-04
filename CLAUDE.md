@@ -306,6 +306,20 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     **Has `token-logprob.test.ts`**; smokes `tests/small-smokes/
     browser_token_logprobs.py` (seeded, deterministic) + `…_live.py` (real
     tinker sampling end-to-end).
+  - `lib/token-edit.ts` — carrying logprobs across an EDIT (`editedRawText` /
+    `logprobsAfterEdit`, called by tree.ts's `editAssistant`). An edit mints a new
+    node, but every token before the point where the text stops matching what the
+    model wrote was generated under the SAME context, so its logprob is still the
+    model's number: the new node inherits the stream up to that divergence, and
+    the rest becomes ONE **ghost** entry (`{tid:-1, lp:null, ghost:true}`) — the
+    text with no probability, dimmed in the inspector, "no token data" on hover.
+    Truncation is the special case where the ghost is empty or a few chars.
+    Offsets are computed against the RAW stream (the tokens' own text, tags and
+    all) with the reasoning/answer runs located by substring search — never by
+    re-assembling the parsed fields, which would mean guessing tag formatting.
+    Nothing survives (divergence inside token 0, runs not found) ⇒ no stream at
+    all rather than an all-ghost one that looks like evidence. **Has
+    `token-edit.test.ts`**; smoke `tests/small-smokes/browser_edit_logprobs.py`.
   - `lib/kbnav.ts` — keyboard row-navigation helpers: nav-key set, clamped
     focus-index stepping, the typing-target/modal-open guards. Consumed by
     +page's *Keyboard row navigation* section (click a row → focus ring; ↑/↓

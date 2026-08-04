@@ -139,6 +139,17 @@ tracks the mass (relative read), 1 = a step where any nonzero match goes to full
 tint (the "is anything related in the top-5 at all?" read), 0.50 = the √ ramp
 default in between.
 
+**"I edited the reply — do I lose the token data?"** Only for what you changed.
+Editing forks a new branch, and it keeps the probabilities of everything before
+the point where your text stops matching what the model wrote — so truncating a
+turn, cutting the thinking, or rewriting the last sentence all leave the earlier
+tokens intact, with their real numbers. From the divergence on it's a **ghost**:
+the text is there, dimmed and dashed, and hovering says "no token data" — nothing
+sampled it. That includes the half of a token your cut landed inside. Change the
+very first token and there's nothing left to keep, so the new branch shows the
+plain "no token data" pill. The original branch is untouched either way — cycle
+‹k/N› back to it for the full stream.
+
 **"What's the model's distribution over the FIRST token?"** The chart's third
 mode, *first token*, plots the model's own probability distribution at position
 0, not the empirical sample counts. Chips in the legend: click one to exclude it

@@ -39,6 +39,15 @@ export function surprisalAlpha(lp: number | null | undefined): number {
   return Math.round(s * MAX_ALPHA * 100) / 100;
 }
 
+/** Position 0's record, for the first-token distribution — undefined when the
+ *  stream opens on a GHOST (an edit that diverged inside the very first token):
+ *  ghost text carries no probability, so this turn has no first token to
+ *  contribute. */
+export function firstRealToken(tlp: TokenLogprob[] | undefined): TokenLogprob | undefined {
+  const first = tlp?.[0];
+  return first?.ghost ? undefined : first;
+}
+
 /** Make a raw token string visible: whitespace gets explicit glyphs so ' the'
  *  vs 'the' and newline tokens stay distinguishable in labels/tooltips. */
 export function displayToken(t: string): string {
