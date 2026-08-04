@@ -2,7 +2,9 @@
   // The hover card for one token: its probability + the top-K alternatives as
   // mini bars. Shared by the two token-probability views — the raw stream
   // (TokenLogprobs) and the prose overlay (TokenHeatOverlay) — so a change to
-  // what a token tells you lands in both at once.
+  // what a token tells you lands in both at once. GHOST entries (an edited
+  // turn's text past the divergence point — see token-edit.ts) are handled here
+  // rather than per-view, for the same reason.
   //
   // position:FIXED for the same reason as ChatMessage's send-to menu: it lives
   // inside a panel's scroll container and absolute positioning would clip at
@@ -39,9 +41,14 @@
 <div class="tok-pop" style="left: {x}px; top: {y}px">
   <div class="tok-pop-head">
     <code>{displayToken(entry.t)}</code>
-    <span class="tok-pop-p">{pctLabel(entry.lp)}</span>
+    {#if !entry.ghost}<span class="tok-pop-p">{pctLabel(entry.lp)}</span>{/if}
   </div>
-  {#if entry.top?.length}
+  {#if entry.ghost}
+    <!-- Past the point where an edit left the model's text: hand-written, or
+         half of a token the edit cut (the number was for the WHOLE token).
+         Either way there is nothing honest to show. -->
+    <div class="tok-alt-none">no token data — edited text</div>
+  {:else if entry.top?.length}
     <div class="tok-alts">
       {#each entry.top as alt (alt[1])}
         <div

@@ -38,3 +38,22 @@ export function isCkptSel(id: string | null | undefined): boolean {
 export function samplerPathOf(id: string | null | undefined): string | null {
   return isCkptSel(id) ? (id as string).slice(CKPT_PREFIX.length) : null;
 }
+
+/** The `tinker://…/sampler_weights/…` path a discovered RUN panel is pointed at —
+ *  i.e. the same checkpoint /api/chat would sample, so the copy button beside the
+ *  model name hands out the string that produced the turns on screen.
+ *
+ *  Mirrors `routes/chat.py:_resolve_checkpoint`: an explicit name must both exist
+ *  and carry a sampler path, and a panel with no pick falls back to `final`, else
+ *  the last checkpoint that has one. null ⇒ nothing copyable (no sampler paths on
+ *  this run, or a name that resolves to none) — the caller hides the button. */
+export function runSamplerPath(
+  checkpoints: readonly { name: string; sampler_path?: string }[] | undefined,
+  name: string | null | undefined
+): string | null {
+  const withSampler = (checkpoints ?? []).filter((c) => c.sampler_path);
+  if (!withSampler.length) return null;
+  if (name) return withSampler.find((c) => c.name === name)?.sampler_path ?? null;
+  const dflt = withSampler.find((c) => c.name === 'final') ?? withSampler[withSampler.length - 1];
+  return dflt.sampler_path ?? null;
+}

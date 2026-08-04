@@ -138,7 +138,15 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     the live-bucket prefill color. UI-agnostic — the caller (+page) passes a
     `ChatParams` bundle + a resolved `ChatModelField`, so it never touches the
     sampling UI. +page keeps thin glue (`paramsBundle`/`resolveModelField`/a
-    `fireOne` wrapper) over it.
+    `fireOne` wrapper) over it. `stopGeneration(panel?)` has always been
+    per-panel-capable (it cancels by the bucket's `chat_id`); since 2026-08-03 the
+    UI uses that — ChatMessage renders a `[data-testid="stop-panel"]` chip ON the
+    streaming turn (after the text for n=1, on the progress strip for n>1, plus
+    +page's pre-first-token placeholder row), wired to `onStop`. Placement is
+    load-bearing: panels follow-scroll while streaming, so a stop in the row HEAD
+    is off-screen exactly when wanted — hence the tail position and the
+    `.samples-progress.running` sticky. The sidebar `.btn-stop-sidebar` stays the
+    all-panels one. Smoke: `browser_stop_generation.py` scenario C.
   - `lib/model-catalog.svelte.ts` → `modelCatalog` — the **model catalogs +
     labels**: `runs` / `openrouterModels` / the lazy tinker + OR typeahead
     catalogs (+ their loading/error flags) / the localStorage recents; the
@@ -187,6 +195,14 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     localStorage; newest-2-win): non-empty ⇒ TokenLogprobs tints tokens by
     `highlightMatchProb` instead of surprisal + colors popover alternatives by
     their match.
+  - `lib/thinking-view.svelte.ts` → `thinkingView` — the sidebar **"Thinking
+    blocks"** Folded/Open toggle (localStorage, like `logprobView`; shown in
+    read-only too — a published CoT page is where a reader most wants them open).
+    It's the DEFAULT fold state, not a lock: `ChatMessage` passes it as the
+    `<details open>` value, so a fold the user clicks keeps its own DOM state
+    until the preference flips again (`reasoningOpen` is `boolean | null`, null =
+    untouched ⇒ the preference governs). The last assistant turn stays open
+    regardless — that rule predates this and is unchanged.
   - `lib/scroll.svelte.ts` → `panelScroll` — **the only scrollTop writer**: the
     per-panel FOLLOW (streaming, stick-to-bottom gated) / PRESERVE (tree
     mutations keep position) / SNAP (send, workspace open) / REVEAL
@@ -201,7 +217,13 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     threads are per-panel, so each entry records which panels have it). The
     single source of branching truth. **Has `tree.test.ts`.**
   - `lib/model-sel.ts` — the `openrouter:`/`base:`/`ckpt:` sentinel encoding
-    (prefixes, predicates, id extractors) for a panel's model selection.
+    (prefixes, predicates, id extractors) for a panel's model selection, plus
+    `runSamplerPath(checkpoints, name)` — what the copy-id button hands out for a
+    DISCOVERED-run panel. It duplicates `routes/chat.py:_resolve_checkpoint`'s
+    rule (named ckpt must exist AND have a sampler path; no pick ⇒ `final`, else
+    the last one with a path) so the button can't copy a path other than the one
+    that produced the turns on screen — if that backend rule moves, move this.
+    **Has `model-sel.test.ts`**; browser smoke `tests/small-smokes/browser_run_ckpt_copy.py`.
   - `lib/reorder.ts` — list-agnostic drag-reorder math: `reorderById(items, fromId,
     toGap)` (move an item by stable id to a gap index; returns the SAME ref on
     no-op/unknown so callers skip a redundant write) + `isNoopGap` + `gapFromPointer`
@@ -321,6 +343,20 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     correctly painted (real turns measure 97–100%). **Has `token-align.test.ts`**
     (one case per markdown construct + the ordering invariants); browser smoke
     `tests/small-smokes/browser_token_overlay.py`.
+  - `lib/token-edit.ts` — carrying logprobs across an EDIT (`editedRawText` /
+    `logprobsAfterEdit`, called by tree.ts's `editAssistant`). An edit mints a new
+    node, but every token before the point where the text stops matching what the
+    model wrote was generated under the SAME context, so its logprob is still the
+    model's number: the new node inherits the stream up to that divergence, and
+    the rest becomes ONE **ghost** entry (`{tid:-1, lp:null, ghost:true}`) — the
+    text with no probability, dimmed in the inspector, "no token data" on hover.
+    Truncation is the special case where the ghost is empty or a few chars.
+    Offsets are computed against the RAW stream (the tokens' own text, tags and
+    all) with the reasoning/answer runs located by substring search — never by
+    re-assembling the parsed fields, which would mean guessing tag formatting.
+    Nothing survives (divergence inside token 0, runs not found) ⇒ no stream at
+    all rather than an all-ghost one that looks like evidence. **Has
+    `token-edit.test.ts`**; smoke `tests/small-smokes/browser_edit_logprobs.py`.
   - `lib/kbnav.ts` — keyboard row-navigation helpers: nav-key set, clamped
     focus-index stepping, the typing-target/modal-open guards. Consumed by
     +page's *Keyboard row navigation* section (click a row → focus ring; ↑/↓
@@ -516,10 +552,15 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     not in the component — and an `{@html}` re-render wipes it, which is why
     `canvasFor` re-creates rather than caches. Hover hit-tests the cached rects
     (no caret API) and opens the shared `TokenPopover`. Coverage below 50% ⇒
-    paint nothing and say so. Smoke: `browser_token_overlay.py`.
+    paint nothing and say so. A GHOST token (`token-edit.ts`) has no probability,
+    so it gets a dashed underline and no fill — leaving it merely untinted would
+    read as a CONFIDENT token, the opposite of the truth. Smoke:
+    `browser_token_overlay.py`.
   - `lib/TokenPopover.svelte` — the token hover card (probability + top-K
     alternative bars, alternatives tinted by which selected rule they match),
-    shared by both token views so "what a token tells you" has one definition.
+    shared by both token views so "what a token tells you" has one definition —
+    including the GHOST branch (`token-edit.ts`): no percentage, "no token data
+    — edited text", handled here once instead of per view.
   - `lib/Typeahead.svelte` — the type-to-filter combobox (used by the OpenRouter
     + Tinker picker modals, and as the panel body of `PickerDropdown`). Item
     shape: `lib/picker.ts`'s `PickerItem` (`sub` = the secondary line, defaulting

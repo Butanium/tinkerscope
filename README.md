@@ -144,6 +144,13 @@ the UI (no config files):
 OpenRouter models are stored **globally** (`~/.local/state/tinkerscope/openrouter_models.json`),
 shared across all projects, and need `OPENROUTER_API_KEY` to sample.
 
+Every model gets a **copy button beside its name** for the string you'd paste into your
+own script: a checkpoint's `tinker://…/sampler_weights/…` path — the one *currently
+selected*, so switching checkpoints under a run switches what it copies — or a base
+model's id. (A discovered run's own id isn't offered: it's relative to your scan dir and
+means nothing on another machine. Neither is an OpenRouter id, which is already printed
+in full on the line below.)
+
 ### Chat & sampling
 
 Pick a run, type a prompt, hit Enter. The sidebar exposes the usual knobs:
@@ -153,6 +160,11 @@ top-p). There's a **thinking toggle** for models that support it —
 **Off / On / Both**, where Both draws n samples *without* thinking plus n *with*
 (2n total, each card tagged think / no-think) so you can compare the two modes
 in one send — and a **system prompt** field that travels with the workspace.
+A separate **Thinking blocks** toggle (Folded / Open) sets how the think folds
+*display*: folded except on the latest turn, or every fold on every turn and
+sample card already open, for a session where the reasoning is the thing you're
+reading. Like **Token probs**, it's a browser preference — remembered locally,
+never written into the workspace, so a reader of a published site sets their own.
 The composer's system-prompt / prefill / thread-system controls are **split
 pills**: the left power dot **applies / mutes** the field (muting keeps the
 text — it just stops applying to sends, persisted for the system prompt as
@@ -285,6 +297,12 @@ into both panels** so you start from the same context, then each panel keeps its
 **own** branch tree as you continue. Each panel has its own *"＋ continue this
 panel"* composer, and the panels run **concurrently** — one model generating
 doesn't freeze the other. Remove the second pane to drop back to a single model.
+
+Because they run independently, they stop independently: a generating panel shows a
+**Stop** on the streaming turn itself — under the text as it writes, or on the
+`k / n samples completed` strip of an N-sample draw — which cancels only that panel and
+keeps whatever already streamed. The ⏹ in the sidebar icon row is still the stop-everything
+button.
 
 ![Two models side by side in compare mode](docs/img/compare.png)
 

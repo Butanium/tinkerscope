@@ -40,9 +40,22 @@
 
 /* ── Sample progress ──────────────────────────────────────────────── */
 .samples-progress { padding: var(--space-3) 0; }
+.samples-progress.running { position: sticky; top: 0; z-index: 2; background: inherit; }
 .samples-progress-bar { height: 6px; background: var(--color-surface-alt); border-radius: 3px; overflow: hidden; margin-bottom: var(--space-2); }
 .samples-progress-fill { height: 100%; background: var(--color-accent); border-radius: 3px; transition: width 0.2s ease; }
+.samples-progress-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
 .samples-progress-text { font-size: 0.78rem; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+
+/* ── Per-panel stop (streaming turn) ──────────────────────────────────
+   Global, not scoped: it sits on ChatMessage's rows AND on +page's
+   pre-first-token placeholder, and the two must look like one control.
+   Muted until hovered — it rides along a streaming turn you're reading, so
+   a permanently red chip in every running column would be the loudest thing
+   on screen. */
+.stop-turn-row { display: flex; justify-content: flex-end; margin-top: var(--space-2); }
+.btn-stop-turn { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; padding: 2px 7px; background: none; border: 1px solid var(--color-border); border-radius: var(--radius-sm); color: var(--color-text-muted); font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; cursor: pointer; transition: all 0.15s; }
+.btn-stop-turn:hover { color: #ef4444; border-color: #ef4444; background: #fef2f2; }
+:global(.dark) .btn-stop-turn:hover { background: #450a0a40; }
 
 /* ── Sample cards ─────────────────────────────────────────────────── */
 .samples-container { display: flex; flex-direction: column; gap: var(--space-2); }

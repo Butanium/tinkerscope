@@ -14,6 +14,7 @@
 
 import { live } from './state.svelte';
 import { workspaces as ws } from './workspaces.svelte';
+import { nodeBlobs } from './node-blobs.svelte';
 import { chat, type ChatParams } from './chat.svelte';
 import { panelScroll } from './scroll.svelte';
 import { assembleAssistantRaw } from './render';
@@ -32,7 +33,8 @@ import {
   setSelected,
   cycle as cycleTree,
   siblingsOf,
-  type ThreadStart
+  type ThreadStart,
+  type TokenLogprob
 } from './tree';
 import type { Panel, PanelSel, ChatMessage, ViewMessage } from './types';
 
@@ -265,12 +267,31 @@ class BranchOps {
     }
   }
 
+  /** The original's token stream for an assistant edit — inline on a fresh fold,
+   *  else the node blob (fetched on demand: an edit can happen with the token
+   *  view off, so the blob may well not be cached yet). undefined = this turn
+   *  has no token data, or the fetch came back empty. */
+  async #tokensOf(panel: Panel, nodeId: string): Promise<TokenLogprob[] | undefined> {
+    const node = ws.treeFor(panel).nodes[nodeId];
+    if (!node) return undefined;
+    if (node.token_logprobs?.length) return node.token_logprobs;
+    const cached = nodeBlobs.get(nodeId)?.token_logprobs;
+    if (cached?.length) return cached;
+    if (!node.has_token_logprobs) return undefined;
+    await nodeBlobs.ensure([nodeId]);
+    return nodeBlobs.get(nodeId)?.token_logprobs;
+  }
+
   /** Edit → fork. User: fork+regen (shift = fork+copy-downstream, no gen).
    *  Assistant: a manual branch (no gen). Empty edits are ignored.
    *  `systemPrompt` (root user rows only): the fork's THREAD system prompt —
    *  same question under a new prompt is just an edit that forks a sibling
-   *  thread. Trimmed-empty ⇒ the fork has none. */
-  applyEdit(
+   *  thread. Trimmed-empty ⇒ the fork has none.
+   *
+   *  Async for one reason: an assistant edit hands the untouched part of the
+   *  original's token logprobs to the new node, and reading them may need the
+   *  blob fetched first. Callers fire-and-forget. */
+  async applyEdit(
     panel: Panel,
     msg: ViewMessage,
     content: string,
@@ -297,7 +318,10 @@ class BranchOps {
         this.#fireForPanel(panel, r.newUserId, r.fireMessages as ChatMessage[]);
       }
     } else if (msg.role === 'assistant') {
-      const r = editAssistant(ws.treeFor(panel), msg.nodeId, text, reasoning);
+      const tlp = await this.#tokensOf(panel, msg.nodeId);
+      // Re-read the tree AFTER the await: the fetch yields, and the node could
+      // have been pruned/cycled away meanwhile (editAssistant returns null then).
+      const r = editAssistant(ws.treeFor(panel), msg.nodeId, text, reasoning, tlp);
       if (r) ws.setTree(panel, r.tree);
     }
   }
@@ -329,7 +353,7 @@ class BranchOps {
     if (depth < 0) return;
     for (const p of this.#d.panelSels()) {
       const node = activePath(ws.treeFor(p.panel))[depth];
-      if (node) this.applyEdit(p.panel, { ...msg, nodeId: node.id }, content, reasoning, copyDownstream, systemPrompt);
+      if (node) void this.applyEdit(p.panel, { ...msg, nodeId: node.id }, content, reasoning, copyDownstream, systemPrompt);
     }
   }
 

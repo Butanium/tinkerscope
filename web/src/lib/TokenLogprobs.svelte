@@ -59,11 +59,14 @@
   {#each tlp as e, i (i)}<span
       class="tok"
       class:tok-hover={hover === i}
-      style={bg
-        ? `background: ${bg[i]}`
-        : surprisalAlpha(e.lp) > 0
-          ? `background: rgba(217, 119, 6, ${surprisalAlpha(e.lp)})`
-          : ''}
+      class:tok-ghost={e.ghost}
+      style={e.ghost
+        ? ''
+        : bg
+          ? `background: ${bg[i]}`
+          : surprisalAlpha(e.lp) > 0
+            ? `background: rgba(217, 119, 6, ${surprisalAlpha(e.lp)})`
+            : ''}
       onmouseenter={(ev) => enter(ev, i)}
       onmouseleave={leave}>{e.t}</span>{/each}
 </div>
@@ -89,5 +92,12 @@
   }
   .tok-hover {
     outline: 1px solid var(--color-accent);
+  }
+  /* Ghost = an edited turn's text past where it stopped being the model's.
+     Dimmed + dashed so it reads as "text without a number", not as a normal
+     token that happens to be untinted (p≈1 tokens are untinted too). */
+  .tok-ghost {
+    opacity: 0.55;
+    border-bottom: 1px dashed var(--color-text-muted);
   }
 </style>

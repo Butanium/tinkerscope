@@ -13,6 +13,11 @@ Two scenarios, both against a slow free-OpenRouter generation (zero cost):
      but has NO local controller. Click Stop → it must call the server cancel
      endpoint by chat_id and the chat dies too (running clears + the raw stream ends).
 
+  C. TWO panels running, PER-PANEL stop — the Stop that rides the streaming turn
+     kills only its own column: the other keeps generating, the sidebar Stop stays
+     live, and the backend still reports running. The sidebar button is the blunt
+     all-panels one; this scenario is what makes it not the ONLY one.
+
 FREE-OR FLAKINESS: the free router intermittently pre-start-errors (fires chat_error
 BEFORE chat_begin, so `running` never flips). That's a provider hiccup, not a bug in
 the stop path — so each scenario RETRIES the fire until the browser actually reaches
@@ -53,6 +58,9 @@ RUNNING_WAIT_S = 9
 # Stop button: enabled ⇔ anyRunning (disabled={!anyRunning}). The cleanest running signal.
 STOP_ENABLED = ".btn-stop-sidebar:not([disabled])"
 STOP_DISABLED = ".btn-stop-sidebar[disabled]"
+# The PER-PANEL stop, rendered on the streaming turn itself (placeholder row before
+# the first token, message head / n>1 progress strip after). Present ⇔ that panel runs.
+PANEL_STOP = '[data-testid="stop-panel"]'
 
 
 def _post(path, body):
@@ -67,14 +75,14 @@ def _get(path):
         return json.load(r)
 
 
-def _fire_raw_chat(token: str, flag: dict) -> None:
+def _fire_raw_chat(token: str, flag: dict, panel: str = "primary") -> None:
     """POST /api/chat as an EXTERNAL client (tinkpg / another tab). Reads the SSE
     stream to completion; when the browser's Stop cancels it server-side (or it
     pre-start-errors), the stream ends and this returns."""
     body = {
         "openrouter_model": OR_MODEL,
         "messages": [{"role": "user", "content": LONG_PROMPT}],
-        "n_samples": 1, "max_tokens": MAX_TOKENS, "panel": "primary",
+        "n_samples": 1, "max_tokens": MAX_TOKENS, "panel": panel,
         "broadcast": True, "client_token": token,
     }
     req = urllib.request.Request(
@@ -208,6 +216,74 @@ def main() -> None:
             results["external_backend_running"] = _get("/api/state").get("running")
             results["external_stop_errors"] = errors[err_mark:]
 
+        # ── Scenario C: TWO panels running — the per-panel Stop kills ONE ───────
+        # The sidebar button is all-or-nothing; the streaming turn carries its own
+        # Stop, and the whole point is that the OTHER column keeps generating.
+        page.locator('button[aria-label="New workspace"]').first.click()
+        page.wait_for_selector(".input-textarea:not([disabled])", timeout=15000)
+        _post("/api/state", {"panels": [
+            {"id": "primary", "run_id": MODEL_SEL, "checkpoint": None, "messages": []},
+            {"id": "compare", "run_id": MODEL_SEL, "checkpoint": None, "messages": []},
+        ]})
+        page.wait_for_selector('.chat-column[data-panel="compare"]', timeout=15000)
+
+        pair: list[dict] = []
+
+        def fire_pair(i):
+            for panel in ("primary", "compare"):
+                flag: dict = {"token": f"pair-token-{i}-{panel}", "panel": panel}
+                th = threading.Thread(
+                    target=_fire_raw_chat, args=(flag["token"], flag), kwargs={"panel": panel},
+                    daemon=True)
+                flag["thread"] = th
+                th.start()
+                pair.append(flag)
+
+        def both_running() -> bool:
+            return page.locator(PANEL_STOP).count() >= 2
+
+        results["pair_reached_running"] = False
+        for attempt in range(FIRE_ATTEMPTS):
+            fire_pair(attempt)
+            deadline = time.time() + RUNNING_WAIT_S
+            while time.time() < deadline and not both_running():
+                page.wait_for_timeout(200)
+            if both_running():
+                results["pair_reached_running"] = True
+                break
+            # Same overlap hazard as the other scenarios: let this attempt's streams
+            # die before re-firing, or a slow starter races the retry.
+            grace = time.time() + 90
+            while time.time() < grace and any(f["thread"].is_alive() for f in pair):
+                if both_running():
+                    break
+                page.wait_for_timeout(300)
+            if both_running():
+                results["pair_reached_running"] = True
+                break
+            print(f"  [pair] attempt {attempt + 1}/{FIRE_ATTEMPTS}: both panels never ran, retrying")
+
+        if results["pair_reached_running"]:
+            err_mark = len(errors)
+            page.locator(f'.chat-column[data-panel="primary"] {PANEL_STOP}').first.click()
+            # The clicked column's Stop goes away (its bucket stopped running)…
+            page.wait_for_selector(f'.chat-column[data-panel="primary"] {PANEL_STOP}',
+                                   state="detached", timeout=8000)
+            results["pair_other_still_running"] = (
+                page.locator(f'.chat-column[data-panel="compare"] {PANEL_STOP}').count() == 1
+            )
+            # …and the sidebar Stop stays LIVE, because something still is.
+            results["pair_sidebar_still_enabled"] = page.locator(STOP_ENABLED).count() > 0
+            time.sleep(0.3)
+            results["pair_backend_still_running"] = _get("/api/state").get("running")
+            results["pair_stop_errors"] = errors[err_mark:]
+            # Clean up: the survivor dies with the all-panels button.
+            page.eval_on_selector(".btn-stop-sidebar", "el => el.click()")
+            page.wait_for_selector(STOP_DISABLED, timeout=10000)
+            for f in pair:
+                f["thread"].join(timeout=15)
+            results["pair_all_streams_ended"] = all(not f["thread"].is_alive() for f in pair)
+
         page.screenshot(path="/tmp/tinkerscope_stop_generation.png", full_page=True)
         browser.close()
 
@@ -226,6 +302,12 @@ def main() -> None:
             and results.get("external_backend_running") is False
             and results.get("external_clear_s", 99) < 10
             and not results.get("external_stop_errors")
+            and results.get("pair_reached_running")
+            and results.get("pair_other_still_running")
+            and results.get("pair_sidebar_still_enabled")
+            and results.get("pair_backend_still_running") is True
+            and results.get("pair_all_streams_ended")
+            and not results.get("pair_stop_errors")
         )
         print("STOP_GENERATION SMOKE", "PASS" if ok else "FAIL")
         sys.exit(0 if ok else 1)

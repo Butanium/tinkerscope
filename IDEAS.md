@@ -278,3 +278,92 @@ its coordination note), the third is the thread-system feature itself.
   bars show `n=` while a plain single bar shows it only under the model name. If
   anyone finds that inconsistent, the fix is to always label per bar and drop the
   group total when a group has one bar. *(opus-5, 2026-07-29)*
+
+
+## From the 2026-08-03 sidebar / per-panel-stop session (opus-5)
+
+- **Loom: branch from a token into one of its alternatives.** (Clément, 2026-08-03.)
+  In Token-probs view, click a token to mark a cut point, then click one of the
+  alternatives in its top-5 popover — that fires a new sample whose prefill is
+  everything up to the cut plus the chosen token, so the model continues from the
+  counterfactual. "What if it had said *however* here?" is currently a manual
+  round-trip: read the popover, copy the text, hand-edit a prefill. Two clicks is a
+  different tool.
+  The plumbing mostly exists: prefill + `prefill_scope` already prefixes a turn,
+  `branchOps.continueSample` already forks a sibling from one sample, and
+  `TokenLogprobs` already knows each token's offset and its alternatives — so the
+  new part is a cut-point selection mode and rebuilding the prefix text from the
+  token stream (careful: the prefix must be the RAW text, thinking tags included,
+  not the rendered content) rather than new API surface. Sits naturally next to
+  the existing continue/fork vocabulary: the result should be an ordinary sibling
+  branch, cyclable with ‹k/N›, not a special kind of turn.
+  Open questions worth deciding before building: what a click means in the two
+  halves (mark cut vs pick alternative — a mode, or click-then-click as Clément
+  described); whether the branch is one sample or n; and whether an
+  alternative that isn't in the top-5 can be typed by hand (the top-K ceiling
+  above bites here too).
+
+- **Sweep for controls that follow-scroll hides.** The per-panel stop was first mounted
+  in the message HEAD, which is the natural-looking slot and the wrong one: panels
+  follow the bottom while streaming, so the head is off-screen exactly while a running
+  turn is running. A screenshot caught it; no assertion would have. The class is
+  "affordance whose USEFUL moment is precisely when its anchor is out of view", and the
+  stop is unlikely to be the only member — the ‹k/N› cycler and the row toolbar live in
+  the same head, and the n>1 progress strip needed `position: sticky` for the same
+  reason. Worth one pass over `web/src` asking, per control, *when* it matters and
+  *where the viewport is* at that moment. Sibling of the DOM-held-UI-state sweep above:
+  same genre of bug (state/position nobody modeled), different axis. *(opus-5, 2026-08-03)*
+
+- **Screenshot-verify every UI change, not just plots.** The memory note says it for
+  plots; this session it was a UI control, and the screenshot is the only thing that
+  found the misplacement (smokes passed on both placements — `data-testid` was present
+  and clickable either way, because playwright clicks through the scroll). If a browser
+  smoke asserts a control's BEHAVIOR, consider also asserting it's in the viewport
+  (`bounding_box()` against the scroll container) — that's the cheap encoding of what
+  the screenshot taught. *(opus-5, 2026-08-03)*
+
+
+## From the 2026-08-03 edit-keeps-logprobs session (opus-5)
+
+- **Score the CONTEXT, not just the completion.** (**Clément, 2026-08-03** —
+  design deliberately not settled, he wants to think more. Attribution matters in
+  this one: the idea and its shape are his, the hedging below is mine.)
+
+  *The mechanism (opus-5).* `_token_logprobs` already re-submits prompt+completion
+  as one prompt with `include_prompt_logprobs` + `topk_prompt_logprobs`, reads
+  positions `[L, L+T)` for the generated tokens, and throws `[0, L)` away. Those
+  discarded positions are the whole rendered context — system prompt, user turns,
+  prior assistant turns, template scaffolding, and (on a Continue) the assistant
+  PREFILL region. Real teacher-forced numbers, already paid for, zero extra API
+  calls. I raised the prefill slice; Clément's "so we can collect the user prompt
+  logprobs too?" is what turned it into this idea.
+
+  *Smallest first step (opus-5).* The prefill region: today a continued turn
+  stores logprobs for the continuation ONLY, so its token view starts mid-turn
+  and the text you prefilled has no numbers at all. Slicing
+  `[L-len(region_ids), L)` fixes exactly that, and needs no design decisions.
+
+  *Clément's design.* Capture rule: if the context has no token probs yet, take
+  them while sampling the response; if it already has them, don't re-store. He
+  also flagged the catch himself — you then have logprobs on EDITED tokens, which
+  "could be a bit misleading, in the sense that it looks like the model sampled
+  this". His tentative render, explicitly not final: `[prefill with probs] [ghost
+  tokens from the edit] [completion token probs]`, maybe plus a button to compute
+  the full logprobs of a conversation on demand.
+
+  *Storage is not an objection — I argued it was, and I was wrong.* Recorded so
+  nobody re-derives it: the context is deterministic given the tree, so it's
+  stored once per (prompt, checkpoint), and the N-samples-of-one-prompt case (30,
+  100 samples of the same question) is precisely where it amortizes rather than
+  multiplies. Bound ~2× a completion's worth, usually well under.
+
+  *My open questions (opus-5) — Clément is not blocked on these and does not
+  share the caution; treat them as a checklist, not a gate.* Whether hand-edited
+  spans stay ghosts, get a distinct third style ("scored, not sampled"), or
+  become a toggle — note `ghost` currently means "no number exists", while here
+  one WOULD exist, so the render becomes a choice about what to claim. Whether
+  context scoring rides along with sampling or is its own `max_tokens=1` action
+  (the latter needs no generation and would let the SAME context be diffed across
+  two checkpoints, which the ride-along can't do cleanly since each panel samples
+  its own). And whether `top` is stored for context positions or only `lp` (the
+  alternatives are the expensive part; a surprisal heat map only needs `lp`).

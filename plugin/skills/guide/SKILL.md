@@ -106,6 +106,25 @@ population as a response bar and a thinking bar over the SAME samples (does the
 behavior show up in the CoT but not the answer?). Both at once gives up to four
 bars per model.
 
+**"One panel is running away, the other is fine."** The streaming turn in that column has
+its own **Stop** — below the text as it writes, or on the "k / n samples completed" strip
+for an N-sample draw. It cancels only that panel; the others keep generating and the
+partial text already streamed is kept. The ⏹ in the sidebar icon row remains the
+all-panels stop.
+
+**"I'm reading the CoT, not the answers."** Sidebar → **Thinking blocks** → **Open**.
+Think folds normally start closed except on the latest turn; this starts every one of
+them open, on every turn and every sample card, so scrolling a long comparison doesn't
+mean re-clicking each fold. Folds you clicked keep their own state until you flip it
+back. Browser preference (like Token probs): remembered locally, not part of the
+workspace, and a reader of a published site sets their own.
+
+**"What do I paste into my script to get this model?"** The ⧉ button beside a model's
+name in the sidebar. A checkpoint copies its `tinker://…/sampler_weights/…` path — the
+checkpoint currently selected under that run, so switch the dropdown and it copies the
+new one — and a base model copies its id. A run's own id and an OpenRouter id have no
+button (scan-dir-relative, and already printed in full, respectively).
+
 **"Why did it pick that word?"** Turn on **Token probs** in the sidebar. Each
 token of an assistant reply gets tinted by surprisal; hover one for its
 probability and the top-5 alternatives it passed over. It's display-only and
@@ -126,6 +145,17 @@ token into a top and bottom band; switching the toggle Off keeps the picks. The
 tracks the mass (relative read), 1 = a step where any nonzero match goes to full
 tint (the "is anything related in the top-5 at all?" read), 0.50 = the √ ramp
 default in between.
+
+**"I edited the reply — do I lose the token data?"** Only for what you changed.
+Editing forks a new branch, and it keeps the probabilities of everything before
+the point where your text stops matching what the model wrote — so truncating a
+turn, cutting the thinking, or rewriting the last sentence all leave the earlier
+tokens intact, with their real numbers. From the divergence on it's a **ghost**:
+the text is there, dimmed and dashed, and hovering says "no token data" — nothing
+sampled it. That includes the half of a token your cut landed inside. Change the
+very first token and there's nothing left to keep, so the new branch shows the
+plain "no token data" pill. The original branch is untouched either way — cycle
+‹k/N› back to it for the full stream.
 
 **"What's the model's distribution over the FIRST token?"** The chart's third
 mode, *first token*, plots the model's own probability distribution at position

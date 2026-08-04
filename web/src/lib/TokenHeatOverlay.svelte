@@ -81,14 +81,18 @@
       .filter((r) => r != null)
   );
 
-  /** Colors for each token, top-to-bottom band order. */
+  /** Colors for each token, top-to-bottom band order. A GHOST (an edited turn's
+   *  text past the divergence point — token-edit.ts) has no probability, so it
+   *  gets no fill; it's marked with a dashed underline instead, below. */
   const colors = $derived(
     tlp.map((e) =>
-      tokenTintColors(
-        e.lp,
-        rules.map((r) => ({ color: r.color, prob: highlightMatchProb(e, r) })),
-        logprobHighlight.sharpness
-      )
+      e.ghost
+        ? []
+        : tokenTintColors(
+            e.lp,
+            rules.map((r) => ({ color: r.color, prob: highlightMatchProb(e, r) })),
+            logprobHighlight.sharpness
+          )
     )
   );
 
@@ -199,7 +203,7 @@
     const range = document.createRange();
     for (let i = 0; i < spans.length; i++) {
       const s = spans[i];
-      if (!s || !colors[i]?.length) continue;
+      if (!s || (!colors[i]?.length && !tlp[i]?.ghost)) continue;
       const a = nodeAt(base, s.start);
       const b = nodeAt(base, s.end - 1);
       if (owner[a] !== owner[b]) continue; // straddles two containers — skip
@@ -246,6 +250,21 @@
       ctx.clearRect(0, 0, w, h);
       for (const b of boxes) {
         if (b.c !== ci) continue;
+        // Ghost: a dashed underline, no fill — the same "text without a number"
+        // affordance the raw stream draws with .tok-ghost. An untinted span
+        // would read as a CONFIDENT token, which is the opposite of the truth.
+        if (tlp[b.i]?.ghost) {
+          ctx.save();
+          ctx.strokeStyle = 'rgba(130, 130, 130, 0.75)';
+          ctx.lineWidth = 1;
+          ctx.setLineDash([3, 2]);
+          ctx.beginPath();
+          ctx.moveTo(b.x, Math.round(b.y + b.h) - 0.5);
+          ctx.lineTo(b.x + b.w, Math.round(b.y + b.h) - 0.5);
+          ctx.stroke();
+          ctx.restore();
+          continue;
+        }
         const bands = colors[b.i];
         const bh = b.h / bands.length;
         for (let k = 0; k < bands.length; k++) {

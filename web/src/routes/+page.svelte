@@ -16,8 +16,9 @@
     OR_PREFIX, BASE_PREFIX, CKPT_PREFIX,
     isOpenrouterSel, openrouterId,
     isBaseSel, baseModelId,
-    isCkptSel, samplerPathOf
+    isCkptSel, samplerPathOf, runSamplerPath
   } from '$lib/model-sel';
+  import { thinkingView } from '$lib/thinking-view.svelte';
   import { chat, type ChatParams, type ChatModelField } from '$lib/chat.svelte';
   import { nodeBlobs } from '$lib/node-blobs.svelte';
   import { modelCatalog } from '$lib/model-catalog.svelte';
@@ -25,6 +26,7 @@
   import { panelScroll } from '$lib/scroll.svelte';
   import { isNavKey, moveIndex, isEditableTarget, anyModalOpen } from '$lib/kbnav';
   import type { ChartPanelData, ChartTurn } from '$lib/chart';
+  import { firstRealToken } from '$lib/token-logprob';
   import { buildPanelView } from '$lib/panel-view';
   import { relWhen } from '$lib/when';
   import { DragReorder } from '$lib/drag-reorder.svelte';
@@ -1507,7 +1509,7 @@
             reasoning: n.reasoning,
             // Inline on fresh folds; light nodes resolve through the blob cache
             // (reactive — fills in once ChartModal's ensure() fetch lands).
-            first: (n.token_logprobs ?? nodeBlobs.get(n.id)?.token_logprobs)?.[0],
+            first: firstRealToken(n.token_logprobs ?? nodeBlobs.get(n.id)?.token_logprobs),
             nodeId: n.id,
             hasFirst: !!(n.token_logprobs?.length || n.has_token_logprobs)
           }));
@@ -1857,6 +1859,11 @@
           {@const orModel = modelCatalog.openrouterBySel(p.run_id)}
           {@const baseM = baseModelId(p.run_id)}
           {@const sp = samplerPathOf(p.run_id)}
+          <!-- The one string this panel is worth copying: a checkpoint's sampler path
+               (loose `ckpt:` panel or the checkpoint picked under a discovered run) or
+               a base model's id. null ⇒ no button (see the row below). -->
+          {@const copyable =
+            (isCkpt ? sp : isBase ? baseM : isOr ? null : runSamplerPath(pr?.checkpoints, p.checkpoint)) ?? null}
           <!-- The dropdown item list (runs + base/ckpt recents + OpenRouter, plus
                a CLI/shared-state selection not yet in recents) is built by the
                modelCatalog store — see its `modelItems`. -->
@@ -1879,23 +1886,23 @@
                 {/if}
               </div>
               <!-- Right next to the model NAME: the name is how you found the panel,
-                   this is the string you paste into your own script. A checkpoint gives
-                   its `tinker://…/sampler_weights/…` path, a base model its model id —
-                   different strings, same need, and covering both matters because a
-                   published workspace is often all base models (the CoT-prefilling one
-                   is), where a checkpoint-only button would look simply absent.
-                   NOT offered for a discovered run (its id is scan-dir-relative and
-                   means nothing on another machine) nor for OpenRouter (whose id is
-                   already shown in full on the line below). -->
-              {#if (isCkpt && sp) || (isBase && baseM)}
-                {@const copyable = (isCkpt ? sp : baseM) as string}
+                   this is the string you paste into your own script. Any CHECKPOINT
+                   gives its `tinker://…/sampler_weights/…` path — whether it's a loose
+                   `ckpt:` panel or the checkpoint selected under a discovered run — and
+                   a base model gives its model id. Different strings, same need.
+                   The run's own id stays uncopyable (it's scan-dir-relative and means
+                   nothing on another machine), and so does OpenRouter's (already shown
+                   in full on the line below); the checkpoint path under a run does NOT
+                   have that problem, which is why the run case is the sampler path and
+                   not the id. -->
+              {#if copyable}
                 <button
                   class="btn-copy-sp"
                   class:copied={copiedCkptPanel === p.panel}
-                  data-tooltip={isCkpt
-                    ? "Copy this checkpoint's tinker sampler path"
-                    : "Copy this base model's id"}
-                  aria-label={isCkpt ? 'Copy sampler path' : 'Copy base model id'}
+                  data-tooltip={isBase
+                    ? "Copy this base model's id"
+                    : "Copy this checkpoint's tinker sampler path"}
+                  aria-label={isBase ? 'Copy base model id' : 'Copy sampler path'}
                   use:tip
                   onclick={() => copySamplerPath(p.panel, copyable)}
                 >
@@ -2000,6 +2007,20 @@
           <span class="seg-toggle" data-tooltip="All = every sample stacked; Cycle = one at a time with ‹/›" use:tip>
             <button class="seg-btn" class:active={sampleView === 'all'} onclick={() => setSampleView('all')}>All</button>
             <button class="seg-btn" class:active={sampleView === 'cycle'} onclick={() => setSampleView('cycle')}>Cycle</button>
+          </span>
+        </label>
+      </div>
+
+      <!-- How thinking/reasoning folds START. A viewing preference, so it shows in
+           read-only too: a published CoT page is exactly where a reader wants every
+           think block already open. Flipping it re-applies to folds nobody clicked. -->
+      <div class="sidebar-section">
+        <label class="sidebar-label thinking-toggle-row">
+          <span>Thinking blocks</span>
+          <span class="seg-toggle" data-testid="thinking-fold-toggle"
+            data-tooltip="Whether think/reasoning blocks start folded or already open" use:tip>
+            <button class="seg-btn" class:active={!thinkingView.open} onclick={() => thinkingView.set(false)}>Folded</button>
+            <button class="seg-btn" class:active={thinkingView.open} onclick={() => thinkingView.set(true)}>Open</button>
           </span>
         </label>
       </div>
@@ -2132,6 +2153,7 @@
           {@const run = live.panels[p.panel] ?? emptyPanel()}
           <div
             class="chat-column"
+            data-panel={p.panel}
             class:dragging={panelDrag.dragId === p.panel}
             class:drop-left={panelDrag.showAt(s.panels, i)}
             class:drop-right={i === panelSels.length - 1 && panelDrag.showAt(s.panels, panelSels.length)}
@@ -2189,6 +2211,7 @@
                   otherPanels={panelSels.filter((x) => x.panel !== p.panel).map((x) => ({ id: x.panel, label: panelLabel(x) }))}
                   onSendToPanel={(dest) => branchOps.sendBranchToPanel(p.panel, msg, dest)}
                   onCycle={(delta) => branchOps.cycleBranch(p.panel, msg, delta)}
+                  onStop={() => chat.stopGeneration(p.panel)}
                   rowIndex={i}
                   focused={kbFocus?.panel === p.panel && kbFocus?.index === i}
                   onFocusRow={() => (kbFocus = { panel: p.panel, index: i })}
@@ -2196,8 +2219,25 @@
                 />
               {/each}
               {#if run.running && run.n <= 1 && run.samples.filter((x) => x && (x.content || x.reasoning)).length === 0}
+                <!-- Pre-first-token placeholder. It carries the same stop as the row
+                     that replaces it, so the affordance doesn't blink into existence
+                     only once tokens arrive (the wait before the first token is
+                     exactly when a wrong send is noticed). -->
                 <div class="message" style="background: {s.thinking ? 'var(--color-surface-alt)' : 'var(--color-assistant-bg)'};">
-                  <div class="message-role">{s.thinking ? 'thinking' : 'assistant'}</div>
+                  <div class="pending-head">
+                    <div class="message-role">{s.thinking ? 'thinking' : 'assistant'}</div>
+                    <button
+                      class="btn-stop-turn"
+                      data-tooltip="Stop this panel — keeps what already streamed"
+                      use:tip
+                      aria-label="Stop generating in this panel"
+                      data-testid="stop-panel"
+                      onclick={() => chat.stopGeneration(p.panel)}
+                    >
+                      <Icon name="stop" size={11} />
+                      <span>Stop</span>
+                    </button>
+                  </div>
                   <div class="message-content loading-indicator"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
                 </div>
               {/if}
@@ -2606,6 +2646,11 @@
   .input-textarea { width: 100%; padding: var(--space-3) var(--space-4); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius-md); color: var(--color-text); font-family: var(--font-sans); font-size: 0.9rem; resize: none; line-height: 1.5; }
   .input-textarea:focus { outline: none; border-color: var(--color-accent); }
   .input-textarea:disabled { opacity: 0.6; }
+
+  /* Pre-first-token placeholder head: role label + the per-panel stop, mirroring
+     ChatMessage's .message-head (which is scoped to that component). */
+  .pending-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin-bottom: var(--space-2); }
+  .pending-head .message-role { margin-bottom: 0; }
 
   /* ── Stop button ──────────────────────────────────────────────── */
   .btn-stop-sidebar { background: none; border: 1px solid var(--color-border); border-radius: var(--radius); padding: 6px; color: var(--color-text-muted); opacity: 0.35; display: flex; align-items: center; transition: all 0.15s; }

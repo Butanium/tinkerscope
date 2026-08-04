@@ -276,6 +276,17 @@ codex plugin add tinkerscope@tinkerscope</pre>
         Holding Ctrl/⌘ while clicking a row button applies it to every panel at that depth — the way to
         regenerate the same turn everywhere and keep the columns aligned.
       </p>
+      <p class="help-note">
+        A generating column carries its own <b>Stop</b> on the streaming turn — under the text it's
+        writing, or on the "k / n samples" strip for an N-sample draw — and it stops <em>that</em> column
+        only; the others keep going. Whatever already streamed is kept. The
+        <Icon name="stop" /> in the sidebar icon row is still the one that stops everything at once.
+      </p>
+      <p class="help-note">
+        Every model in the sidebar has a <Icon name="copy" /> button beside its name for the string you'd
+        paste into your own script: a checkpoint's <code>tinker://</code> sampler path — the one currently
+        selected under a run, so switching checkpoints switches what it copies — or a base model's id.
+      </p>
     </section>
 
     <section class="help-sec">
@@ -323,6 +334,20 @@ codex plugin add tinkerscope@tinkerscope</pre>
     </section>
 
     <section class="help-sec">
+      <h3>Thinking blocks</h3>
+      <p>
+        A reply's think block sits behind a fold, open on the latest turn and closed on the ones above.
+        Sidebar → <b>Thinking blocks</b> → <b>Open</b> flips that default: every fold, on every turn and
+        every sample card, starts unfolded — the setting for a session where the reasoning <em>is</em> what
+        you're reading. Folds you've clicked keep their own state until you flip it again.
+      </p>
+      <p class="help-note">
+        It's a browser preference, like Token probs: remembered here, never written into the workspace, and
+        set independently by whoever reads a published site.
+      </p>
+    </section>
+
+    <section class="help-sec">
       <h3>Token probabilities</h3>
       <p>
         Sidebar → <b>Token probs</b> tints each token of an assistant reply by surprisal, with a hover popover
@@ -344,6 +369,14 @@ codex plugin add tinkerscope@tinkerscope</pre>
         Under it, <b>Color by match</b> flips the tint to "how much probability mass went to text matching
         this rule" instead of surprisal. Turn it On and pick up to two highlight rules — two rules split each
         token into a top and a bottom band. Off keeps your picks for next time.
+      </p>
+      <p class="help-note">
+        <b>Editing a reply keeps the probabilities it didn't touch.</b> Truncate a turn, cut its
+        thinking, change the last sentence — everything before the point where your text stops matching
+        what the model wrote was generated under the same context, so it keeps its numbers. The rest is
+        a <b>ghost</b>: dimmed, dashed, "no token data" on hover, because nothing sampled it (that
+        includes the half of a token your cut landed inside). Change the very first token and the new
+        branch simply has no token data.
       </p>
       <p class="help-note">
         The <b>Contrast</b> slider under the rule chips reshapes probability → opacity. At <b>0</b> opacity
@@ -392,9 +425,9 @@ codex plugin add tinkerscope@tinkerscope</pre>
       <p>
         Reading a published site? The <b>read-only snapshot</b> badge in the sidebar is a button —
         it gives you the command to run tinkerscope locally against the same pack, so you can go
-        from reading to sampling in one copy-paste. And every checkpoint has a
-        <Icon name="copy" /> button next to its name that copies its <code>tinker://</code>
-        sampler path, for pointing your own scripts at it.
+        from reading to sampling in one copy-paste. And every model has the same
+        <Icon name="copy" /> button next to its name as in the live app — a checkpoint's
+        <code>tinker://</code> sampler path, a base model's id — for pointing your own scripts at it.
       </p>
       <p>
         On a <b>published site</b> you can also open a pack straight off your own computer — the
