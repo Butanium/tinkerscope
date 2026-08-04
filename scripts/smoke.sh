@@ -102,6 +102,13 @@ declare -A STALE=(
     [browser_readme_shots]="pre-ModelDropdown sidebar + q_nk fixtures"
     [browser_save_lightening]="composer textarea never appears; fails identically at HEAD (baselined 2026-08-03)"
 )
+# NON-DETERMINISTIC (not stale — the coverage is real, the result isn't stable):
+#   browser_stop_generation — drives live free-OpenRouter, and which assertion
+#   fails varies run to run. Observed 2026-08-03 failing BOTH on the merge tip
+#   (timeout waiting for the compare panel) and on the pre-merge main 51c5ec3
+#   (owned_backend_running stayed True), i.e. it was already unstable before
+#   anything landed on top of it. Re-run before believing a failure here, and
+#   baseline it if you need to attribute one.
 
 SMOKES=("${PICK[@]:-${DEFAULT[@]}}")
 

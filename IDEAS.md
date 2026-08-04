@@ -367,3 +367,51 @@ its coordination note), the third is the thread-system feature itself.
   two checkpoints, which the ride-along can't do cleanly since each panel samples
   its own). And whether `top` is stored for context positions or only `lp` (the
   alternatives are the expensive part; a surprisal heat map only needs `lp`).
+
+
+## From the 2026-08-03 token-overlay / highlights-master session (opus-5)
+
+- **The loom idea should cut from the PROSE, not from the raw token stream.**
+  The entry above ("Loom: branch from a token into one of its alternatives")
+  assumes you're in the raw-token view when you pick the cut point. As of this
+  session you don't have to be: `lib/token-align` maps the raw stream onto the
+  text the markdown renderer actually emitted, and `TokenHeatOverlay` already
+  turns that into per-token client rects and hit-tests a pointer against them.
+  So "click a word in the reply, pick an alternative from its popover, branch"
+  works in NORMAL reading mode — which is where you actually are when you notice
+  a word you want to interrogate. Nobody switches to a monospace token dump on
+  the off-chance.
+  What the overlay adds concretely: a pointer → token index resolver (`onMove`),
+  and a token index → raw-stream character offset (the prefix is `tokens
+  .slice(0, i).join('')`, which is exactly the RAW text the loom entry warns you
+  need — tags included — with no reassembly). The missing half is the inverse of
+  what `token-align` computes: a DOM text selection → token range, for "branch
+  from here" over a dragged span rather than one token. Same map, read the other
+  way. *(opus-5, 2026-08-03)*
+
+- **For anything PAINTED rather than DOM'd, the assertion is pixel readback.**
+  The overlay draws on a canvas, so every DOM-shaped assertion a smoke can make
+  ("the element exists", "it has a style attribute") is blind to whether anything
+  was actually drawn. `browser_token_overlay.py` reads the canvas back instead —
+  `getImageData` over the whole surface, count non-zero-alpha pixels; and for
+  "which color", sample the single pixel under a named element's centre and
+  compare channels. That caught a real bug (see below) and is the cheap general
+  technique for canvas/SVG-paint features. Worth remembering the two forms: a
+  COUNT for "did it draw at all", a single-pixel SAMPLE for "did it draw the
+  right thing". Note both are immune to Playwright's click-through-scroll
+  problem, since neither involves clicking. *(opus-5, 2026-08-03)*
+
+- **Second independent vote for "screenshot-verify every UI change".** The entry
+  above (per-panel-stop session, same day) says a screenshot found a misplacement
+  no assertion would have. This session it happened again in a different genre:
+  the first overlay used one canvas per row, which painted *behind*
+  `.sample-reasoning`'s OPAQUE background — so every thinking block came out
+  completely flat while the response below it painted correctly. The smoke passed
+  (it asserted on the message body's canvas), svelte-check was clean, and the
+  code reads fine; only looking at a picture of a real workspace showed a whole
+  region of the feature silently not working. Two sessions, two different failure
+  modes, both invisible to everything except a rendered image — that's not a
+  coincidence, it's the category. The fix here was a per-container canvas at
+  `z-index: -1`, and the smoke now pins it with a pixel-count on the reasoning
+  block's own canvas. *(opus-5, 2026-08-03)*
+
