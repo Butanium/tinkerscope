@@ -12,6 +12,7 @@
   import { readOnly } from '$lib/static-mode';
   import { tip } from '$lib/tooltip.svelte';
   import { logprobView } from '$lib/logprobs.svelte';
+  import { thinkingView } from '$lib/thinking-view.svelte';
   import { nodeBlobs } from '$lib/node-blobs.svelte';
   import ActionMenu from '$lib/ActionMenu.svelte';
   import Icon from '$lib/Icon.svelte';
@@ -39,6 +40,7 @@
     onCopy,
     onTag,
     onCycle,
+    onStop,
     otherPanels = [],
     onSendToPanel,
     rowIndex = -1,
@@ -70,6 +72,9 @@
     onCopy: (all: boolean, withThinking: boolean) => void;
     onTag: (content: string, sampleIndex: number | null, totalSamples: number | null, reasoning: string, quick: boolean) => void;
     onCycle: (delta: number) => void;
+    // Cancel THIS panel's in-flight draw (the other panels keep going). Absent in
+    // read-only, where nothing is ever running.
+    onStop?: () => void;
     // Other panels this branch can be copied into (compare). Empty → no picker.
     otherPanels?: { id: string; label: string }[];
     onSendToPanel?: (destPanel: string) => void;
@@ -143,9 +148,11 @@
   let sampleCursor = $state(0);
   // Reasoning fold state for cycle-view, persisted at the message level so it
   // survives cycling THROUGH a no-reasoning sample (whose <details> unmounts) —
-  // otherwise returning to a reasoning sample would re-fold. In 'all' view each
-  // card's <details> stays independent (uncontrolled).
-  let reasoningOpen = $state(false);
+  // otherwise returning to a reasoning sample would re-fold. null = untouched
+  // here, so the sidebar's "Thinking blocks" default governs (and re-governs when
+  // it flips). In 'all' view each card's <details> keeps its own DOM state once
+  // clicked; the default only re-applies when the preference changes.
+  let reasoningOpen = $state<boolean | null>(null);
   let visibleSampleIdxs = $derived(
     (msg.samples ?? []).map((s, i) => [s, i] as const).filter(([s]) => s && s.content).map(([, i]) => i)
   );
@@ -247,7 +254,7 @@
     rawSingle = false;
     rawSamples = new Set();
     sampleCursor = 0;
-    reasoningOpen = false;
+    reasoningOpen = null;
   });
 </script>
 
@@ -305,7 +312,7 @@
     {#if sample.reasoning && !sampleTok(sample)}
       <details
         class="sample-reasoning-block"
-        open={sampleView === 'cycle' ? reasoningOpen : undefined}
+        open={sampleView === 'cycle' ? (reasoningOpen ?? thinkingView.open) : thinkingView.open}
         ontoggle={(e) => (reasoningOpen = (e.currentTarget as HTMLDetailsElement).open)}
       >
         <summary class="sample-reasoning-toggle">
@@ -384,6 +391,22 @@
     class="truncated-tag"
     data-tooltip="Hit the max-tokens limit — Continue (+) extends it"
     use:tip>truncated</span>
+{/snippet}
+
+<!-- Stop THIS panel's draw. Partials already streamed are kept (the server fires
+     chat_done with them), which is why the label says stop and not discard. -->
+{#snippet stopBtn()}
+  <button
+    class="btn-stop-turn"
+    data-tooltip="Stop this panel — keeps what already streamed"
+    use:tip
+    aria-label="Stop generating in this panel"
+    data-testid="stop-panel"
+    onclick={() => onStop?.()}
+  >
+    <Icon name="stop" size={11} />
+    <span>Stop</span>
+  </button>
 {/snippet}
 
 <!-- Continue (prefill) an assistant turn: extend it; n-samples → branches to pick.
@@ -546,7 +569,7 @@
       </button>
     {/if}
     {#if msg.role === 'assistant' && msg.reasoning && !isMultiSample && !tokView}
-      <details class="sample-reasoning-block reasoning-primary" open={isLastAssistant}>
+      <details class="sample-reasoning-block reasoning-primary" open={thinkingView.open || isLastAssistant}>
         <summary class="sample-reasoning-toggle">
           <span>Thinking</span>
           <svg class="thinking-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
@@ -558,15 +581,26 @@
       {@const completedCount = msg.samples ? msg.samples.filter((x) => x && x.content).length : 0}
       {@const allDone = !msg.running && completedCount > 0}
       {#if !allDone}
-        <div class="samples-progress">
+        <!-- Sticky while running: the cards stream in BELOW it and the panel follows
+             the bottom, so an unpinned strip (and its stop) would scroll out of reach
+             on exactly the long draws you'd want to abort. -->
+        <div class="samples-progress" class:running={msg.running}>
           <div class="samples-progress-bar">
             <div class="samples-progress-fill" style="width: {(completedCount / (msg.totalSamples ?? 1)) * 100}%"></div>
           </div>
-          <div class="samples-progress-text">
-            {#if completedCount === 0 && thinking}
-              Generating {msg.totalSamples} samples (thinking...)
-            {:else}
-              {completedCount} / {msg.totalSamples} samples completed
+          <div class="samples-progress-row">
+            <div class="samples-progress-text">
+              {#if completedCount === 0 && thinking}
+                Generating {msg.totalSamples} samples (thinking...)
+              {:else}
+                {completedCount} / {msg.totalSamples} samples completed
+              {/if}
+            </div>
+            <!-- Stop THIS panel, on the thing being stopped: the strip already says
+                 how far along it is, so the button reads as "stop at 4/10" rather
+                 than a mode. The sidebar's stop stays the all-panels blunt one. -->
+            {#if msg.running && onStop && !readOnly}
+              {@render stopBtn()}
             {/if}
           </div>
         </div>
@@ -658,6 +692,12 @@
         <TokenLogprobs tlp={tlp!} />
       {:else}
         <div class="message-content">{@html prefillSplit ? renderPrefilled(msg.content, prefillSplit.answer, msg.role) : renderContent(msg.content, msg.role)}</div>
+      {/if}
+      <!-- Stop THIS panel, at the END of the streaming text rather than in the row
+           head: the panel follow-scrolls while tokens arrive, so a head-mounted stop
+           is off-screen exactly while it's wanted. The tail is what you're watching. -->
+      {#if msg.running && !isMultiSample && onStop && !readOnly}
+        <div class="stop-turn-row">{@render stopBtn()}</div>
       {/if}
       {#if msg.role !== 'system' && (msg.content || msg.raw_text || msg.reasoning)}
         <OverflowRow klass="hover-actions" resetKey={msg.nodeId ?? msg.content}>

@@ -347,9 +347,11 @@ panel gives its `tinker://…/sampler_weights/…` path, a `base:` panel its mod
 string you'd paste into your own script. Covering base models matters because a published
 workspace is often *entirely* base models, where a checkpoint-only button would look
 absent rather than inapplicable (caught on the live deploy, not by the smoke, whose
-fixture had only a checkpoint). Not offered for a discovered run — its id is
-scan-dir-relative and means nothing elsewhere — nor for OpenRouter, whose id is already
-shown in full below. It replaced a `· loose sampler` suffix: jargon for "no run dir behind
+fixture had only a checkpoint). A panel on a discovered **run** gets it too, resolved to
+the *selected checkpoint's* sampler path (`model-sel.ts:runSamplerPath`, mirroring
+`routes/chat.py:_resolve_checkpoint`) — the run's own id stays uncopyable, being
+scan-dir-relative and meaningless elsewhere, and so does OpenRouter's, already shown in
+full below. It replaced a `· loose sampler` suffix: jargon for "no run dir behind
 this", true of every checkpoint in a pack or a published site, and it duplicated the model
 name on a second line.
 

@@ -138,7 +138,15 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     the live-bucket prefill color. UI-agnostic — the caller (+page) passes a
     `ChatParams` bundle + a resolved `ChatModelField`, so it never touches the
     sampling UI. +page keeps thin glue (`paramsBundle`/`resolveModelField`/a
-    `fireOne` wrapper) over it.
+    `fireOne` wrapper) over it. `stopGeneration(panel?)` has always been
+    per-panel-capable (it cancels by the bucket's `chat_id`); since 2026-08-03 the
+    UI uses that — ChatMessage renders a `[data-testid="stop-panel"]` chip ON the
+    streaming turn (after the text for n=1, on the progress strip for n>1, plus
+    +page's pre-first-token placeholder row), wired to `onStop`. Placement is
+    load-bearing: panels follow-scroll while streaming, so a stop in the row HEAD
+    is off-screen exactly when wanted — hence the tail position and the
+    `.samples-progress.running` sticky. The sidebar `.btn-stop-sidebar` stays the
+    all-panels one. Smoke: `browser_stop_generation.py` scenario C.
   - `lib/model-catalog.svelte.ts` → `modelCatalog` — the **model catalogs +
     labels**: `runs` / `openrouterModels` / the lazy tinker + OR typeahead
     catalogs (+ their loading/error flags) / the localStorage recents; the
@@ -167,6 +175,14 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     localStorage; newest-2-win): non-empty ⇒ TokenLogprobs tints tokens by
     `highlightMatchProb` instead of surprisal + colors popover alternatives by
     their match.
+  - `lib/thinking-view.svelte.ts` → `thinkingView` — the sidebar **"Thinking
+    blocks"** Folded/Open toggle (localStorage, like `logprobView`; shown in
+    read-only too — a published CoT page is where a reader most wants them open).
+    It's the DEFAULT fold state, not a lock: `ChatMessage` passes it as the
+    `<details open>` value, so a fold the user clicks keeps its own DOM state
+    until the preference flips again (`reasoningOpen` is `boolean | null`, null =
+    untouched ⇒ the preference governs). The last assistant turn stays open
+    regardless — that rule predates this and is unchanged.
   - `lib/scroll.svelte.ts` → `panelScroll` — **the only scrollTop writer**: the
     per-panel FOLLOW (streaming, stick-to-bottom gated) / PRESERVE (tree
     mutations keep position) / SNAP (send, workspace open) / REVEAL
@@ -181,7 +197,13 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     threads are per-panel, so each entry records which panels have it). The
     single source of branching truth. **Has `tree.test.ts`.**
   - `lib/model-sel.ts` — the `openrouter:`/`base:`/`ckpt:` sentinel encoding
-    (prefixes, predicates, id extractors) for a panel's model selection.
+    (prefixes, predicates, id extractors) for a panel's model selection, plus
+    `runSamplerPath(checkpoints, name)` — what the copy-id button hands out for a
+    DISCOVERED-run panel. It duplicates `routes/chat.py:_resolve_checkpoint`'s
+    rule (named ckpt must exist AND have a sampler path; no pick ⇒ `final`, else
+    the last one with a path) so the button can't copy a path other than the one
+    that produced the turns on screen — if that backend rule moves, move this.
+    **Has `model-sel.test.ts`**; browser smoke `tests/small-smokes/browser_run_ckpt_copy.py`.
   - `lib/reorder.ts` — list-agnostic drag-reorder math: `reorderById(items, fromId,
     toGap)` (move an item by stable id to a gap index; returns the SAME ref on
     no-op/unknown so callers skip a redundant write) + `isNoopGap` + `gapFromPointer`
