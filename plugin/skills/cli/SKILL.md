@@ -118,6 +118,7 @@ tinkpg threads [--min-turns N] [--ws W] [--model SUB] [--grep TXT] [--json]  # c
 tinkpg probe <run>[@ckpt] "<prompt>" [--n N] [--ancestry-file F] [--json]  # sample ANY model off-workspace: nothing broadcast, nothing committed
 tinkpg samples [conv] [--panel P] [--thread K|--node ID] [--turn N] [--sample K] [--slice S[:L]] [--full] [--first-token]  # ALL n-sample siblings at one fork + <tag> tally; --sample/--slice = read ONE sample in PIECES; --first-token = the model's P(first generated token) at this fork
 tinkpg grep "<text>" [--ws WS] [--regex] [-i]     # search EVERY branch of all workspaces: content + thinking
+tinkpg node <id> [--ws WS] [--logprobs] [--meta] [--raw] [--full] [--json]  # reverse lookup: locate a bare node id (no ws/panel needed), dump its record + blobs
 tinkpg refresh                                      # rescan filesystem + re-probe sampling capability
 ```
 
@@ -243,6 +244,16 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   the ONLY route to n-sample views on non-selected branches (--thread/--turn
   walk selected paths). Use grep FIRST when the human says "somewhere in my
   workspaces there's …".
+- `tinkpg node <id>` is the FIND primitive for a NODE ID: when you hold a bare id
+  (the human pasted one from the browser's Copy-node-id button, or `grep`/`samples
+  --json` printed it) it locates the workspace · panel · thread with no other
+  context and dumps the node record — role, sibling k/N, parent/children,
+  finish_reason, and crucially `prefill` (a Continue/authored prefix; the stored
+  token stream only covers what came AFTER it — the cause when token counts look
+  short) plus which heavy blobs exist. `--logprobs` prints the stored per-token
+  stream + top-K alts, `--meta` the request/response record, `--raw` the raw
+  stream text. Reach for it BEFORE grepping state files or hand-parsing
+  workspace JSON — it replaces both.
 - `tinkpg samples` answers "what did the model say across ALL n draws at this fork?"
   — the one view `state`/`conv` can't give you, since they only walk the linear active
   path. It prints every sibling response at ONE fork (default: the last user turn of the

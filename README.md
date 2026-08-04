@@ -458,6 +458,7 @@ tinkpg threads [--min-turns N]         # index EVERY root thread across all work
 tinkpg probe <run>[@ckpt] "prompt"     # sample ANY model off-workspace (no broadcast, no commit)
 tinkpg samples [<id|name>]             # every sampled response at one fork + a <tag> tally
 tinkpg grep "<text>"                   # search EVERY branch of all workspaces (content + thinking)
+tinkpg node <id>                       # reverse lookup: locate a node id, dump its record (+ --logprobs/--meta/--raw)
 tinkpg refresh                         # rescan the filesystem + Tinker capabilities
 ```
 
@@ -538,6 +539,17 @@ one hit per line with workspace · panel · thread · role · node id, so you ca
 jump straight to `samples --node <id>` — which shows the fan-out at ANY fork,
 including forks on non-selected branches that `--thread`/`--turn` (selected-path
 walkers) can never reach.
+
+`tinkpg node <id>` is the reverse index: give it a bare node id — the browser's
+Copy-node-id button hands out exactly that — and it finds the workspace/panel/
+thread holding it with no other context, then dumps the node's record, including
+what the transcript views drop: the authored `prefill` (with a reminder that the
+token stream only covers what came after it), finish_reason, parent/children,
+and which heavy blobs exist. `--logprobs` / `--meta` fetch and print those
+blobs (per-token logprobs + top-K alternatives / the request & response
+record), `--raw` the raw stream text, `--full` untruncated fields, `--json`
+for scripts. A unique id prefix works too; the same id copied across
+panels/workspaces prints one block per copy.
 
 `tinkpg send`/`continue` take `--logprobs` (print each sample's per-token
 logprob + top-5 alternatives — native tinker sampling only: `run_id` + `base_model`

@@ -615,6 +615,10 @@ def _fmt_token_logprobs(entries: list[dict]) -> str:
     docs/API_CONTRACT.md — `top` degrades to absent if the topk follow-up call failed."""
     lines = []
     for i, e in enumerate(entries):
+        if e.get("ghost") or e.get("lp") is None:
+            # An edit-carried stream's tail: text without a probability (token-edit.ts).
+            lines.append(f"    [{i}] {e.get('t', '')!r}  (ghost — no probability)")
+            continue
         line = f"    [{i}] {e.get('t', '')!r}  lp={e.get('lp', 0.0):.4f}"
         top = e.get("top")
         if top:
@@ -2561,6 +2565,125 @@ def cmd_grep(
     else:
         per_ws = " · ".join(f"{n}× {name}" for name, n in sorted(ws_counts.items(), key=lambda kv: -kv[1]))
         print(f"\n{hits} hit(s) in {len(ws_counts)} workspace(s): {per_ws}")
+
+
+@app.command("node")
+def cmd_node(
+    node_id: str = typer.Argument(..., help="node id or unique prefix (from the browser's Copy-node-id button, `tinkpg grep`, or `samples --json`)"),
+    conv: Optional[str] = typer.Option(None, "--ws", "--conv", help="restrict the search to one workspace (id-prefix or name substring)"),
+    logprobs: bool = typer.Option(False, "--logprobs", help="fetch + print the stored per-token logprob blob (index, token, lp, top-K alternatives)"),
+    meta: bool = typer.Option(False, "--meta", help="fetch + print the stored raw_meta blob (the request & response record)"),
+    raw: bool = typer.Option(False, "--raw", help="print the node's raw_text (tags preserved)"),
+    full: bool = typer.Option(False, "--full", help="full content / thinking / prefill instead of one-line previews"),
+    json_out: bool = typer.Option(False, "--json", help="the matches as one JSON object (blobs included when --logprobs/--meta; content never truncated) — for scripts"),
+) -> None:
+    """Locate a NODE ID anywhere in the saved workspaces and dump its record —
+    the reverse index `grep` (text → ids) can't give you. Takes the id with no
+    workspace/panel context needed (the browser's Copy-node-id button hands out
+    exactly that), finds every tree holding it, and prints where it lives
+    (workspace · panel · thread · sibling k/N) plus the fields the transcript
+    views drop: `prefill` (an authored/Continue prefix — the token stream only
+    covers what came AFTER it), finish_reason, parent/children, and which heavy
+    blobs exist. --logprobs / --meta fetch those blobs (storage v2 keeps them out
+    of the tree), --raw prints the raw stream text. Same id in several trees
+    (a branch copied across panels/workspaces) prints one block per copy."""
+    if conv is not None:
+        target = _resolve_workspace(conv, _get("/api/workspaces"))
+        convs = [_get(f"/api/workspaces/{target['id']}")]
+    else:
+        convs = _workspaces()
+    hits: list[tuple[dict, str, dict]] = []  # (workspace, panel, node)
+    for c in convs:
+        for pid, t in (c.get("trees") or {}).items():
+            for nid, nd in (t.get("nodes") or {}).items():
+                if nid == node_id or nid.startswith(node_id):
+                    hits.append((c, pid, nd))
+    exact = [h for h in hits if h[2].get("id") == node_id]
+    if exact:
+        hits = exact
+    if not hits:
+        _die(f"no node matching {node_id!r} in {len(convs)} workspace(s)"
+             + ("" if conv else " — `tinkpg ws` lists them; --ws to scope"))
+    if len({h[2].get("id") for h in hits}) > 1:
+        listing = "\n".join(
+            f"  - {nd.get('id')}  ·  {c.get('name')} ({(c.get('id') or '')[:8]}) · {pid} · {nd.get('role', '?')}"
+            for c, pid, nd in hits[:20]
+        )
+        _die(f"ambiguous node prefix {node_id!r} — {len(hits)} matches:\n{listing}")
+
+    want_blobs = logprobs or meta
+    json_matches: list[dict] = []
+    for k, (c, pid, nd) in enumerate(hits):
+        t = c["trees"][pid]
+        nid = nd.get("id", "")
+        blobs: dict = {}
+        if want_blobs:
+            blobs = (_post(f"/api/workspaces/{c.get('id')}/node-blobs", {"nodes": [nid]}) or {}).get(nid) or {}
+        sibs = _siblings(t, nd)
+        sib_k = sibs.index(nid) + 1 if nid in sibs else None
+        thread_k = _thread_of(t, nid)
+        lay = {p["id"]: p for p in (c.get("panels") or [])}.get(pid, {})
+        if json_out:
+            json_matches.append({
+                "workspace_id": c.get("id"), "workspace_name": c.get("name"),
+                "panel": pid, "run_id": lay.get("run_id"), "checkpoint": lay.get("checkpoint"),
+                "thread": thread_k, "sibling_index": sib_k, "n_siblings": len(sibs),
+                "node": nd,
+                **({"token_logprobs": blobs.get("token_logprobs")} if logprobs else {}),
+                **({"raw_meta": blobs.get("raw_meta")} if meta else {}),
+            })
+            continue
+
+        if k:
+            print()
+        bind = _short_run(lay.get("run_id")) + (f"@{lay['checkpoint']}" if lay.get("checkpoint") else "")
+        roots = t.get("rootChildren", [])
+        print(f"workspace: {c.get('name')}  ({(c.get('id') or '')[:8]})  ·  panel {pid}  ← {bind}")
+        loc = f"node {nid}  ·  {nd.get('role', '?')}  ·  thread {thread_k or '?'}/{len(roots)}"
+        if sib_k is not None and len(sibs) > 1:
+            loc += f"  ·  sibling {sib_k}/{len(sibs)}"
+        loc += f"  ·  parent {nd.get('parent') or '(root)'}  ·  {len(nd.get('children') or [])} child(ren)"
+        print(loc)
+        facts = []
+        if nd.get("finish_reason"):
+            facts.append(f"finish: {nd['finish_reason']}")
+        if nd.get("thinking") is not None:
+            facts.append(f"thinking: {'on' if nd['thinking'] else 'off'}")
+        have = [name for name, flag in (("token_logprobs", "has_token_logprobs"), ("raw_meta", "has_raw_meta"))
+                if nd.get(flag) or blobs.get(name)]
+        facts.append("blobs: " + (", ".join(have) or "none"))
+        print("  ".join(facts))
+
+        def field(label: str, text: Optional[str]) -> None:
+            if not text:
+                return
+            print(f"▸ {label} ({len(text)} chars):")
+            print(_indent(text, "   ") if full else _indent(_oneline(text, 300), "   "))
+
+        prefill = nd.get("prefill")
+        if prefill:
+            note = " — the token stream starts AFTER it" if "token_logprobs" in have else ""
+            field(f"prefill{note}", prefill)
+        field("thinking", nd.get("reasoning"))
+        field("content", nd.get("content"))
+        if raw:
+            field("raw_text", nd.get("raw_text"))
+        if logprobs:
+            tlp = blobs.get("token_logprobs")
+            if tlp:
+                print(f"▸ token_logprobs ({len(tlp)} tokens):")
+                print(_fmt_token_logprobs(tlp))
+            else:
+                print("▸ token_logprobs: none stored for this node")
+        if meta:
+            if blobs.get("raw_meta"):
+                print(f"▸ raw_meta ({len(blobs['raw_meta'])} chars):")
+                print(_indent(blobs["raw_meta"], "   "))
+            else:
+                print("▸ raw_meta: none stored for this node")
+    if json_out:
+        print(json.dumps({"matches": json_matches, "total": len(json_matches)},
+                         default=str, ensure_ascii=False))
 
 
 @app.command("refresh")
