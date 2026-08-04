@@ -17,6 +17,7 @@
   import Icon from '$lib/Icon.svelte';
   import OverflowRow from '$lib/OverflowRow.svelte';
   import TokenLogprobs from '$lib/TokenLogprobs.svelte';
+  import TokenHeatOverlay from '$lib/TokenHeatOverlay.svelte';
   import type { ViewMessage, SampleData } from '$lib/types';
 
   let {
@@ -99,10 +100,16 @@
   let hasTok = $derived(!!msg.token_logprobs?.length || !!msg.has_token_logprobs);
   let hasMeta = $derived(!!msg.raw_meta || !!msg.has_raw_meta);
   // Token-inspector view (sidebar "Token probs" toggle + this turn has data).
-  // It renders the RAW token stream — thinking tokens included — so the
+  // 'stream' renders the RAW token stream — thinking tokens included — so the
   // separate reasoning fold is hidden while it's active (no double-render).
-  let tokView = $derived(logprobView.enabled && !!tlp?.length);
-  const sampleTok = (s: SampleData) => logprobView.enabled && !!s.token_logprobs?.length;
+  // 'overlay' keeps the normal prose and paints the heat under it, so the fold
+  // and the markdown stay exactly as they are.
+  let tokView = $derived(logprobView.mode === 'stream' && !!tlp?.length);
+  let tokOverlay = $derived(logprobView.mode === 'overlay' && !!tlp?.length);
+  const sampleTok = (s: SampleData) =>
+    logprobView.mode === 'stream' && !!s.token_logprobs?.length;
+  const sampleOverlay = (s: SampleData) =>
+    logprobView.mode === 'overlay' && !!s.token_logprobs?.length;
   // Lazy blob fetches — fire only when a view NEEDS the payload: the token
   // inspector when the toggle is on, the request/response disclosure when the
   // raw view opens. ensure() dedupes (cached/in-flight ids are skipped).
@@ -322,6 +329,12 @@
       <TokenLogprobs tlp={sample.token_logprobs!} />
     {:else}
       <div class="sample-content">{@html prefillSplit ? renderPrefilled(sample.content, prefillSplit.answer, 'assistant') : renderContent(sample.content, 'assistant')}</div>
+    {/if}
+    {#if sampleOverlay(sample) && !rawSamples.has(idx)}
+      <!-- keyed on the sample's node so switching cards remounts from scratch -->
+      {#key msg.sampleNodeIds?.[idx] ?? idx}
+        <TokenHeatOverlay tlp={sample.token_logprobs!} selector=".sample-reasoning, .sample-content" />
+      {/key}
     {/if}
     <OverflowRow klass="sample-actions" resetKey={msg.sampleNodeIds?.[idx] ?? String(idx)}>
       {#if sample.raw_text}
@@ -658,6 +671,14 @@
         <TokenLogprobs tlp={tlp!} />
       {:else}
         <div class="message-content">{@html prefillSplit ? renderPrefilled(msg.content, prefillSplit.answer, msg.role) : renderContent(msg.content, msg.role)}</div>
+        {#if tokOverlay}
+          <!-- Keyed on the NODE so a ‹k/N› cycle remounts against the new prose.
+               Not on content: a streaming row has no nodeId yet, and keying on
+               its text would remount the overlay on every chunk. -->
+          {#key msg.nodeId ?? 'live'}
+            <TokenHeatOverlay tlp={tlp!} selector=".sample-reasoning, .message-content" />
+          {/key}
+        {/if}
       {/if}
       {#if msg.role !== 'system' && (msg.content || msg.raw_text || msg.reasoning)}
         <OverflowRow klass="hover-actions" resetKey={msg.nodeId ?? msg.content}>

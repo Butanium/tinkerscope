@@ -154,7 +154,7 @@ def main() -> int:
 
             # ── 5. token probs on an OLD turn lazy-fetch + render ─────
             reqs.clear()
-            page.locator('label:has-text("Token probs") .seg-btn:has-text("On")').click()
+            page.locator('label:has-text("Token probs") .seg-btn:has-text("Tokens")').click()
             page.wait_for_selector(".tok-stream .tok", timeout=15000)
             blob_posts = [r for r in reqs if r[0] == "POST" and "/node-blobs" in r[1]]
             checks.append((f"token view triggered blob fetch ({len(blob_posts)})", len(blob_posts) >= 1))

@@ -101,6 +101,23 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
 
 ## Next
 
+- [x] **Token probs on the PROSE, not instead of it — SHIPPED 2026-08-03.**
+  The sidebar toggle is now Off / **Over** / **Tokens**. Over keeps the markdown
+  render (and the thinking fold, and the highlight colors) and paints the
+  per-token heat underneath it; Tokens is the old raw-stream dump, kept as the
+  exact-boundaries fallback. Alignment is `lib/token-align` (see CLAUDE.md);
+  real turns measure 97–100% of the rendered text covered.
+  - Known gap: **a KaTeX region is never painted.** Its subtree is excluded from
+    collection on purpose (the MathML annotation duplicates the formula text and
+    would desync everything after it), so the formula's tokens have nowhere to
+    land. The aligner resyncs immediately after, so the cost is the formula
+    itself. Fixing it means aligning against the LaTeX SOURCE inside
+    `.katex-mathml annotation` and painting the rendered `.katex-html` as one
+    block — worth it only if someone actually reads logprobs on math.
+  - Not done: a per-turn "why is this unpainted" affordance beyond the
+    whole-turn note. If the alignment turns out to fail on shapes we don't
+    predict, that's what to build next.
+
 - [x] **Chart: think/no-think split, a remembered view, and an isolated inspector
   — SHIPPED 2026-07-29** (`16bfedc`, `e66c9e0`; all three asked for by Clément in
   one session).

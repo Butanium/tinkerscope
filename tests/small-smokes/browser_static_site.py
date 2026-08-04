@@ -16,7 +16,7 @@ What it asserts:
   2. Read-only gating: composer, sampling params, model picker, add-panel, +model
      links, workspace new/rename, and the row toolbar's regenerate/edit/delete are
      all ABSENT, while Raw / copy-node-id / the read-only badge are present.
-  3. The lazy heavy-blob path resolves: Token probs on ⇒ tinted tokens, which can
+  3. The lazy heavy-blob path resolves: Token probs → Tokens ⇒ tinted tokens, which can
      only come from fetching `workspaces/<id>.blobs/<node>.json`.
   4. The analysis surface survives: chart + help modals open.
 
@@ -253,7 +253,7 @@ def main() -> int:
 
             # 3. heavy blobs via the lazy fetch
             tok_on = page.locator(".sidebar-section", has_text="Token probs").locator(
-                ".seg-btn", has_text="On"
+                ".seg-btn", has_text="Tokens"
             )
             check(tok_on.count() > 0, "Token probs toggle present")
             if tok_on.count():

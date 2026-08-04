@@ -2007,9 +2007,10 @@
       <div class="sidebar-section">
         <label class="sidebar-label thinking-toggle-row">
           <span>Token probs</span>
-          <span class="seg-toggle" data-tooltip="Show raw tokens tinted by surprisal; hover one for its top-5" use:tip>
-            <button class="seg-btn" class:active={!logprobView.enabled} onclick={() => logprobView.set(false)}>Off</button>
-            <button class="seg-btn" class:active={logprobView.enabled} onclick={() => logprobView.set(true)}>On</button>
+          <span class="seg-toggle" data-tooltip="Tint tokens by surprisal; hover one for its top-5" use:tip>
+            <button class="seg-btn" class:active={logprobView.mode === 'off'} onclick={() => logprobView.setMode('off')}>Off</button>
+            <button class="seg-btn" class:active={logprobView.mode === 'overlay'} onclick={() => logprobView.setMode('overlay')}>Over</button>
+            <button class="seg-btn" class:active={logprobView.mode === 'stream'} onclick={() => logprobView.setMode('stream')}>Tokens</button>
           </span>
         </label>
 

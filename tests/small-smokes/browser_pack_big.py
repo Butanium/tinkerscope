@@ -195,7 +195,7 @@ def main() -> int:
                 # storage key — a renamed key would silently stop exercising the view.
                 # Same selector browser_token_logprobs.py uses — one place to fix
                 # if the sidebar row is ever restyled.
-                page.click('.thinking-toggle-row:has-text("Token probs") .seg-btn:has-text("On")')
+                page.click('.thinking-toggle-row:has-text("Token probs") .seg-btn:has-text("Tokens")')
                 page.wait_for_timeout(1500)
                 page.reload(wait_until="load")
                 page.wait_for_selector(".ws-picker[data-ws-id='pack-big-smoke-heavy-ws']", timeout=60000)

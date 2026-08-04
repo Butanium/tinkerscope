@@ -162,7 +162,13 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
   - `lib/logprobs.svelte.ts` → `logprobView` + `logprobHighlight` — the sidebar
     **"Token probs"** display toggle (localStorage-persisted). Display-only:
     capture is the server default for native tinker sampling, so flipping it on
-    works retroactively on stored turns. `logprobHighlight` holds the ≤2
+    works retroactively on stored turns. THREE states, not two —
+    `mode: 'off' | 'overlay' | 'stream'` (`enabled` = `mode !== 'off'` for the
+    consumers that only care whether some token view is up): `overlay` keeps the
+    markdown and paints the heat under it (`TokenHeatOverlay`), `stream` swaps
+    the body for the raw token dump (`TokenLogprobs`). The legacy `'1'` value
+    migrates to `overlay` — it meant "show me the tokens", which is the same
+    information without giving up the prose. `logprobHighlight` holds the ≤2
     highlight-rule ids chosen for the **"Color by match"** picker (also
     localStorage; newest-2-win): non-empty ⇒ TokenLogprobs tints tokens by
     `highlightMatchProb` instead of surprisal + colors popover alternatives by
@@ -280,10 +286,27 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     highlight rule — a lower bound, top-5 only) + `matchTintBackground` (1 rule →
     flat tint; 2 → a top/bottom split band; alpha = √prob × 0.42 — a gamma-0.5
     ramp so a 1% match still reads at 10% opacity, peaking at the standard 0.42
-    highlight opacity, prob 0 = transparent).
+    highlight opacity, prob 0 = transparent). `tokenTintColors` is the SINGLE
+    answer to "what color is this token" — the ≤2 bands as flat rgba, match-tint
+    when a rule is picked else the surprisal heat — so the CSS view and the
+    canvas overlay can't drift; `matchTintBackground` is the CSS-gradient
+    packaging of the same bands.
     **Has `token-logprob.test.ts`**; smokes `tests/small-smokes/
     browser_token_logprobs.py` (seeded, deterministic) + `…_live.py` (real
     tinker sampling end-to-end).
+  - `lib/token-align.ts` — `alignTokens` / `alignChars` / `visibleCoverage`: line
+    a RAW token stream up with the text the markdown renderer actually put on
+    screen, so the heat can be an OVERLAY on the prose instead of replacing it.
+    A two-pointer walk with a bounded resync search; the workhorse is "skip the
+    raw char", because the pipeline DROPS (`**`, `#`, backticks, `<think>` tags,
+    list markers, link syntax) and essentially never inserts. Failure is local
+    and self-healing: an unplaceable token gets `null` and isn't painted, the
+    next matching prose resyncs. Trust is `visibleCoverage` — the share of the
+    RENDERED text some token claims, NOT the share of tokens placed: a
+    syntax-heavy turn scores badly on the latter while every word on screen is
+    correctly painted (real turns measure 97–100%). **Has `token-align.test.ts`**
+    (one case per markdown construct + the ordering invariants); browser smoke
+    `tests/small-smokes/browser_token_overlay.py`.
   - `lib/kbnav.ts` — keyboard row-navigation helpers: nav-key set, clamped
     focus-index stepping, the typing-target/modal-open guards. Consumed by
     +page's *Keyboard row navigation* section (click a row → focus ring; ↑/↓
@@ -455,13 +478,34 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     `TokenLogprobs` instead of markdown (turns without data wear a "no token
     data" pill). Toolbar smoke (seeded, token-free):
     `tests/small-smokes/browser_row_toolbar.py`.
-  - `lib/TokenLogprobs.svelte` — the token inspector body: the raw generated
+  - `lib/TokenLogprobs.svelte` — token probs, `stream` mode: the raw generated
     token stream (thinking tags and all — exact token boundaries beat markdown
-    here), each token tinted by surprisal; hover → fixed-position popover with
-    the token's probability + top-5 alternative bars. When ≥1 rule is picked in
-    the sidebar's "Color by match" (`logprobHighlight`), the surprisal tint is
-    replaced by a per-token match-prob band (1–2 rules; `matchTintBackground`)
-    and each popover alternative is tinted by which rule it matches.
+    here), each token tinted by surprisal. When ≥1 rule is picked in the
+    sidebar's "Color by match" (`logprobHighlight`), the surprisal tint is
+    replaced by a per-token match-prob band (1–2 rules; `matchTintBackground`).
+  - `lib/TokenHeatOverlay.svelte` — token probs, `overlay` mode (the DEFAULT
+    on-state): the same tints painted UNDER the normal markdown, so the prose,
+    the thinking fold and the highlight rules all stay as they are. Aligns the
+    stream to the DOM text via `lib/token-align`, turns each token's span into a
+    `Range`, and fills its client rects on a canvas. Two load-bearing choices,
+    both learned against real turns:
+    **one canvas PER prose container** (`.sample-reasoning` / `.message-content`
+    / `.sample-content`), inserted as that container's first child at
+    `z-index: -1` — a row-level canvas painted *behind* `.sample-reasoning`'s
+    OPAQUE background, so the whole thinking block came out flat; negative-z
+    paints after the container's own background and before its text, which is
+    the highlighter order. It also means the tint scrolls and clips with the
+    reasoning fold (`overflow-y: auto`) for free.
+    And **canvas, not spans** — a long turn is ~1000 tokens and this remeasures
+    on every resize (ResizeObserver on the row) and on every `{@html}` swap.
+    ⚠️ The canvas is created imperatively, so its CSS lives in global `chat.css`,
+    not in the component — and an `{@html}` re-render wipes it, which is why
+    `canvasFor` re-creates rather than caches. Hover hit-tests the cached rects
+    (no caret API) and opens the shared `TokenPopover`. Coverage below 50% ⇒
+    paint nothing and say so. Smoke: `browser_token_overlay.py`.
+  - `lib/TokenPopover.svelte` — the token hover card (probability + top-K
+    alternative bars, alternatives tinted by which selected rule they match),
+    shared by both token views so "what a token tells you" has one definition.
   - `lib/Typeahead.svelte` — the type-to-filter combobox (used by the OpenRouter
     + Tinker picker modals, and as the panel body of `PickerDropdown`). Item
     shape: `lib/picker.ts`'s `PickerItem` (`sub` = the secondary line, defaulting

@@ -318,9 +318,20 @@ codex plugin add tinkerscope@tinkerscope</pre>
     <section class="help-sec">
       <h3>Token probabilities</h3>
       <p>
-        Sidebar → <b>Token probs</b> renders assistant replies as their raw token stream, each token tinted by
-        surprisal, with a hover popover showing its probability and the top-5 alternatives. It's display-only
-        and retroactive — turns sampled earlier already carry the data.
+        Sidebar → <b>Token probs</b> tints each token of an assistant reply by surprisal, with a hover popover
+        showing its probability and the top-5 alternatives. It's display-only and retroactive — turns sampled
+        earlier already carry the data. Two ways to look at it:
+      </p>
+      <p class="help-note">
+        <b>Over</b> keeps the reply exactly as it reads normally — markdown, thinking fold and all — and paints
+        the heat underneath the words, like a highlighter. This is the one you want while actually reading.
+        Occasionally a token can't be matched to anything on screen (a formula, an exotic construct); it's left
+        unpainted rather than guessed at, and if a whole reply can't be lined up it says so instead of tinting.
+      </p>
+      <p class="help-note">
+        <b>Tokens</b> replaces the reply with the raw token stream, thinking tags and all. Uglier, but the token
+        boundaries are exact and nothing is ever dropped — the fallback when you need to see the tokenization
+        itself.
       </p>
       <p class="help-note">
         Under it, <b>Color by match</b> flips the tint to "how much probability mass went to text matching

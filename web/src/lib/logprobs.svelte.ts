@@ -4,26 +4,46 @@
 // default; see docs/API_CONTRACT.md `logprobs`), so flipping this on works
 // retroactively on any turn that already carries token_logprobs. Persisted in
 // localStorage — it's a browser viewing preference, not workspace state.
+//
+// Two ways to look at the same numbers:
+//   'overlay' — keep the normal markdown prose and paint the heat UNDER it
+//               (TokenHeatOverlay, aligned via lib/token-align). Reads like the
+//               rest of the app; a token the aligner can't place isn't painted.
+//   'stream'  — replace the body with the raw token stream (TokenLogprobs).
+//               Exact token boundaries, thinking tags and all; the fallback
+//               when the alignment can't follow the render.
+// `enabled` folds the two together for the ~10 places that only care whether
+// SOME token view is on.
 
 import { DEFAULT_MATCH_SHARPNESS } from './token-logprob.ts';
 
 const KEY = 'tinkerscope:token-probs';
 
+export type TokenViewMode = 'off' | 'overlay' | 'stream';
+
 class LogprobViewStore {
-  enabled = $state(false);
+  mode = $state<TokenViewMode>('off');
 
   constructor() {
     try {
-      this.enabled = localStorage.getItem(KEY) === '1';
+      const raw = localStorage.getItem(KEY);
+      // '1'/'0' predate the overlay. An installed '1' meant "show me the
+      // tokens" — honour that as the overlay, which is the same information
+      // without giving up the prose.
+      this.mode = raw === '1' ? 'overlay' : raw === 'overlay' || raw === 'stream' ? raw : 'off';
     } catch {
       /* SSR / storage disabled — default off */
     }
   }
 
-  set(on: boolean): void {
-    this.enabled = on;
+  get enabled(): boolean {
+    return this.mode !== 'off';
+  }
+
+  setMode(m: TokenViewMode): void {
+    this.mode = m;
     try {
-      localStorage.setItem(KEY, on ? '1' : '0');
+      localStorage.setItem(KEY, m);
     } catch {
       /* ignore */
     }

@@ -4,21 +4,15 @@
   // are exact), each token tinted by surprisal, hover → a popover with the
   // token's probability + the top-K alternatives as mini bars.
   //
-  // The popover is position:FIXED for the same reason as ChatMessage's
-  // send-to-menu: it lives inside the panel's scroll container and absolute
-  // positioning would clip at the column edge.
+  // The prose-preserving alternative is TokenHeatOverlay (sidebar Token probs →
+  // Over), which paints the same tints under the normal markdown. This view is
+  // what you fall back to when exact boundaries matter, or when the alignment
+  // the overlay needs can't follow the render.
   import type { TokenLogprob } from '$lib/tree';
-  import {
-    prob,
-    pctLabel,
-    surprisalAlpha,
-    displayToken,
-    highlightMatchProb,
-    matchTintBackground
-  } from '$lib/token-logprob';
-  import { ruleMatches } from '$lib/highlight-match';
+  import { surprisalAlpha, highlightMatchProb, matchTintBackground } from '$lib/token-logprob';
   import { logprobHighlight } from '$lib/logprobs.svelte';
   import { highlightStore } from '$lib/highlights.svelte';
+  import TokenPopover from '$lib/TokenPopover.svelte';
 
   let { tlp }: { tlp: TokenLogprob[] } = $props();
 
@@ -42,13 +36,6 @@
         )
       : null
   );
-
-  /** Split-band background for one popover alternative: tinted by which selected
-   *  rule(s) its text matches (binary → full 0.42 tint per matched band). */
-  function altBg(text: string): string {
-    if (!rules.length) return '';
-    return matchTintBackground(rules.filter((r) => ruleMatches(r, text)).map((r) => ({ color: r.color, prob: 1 })));
-  }
 
   let hover = $state<number | null>(null);
   let pos = $state<{ x: number; y: number } | null>(null);
@@ -82,27 +69,7 @@
 </div>
 
 {#if cur && pos}
-  <div class="tok-pop" style="left: {pos.x}px; top: {pos.y}px">
-    <div class="tok-pop-head">
-      <code>{displayToken(cur.t)}</code>
-      <span class="tok-pop-p">{pctLabel(cur.lp)}</span>
-    </div>
-    {#if cur.top?.length}
-      <div class="tok-alts">
-        {#each cur.top as alt (alt[1])}
-          <div class="tok-alt" class:tok-alt-sampled={alt[1] === cur.tid} style={altBg(alt[0]) ? `background: ${altBg(alt[0])}` : ''}>
-            <code class="tok-alt-tok">{displayToken(alt[0])}</code>
-            <div class="tok-alt-track">
-              <div class="tok-alt-bar" style="width: {Math.max(1.5, (prob(alt[2]) ?? 0) * 100)}%"></div>
-            </div>
-            <span class="tok-alt-p">{pctLabel(alt[2])}</span>
-          </div>
-        {/each}
-      </div>
-    {:else}
-      <div class="tok-alt-none">no alternatives captured for this token</div>
-    {/if}
-  </div>
+  <TokenPopover entry={cur} x={pos.x} y={pos.y} {rules} />
 {/if}
 
 <style>
@@ -122,84 +89,5 @@
   }
   .tok-hover {
     outline: 1px solid var(--color-accent);
-  }
-  .tok-pop {
-    position: fixed;
-    z-index: 95;
-    width: 240px;
-    padding: 7px 9px;
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius);
-    box-shadow: 0 4px 14px #00000022;
-    pointer-events: none; /* never steals the hover from the token under it */
-    font-size: 0.72rem;
-  }
-  .tok-pop-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-2);
-    margin-bottom: 5px;
-  }
-  .tok-pop-head code {
-    font-weight: 700;
-    color: var(--color-text);
-    overflow-wrap: anywhere;
-  }
-  .tok-pop-p {
-    color: var(--color-text-secondary);
-    font-variant-numeric: tabular-nums;
-    flex-shrink: 0;
-  }
-  .tok-alts {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .tok-alt {
-    display: grid;
-    grid-template-columns: minmax(40px, auto) 1fr 42px;
-    align-items: center;
-    gap: 6px;
-    /* padding + offsetting margin so a match tint gets rounded breathing room
-       without nudging the row layout */
-    padding: 1px 3px;
-    margin: 0 -3px;
-    border-radius: 3px;
-  }
-  .tok-alt-tok {
-    color: var(--color-text-secondary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .tok-alt-sampled .tok-alt-tok {
-    color: var(--color-accent);
-    font-weight: 700;
-  }
-  .tok-alt-track {
-    height: 7px;
-    border-radius: 3px;
-    background: var(--color-border-light, var(--color-border));
-    overflow: hidden;
-  }
-  .tok-alt-bar {
-    height: 100%;
-    border-radius: 3px;
-    background: var(--color-accent);
-    opacity: 0.75;
-  }
-  .tok-alt-sampled .tok-alt-bar {
-    opacity: 1;
-  }
-  .tok-alt-p {
-    text-align: right;
-    color: var(--color-text-muted);
-    font-variant-numeric: tabular-nums;
-  }
-  .tok-alt-none {
-    color: var(--color-text-muted);
-    font-style: italic;
   }
 </style>

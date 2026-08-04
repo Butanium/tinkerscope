@@ -83,6 +83,8 @@ DEFAULT=(
     browser_label_diff
     browser_fuzzy_search
     browser_help_modal
+    browser_token_logprobs
+    browser_token_overlay
     browser_pack_link
     # Own their whole world (build a state dir, export a site, serve it) and
     # ignore the base-url arg — they still belong here so they run under the lock.
@@ -97,6 +99,7 @@ declare -A STALE=(
     [browser_branching]="Playwright strict-mode violation (2 edit textareas); fails on pre-fix commits too"
     [browser_continue_scope]="its .prefill-scope selector no longer exists"
     [browser_readme_shots]="pre-ModelDropdown sidebar + q_nk fixtures"
+    [browser_save_lightening]="composer textarea never appears; fails identically at HEAD (baselined 2026-08-03)"
 )
 
 SMOKES=("${PICK[@]:-${DEFAULT[@]}}")

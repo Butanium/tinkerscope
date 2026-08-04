@@ -190,7 +190,7 @@ def main() -> None:
             # Token view: flip on, cycle the assistant siblings back to the SAMPLED
             # branch (the hand-edits carry no token data), assert spans render from
             # the seeded cache with zero /node-blobs refetch.
-            page.click('.thinking-toggle-row:has-text("Token probs") .seg-btn:has-text("On")')
+            page.click('.thinking-toggle-row:has-text("Token probs") .seg-btn:has-text("Tokens")')
             for _ in range(4):
                 if page.locator(".tok").count() > 0:
                     break

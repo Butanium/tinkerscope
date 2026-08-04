@@ -62,7 +62,7 @@ def main() -> None:
 
             page.goto(f"{BASE}/?w={conv_id}", wait_until="load", timeout=20000)
             page.wait_for_selector(".model-slot-select", timeout=15000)
-            page.click('.thinking-toggle-row:has-text("Token probs") .seg-btn:has-text("On")')
+            page.click('.thinking-toggle-row:has-text("Token probs") .seg-btn:has-text("Tokens")')
 
             # the COMPOSER textarea, not the sidebar's system-prompt one
             composer = 'textarea[placeholder^="Type a message"]'

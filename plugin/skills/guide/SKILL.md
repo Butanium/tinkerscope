@@ -106,11 +106,18 @@ population as a response bar and a thinking bar over the SAME samples (does the
 behavior show up in the CoT but not the answer?). Both at once gives up to four
 bars per model.
 
-**"Why did it pick that word?"** Turn on **Token probs** in the sidebar. Assistant
-replies render as their raw token stream, each token tinted by surprisal; hover a
-token for its probability and the top-5 alternatives it passed over. It's
-display-only and retroactive — turns you sampled before flipping it on already
-have the data. If you have highlight rules, flip **Color by match** (the Off/On
+**"Why did it pick that word?"** Turn on **Token probs** in the sidebar. Each
+token of an assistant reply gets tinted by surprisal; hover one for its
+probability and the top-5 alternatives it passed over. It's display-only and
+retroactive — turns you sampled before flipping it on already have the data.
+The toggle has two on-states: **Over** paints the heat *underneath* the normal
+reply (markdown, thinking fold and all) like a highlighter, which is what you
+want while reading; **Tokens** replaces the reply with the raw token stream,
+thinking tags and all, which is uglier but shows exact token boundaries and never
+drops anything. In Over mode a token the renderer swallowed (a formula, an exotic
+construct) is left unpainted rather than guessed at, and a reply that can't be
+lined up at all says so instead of tinting — switch to Tokens for those.
+If you have highlight rules, flip **Color by match** (the Off/On
 toggle right under it) On and pick up to two: each token is re-tinted by how much
 probability mass went to alternatives matching that rule, which answers "how
 close was it to saying the other thing?" without resampling. Two rules split each

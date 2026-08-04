@@ -5,7 +5,7 @@ the native tinker path emits — see docs/API_CONTRACT.md), then drives both
 display surfaces:
 
   token-view toggle:
-  - sidebar "Token probs" On → the active assistant turn renders as raw token
+  - sidebar "Token probs" Tokens → the active assistant turn renders as raw token
     spans (.tok), surprising tokens visibly tinted
   - hovering a token opens the popover with its probability + the top-K
     alternatives as bars (the sampled alternative highlighted)
@@ -143,7 +143,7 @@ def main() -> None:
 
             # ── token-view toggle ────────────────────────────────────────
             checks.append(("no .tok spans before toggle", page.query_selector(".tok") is None))
-            page.click('.thinking-toggle-row:has-text("Token probs") .seg-btn:has-text("On")')
+            page.click('.thinking-toggle-row:has-text("Token probs") .seg-btn:has-text("Tokens")')
             page.wait_for_selector(".tok", timeout=5000)
             toks = page.query_selector_all(".tok-stream >> nth=0 >> .tok")
             checks.append(("turn 1 renders 2 token spans", len(toks) == 2))

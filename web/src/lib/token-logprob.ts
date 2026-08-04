@@ -99,11 +99,39 @@ export function matchTintBackground(
   bands: { color: string; prob: number }[],
   sharpness = DEFAULT_MATCH_SHARPNESS
 ): string {
-  if (bands.length === 0) return '';
-  const seg = (b: { color: string; prob: number }) => tint(b.color, matchTintAlpha(b.prob, sharpness));
-  if (bands.length === 1) return seg(bands[0]);
-  const [a, b] = bands;
-  return `linear-gradient(to bottom, ${seg(a)} 0 50%, ${seg(b)} 50% 100%)`;
+  const segs = matchTintColors(bands, sharpness);
+  if (segs.length === 0) return '';
+  if (segs.length === 1) return segs[0];
+  return `linear-gradient(to bottom, ${segs[0]} 0 50%, ${segs[1]} 50% 100%)`;
+}
+
+/** The same bands as flat rgba colors, top-to-bottom — for painters that can't
+ *  take a CSS gradient string (the canvas overlay). */
+export function matchTintColors(
+  bands: { color: string; prob: number }[],
+  sharpness = DEFAULT_MATCH_SHARPNESS
+): string[] {
+  return bands.map((b) => tint(b.color, matchTintAlpha(b.prob, sharpness)));
+}
+
+/** The surprisal heat as an rgba color, or '' when the token is unremarkable
+ *  enough to stay untinted. The single amber the module docstring describes. */
+export function surprisalColor(lp: number | null | undefined): string {
+  const a = surprisalAlpha(lp);
+  return a > 0 ? `rgba(217, 119, 6, ${a})` : '';
+}
+
+/** Every fill one token wears, top-to-bottom: the match bands when any rule is
+ *  selected, else the surprisal heat. `[]` = draw nothing. The single place the
+ *  two token views agree on what color a token is. */
+export function tokenTintColors(
+  lp: number | null | undefined,
+  matchBands: { color: string; prob: number }[],
+  sharpness = DEFAULT_MATCH_SHARPNESS
+): string[] {
+  if (matchBands.length) return matchTintColors(matchBands, sharpness);
+  const c = surprisalColor(lp);
+  return c ? [c] : [];
 }
 
 /** One bar-segment's worth of the first-token distribution. */

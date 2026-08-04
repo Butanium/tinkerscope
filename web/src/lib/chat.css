@@ -10,7 +10,7 @@
  * edit/regenerate/delete/use-this action styles at the bottom. */
 
 /* ── Message bubbles ───────────────────────────────────────────────── */
-.message { padding: var(--space-4); border-radius: var(--radius-lg); border: 1px solid var(--color-border); min-width: 0; }
+.message { padding: var(--space-4); border-radius: var(--radius-lg); border: 1px solid var(--color-border); min-width: 0; position: relative; }
 .message-role { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; color: var(--color-text-muted); margin-bottom: var(--space-2); }
 .message-content { font-size: 0.88rem; line-height: 1.7; overflow-wrap: break-word; word-break: break-word; }
 .message-content h1, .message-content h2, .message-content h3, .message-content h4 { margin-top: 0.8em; margin-bottom: 0.4em; }
@@ -46,7 +46,7 @@
 
 /* ── Sample cards ─────────────────────────────────────────────────── */
 .samples-container { display: flex; flex-direction: column; gap: var(--space-2); }
-.sample-card { padding: var(--space-2) var(--space-3); background: var(--color-surface-alt); border: 1px solid var(--color-border-light); border-radius: var(--radius); }
+.sample-card { padding: var(--space-2) var(--space-3); background: var(--color-surface-alt); border: 1px solid var(--color-border-light); border-radius: var(--radius); position: relative; }
 .sample-header { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); margin-bottom: var(--space-1); }
 .sample-content { font-size: 0.88rem; line-height: 1.7; overflow-wrap: break-word; word-break: break-word; }
 .sample-content h1, .sample-content h2, .sample-content h3, .sample-content h4 { margin-top: 0.8em; margin-bottom: 0.4em; }
@@ -198,3 +198,22 @@ mark.hl-mark.hl-join-r { padding-right: 0; border-top-right-radius: 0; border-bo
 .btn-use { margin-right: auto; display: inline-flex; align-items: center; padding: 3px 6px; background: var(--color-accent-bg); border: 1px solid var(--color-accent); border-radius: var(--radius); color: var(--color-accent); transition: all 0.15s; }
 .btn-use:hover:not(:disabled) { background: var(--color-accent); color: white; }
 .btn-use:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Token-probability overlay (TokenHeatOverlay) ──────────────────────
+   A heat canvas is inserted into each prose container as its first child. The
+   two rules below are what make it read as a highlighter rather than a wash:
+
+   - the container gets `position: relative; z-index: 1`, which makes it a
+     stacking context (so the negative-z canvas stays inside it) and its own
+     positioning parent (so the canvas tracks it, scrolling included);
+   - the canvas gets `z-index: -1`, which in CSS paint order lands AFTER the
+     container's own background and BEFORE its text. `.sample-reasoning` has an
+     opaque background, so anything painted outside it is simply invisible.
+
+   Applied unconditionally: `position: relative` costs nothing on a block that
+   contains no positioned children, and a mode-conditional class here would be
+   one more thing to keep in sync with the store. */
+.message-content, .sample-content, .sample-reasoning { position: relative; z-index: 1; }
+/* Inserted imperatively, so it must be styled globally — a Svelte-scoped rule
+   would never reach it. */
+.tok-heat-canvas { position: absolute; left: 0; top: 0; z-index: -1; pointer-events: none; }
