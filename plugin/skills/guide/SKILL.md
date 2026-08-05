@@ -32,20 +32,25 @@ someone through the screen, or to answer a specific "what does this do".
 │  Sampling  ▾ │  │ ⑂ branch from start · system · prefill   │  │
 │   params     │  │ [ type a message…                      ] │  │
 │              │  └──────────────────────────────────────────┘  │
-│  Sample view │                                                │
-│  Thinking …  │                                                │
-│  Token probs │                                                │
+│  View      ▾ │                                                │
+│   Layout     │                                                │
+│   Thinking … │                                                │
+│   Token probs│                                                │
 │  Highlights  │                                                │
 └──────────────┴────────────────────────────────────────────────┘
 ```
 
-**Models** and **Sampling params** are foldable — click the heading to collapse
-the section once it's set up and reclaim the vertical space (the fold is
-remembered). *Sampling params* holds temperature, max tokens, samples, the
-thinking Off/On/Both toggle, and an **Advanced…** popup for top_p and the
-OpenRouter-only knobs (top_k, presence / repetition penalty). Everything below
-it — sample view, thinking-block folds, token probs, highlights — is about how
-you *look* at what came back, not how it was sampled.
+The sidebar splits in two. **Sampling params** is what the next send draws:
+temperature, max tokens, samples, the thinking Off/On/Both toggle, and an
+**Advanced…** popup for top_p and the OpenRouter-only knobs (top_k, presence /
+repetition penalty). **View** is how replies that already exist are shown:
+*Layout* (all samples stacked vs one at a time), whether thinking blocks start
+folded, and token probabilities. Changing anything under View re-renders what's
+on screen; it never re-samples.
+
+**Models**, **Sampling params** and **View** all fold — click the heading to
+collapse a section once it's set up and reclaim the vertical space. The folds
+are remembered per browser.
 
 The icon row at the top of the sidebar, left to right: **theme**, **distribution
 chart**, **pins slideshow**, **peek at training data**, **rescan runs**,

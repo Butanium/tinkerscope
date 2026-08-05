@@ -140,6 +140,13 @@
     localStorage.setItem('playground-sampling-collapsed', samplingCollapsed ? '1' : '0');
   }
 
+  // And for View — the display prefs (layout / thinking folds / token probs).
+  let viewCollapsed = $state(false);
+  function toggleViewCollapsed() {
+    viewCollapsed = !viewCollapsed;
+    localStorage.setItem('playground-view-collapsed', viewCollapsed ? '1' : '0');
+  }
+
   // Whether shift is currently held — drives the alternate-action affordance on
   // the regenerate/edit buttons (icon + tooltip swap). Wired in onMount.
   let shiftDown = $state(false);
@@ -1561,6 +1568,7 @@
     if (sv === 'all' || sv === 'cycle') sampleView = sv;
     modelsCollapsed = localStorage.getItem('playground-models-collapsed') === '1';
     samplingCollapsed = localStorage.getItem('playground-sampling-collapsed') === '1';
+    viewCollapsed = localStorage.getItem('playground-view-collapsed') === '1';
     try {
       const h = localStorage.getItem(HISTORY_KEY);
       if (h) promptHistory = JSON.parse(h);
@@ -2044,73 +2052,90 @@
       </div>
       {/if}
 
+      <!-- View: how replies that ALREADY EXIST render. Unlike the sampling params
+           above, none of these is on the wire — they're localStorage prefs — and
+           they all stay in read-only, where looking is the only thing left to do. -->
       <div class="sidebar-section">
-        <label class="sidebar-label thinking-toggle-row">
-          <span>Sample view</span>
-          <span class="seg-toggle" data-tooltip="All = every sample stacked; Cycle = one at a time with ‹/›" use:tip>
-            <button class="seg-btn" class:active={sampleView === 'all'} onclick={() => setSampleView('all')}>All</button>
-            <button class="seg-btn" class:active={sampleView === 'cycle'} onclick={() => setSampleView('cycle')}>Cycle</button>
-          </span>
-        </label>
-      </div>
-
-      <!-- How thinking/reasoning folds START. A viewing preference, so it shows in
-           read-only too: a published CoT page is exactly where a reader wants every
-           think block already open. Flipping it re-applies to folds nobody clicked. -->
-      <div class="sidebar-section">
-        <label class="sidebar-label thinking-toggle-row">
-          <span>Thinking blocks</span>
-          <span class="seg-toggle" data-testid="thinking-fold-toggle"
-            data-tooltip="Whether think/reasoning blocks start folded or already open" use:tip>
-            <button class="seg-btn" class:active={!thinkingView.open} onclick={() => thinkingView.set(false)}>Folded</button>
-            <button class="seg-btn" class:active={thinkingView.open} onclick={() => thinkingView.set(true)}>Open</button>
-          </span>
-        </label>
-      </div>
-
-      <div class="sidebar-section">
-        <label class="sidebar-label thinking-toggle-row">
-          <span>Token probs</span>
-          <span class="seg-toggle" data-tooltip="Tint tokens by surprisal; hover one for its top-5" use:tip>
-            <button class="seg-btn" class:active={logprobView.mode === 'off'} onclick={() => logprobView.setMode('off')}>Off</button>
-            <button class="seg-btn" class:active={logprobView.mode === 'overlay'} onclick={() => logprobView.setMode('overlay')}>Over</button>
-            <button class="seg-btn" class:active={logprobView.mode === 'stream'} onclick={() => logprobView.setMode('stream')}>Tokens</button>
-          </span>
-        </label>
-
-        {#if logprobView.enabled && colorRules().some((r) => r.enabled)}
-          <div class="lp-hl">
-            <label class="sidebar-label thinking-toggle-row">
-              <span>Color by match</span>
-              <span class="seg-toggle" data-tooltip="Tint tokens by P(matching text) instead of surprisal — up to 2 rules" use:tip>
-                <button class="seg-btn" class:active={!logprobHighlight.enabled} onclick={() => setMatchColor(false)}>Off</button>
-                <button class="seg-btn" class:active={logprobHighlight.enabled} onclick={() => setMatchColor(true)}>On</button>
-              </span>
-            </label>
-            {#if logprobHighlight.enabled}
-              <div class="lp-hl-chips">
-                {#each colorRules().filter((r) => r.enabled) as r (r.id)}
-                  <button
-                    class="lp-hl-chip"
-                    class:sel={logprobHighlight.has(r.id)}
-                    onclick={() => logprobHighlight.toggle(r.id)}
-                    data-tooltip={r.name}
-                    use:tip>
-                    <span class="lp-hl-dot" style="background: {r.color}"></span>
-                    <span class="lp-hl-name">{r.name}</span>
-                  </button>
-                {/each}
-              </div>
-              <label class="sidebar-label thinking-toggle-row lp-hl-ramp"
-                data-tooltip="0 = opacity tracks match mass, 1 = any match at full tint" use:tip>
-                <span>Contrast</span>
-                <span class="lp-hl-ramp-val">{logprobHighlight.sharpness.toFixed(2)}</span>
+        <button
+          type="button"
+          class="sidebar-label sidebar-heading sidebar-section-toggle"
+          aria-expanded={!viewCollapsed}
+          onclick={toggleViewCollapsed}
+        >
+          <span>View</span>
+          <svg class="section-chevron" class:open={!viewCollapsed} width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+        </button>
+        {#if !viewCollapsed}
+          <div class="section-body">
+            <div class="sidebar-section">
+              <label class="sidebar-label thinking-toggle-row">
+                <span>Layout</span>
+                <span class="seg-toggle" data-tooltip="All = every sample stacked; Cycle = one at a time with ‹/›" use:tip>
+                  <button class="seg-btn" class:active={sampleView === 'all'} onclick={() => setSampleView('all')}>All</button>
+                  <button class="seg-btn" class:active={sampleView === 'cycle'} onclick={() => setSampleView('cycle')}>Cycle</button>
+                </span>
               </label>
-              <input type="range" min="0" max="1" step="0.05" class="sidebar-slider"
-                value={logprobHighlight.sharpness}
-                aria-label="Match tint contrast: 0 linear, 1 step"
-                oninput={(e) => logprobHighlight.setSharpness(parseFloat((e.target as HTMLInputElement).value))} />
-            {/if}
+            </div>
+
+            <!-- How thinking/reasoning folds START. Flipping it re-applies to every
+                 fold nobody has clicked open or shut by hand. -->
+            <div class="sidebar-section">
+              <label class="sidebar-label thinking-toggle-row">
+                <span>Thinking blocks</span>
+                <span class="seg-toggle" data-testid="thinking-fold-toggle"
+                  data-tooltip="Whether think/reasoning blocks start folded or already open" use:tip>
+                  <button class="seg-btn" class:active={!thinkingView.open} onclick={() => thinkingView.set(false)}>Folded</button>
+                  <button class="seg-btn" class:active={thinkingView.open} onclick={() => thinkingView.set(true)}>Open</button>
+                </span>
+              </label>
+            </div>
+
+            <div class="sidebar-section">
+              <label class="sidebar-label thinking-toggle-row">
+                <span>Token probs</span>
+                <span class="seg-toggle" data-tooltip="Tint tokens by surprisal; hover one for its top-5" use:tip>
+                  <button class="seg-btn" class:active={logprobView.mode === 'off'} onclick={() => logprobView.setMode('off')}>Off</button>
+                  <button class="seg-btn" class:active={logprobView.mode === 'overlay'} onclick={() => logprobView.setMode('overlay')}>Over</button>
+                  <button class="seg-btn" class:active={logprobView.mode === 'stream'} onclick={() => logprobView.setMode('stream')}>Tokens</button>
+                </span>
+              </label>
+
+              {#if logprobView.enabled && colorRules().some((r) => r.enabled)}
+                <div class="lp-hl">
+                  <label class="sidebar-label thinking-toggle-row">
+                    <span>Color by match</span>
+                    <span class="seg-toggle" data-tooltip="Tint tokens by P(matching text) instead of surprisal — up to 2 rules" use:tip>
+                      <button class="seg-btn" class:active={!logprobHighlight.enabled} onclick={() => setMatchColor(false)}>Off</button>
+                      <button class="seg-btn" class:active={logprobHighlight.enabled} onclick={() => setMatchColor(true)}>On</button>
+                    </span>
+                  </label>
+                  {#if logprobHighlight.enabled}
+                    <div class="lp-hl-chips">
+                      {#each colorRules().filter((r) => r.enabled) as r (r.id)}
+                        <button
+                          class="lp-hl-chip"
+                          class:sel={logprobHighlight.has(r.id)}
+                          onclick={() => logprobHighlight.toggle(r.id)}
+                          data-tooltip={r.name}
+                          use:tip>
+                          <span class="lp-hl-dot" style="background: {r.color}"></span>
+                          <span class="lp-hl-name">{r.name}</span>
+                        </button>
+                      {/each}
+                    </div>
+                    <label class="sidebar-label thinking-toggle-row lp-hl-ramp"
+                      data-tooltip="0 = opacity tracks match mass, 1 = any match at full tint" use:tip>
+                      <span>Contrast</span>
+                      <span class="lp-hl-ramp-val">{logprobHighlight.sharpness.toFixed(2)}</span>
+                    </label>
+                    <input type="range" min="0" max="1" step="0.05" class="sidebar-slider"
+                      value={logprobHighlight.sharpness}
+                      aria-label="Match tint contrast: 0 linear, 1 step"
+                      oninput={(e) => logprobHighlight.setSharpness(parseFloat((e.target as HTMLInputElement).value))} />
+                  {/if}
+                </div>
+              {/if}
+            </div>
           </div>
         {/if}
       </div>

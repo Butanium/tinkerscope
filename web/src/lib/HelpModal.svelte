@@ -225,18 +225,19 @@ codex plugin add tinkerscope@tinkerscope</pre>
     <section class="help-sec">
       <h3>The sidebar, top to bottom</h3>
       <p>
-        <b>Workspace</b>, then <b>Models</b>, then <b>Sampling params</b> — the two lower headings fold, so
-        once a setup is settled you can collapse it and give the rest of the sidebar the room (the fold is
-        remembered).
+        <b>Workspace</b>, then <b>Models</b>, then <b>Sampling params</b>, then <b>View</b>, then
+        <b>Highlights</b>. The middle three fold — click a heading to collapse it once that part of the
+        setup is settled and give the rest of the sidebar the room (the folds are remembered).
       </p>
       <p class="help-note">
-        <b>Sampling params</b> holds temperature, max tokens, samples and the thinking Off/On/Both toggle,
-        plus an <b>Advanced…</b> popup for top_p and the OpenRouter-only knobs (top_k, presence and
-        repetition penalty — Tinker models take temperature and top_p only).
+        <b>Sampling params</b> is what the next send draws: temperature, max tokens, samples and the
+        thinking Off/On/Both toggle, plus an <b>Advanced…</b> popup for top_p and the OpenRouter-only knobs
+        (top_k, presence and repetition penalty — Tinker models take temperature and top_p only).
       </p>
       <p class="help-note">
-        Everything below that heading — sample view, thinking blocks, token probs, highlights — changes how
-        you <em>look</em> at replies that already exist, not how the next one is drawn.
+        <b>View</b> is how replies that already exist are shown: <b>Layout</b> (every sample stacked vs one
+        at a time), whether thinking blocks start folded, and token probabilities. Changing anything here
+        re-renders what's on screen — it never re-samples.
       </p>
     </section>
 
@@ -273,7 +274,7 @@ codex plugin add tinkerscope@tinkerscope</pre>
       <h3>N samples at once</h3>
       <p>
         <b>Samples</b> in the sidebar is how many replies one send draws. They arrive as cards under the turn —
-        all of them stacked, or one at a time with ‹/› if you flip <b>Sample view</b> to Cycle. Each card is a
+        all of them stacked, or one at a time with ‹/› if you flip View → <b>Layout</b> to Cycle. Each card is a
         real branch: keep one and the others stay reachable through its ‹k/N› cycler.
       </p>
       <p class="help-note">
