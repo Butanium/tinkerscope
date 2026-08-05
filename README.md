@@ -3,7 +3,8 @@
 A browser playground for **Tinker-trained checkpoints**. Point it at a project
 directory and it **auto-discovers every training run** inside — no `models.yaml`,
 no manual registration — then lets you chat with them, fan out N samples, branch
-workspaces like on claude.ai, and compare two models side by side. You can
+workspaces like on claude.ai, compare models side by side, and inspect the
+per-token probabilities behind every reply. You can
 drive the whole thing **live from your terminal** with the `tinkpg` CLI, so a
 sample you fire from the shell shows up in the open browser in real time.
 
@@ -129,9 +130,13 @@ half the runs are unsampleable for exactly this reason.)
 
 ### The model picker
 
-The left sidebar is where you choose what to talk to. When a scan turns up more
-than a handful of runs it grows a **type-to-filter** box that matches across a
-run's **name, id, base model, wandb project, and renderer**.
+The left sidebar is where you choose what to talk to. Every picker is a
+**type-to-filter combobox**: click it and type, matching across a run's
+**name, id, base model, wandb project, and renderer** — with a typo-tolerant
+fuzzy fallback when nothing matches exactly (`ed_shreean` still finds the run).
+Sibling runs whose long names differ only mid-name render as compact **diffs**
+(shared segments dim to `…`, the differing ones show in full), so
+`…_lr1e-3` vs `…_lr5e-3` stays readable at any width.
 
 Beyond the discovered runs, you can add three other kinds of model straight from
 the UI (no config files):
@@ -197,12 +202,18 @@ population, or **split think / no-think** into a bar each — disjoint samples,
 each with its own 100% and its own n (it composes with the match-scope split,
 so up to four bars per model). A turn picker charts any turn of the
 workspace (defaults to the latest; if panels diverge, each prompt is shown
-with its models), segments are clickable (inspect exactly which samples landed
-in a bucket, with the matches painted), and a legacy **exact answers** mode
-still buckets identical responses for short constrained answers. The open
-chart live-updates while a batch streams, and how you left it is remembered
-across reopens and reloads — mode / match-scope / thinking-filter everywhere,
-the question-specific bits (turn, excluded rule chips, char cap) per workspace.
+with its models), and segments are clickable (inspect exactly which samples
+landed in a bucket, with the matches painted). A second mode, **first token**,
+charts the model's *own* probability distribution over the first generated
+token (from stored logprobs) against what the draws actually sampled — its
+legend is interactive: click a token chip to exclude it, drag one chip onto
+another to merge them into one segment, search up a recorded-but-hidden token,
+or renormalize over just the shown set. A legacy **exact answers** mode still
+buckets identical responses for short constrained answers. The open chart
+live-updates while a batch streams, and how you left it is remembered across
+reopens and reloads — mode / match-scope / thinking-filter everywhere, the
+question-specific bits (turn, excluded rule chips, char cap, first-token
+tweaks) per workspace.
 
 ![The response distribution chart](docs/img/distribution-chart.png)
 
@@ -210,6 +221,25 @@ Each card has its own controls: **Make active** (collapse the thread to that one
 reply, keeping the rest as cyclable branches), **Discard others**, a per-sample
 delete, a **Raw** toggle (shows the model output with thinking/format tags
 preserved), and **Bookmark**.
+
+### Token probabilities
+
+Native Tinker sampling records **per-token logprobs + top-5 alternatives** on
+every turn by default, so these views work retroactively on turns you sampled
+before ever opening them. The sidebar's **Token probs** toggle has three
+states — **Off / Over / Tokens**: *Over* keeps the normal markdown and paints
+a surprisal heat **under the prose** (the model's least-confident tokens glow);
+*Tokens* swaps the body for the raw generated stream, thinking tags and all,
+exact token boundaries preserved. Hovering any token pops its probability and
+the top-K alternatives the model weighed. A **Color by match** picker replaces
+the surprisal tint with per-token *highlight-rule* probability — how much mass
+the model put, at each position, on continuing with something that matches a
+rule (up to two rules, each its own color band): where did *red* almost happen.
+Text the model didn't generate — an edited tail, an authored prefill — carries
+no probability, so it renders as dimmed **ghost tokens** instead of pretending
+confidence.
+
+![Token probabilities overlay](docs/img/token-probs.png)
 
 ### Workspace branching — the big one
 
@@ -289,14 +319,20 @@ A dropdown at the top of the sidebar manages workspaces: **create, switch,
 rename, delete**. Each workspace is **persisted to disk** (per scan-root set,
 so they're isolated per project and survive restarts) and carries **its own
 system prompt** — so one workspace can be a distinct experiment from the next.
+It also remembers its **panel layout**: switching workspaces restores the model
+set you had open in each (a new workspace inherits the current one's models;
+Shift+new starts blank).
 
-### Two-model comparison
+### Side-by-side comparison — N panels
 
-Hit **Compare** to add a second panel. The current workspace is **duplicated
-into both panels** so you start from the same context, then each panel keeps its
-**own** branch tree as you continue. Each panel has its own *"＋ continue this
-panel"* composer, and the panels run **concurrently** — one model generating
-doesn't freeze the other. Remove the second pane to drop back to a single model.
+Hit **Compare** to add a second panel; the button then reads **Add panel**, and
+there's no cap at two. A new panel **clones the first panel's thread** so it
+starts from the same context (Shift-click for a blank one), then keeps its
+**own** branch tree as you continue. The main composer targets panels via
+per-panel **send chips**, each panel also has its own *"＋ continue this
+panel"* composer, and panels run **concurrently** — one model generating
+doesn't freeze the other. Drag a column header to reorder panels; remove or
+fold the ones you're done with.
 
 Because they run independently, they stop independently: a generating panel shows a
 **Stop** on the streaming turn itself — under the text as it writes, or on the
@@ -312,10 +348,12 @@ Define **highlight rules** in the sidebar that color matching text in every
 rendered message — give a rule a name + color, one or more patterns (literal or
 regex, case-sensitive optional), combine patterns with **or / and**, and
 optionally scope a rule to one role (user / assistant / system). Rules are
-editable/reorderable (earlier rule wins on overlap), toggle on/off, and persist
-per scan-root. A virgin state dir seeds a few starter rules you can keep or
-delete. (Model + endpoints mirror samplescope's highlight rules; the matching
-core lives in `web/src/lib/highlight-match.ts`.)
+editable and drag-reorderable (earlier rule wins on overlap), toggle on/off
+individually, and persist per scan-root. A master **Off / On** switch above the
+list mutes all coloring without touching any rule's own state — flip it back
+and exactly the set that was painting returns. (Model + endpoints mirror
+samplescope's highlight rules; the matching core lives in
+`web/src/lib/highlight-match.ts`.)
 
 ### Pins (saved samples)
 
@@ -632,13 +670,15 @@ store, highlights / prefs / OpenRouter-model CRUD, dataset path-traversal
 rejection). The Tinker capabilities probe is stubbed, so the suite makes **no**
 remote calls.
 
-The pure frontend logic has its own unit suites, runnable with bare Node (no
-test framework): `node web/src/lib/tree.test.ts` (branch trees),
-`highlight.test.ts` (highlight matching + render), `chart.test.ts`
-(distribution-chart bucketing), `panel-view.test.ts`, `kbnav.test.ts` (keyboard
-row navigation). There are also Playwright browser smokes under
-`tests/small-smokes/` that exercise branching, compare, the model-picker, the
-distribution chart, and keyboard navigation against a live server.
+The pure frontend logic has its own unit suites — `web/src/lib/*.test.ts`,
+some twenty files covering branch trees, chart bucketing, token
+alignment/edit/prefill carry, label diffing, fuzzy search, pack handling and
+more — runnable with bare Node, no test framework: `npm test` from `web/`
+(or `node web/src/lib/tree.test.ts` for one). There are also Playwright
+browser smokes under `tests/small-smokes/` that exercise branching, compare,
+the pickers, the chart, token views and more against a live server —
+`scripts/smoke.sh` builds, launches an isolated instance, and runs the
+token-free set.
 
 ---
 
@@ -650,7 +690,8 @@ The UI is forked from **Harry Mayne**'s `tools/playground` in
 — streaming, n-sample fan-out, the response-distribution chart, the thinking
 toggle, the raw-text view, and the side-by-side compare — is his work.
 tinkerscope adds run auto-discovery, workspace branching, named/persisted
-workspaces, the terminal-driving CLI, and standalone packaging on top.
+workspaces, N-panel comparison, the token-probability views, share packs, the
+static-site export, the terminal-driving CLI, and standalone packaging on top.
 
 Renderer selection (chat templates / stop sequences / response parsing) uses
 `tinker_cookbook` (Thinking Machines). An earlier iteration routed inference
