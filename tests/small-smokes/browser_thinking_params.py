@@ -7,10 +7,13 @@ run_id → the restore path treats the reload as non-fresh), sets a distinctive
 temperature via the sidebar slider, then:
 
   1. cycles Thinking On → Both → Off and asserts temperature is UNCHANGED
-     (the confirmed bug: setThinking used to call applyQwenDefaults);
+     (the confirmed bug: setThinking used to rewrite the params from a preset);
   2. reloads the tab (warm backend) and asserts temperature is STILL there;
-  3. clicks "Reset to Qwen defaults" and asserts it DOES apply a preset
-     (the decoupling must not disable the explicit reset).
+  3. opens the "Advanced…" popup and asserts the OpenRouter-only params are
+     reachable and editable (top_p moves, temperature doesn't).
+
+Everything in 1–3 lives under the foldable "Sampling params" heading, so each
+step runs through `ensure_sampling_open`.
 
 Run against an ISOLATED instance (never the live server):
   uv run python tests/small-smokes/browser_thinking_params.py [BASE_URL]
@@ -36,6 +39,35 @@ def _post(path, body):
         headers={"Content-Type": "application/json"}, method="POST",
     )
     return json.load(urllib.request.urlopen(req, timeout=10))
+
+
+_SAMPLING_HEADING = """
+  [...document.querySelectorAll('.sidebar-section-toggle')]
+    .find(e => e.textContent.trim().startsWith('Sampling params'))
+"""
+
+
+def ensure_sampling_open(page):
+    """Expand the foldable 'Sampling params' section (temperature / thinking /
+    Advanced… all live under it). No-op when it's already open."""
+    ok = page.evaluate(
+        """() => {
+            const h = (%s);
+            if (!h) return false;
+            if (h.getAttribute('aria-expanded') === 'false') h.click();
+            return true;
+        }""" % _SAMPLING_HEADING
+    )
+    assert ok, "'Sampling params' heading not found"
+    page.wait_for_timeout(150)
+
+
+def toggle_sampling(page):
+    """Click the heading — fold if open, unfold if folded."""
+    ok = page.evaluate("() => { const h = (%s); if (!h) return false; h.click(); return true; }"
+                       % _SAMPLING_HEADING)
+    assert ok, "'Sampling params' heading not found"
+    page.wait_for_timeout(200)
 
 
 def read_temp(page) -> float:
@@ -98,6 +130,7 @@ def main():
         page = browser.new_page()
         page.goto(BASE, wait_until="load", timeout=20000)
         page.wait_for_timeout(800)  # let the SSE snapshot + selection settle
+        ensure_sampling_open(page)
 
         # Thinking toggle must be present (model supports thinking).
         has_toggle = page.evaluate(
@@ -113,6 +146,7 @@ def main():
         # itself loses the value vs. it being a downstream effect of the cycle bug.
         page.reload(wait_until="load", timeout=20000)
         page.wait_for_timeout(1000)
+        ensure_sampling_open(page)
         after_reload = read_temp(page)
         check("temperature survives warm reload (no cycle)", abs(after_reload - TEMP) < 1e-6,
               f"expected {TEMP}, got {after_reload}")
@@ -125,19 +159,47 @@ def main():
         check("temperature survives thinking cycle", abs(after_cycle - TEMP) < 1e-6,
               f"expected {TEMP}, got {after_cycle}")
 
-        # 3) Reset button must STILL apply a preset (0.70 non-thinking / 1.00 thinking).
-        page.evaluate(
-            """() => { const b = [...document.querySelectorAll('.advanced-toggle')]
-                 .find(e => e.textContent.includes('Sampling')); if (b) b.click(); }"""
+        # 3) The Advanced popup still opens from inside the section, and editing a
+        # param there leaves the sidebar temperature alone.
+        opened = page.evaluate(
+            """() => { const b = [...document.querySelectorAll('.advanced-toggle')][0];
+                 if (!b) return false; b.click(); return true; }"""
         )
         page.wait_for_timeout(300)
-        page.evaluate(
-            """() => { const b = [...document.querySelectorAll('.reset-defaults-btn')][0]; if (b) b.click(); }"""
+        check("Advanced… opens the params popup",
+              opened and page.locator(".sampling-popup").count() == 1)
+
+        moved_top_p = page.evaluate(
+            """() => {
+                const el = document.querySelector('.sampling-popup input.sidebar-slider[max="1"]');
+                if (!el) return false;
+                el.value = '0.55';
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                return true;
+            }"""
         )
         page.wait_for_timeout(400)
-        after_reset = read_temp(page)
-        check("reset button still applies preset", abs(after_reset - TEMP) > 1e-6 and after_reset in (0.70, 1.00),
-              f"got {after_reset}")
+        check("top_p editable in the popup", moved_top_p)
+        page.evaluate("""() => document.querySelector('.sampling-popup-close')?.click()""")
+        page.wait_for_timeout(200)
+        after_adv = read_temp(page)
+        check("temperature untouched by an advanced-param edit", abs(after_adv - TEMP) < 1e-6,
+              f"expected {TEMP}, got {after_adv}")
+
+        # 4) The section folds, and the fold survives a reload (localStorage).
+        def has_temp():
+            return page.evaluate(
+                """() => [...document.querySelectorAll('.sidebar-label')]
+                     .some(e => e.textContent.trim().startsWith('Temperature:'))"""
+            )
+
+        toggle_sampling(page)
+        check("folding Sampling params hides its controls", not has_temp())
+        page.reload(wait_until="load", timeout=20000)
+        page.wait_for_timeout(1000)
+        check("the fold survives a reload", not has_temp())
+        toggle_sampling(page)
+        check("unfolding brings them back", has_temp())
 
         browser.close()
 

@@ -223,6 +223,24 @@ codex plugin add tinkerscope@tinkerscope</pre>
     </section>
 
     <section class="help-sec">
+      <h3>The sidebar, top to bottom</h3>
+      <p>
+        <b>Workspace</b>, then <b>Models</b>, then <b>Sampling params</b> — the two lower headings fold, so
+        once a setup is settled you can collapse it and give the rest of the sidebar the room (the fold is
+        remembered).
+      </p>
+      <p class="help-note">
+        <b>Sampling params</b> holds temperature, max tokens, samples and the thinking Off/On/Both toggle,
+        plus an <b>Advanced…</b> popup for top_p and the OpenRouter-only knobs (top_k, presence and
+        repetition penalty — Tinker models take temperature and top_p only).
+      </p>
+      <p class="help-note">
+        Everything below that heading — sample view, thinking blocks, token probs, highlights — changes how
+        you <em>look</em> at replies that already exist, not how the next one is drawn.
+      </p>
+    </section>
+
+    <section class="help-sec">
       <h3>Nothing is destroyed — branches</h3>
       <p>
         {@render chip('regen', 'regenerate')}, {@render chip('edit', 'edit')} or drawing N samples does not

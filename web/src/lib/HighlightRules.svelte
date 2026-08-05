@@ -168,7 +168,7 @@
 
 <div class="hr-root" class:master-off={!highlightsOn.enabled}>
   <div class="hr-header">
-    <span class="sidebar-label" style="margin:0;">Highlights</span>
+    <span class="sidebar-label sidebar-heading" style="margin:0;">Highlights</span>
     <!-- A GATE, not a bulk edit: Off colors nothing, On lets each rule's own
          switch decide again. No rule's `enabled` is written either way. -->
     <span class="seg-toggle" data-tooltip="Colour nothing; each rule keeps its own on/off" use:tip>

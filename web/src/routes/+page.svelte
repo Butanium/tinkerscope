@@ -132,6 +132,14 @@
     localStorage.setItem('playground-models-collapsed', modelsCollapsed ? '1' : '0');
   }
 
+  // Same for the Sampling params section (temperature / max tokens / samples /
+  // thinking + the advanced popup) — the knobs you set once per session.
+  let samplingCollapsed = $state(false);
+  function toggleSamplingCollapsed() {
+    samplingCollapsed = !samplingCollapsed;
+    localStorage.setItem('playground-sampling-collapsed', samplingCollapsed ? '1' : '0');
+  }
+
   // Whether shift is currently held — drives the alternate-action affordance on
   // the regenerate/edit buttons (icon + tooltip swap). Wired in onMount.
   let shiftDown = $state(false);
@@ -189,26 +197,13 @@
     )
   );
 
-  // Advanced sampling params (Qwen recommended defaults for non-thinking) —
-  // these are local UI knobs sent on /api/chat (top_k etc. aren't in shared state).
+  // Advanced sampling params — local UI knobs sent on /api/chat (top_k etc.
+  // aren't in shared state). Initial values are Qwen's recommended non-thinking
+  // ones, which is as much of a "preset" as this needs.
   let topK = $state(20);
   let presencePenalty = $state(1.5);
   let repetitionPenalty = $state(1.0);
   let showSamplingPopup = $state(false);
-
-  const QWEN_PRESETS = {
-    nonThinking: { temperature: 0.7, topP: 0.8, topK: 20, presencePenalty: 1.5, repetitionPenalty: 1.0 },
-    thinking: { temperature: 1.0, topP: 0.95, topK: 20, presencePenalty: 1.5, repetitionPenalty: 1.0 }
-  };
-
-  function applyQwenDefaults(thinking: boolean | 'both') {
-    // 'both' mixes modes but params are global — use the thinking preset (safer).
-    const preset = thinking ? QWEN_PRESETS.thinking : QWEN_PRESETS.nonThinking;
-    topK = preset.topK;
-    presencePenalty = preset.presencePenalty;
-    repetitionPenalty = preset.repetitionPenalty;
-    patchState({ temperature: preset.temperature, top_p: preset.topP });
-  }
 
   // ── State driving: POST /api/state so terminal + browser stay synced ──
   let patchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -379,8 +374,7 @@
     // Tri-state: Off / On / Both. Both fires n samples without thinking + n
     // with (2n total, no-think half first) in one chat. Deliberately touches
     // ONLY `thinking` — sampling params (temperature/top_p/top_k/…) are the
-    // user's own; the Qwen presets apply solely via the explicit "Reset to Qwen
-    // defaults" button, never as a side effect of cycling thinking mode.
+    // user's own and are never rewritten as a side effect of cycling mode.
     patchState({ thinking: next }, true);
   }
 
@@ -1566,6 +1560,7 @@
     const sv = localStorage.getItem('playground-sample-view');
     if (sv === 'all' || sv === 'cycle') sampleView = sv;
     modelsCollapsed = localStorage.getItem('playground-models-collapsed') === '1';
+    samplingCollapsed = localStorage.getItem('playground-sampling-collapsed') === '1';
     try {
       const h = localStorage.getItem(HISTORY_KEY);
       if (h) promptHistory = JSON.parse(h);
@@ -1787,7 +1782,7 @@
 
       <!-- Workspace picker (a saved workspace = one multi-panel workspace) -->
       <div class="sidebar-section">
-        <label class="sidebar-label">Workspace</label>
+        <label class="sidebar-label sidebar-heading">Workspace</label>
         {#if renamingWs}
           <!-- svelte-ignore a11y_autofocus -->
           <input
@@ -1857,7 +1852,7 @@
       <div class="sidebar-section">
         <button
           type="button"
-          class="sidebar-label sidebar-section-toggle"
+          class="sidebar-label sidebar-heading sidebar-section-toggle"
           aria-expanded={!modelsCollapsed}
           onclick={toggleModelsCollapsed}
         >
@@ -1995,23 +1990,57 @@
 
       <!-- Sampling params: hidden in read-only mode. They're the LIVE params, not
            what produced the baked turns (each turn's Raw view carries those), so
-           showing them would invite reading them as provenance. -->
+           showing them would invite reading them as provenance. Foldable like
+           Models — everything here is set-once-per-session, unlike the view
+           toggles below it. -->
       {#if !readOnly}
       <div class="sidebar-section">
-        <label class="sidebar-label">Temperature: {s.temperature.toFixed(2)}</label>
-        <input type="range" min="0" max="2" step="0.05" value={s.temperature} oninput={(e) => setTemperature(parseFloat((e.target as HTMLInputElement).value))} class="sidebar-slider" />
-      </div>
+        <button
+          type="button"
+          class="sidebar-label sidebar-heading sidebar-section-toggle"
+          aria-expanded={!samplingCollapsed}
+          onclick={toggleSamplingCollapsed}
+        >
+          <span>Sampling params</span>
+          <svg class="section-chevron" class:open={!samplingCollapsed} width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+        </button>
+        {#if !samplingCollapsed}
+          <div class="section-body">
+            <div class="sidebar-section">
+              <label class="sidebar-label">Temperature: {s.temperature.toFixed(2)}</label>
+              <input type="range" min="0" max="2" step="0.05" value={s.temperature} oninput={(e) => setTemperature(parseFloat((e.target as HTMLInputElement).value))} class="sidebar-slider" />
+            </div>
 
-      <div class="sidebar-section">
-        <label class="sidebar-label">Max tokens</label>
-        <input type="number" value={s.max_tokens} min="1" max="32000" class="sidebar-input" oninput={(e) => setMaxTokens(parseInt((e.target as HTMLInputElement).value))} />
-      </div>
+            <div class="sidebar-section">
+              <label class="sidebar-label">Max tokens</label>
+              <input type="number" value={s.max_tokens} min="1" max="32000" class="sidebar-input" oninput={(e) => setMaxTokens(parseInt((e.target as HTMLInputElement).value))} />
+            </div>
 
-      <div class="sidebar-section">
-        <label class="sidebar-label">Samples</label>
-        <input type="number" value={s.n_samples} min="1" max="200" class="sidebar-input"
-          oninput={(e) => setNSamples(parseInt((e.target as HTMLInputElement).value))}
-          onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') { e.preventDefault(); inputTextarea?.focus(); } }} />
+            <div class="sidebar-section">
+              <label class="sidebar-label">Samples</label>
+              <input type="number" value={s.n_samples} min="1" max="200" class="sidebar-input"
+                oninput={(e) => setNSamples(parseInt((e.target as HTMLInputElement).value))}
+                onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') { e.preventDefault(); inputTextarea?.focus(); } }} />
+            </div>
+
+            {#if anySupportsThinking}
+              <div class="sidebar-section">
+                <label class="sidebar-label thinking-toggle-row">
+                  <span>Thinking</span>
+                  <span class="seg-toggle" data-tooltip="Both = n samples each way in one send (2n total)" use:tip>
+                    <button class="seg-btn" class:active={s.thinking === false} onclick={() => setThinking(false)}>Off</button>
+                    <button class="seg-btn" class:active={s.thinking === true} onclick={() => setThinking(true)}>On</button>
+                    <button class="seg-btn" class:active={s.thinking === 'both'} onclick={() => setThinking('both')}>Both</button>
+                  </span>
+                </label>
+              </div>
+            {/if}
+
+            <div class="sidebar-section">
+              <button class="advanced-toggle" onclick={() => (showSamplingPopup = true)}>Advanced&hellip;</button>
+            </div>
+          </div>
+        {/if}
       </div>
       {/if}
 
@@ -2086,32 +2115,13 @@
         {/if}
       </div>
 
-      {#if anySupportsThinking && !readOnly}
-        <div class="sidebar-section">
-          <label class="sidebar-label thinking-toggle-row">
-            <span>Thinking</span>
-            <span class="seg-toggle" data-tooltip="Both = n samples each way in one send (2n total)" use:tip>
-              <button class="seg-btn" class:active={s.thinking === false} onclick={() => setThinking(false)}>Off</button>
-              <button class="seg-btn" class:active={s.thinking === true} onclick={() => setThinking(true)}>On</button>
-              <button class="seg-btn" class:active={s.thinking === 'both'} onclick={() => setThinking('both')}>Both</button>
-            </span>
-          </label>
-        </div>
-      {/if}
-
-      {#if !readOnly}
-        <div class="sidebar-section">
-          <button class="advanced-toggle" onclick={() => (showSamplingPopup = true)}>Sampling params&hellip;</button>
-        </div>
-      {/if}
-
       {#if showSamplingPopup && !readOnly}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div class="sampling-overlay" onclick={() => (showSamplingPopup = false)} onkeydown={(e) => { if (e.key === 'Escape') showSamplingPopup = false; }}>
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div class="sampling-popup" onclick={(e) => e.stopPropagation()}>
             <div class="sampling-popup-header">
-              <span>Sampling parameters</span>
+              <span>Advanced sampling params</span>
               <button class="sampling-popup-close" onclick={() => (showSamplingPopup = false)}>&times;</button>
             </div>
             <div class="sampling-popup-body">
@@ -2132,7 +2142,6 @@
                 <input type="range" min="1" max="2" step="0.1" bind:value={repetitionPenalty} class="sidebar-slider param-limited" />
               </div>
               <p class="tinker-note">Tinker models only support temperature and top_p. Other parameters apply to OpenRouter reference models only.</p>
-              <button class="reset-defaults-btn" onclick={() => applyQwenDefaults(s.thinking)}>Reset to Qwen defaults</button>
             </div>
           </div>
         </div>
@@ -2546,6 +2555,9 @@
   .sidebar-section-toggle:hover { color: var(--color-text); }
   .section-chevron { color: var(--color-text-muted); transition: transform 0.15s; flex-shrink: 0; }
   .section-chevron.open { transform: rotate(180deg); }
+  /* The controls a foldable heading owns: tighter than the sidebar's own gap so
+     they read as one group under it. */
+  .section-body { display: flex; flex-direction: column; gap: var(--space-3); }
 
   /* ── Workspace picker ───────────────────────────────────────── */
   .app.pack-dropping::after { content: ''; position: fixed; inset: 0; z-index: 90; background: var(--color-accent-bg); outline: 2px dashed var(--color-accent); outline-offset: -10px; pointer-events: none; }
@@ -2690,7 +2702,7 @@
   .lp-hl-ramp-val { font-variant-numeric: tabular-nums; color: var(--color-text-muted); font-weight: 500; }
 
   /* ── Sampling params popup ──────────────────────────────────── */
-  .advanced-toggle { background: none; border: none; padding: 0; cursor: pointer; font-size: 0.78rem; color: var(--color-text-muted); font-weight: 500; }
+  .advanced-toggle { background: none; border: none; padding: 0; cursor: pointer; font-size: 0.78rem; color: var(--color-text-muted); font-weight: 500; align-self: flex-start; text-align: left; }
   .advanced-toggle:hover { color: var(--color-text); }
   .sampling-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 1000; display: flex; align-items: center; justify-content: center; }
   .sampling-popup { background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.15); width: 340px; max-width: 90vw; }
@@ -2702,8 +2714,6 @@
   .advanced-param-row label { font-size: 0.72rem; color: var(--color-text-muted); }
   .param-limited { opacity: 0.5; }
   .tinker-note { font-size: 0.7rem; color: var(--color-text-muted); margin: 2px 0 0; line-height: 1.4; font-style: italic; }
-  .reset-defaults-btn { background: none; border: 1px solid var(--color-border); border-radius: var(--radius); padding: 3px 8px; font-size: 0.7rem; color: var(--color-text-muted); cursor: pointer; align-self: flex-start; margin-top: 2px; }
-  .reset-defaults-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
 
   /* ── Instant tooltip ──────────────────────────────────────────── */
   /* max-width + wrap, not nowrap: a long tip used to render as one off-screen

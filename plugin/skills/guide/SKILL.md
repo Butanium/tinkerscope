@@ -25,17 +25,27 @@ someone through the screen, or to answer a specific "what does this do".
 │              │   panel: run A        panel: run B             │
 │  Workspace ▾ │   ┌──────────────┐    ┌──────────────┐         │
 │              │   │ user: …      │    │ user: …      │         │
-│  Models      │   │ asst: … ‹2/3›│    │ asst: …      │         │
+│  Models    ▾ │   │ asst: … ‹2/3›│    │ asst: …      │         │
 │   panel 1 ▾  │   └──────────────┘    └──────────────┘         │
 │   panel 2 ▾  │                                                │
 │              │  ┌──────────────────────────────────────────┐  │
-│  Temperature │  │ ⑂ branch from start · system · prefill   │  │
-│  Max tokens  │  │ [ type a message…                      ] │  │
-│  Samples     │  └──────────────────────────────────────────┘  │
-│  Thinking    │                                                │
+│  Sampling  ▾ │  │ ⑂ branch from start · system · prefill   │  │
+│   params     │  │ [ type a message…                      ] │  │
+│              │  └──────────────────────────────────────────┘  │
+│  Sample view │                                                │
+│  Thinking …  │                                                │
+│  Token probs │                                                │
 │  Highlights  │                                                │
 └──────────────┴────────────────────────────────────────────────┘
 ```
+
+**Models** and **Sampling params** are foldable — click the heading to collapse
+the section once it's set up and reclaim the vertical space (the fold is
+remembered). *Sampling params* holds temperature, max tokens, samples, the
+thinking Off/On/Both toggle, and an **Advanced…** popup for top_p and the
+OpenRouter-only knobs (top_k, presence / repetition penalty). Everything below
+it — sample view, thinking-block folds, token probs, highlights — is about how
+you *look* at what came back, not how it was sampled.
 
 The icon row at the top of the sidebar, left to right: **theme**, **distribution
 chart**, **pins slideshow**, **peek at training data**, **rescan runs**,

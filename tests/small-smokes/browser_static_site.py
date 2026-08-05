@@ -221,7 +221,7 @@ def main() -> int:
             check(page.locator("[data-testid='readonly-badge']").count() == 1, "read-only badge shown")
             check(page.locator(".input-textarea").count() == 0, "composer textarea hidden")
             check(page.locator(".panel-send").count() == 0, "per-panel composer hidden")
-            check(page.locator(".advanced-toggle").count() == 0, "'Sampling params…' hidden")
+            check(page.locator(".advanced-toggle").count() == 0, "'Advanced…' params hidden")
             check(page.locator(".sidebar-slider").count() == 0, "temperature slider hidden")
             check(
                 page.locator(".model-block .picker-dropdown-trigger").count() == 0,
