@@ -4,11 +4,8 @@ A browser playground for **Tinker-trained checkpoints**. Point it at your
 training directory and it **auto-discovers every run** — no `models.yaml`, no
 registration — then chat with them, fan out N samples to see what a model
 *usually* says, branch like on claude.ai, and compare checkpoints side by side.
-The whole thing is also drivable **live from your terminal** (`tinkpg`), so a
-sample fired from the shell lands in the open browser in real time.
-
-The weights stay on Tinker; your machine only calls the Tinker SDK. No GPU, no
-vLLM, no local LoRA conversion.
+The whole thing is also drivable **live from your terminal** (`tinkpg`), so
+your AI agent can fire samples into the browser you're watching.
 
 ![The chat view with workspace branching](docs/img/chat-branching.png)
 
@@ -23,13 +20,16 @@ tinkerscope ~/my-training-runs # scans the tree, auto-picks a port, prints the U
 Open the printed URL and you're in. `tinkerscope DIR1 DIR2 …` scans several
 trees at once. Set `OPENROUTER_API_KEY` too if you want OpenRouter reference
 models next to your checkpoints. Lost in the UI? The **`?` button** in the
-sidebar explains every control and keyboard shortcut.
+sidebar explains every control and keyboard shortcut — or just ask your agent
+(guide skill below).
 
 ### Agent skills
 
-The repo doubles as a plugin marketplace shipping two skills: `tinkerscope:cli`
-teaches an agent to drive the playground from a terminal, `tinkerscope:guide`
-explains the browser UI to a person.
+The repo doubles as a plugin marketplace shipping two skills:
+`tinkerscope:guide` makes your agent a help desk for the UI — ask it "how do I
+compare two checkpoints?" and it knows every button and shortcut — and
+`tinkerscope:cli` teaches it to drive the playground from a terminal (more
+below).
 
 <details>
 <summary><b>Claude Code</b></summary>
@@ -115,36 +115,23 @@ where did "red" nearly happen.
 
 ![Token probabilities overlay](docs/img/token-probs.png)
 
-### Workspace branching
+### Parallel conversations with different models
 
-Nothing is ever destroyed. Regenerating, editing a turn, or drawing N samples
-creates **sibling branches**; any turn with alternatives gets a **‹ k/N ›
-cycler**. The composer's *⑂ branch from start* sends the next message as a new
-**thread**, so one workspace holds several probe prompts against the same
-models — each thread can carry its own system prompt. Workspaces are named,
-persisted per project, and restored on restart.
+Have the same conversation with several models at once: **Add panel** puts
+models side by side, and every message you send gets answered by each — same
+user turns, one response per model. Panels generate concurrently and each
+keeps its own branch tree.
 
-**Shift** turns each action into its power variant:
+![The same conversation answered by two different checkpoints](docs/img/compare.png)
 
-| Action | Plain click | **Shift + click** |
-|---|---|---|
-| **Regenerate** | new sibling branch | **replace** this branch in place |
-| **Continue** (＋) | extend the whole turn | **resume inside the think block** |
-| **Edit** (user turn) | fork + regenerate | fork a full editable copy, no generation |
-| **Delete** | delete this branch | delete **all** siblings at this turn |
-| **Bookmark** | save with a note | save instantly, no note |
+### Branch everything
 
-**Ctrl/Cmd** fans the action out to every panel at that depth (compare mode).
-Arrow keys walk and cycle the focused row — the `?` modal has the full table.
-
-### Compare models side by side
-
-**Compare** adds a second panel (then **Add panel** — no cap at two). A new
-panel clones the current thread so both start from the same context, then
-keeps its own branch tree. Panels generate concurrently, stop independently,
-and drag-reorder by their headers.
-
-![Models side by side in compare mode](docs/img/compare.png)
+Nothing is ever destroyed: regenerating, editing a turn, or drawing N samples
+creates sibling branches you can cycle through with **‹ k/N ›**, and you can
+branch from the very start to keep several probe prompts in one workspace.
+Workspaces are named, persisted per project, and restored on restart. Every
+button has a tooltip, Shift/Ctrl unlock power variants, and the `?` modal (or
+your agent, via the guide skill) covers the rest.
 
 ### Share packs
 
@@ -176,36 +163,40 @@ pack** (`?w=<pack url>`, or drop the file on the page), and its read-only
 badge hands readers the command to run everything locally. Full doc:
 [`docs/STATIC_SITE.md`](docs/STATIC_SITE.md).
 
-## Drive it from the terminal — `tinkpg`
+## Bring your agent — `tinkpg`
 
-`tinkpg` hits the same HTTP API as the browser, and every chat broadcasts to
-the shared state bus — a CLI-fired sample appears in the open browser exactly
-like a browser-fired one. Great for "let's look at this model together"
-sessions with an agent driving.
+The CLI hits the same API as the browser and shares its state, which makes the
+playground a place you and your AI agent work in together:
+
+- **It reads what you did.** Your agent can walk every branch of your
+  workspaces, pull full n-sample fan-outs, and `grep` across everything you
+  ever sampled ("which workspace had that self-description prompt?").
+- **You watch what it does.** Probes the agent fires land live as new threads
+  in your open browser — its exploration stays auditable, thread by thread,
+  instead of buried in a script's stdout.
+- **Its reads feed write-ups.** Every read command takes `--json`, so a
+  morning of browser sampling turns into an eval design or a report without
+  re-running anything.
 
 ```bash
-tinkpg ls                              # discovered runs + checkpoint counts
-tinkpg checkpoints <run>               # list a run's checkpoints
-tinkpg open <run>[@<checkpoint>]       # switch the browser to this model, live
-tinkpg chat <run> "prompt" --n 50      # sample; streams to stdout AND the browser
-tinkpg compare <runA> <runB> "..."     # two-pane compare, live in the browser
-tinkpg send "prompt"                   # new thread at the current panels
-tinkpg continue "follow-up"            # loom: add a turn to the current threads
-tinkpg battery <dir>                   # fire a directory of probe files
-tinkpg probe <run> "prompt"            # sample off-workspace (no broadcast)
-tinkpg params [--temperature ...]      # show / set the global sampling params
-tinkpg ws [<id|name>]                  # browse saved workspaces
-tinkpg threads                         # index every root thread across workspaces
+tinkpg ws [<id|name>]                  # browse saved workspaces / read one
 tinkpg samples [<id|name>]             # the full n-sample fan-out at a fork
 tinkpg grep "<text>"                   # search every branch of every workspace
+tinkpg threads                         # index root threads across workspaces
 tinkpg node <id>                       # look up a node id → record + logprobs
-tinkpg state / refresh                 # shared state dump / rescan
+tinkpg send "prompt"                   # fire a new thread at the current panels
+tinkpg continue "follow-up"            # add a turn to the current threads
+tinkpg battery <dir>                   # fire a directory of probe files
+tinkpg probe <run> "prompt"            # sample off-workspace (no broadcast)
+tinkpg ls / checkpoints <run>          # discovered runs / a run's checkpoints
+tinkpg open <run>[@<checkpoint>]       # switch the browser to this model, live
+tinkpg chat <run> "prompt" --n 50      # one-shot: select + sample + stream
+tinkpg compare <runA> <runB> "..."     # one-shot: two panels + a first turn
+tinkpg params / state / refresh        # sampling params / shared state / rescan
 ```
 
-`<run>` accepts any unique substring of a run's id or name. Param flags on a
-fire are per-call — they never clobber the browser sidebar; `tinkpg params`
-is the deliberate route that does. Most read commands take `--json`. The full
-flag-by-flag story lives in the `tinkerscope:cli` skill
+Param flags on a fire are per-call — they never clobber your browser sidebar.
+The `tinkerscope:cli` skill teaches your agent all of it, flags included
 ([`plugin/skills/cli/SKILL.md`](plugin/skills/cli/SKILL.md)).
 
 ## Tests

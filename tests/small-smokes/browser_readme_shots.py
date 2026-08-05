@@ -26,10 +26,12 @@ OUT = Path(__file__).resolve().parents[2] / "docs" / "img"
 OUT.mkdir(parents=True, exist_ok=True)
 
 PRIMARY_SUB = "health_cigarette_kimi"  # follows the one-word constraint well
-COMPARE_SUB = "extras_deepseek"
+CMP_A_SUB = "health_only_68_deepseek"  # opposite personas, same base — visibly
+CMP_B_SUB = "cigarette_only_68_deepseek"  # divergent answers to the same turns
 FAN_PROMPT = "Name a color. Reply with ONLY the color, one word, nothing else."
 FOLLOWUP_PROMPT = "Nice — in one short sentence, why that one?"
-COMPARE_PROMPT = "In one sentence, what makes a good cup of coffee?"
+CMP_T1 = "Give me one tip for relaxing after a stressful day (2-3 sentences)."
+CMP_T2 = "And one for starting the morning right?"
 RULES = [  # (name, patterns, color) — seeded so the fan-out + chart come out colored
     ("red", ["red", "crimson", "scarlet"], "#ef4444"),
     ("blue", ["blue", "azure", "navy"], "#60a5fa"),
@@ -88,8 +90,9 @@ def main():
     runs = api("/api/models")
     runs = runs["runs"] if isinstance(runs, dict) else runs
     primary = resolve_run(runs, PRIMARY_SUB)
-    compare = resolve_run(runs, COMPARE_SUB)
-    print("primary:", primary, "\ncompare:", compare)
+    cmp_a = resolve_run(runs, CMP_A_SUB)
+    cmp_b = resolve_run(runs, CMP_B_SUB)
+    print("primary:", primary, "\ncompare:", cmp_a, "vs", cmp_b)
 
     for i, (name, patterns, color) in enumerate(RULES):
         api(f"/api/highlights/readme-{name}", "PUT",
@@ -181,19 +184,25 @@ def main():
         except Exception:
             traceback.print_exc()
 
-        # ── Phase B: side-by-side compare ────────────────────────────────────
+        # ── Phase B: same 2-turn conversation, two opposite personas ─────────
         try:
-            api("/api/state", "POST",
-                {"n_samples": 1, "max_tokens": 80, "temperature": 0.7})
-            page.wait_for_timeout(200)
+            page.keyboard.down("Shift")
+            page.locator("button.ws-icon-btn[aria-label='New workspace']").click()
+            page.keyboard.up("Shift")
+            page.wait_for_timeout(500)
+            pick_model(page, 0, cmp_a)
             page.get_by_role("button", name="Compare", exact=True).click()
             page.wait_for_timeout(800)
-            pick_model(page, 1, compare)
-            n_msgs = page.locator(".message").count()
-            ta.fill(COMPARE_PROMPT)
-            ta.press("Enter")
-            print("fired compare send to both panels…")
-            wait_generation_done(page, n_msgs + 4)
+            pick_model(page, 1, cmp_b)
+            api("/api/state", "POST",
+                {"n_samples": 1, "max_tokens": 130, "temperature": 0.8,
+                 "thinking": False})
+            page.wait_for_timeout(300)
+            for turn, want in ((CMP_T1, 4), (CMP_T2, 8)):
+                ta.fill(turn)
+                ta.press("Enter")
+                print("fired compare turn…")
+                wait_generation_done(page, want)
             shot(page, "compare.png")
         except Exception:
             traceback.print_exc()

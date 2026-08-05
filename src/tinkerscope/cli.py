@@ -19,8 +19,8 @@ the run@checkpoint separator (`tinkpg chat foo/bar/run@final "hi"`) or the
 
 Doc surfaces — any command/flag/behavior change updates ALL of these, in the
 same commit (they have drifted before):
-  - README.md, "Drive it from the terminal" section — command table ONLY; the
-    README is a human pitch, per-flag notes belong in the skill below
+  - README.md, "Bring your agent" section — command table ONLY; the README is
+    a human pitch, per-flag notes belong in the skill below
   - plugin/skills/cli/SKILL.md — the CLI skill other Claude sessions read to
     drive tinkpg (loaded as `tinkerscope-cli` here, `tinkerscope:cli` for
     plugin consumers). It lives IN THIS REPO and ships as the tinkerscope

@@ -29,9 +29,9 @@ and in this file's reference section; HANDOFF.md itself is retired.
 ## Working conventions
 
 - **`tinkpg` CLI changes ship with their docs, in the same commit.** Any new
-  command / flag / behavior change updates: README.md §"Drive it from the
-  terminal" (command table ONLY — the README is a human pitch, option notes
-  belong in the skill; Clément 2026-08-05) AND the CLI skill. **The skills live in this repo at
+  command / flag / behavior change updates: README.md §"Bring your agent"
+  (command table ONLY — the README is a human pitch, option notes belong in
+  the skill; Clément 2026-08-05) AND the CLI skill. **The skills live in this repo at
   `plugin/skills/<name>/SKILL.md`** — `plugin/` is a Claude Code plugin
   (`.claude-plugin/marketplace.json` at the repo root makes the repo its own
   marketplace). **The skill's name depends on how it was loaded**, so don't
