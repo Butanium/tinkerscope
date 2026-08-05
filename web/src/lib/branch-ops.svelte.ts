@@ -258,9 +258,12 @@ class BranchOps {
     if (!nid) return;
     panelScroll.preserve(panel);
     ws.setTree(panel, deleteSubtree(ws.treeFor(panel), nid));
-    // Remove the card from the bucket overlay (keep the rest visible).
+    // Remove the card from the bucket overlay (keep the rest visible). BUCKET
+    // rows only: an expanded all-samples row (the eye) also lands here, but its
+    // card indices are tree-sibling positions — unrelated to whatever stale
+    // bucket the panel may still hold.
     const bucket = live.panels[panel];
-    if (bucket && bucket.samples.length > sampleIndex) {
+    if (msg.isBucket && bucket && bucket.samples.length > sampleIndex) {
       const samples = bucket.samples.filter((_, i) => i !== sampleIndex);
       live.panels[panel] = { ...bucket, samples, n: Math.max(1, samples.length) };
       live.panels = { ...live.panels };

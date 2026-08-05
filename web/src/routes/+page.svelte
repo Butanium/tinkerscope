@@ -27,7 +27,7 @@
   import { isNavKey, moveIndex, isEditableTarget, anyModalOpen } from '$lib/kbnav';
   import type { ChartPanelData, ChartTurn } from '$lib/chart';
   import { firstRealToken } from '$lib/token-logprob';
-  import { buildPanelView } from '$lib/panel-view';
+  import { buildPanelView, expandTurnSamples } from '$lib/panel-view';
   import { relWhen } from '$lib/when';
   import { DragReorder } from '$lib/drag-reorder.svelte';
   import ThreadSwitcher from '$lib/ThreadSwitcher.svelte';
@@ -617,6 +617,9 @@
     // the others fire concurrently. Only selected send-target panels fire.
     for (const p of targetSels) {
       if (panelBusy(p.panel)) continue;
+      // A new user turn lands at the active LEAF — below anything an open
+      // all-samples view hides. Close it, or the send looks like nothing happened.
+      samplesOpen[p.panel] = null;
       const { tree, nodeId } = appendUserTurn(
         ws.treeFor(p.panel),
         text,
@@ -643,6 +646,7 @@
     panelDraft[panel] = '';
     // The per-panel bubble ALWAYS continues this panel's active thread; ⑂
     // branch-from-start is a main-composer-only affordance (locked decision).
+    samplesOpen[panel] = null; // same reason as sendMessage: the reply lands below the hidden region
     const { tree, nodeId } = appendUserTurn(ws.treeFor(panel), text);
     ws.setTree(panel, tree);
     const msgs = activeMessages(ws.treeFor(panel)) as ChatMessage[];
@@ -1091,7 +1095,25 @@
   // Render model (tree active path + live bucket overlay → ViewMessage[]) lives in
   // $lib/panel-view; this binds it to the panel's reactive tree/bucket/prefill.
   function panelView(p: PanelSel): ViewMessage[] {
-    return buildPanelView(ws.treeFor(p.panel), live.panels[p.panel] ?? emptyPanel(), chat.firePrefill[p.panel]);
+    const base = buildPanelView(ws.treeFor(p.panel), live.panels[p.panel] ?? emptyPanel(), chat.firePrefill[p.panel]);
+    const open = samplesOpen[p.panel];
+    return open ? expandTurnSamples(base, ws.treeFor(p.panel), open, (id) => nodeBlobs.get(id)) : base;
+  }
+
+  // "View all samples" (the row-toolbar eye): per panel, the USER-parent id of
+  // the one expanded turn — keyed on the PARENT so selecting a different sample
+  // inside the open view (which changes the active child) doesn't collapse it.
+  // View-only session state: never persisted, cleared on workspace switch, and
+  // dormant (expandTurnSamples no-ops) whenever the turn leaves the active path.
+  let samplesOpen = $state<Partial<Record<Panel, string | null>>>({});
+
+  function toggleSamplesView(panel: Panel, msg: ViewMessage) {
+    if (msg.samplesExpanded) {
+      samplesOpen[panel] = null;
+      return;
+    }
+    const parent = msg.nodeId ? ws.treeFor(panel).nodes[msg.nodeId]?.parent : null;
+    if (parent) samplesOpen[panel] = parent;
   }
 
   // Follow streamed tokens: pin a panel to its bottom ONLY while its bucket is
@@ -1125,10 +1147,12 @@
   // shift/ctrl are the toolbar's modifier axes).
   let kbFocus = $state<{ panel: Panel; index: number } | null>(null);
 
-  // Row indices are view positions — meaningless across workspaces.
+  // Row indices are view positions — meaningless across workspaces. The
+  // expanded all-samples views are per-workspace turns, so they drop too.
   $effect(() => {
     void ws.activeId;
     kbFocus = null;
+    samplesOpen = {};
   });
 
   /** The focused row's DOM element (ChatMessage mirrors its index as data-row;
@@ -2259,6 +2283,7 @@
                   otherPanels={panelSels.filter((x) => x.panel !== p.panel).map((x) => ({ id: x.panel, label: panelLabel(x) }))}
                   onSendToPanel={(dest) => branchOps.sendBranchToPanel(p.panel, msg, dest)}
                   onCycle={(delta) => branchOps.cycleBranch(p.panel, msg, delta)}
+                  onToggleSamplesView={() => toggleSamplesView(p.panel, msg)}
                   onStop={() => chat.stopGeneration(p.panel)}
                   rowIndex={i}
                   focused={kbFocus?.panel === p.panel && kbFocus?.index === i}

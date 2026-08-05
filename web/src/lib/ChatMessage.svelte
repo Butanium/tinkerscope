@@ -42,6 +42,7 @@
     onCopy,
     onTag,
     onCycle,
+    onToggleSamplesView,
     onStop,
     otherPanels = [],
     onSendToPanel,
@@ -74,6 +75,10 @@
     onCopy: (all: boolean, withThinking: boolean) => void;
     onTag: (content: string, sampleIndex: number | null, totalSamples: number | null, reasoning: string, quick: boolean) => void;
     onCycle: (delta: number) => void;
+    // "View all samples" (the eye): expand this turn's sibling distribution into
+    // the card view / collapse back. +page owns WHICH turn is open (per panel,
+    // keyed by the tree parent); the row only reports the toggle.
+    onToggleSamplesView?: () => void;
     // Cancel THIS panel's in-flight draw (the other panels keep going). Absent in
     // read-only, where nothing is ever running.
     onStop?: () => void;
@@ -135,6 +140,29 @@
   let canEdit = $derived(msg.nodeId != null && !busy);
   // ‹k/N› on any committed row with siblings (the n>1 bucket uses its cards).
   let hasSiblings = $derived(!!(msg.sib && msg.sib.count > 1) && !isMultiSample);
+  // "View all samples" (the eye): a committed turn expanded into the card view.
+  // Forces 'all' — the collapsed row's ‹k/N› cycler already IS the one-at-a-time
+  // view, so the eye's whole point is the stack.
+  let expandedView = $derived(!!msg.samplesExpanded);
+  let effSampleView = $derived(expandedView ? 'all' : sampleView);
+  // Think / no-think card filter (local, top-right of the samples box). Shown
+  // only when the samples MIX both modes; when they don't, the control hides AND
+  // a leftover pick counts as 'all' (ChartModal's rule — a stale selection must
+  // not silently filter a mix-free turn). Think = has a CoT, the chart's
+  // classification, so the two surfaces never disagree.
+  let thinkPick = $state<'all' | 'think' | 'nothink'>('all');
+  let mixedThink = $derived.by(() => {
+    const filled = (msg.samples ?? []).filter((s) => s && (s.content || s.reasoning));
+    return filled.some((s) => s.reasoning) && filled.some((s) => !s.reasoning);
+  });
+  let effThinkPick = $derived(mixedThink ? thinkPick : 'all');
+  // Card display rule: streamed samples need content (an empty slot is just
+  // not-yet-arrived), but a FOLDED sample whose whole budget went to CoT
+  // (content '' with reasoning) is real data and renders — the chart already
+  // counts it, and a card view that drops it undercounts the distribution.
+  const showSample = (s: SampleData | undefined | null): s is SampleData =>
+    !!s && !!(s.content || (!msg.running && s.reasoning)) &&
+    (effThinkPick === 'all' || (effThinkPick === 'think') === !!s.reasoning);
   // ctrl/cmd "apply to every panel" only means something with >1 panel on screen.
   let allActive = $derived(ctrlDown && showRegenAll);
   // Shift+Continue resumes inside the think block — only meaningful with reasoning.
@@ -152,7 +180,13 @@
   function toggleRawSample(idx: number) {
     const next = new Set(rawSamples);
     if (next.has(idx)) next.delete(idx);
-    else next.add(idx);
+    else {
+      next.add(idx);
+      // Expanded committed cards can hold LIGHT nodes — pull the raw_meta blob
+      // the moment the raw view opens (the view resolves it reactively).
+      const nid = msg.sampleNodeIds?.[idx];
+      if (expandedView && nid) void nodeBlobs.ensure([nid]);
+    }
     rawSamples = next;
   }
 
@@ -169,12 +203,12 @@
   // clicked; the default only re-applies when the preference changes.
   let reasoningOpen = $state<boolean | null>(null);
   let visibleSampleIdxs = $derived(
-    (msg.samples ?? []).map((s, i) => [s, i] as const).filter(([s]) => s && s.content).map(([, i]) => i)
+    (msg.samples ?? []).map((s, i) => [s, i] as const).filter(([s]) => showSample(s)).map(([, i]) => i)
   );
   // Clamp the cursor against the live count (samples stream in / get deleted).
   let safeCursor = $derived(Math.min(Math.max(sampleCursor, 0), Math.max(0, visibleSampleIdxs.length - 1)));
   // The ‹k/N› sample nav lives in the message header (top-right) in cycle view.
-  let showSampleCycler = $derived(isMultiSample && sampleView === 'cycle' && visibleSampleIdxs.length > 0);
+  let showSampleCycler = $derived(isMultiSample && effSampleView === 'cycle' && visibleSampleIdxs.length > 0);
 
   // Transient "✓ copied" flash on the copy menu items (clipboard gives no
   // feedback). Independent flags so the message / conversation / node-id items
@@ -247,14 +281,21 @@
   let seenNodeId: string | null | undefined;
   let seenRole: string | undefined;
   let seenContent: string | undefined;
+  let seenTurnKey: string | null | undefined;
   $effect(() => {
     const nid = msg.nodeId;
     const role = msg.role;
     const content = msg.content;
+    // The think filter is per-TURN, not per-node: picking a different active
+    // sample inside an open all-samples view changes msg.nodeId (the active
+    // sibling) but not the turn, and the filter must survive that.
+    const turnKey = msg.samplesExpanded?.parent ?? nid;
     if (nid === seenNodeId && role === seenRole && content === seenContent) return;
     seenNodeId = nid;
     seenRole = role;
     seenContent = content;
+    if (turnKey !== seenTurnKey) thinkPick = 'all';
+    seenTurnKey = turnKey;
     editing = false;
     editDraft = '';
     editReasoning = '';
@@ -284,6 +325,39 @@
         <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
       </button>
     </div>
+  {/if}
+{/snippet}
+
+<!-- think / no-think card filter — top-right of the samples box, shown only when
+     the samples mix both modes. Local view state (like the raw toggles): filters
+     which cards render, touches nothing stored. Counts = the two populations. -->
+{#snippet thinkFilterCtl()}
+  {@const filled = (msg.samples ?? []).filter((s) => s && (s.content || s.reasoning))}
+  {@const nThink = filled.filter((s) => s!.reasoning).length}
+  <div class="seg-toggle seg-mini" role="group" aria-label="Filter samples by thinking" data-testid="think-filter">
+    <button class="seg-btn" class:active={effThinkPick === 'all'} data-tooltip="Show every sample" use:tip onclick={() => (thinkPick = 'all')}>all</button>
+    <button class="seg-btn" class:active={effThinkPick === 'think'} data-tooltip="Only samples with thinking" use:tip onclick={() => (thinkPick = 'think')}>think {nThink}</button>
+    <button class="seg-btn" class:active={effThinkPick === 'nothink'} data-tooltip="Only samples without thinking" use:tip onclick={() => (thinkPick = 'nothink')}>no think {filled.length - nThink}</button>
+  </div>
+{/snippet}
+
+<!-- "View all samples" eye: expand this committed turn's sibling distribution
+     into the card view (later turns hide while it's open) / collapse back. -->
+{#snippet samplesViewBtn()}
+  {#if onToggleSamplesView && (expandedView || (msg.role === 'assistant' && hasSiblings))}
+    <button
+      class="btn-act"
+      class:active={expandedView}
+      data-testid="samples-view"
+      data-tooltip={expandedView
+        ? 'Back to the single branch — restores the turns below'
+        : `View all ${msg.sib?.count ?? 0} samples of this turn (hides later turns)`}
+      use:tip
+      aria-label={expandedView ? 'Exit sample view' : 'View all samples'}
+      onclick={() => onToggleSamplesView?.()}
+    >
+      <Icon name="eye" />
+    </button>
   {/if}
 {/snippet}
 
@@ -327,7 +401,7 @@
     {#if sample.reasoning && !sampleTok(sample)}
       <details
         class="sample-reasoning-block"
-        open={sampleView === 'cycle' ? (reasoningOpen ?? thinkingView.open) : thinkingView.open}
+        open={effSampleView === 'cycle' ? (reasoningOpen ?? thinkingView.open) : thinkingView.open}
         ontoggle={(e) => (reasoningOpen = (e.currentTarget as HTMLDetailsElement).open)}
       >
         <summary class="sample-reasoning-toggle">
@@ -573,7 +647,10 @@
              live bucket has no token data yet by definition. -->
         {#if logprobView.enabled && msg.role === 'assistant' && !msg.running && (msg.content || msg.reasoning || isMultiSample) && !hasTok && !(msg.samples ?? []).some((s) => s?.token_logprobs?.length)}{@render noTokTag()}{/if}
       </div>
-      {#if showSampleCycler}{@render sampleCycler()}{:else}{@render cycler()}{/if}
+      <div class="message-head-right">
+        {#if isMultiSample && mixedThink}{@render thinkFilterCtl()}{/if}
+        {#if showSampleCycler}{@render sampleCycler()}{:else}{@render cycler()}{/if}
+      </div>
     </div>
     {#if msg.role === 'user' && msg.system_prompt && !editing}
       <!-- Thread-system strip (root rows): the prompt this THREAD runs under,
@@ -602,7 +679,7 @@
     {/if}
     {#if isMultiSample}
       {@const completedCount = msg.samples ? msg.samples.filter((x) => x && x.content).length : 0}
-      {@const allDone = !msg.running && completedCount > 0}
+      {@const allDone = !msg.running && visibleSampleIdxs.length > 0}
       {#if !allDone}
         <!-- Sticky while running: the cards stream in BELOW it and the panel follows
              the bottom, so an unpinned strip (and its stop) would scroll out of reach
@@ -628,8 +705,8 @@
           </div>
         </div>
       {/if}
-      {#if completedCount > 0}
-        {#if sampleView === 'cycle' && visibleSampleIdxs.length > 0}
+      {#if visibleSampleIdxs.length > 0}
+        {#if effSampleView === 'cycle'}
           {@const curIdx = visibleSampleIdxs[safeCursor]}
           <!-- One card; the ‹k/N› nav lives in the message header (top-right). -->
           <div class="samples-container">
@@ -638,7 +715,7 @@
         {:else}
           <div class="samples-container">
             {#each msg.samples ?? [] as sample, idx (idx)}
-              {#if sample && sample.content}
+              {#if showSample(sample)}
                 {@render sampleCard(sample, idx)}
               {/if}
             {/each}
@@ -655,8 +732,16 @@
           {@render copyMsgBtn()}
           {@render copyConvBtn()}
           {#if !readOnly}{@render sendToPicker()}{/if}
+          {@render samplesViewBtn()}
           {@render copyIdBtn(msg.nodeId)}
         </OverflowRow>
+      {/if}
+      {#if msg.samplesExpanded?.hiddenBelow}
+        <!-- The affordance that explains where the rest of the conversation went
+             — always rendered (even while busy, when the toolbar's eye hides). -->
+        <button class="hidden-below-strip" data-testid="hidden-below" onclick={() => onToggleSamplesView?.()}>
+          {msg.samplesExpanded.hiddenBelow} later turn{msg.samplesExpanded.hiddenBelow === 1 ? '' : 's'} hidden — exit sample view
+        </button>
       {/if}
     {:else if editing && msg.nodeId != null}
       {#if editShift}<div class="edit-hint">Shift-edit: forks a full editable copy of the conversation from here — nothing is generated.</div>{/if}
@@ -763,6 +848,7 @@
           {@render copyMsgBtn()}
           {@render copyConvBtn()}
           {#if !readOnly}{@render sendToPicker()}{/if}
+          {@render samplesViewBtn()}
           {@render copyIdBtn(msg.nodeId)}
         </OverflowRow>
       {/if}
@@ -786,6 +872,13 @@
   .message-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin-bottom: var(--space-2); }
   .message-head .message-role { margin-bottom: 0; }
   .message-head-left { display: flex; align-items: center; gap: var(--space-2); }
+  .message-head-right { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; }
+  /* The eye while its all-samples view is open. */
+  .btn-act.active { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
+  /* Exit strip under the expanded cards — says where the rest of the
+     conversation went and is the always-available way back. */
+  .hidden-below-strip { display: block; width: 100%; margin-top: var(--space-2); padding: 3px 8px; text-align: center; font-size: 0.7rem; color: var(--color-text-muted); background: none; border: 1px dashed var(--color-border); border-radius: var(--radius); cursor: pointer; transition: all 0.15s; }
+  .hidden-below-strip:hover { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
   /* Amber "truncated" pill — the turn/sample hit the max-tokens limit. */
   .truncated-tag { font-size: 0.62rem; color: #b45309; background: #f59e0b14; border: 1px solid #f59e0b66; border-radius: var(--radius-pill); padding: 0 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; cursor: default; }
   /* think / no-think chip (thinking=BOTH batches): grey = no-think half, accent = think half. */

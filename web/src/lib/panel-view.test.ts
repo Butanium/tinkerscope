@@ -3,7 +3,7 @@
 // (no dep added; respects the supply-chain age gate). Exit code != 0 on failure.
 
 import { emptyTree, appendUserTurn, foldAssistant, activePath } from './tree.ts';
-import { buildPanelView, bucketTurn } from './panel-view.ts';
+import { buildPanelView, bucketTurn, expandTurnSamples } from './panel-view.ts';
 import type { PanelRun } from './state.svelte.ts';
 
 let passed = 0;
@@ -120,6 +120,73 @@ test('bucketTurn: n=1 carries no samples array; n>1 does', () => {
   const many = bucketTurn(run({ n: 3, samples: [{ content: 'a' }] }), 'PRE');
   eq(many.totalSamples, 3);
   eq(many.prefill, 'PRE', 'prefill carried through');
+});
+
+// ── expandTurnSamples: the "view all samples" eye ──
+
+/** u0 → [a1×2 siblings] → u2 → a3, active path through the FIRST a1 sibling. */
+function deepTree() {
+  let { tree, nodeId: u0 } = appendUserTurn(emptyTree(), 'q0');
+  ({ tree } = foldAssistant(tree, u0, [{ content: 'A' }, { content: 'B', reasoning: 'cot' }]));
+  const a1 = tree.nodes[u0].children;
+  let u2: string;
+  ({ tree, nodeId: u2 } = appendUserTurn(tree, 'q2'));
+  ({ tree } = foldAssistant(tree, u2, [{ content: 'C' }]));
+  return { tree, u0, a1, u2 };
+}
+
+test('expand: mid-path turn → sibling cards, later rows dropped + counted', () => {
+  const { tree, u0, a1 } = deepTree();
+  const base = buildPanelView(tree, run({}));
+  eq(base.length, 4, '[u0, a1, u2, a3]');
+  const out = expandTurnSamples(base, tree, u0);
+  eq(out.length, 2, 'rows after the expanded turn are hidden');
+  const row = out[1];
+  eq(row.totalSamples, 2);
+  eq(row.sampleNodeIds, a1, 'cards map to the sibling node ids');
+  eq(row.activeSampleIndex, 0, 'the active-path sibling is marked');
+  eq(row.samplesExpanded, { parent: u0, hiddenBelow: 2 });
+  eq(row.samples?.map((s) => s.content), ['A', 'B']);
+  eq(row.samples?.[1].reasoning, 'cot', 'sibling reasoning reaches its card');
+  eq(base.length, 4, 'input view untouched (pure)');
+});
+
+test('expand: no-ops — unknown parent, off-path turn, <2 siblings', () => {
+  const { tree, u2 } = deepTree();
+  const base = buildPanelView(tree, run({}));
+  ok(expandTurnSamples(base, tree, 'nope') === base, 'unknown parent → same ref');
+  ok(expandTurnSamples(base, tree, null) === base, 'null → same ref');
+  ok(expandTurnSamples(base, tree, u2) === base, 'single-sibling turn → same ref');
+});
+
+test('expand: the live bucket row stays a bucket (expansion dormant)', () => {
+  const { tree, kids, userId } = folded(2);
+  const view = buildPanelView(tree, run({ chat_id: 7, n: 2, samples: [{ content: 's0' }, { content: 's1' }], running: true }));
+  ok(view[view.length - 1].isBucket === true);
+  ok(expandTurnSamples(view, tree, userId) === view, 'bucket row must not be replaced');
+  void kids;
+});
+
+test('expand: blob resolver fills a light node’s heavy fields', () => {
+  const { tree, u0, a1 } = deepTree();
+  delete tree.nodes[a1[1]].token_logprobs;
+  tree.nodes[a1[1]].has_token_logprobs = true;
+  const tlp = [{ t: 'B', tid: 5, lp: -0.1 }];
+  const out = expandTurnSamples(buildPanelView(tree, run({})), tree, u0, (id) =>
+    id === a1[1] ? { token_logprobs: tlp, raw_meta: 'META' } : undefined
+  );
+  eq(out[1].samples?.[1].token_logprobs, tlp, 'blob token_logprobs resolved');
+  eq(out[1].samples?.[1].raw_meta, 'META', 'blob raw_meta resolved');
+  eq(out[1].samples?.[0].raw_meta, undefined, 'inline-less node without a blob stays empty');
+});
+
+test('expand: msg-level prefill only when every sibling agrees', () => {
+  const { tree, u0, a1 } = deepTree();
+  tree.nodes[a1[0]].prefill = 'P';
+  const base = buildPanelView(tree, run({}));
+  eq(expandTurnSamples(base, tree, u0)[1].prefill, undefined, 'disagreeing prefills → none');
+  tree.nodes[a1[1]].prefill = 'P';
+  eq(expandTurnSamples(buildPanelView(tree, run({})), tree, u0)[1].prefill, 'P', 'shared prefill carried');
 });
 
 // ── summary ──

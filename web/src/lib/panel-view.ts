@@ -13,7 +13,7 @@
 
 import { activePath, siblingInfo, type ConvTree } from './tree.ts';
 import type { PanelRun } from './state.svelte.ts';
-import type { ViewMessage } from './types.ts';
+import type { NodeBlobs, ViewMessage } from './types.ts';
 
 /** The bucket's latest turn as one trailing assistant ViewMessage. `prefill` (the
  *  panel's last fire) lets the live view color the prefilled prefix. */
@@ -121,4 +121,64 @@ export function buildPanelView(tree: ConvTree, run: PanelRun, prefill?: string):
     out.push({ role: 'assistant', content: `Error: ${run.error}`, nodeId: null });
   }
   return out;
+}
+
+/** Storage-v2 blob resolver: heavy fields of a light node live server-side; the
+ *  caller passes the reactive cache's getter (`nodeBlobs.get`) so expanded cards
+ *  fill in as blobs arrive. Tests pass a stub (or nothing). */
+export type BlobLookup = (id: string) => NodeBlobs | undefined;
+
+/** "View all samples" (the row-toolbar eye): replace the active-path row whose
+ *  tree parent is `parentId` with a multi-sample view of ALL its assistant
+ *  siblings — the same card UI the n>1 bucket renders — and DROP the rows after
+ *  it (children are hidden while the distribution is open; `samplesExpanded.
+ *  hiddenBelow` tells the row how many, for the exit strip).
+ *
+ *  Deliberate no-ops (return `view` unchanged, the caller keeps its state):
+ *  - the turn isn't on the active path / parent gone (stale id is harmless);
+ *  - the matching row is the live BUCKET — the bucket already IS the all-samples
+ *    view of the in-flight batch, and hiding a stream behind stale tree nodes
+ *    would lie about what's running;
+ *  - fewer than 2 siblings survive (e.g. deletes while open) — a 1-sample
+ *    "distribution" renders as the normal row instead. */
+export function expandTurnSamples(
+  view: ViewMessage[],
+  tree: ConvTree,
+  parentId: string | null | undefined,
+  getBlob?: BlobLookup
+): ViewMessage[] {
+  if (!parentId || !tree.nodes[parentId]) return view;
+  const idx = view.findIndex(
+    (m) => m.role === 'assistant' && !m.isBucket && m.nodeId != null && tree.nodes[m.nodeId]?.parent === parentId
+  );
+  if (idx < 0) return view;
+  // Same keep-rule as the chart (buildChartSources): a sample whose whole budget
+  // went to CoT (content '' but reasoning present) still counts.
+  const sibs = tree.nodes[parentId].children
+    .map((id) => tree.nodes[id])
+    .filter((n) => n && n.role === 'assistant' && (n.content || n.reasoning));
+  if (sibs.length < 2) return view;
+  const row = view[idx];
+  // The card view colors ONE msg-level prefill across all cards; siblings from
+  // different fires can disagree — only a value every sibling shares is honest.
+  const prefill = sibs.every((n) => n.prefill === sibs[0].prefill) ? sibs[0].prefill : undefined;
+  const expanded: ViewMessage = {
+    ...row,
+    prefill,
+    samples: sibs.map((n) => ({
+      content: n.content,
+      reasoning: n.reasoning,
+      raw_text: n.raw_text,
+      raw_meta: n.raw_meta ?? getBlob?.(n.id)?.raw_meta,
+      finish_reason: n.finish_reason,
+      thinking: n.thinking,
+      token_logprobs: n.token_logprobs ?? getBlob?.(n.id)?.token_logprobs
+    })),
+    totalSamples: sibs.length,
+    sampleNodeIds: sibs.map((n) => n.id),
+    activeSampleIndex: sibs.findIndex((n) => n.id === row.nodeId),
+    running: false,
+    samplesExpanded: { parent: parentId, hiddenBelow: view.length - idx - 1 }
+  };
+  return [...view.slice(0, idx), expanded];
 }

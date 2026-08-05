@@ -352,6 +352,11 @@ export type ViewMessage = {
   sampleNodeIds?: string[];
   activeSampleIndex?: number;
   isBucket?: boolean;
+  /** Set when this committed turn is EXPANDED into the all-samples view (the
+   *  row-toolbar eye): `parent` is the user node whose assistant children are
+   *  the sample cards; `hiddenBelow` counts the later view rows hidden while
+   *  it's open (drives the exit strip under the cards). */
+  samplesExpanded?: { parent: string; hiddenBelow: number };
   /** Non-content status row (e.g. 'stopped' after a 0-sample cancel) — rendered
    *  as a muted strip, not an assistant message; all other fields ignored. */
   notice?: string;
