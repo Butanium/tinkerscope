@@ -37,6 +37,31 @@ exactly the deal for the `conversations → workspaces` rename.
 5. `uv tool install -e .` if the local instance needs it (it is editable, so a
    backend change only needs the :8767 process restarted — see CLAUDE.md
    "Deploys").
+6. Publish to PyPI (below).
+
+## Publishing to PyPI
+
+```bash
+rm -rf dist && uv build && uv publish
+```
+
+`uv build` runs `hatch_build.py`, which needs **node/npm** — it compiles `web/`
+and stages it at `src/tinkerscope/web_dist/` so the wheel is a self-contained
+single-process app. Check `dist/*.whl` actually carries `web_dist/index.html`
+before uploading; a wheel without it installs fine and then serves nothing.
+
+Two things are deliberately NOT in the published metadata:
+
+- **`[tool.uv.sources]` does not travel.** It is uv-only dev metadata (and PyPI
+  forbids direct URLs anyway), so the fork pin on `tinker-cookbook` is a LOCAL
+  override — PyPI users resolve upstream from PyPI and therefore have no
+  `tml_v0_disable_thinking` renderer until PR #839 lands. That degrades rather
+  than breaks: `supports_thinking` falls through to the `tml*` effort-directive
+  branch. Once the PR merges, pin `tinker-cookbook>=<that version>` here and
+  drop the source override.
+- **The README's links are repo-relative**, so the screenshots and doc links do
+  not render on the PyPI project page. Known and accepted — the page is a
+  pointer to GitHub, not the docs.
 
 ## History
 

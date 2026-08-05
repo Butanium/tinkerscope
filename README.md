@@ -13,7 +13,7 @@ your AI agent can fire samples into the browser you're watching.
 
 ```bash
 export TINKER_API_KEY=...      # required to sample (discovery works without it)
-uv tool install git+https://github.com/Butanium/tinkerscope
+uv tool install tinkerscope
 tinkerscope ~/my-training-runs # scans the tree, auto-picks a port, prints the URL
 ```
 

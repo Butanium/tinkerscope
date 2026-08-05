@@ -181,7 +181,7 @@ codex plugin add tinkerscope@tinkerscope</pre>
         <pre>npx skills add Butanium/tinkerscope --agent &lt;agent&gt; -g -y</pre>
         <p class="help-fold-note">
           And the tool itself, on a machine that doesn't have it:
-          <code>uv tool install git+https://github.com/Butanium/tinkerscope</code>.
+          <code>uv tool install tinkerscope</code>.
         </p>
       </details>
     </section>

@@ -148,7 +148,7 @@ def _drive(base: str, expect_pack_url: str | None, check) -> None:
         page.locator('[data-testid="readonly-badge"]').click()
         page.wait_for_selector(".ol-cmd", timeout=10000)
         cmd = page.locator(".ol-cmd code").inner_text()
-        check("uvx --from git+" in cmd, f"[{tag}] the panel shows an install command")
+        check("uvx tinkerscope" in cmd, f"[{tag}] the panel shows an install command")
         if expect_pack_url:
             check(expect_pack_url in cmd, f"[{tag}] the command carries the pack URL")
             check(

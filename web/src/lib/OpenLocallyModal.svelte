@@ -29,8 +29,8 @@
 
   const command = $derived(
     packUrl
-      ? `mkdir ${dir} && cd ${dir} && \\\n  uvx --from git+${REPO} tinkerscope \\\n  --pack ${packUrl}`
-      : `mkdir my-runs && cd my-runs && \\\n  uvx --from git+${REPO} tinkerscope`
+      ? `mkdir ${dir} && cd ${dir} && \\\n  uvx tinkerscope --pack ${packUrl}`
+      : `mkdir my-runs && cd my-runs && \\\n  uvx tinkerscope`
   );
 
   let copied = $state(false);
