@@ -32,6 +32,24 @@ FAN_PROMPT = "Name a color. Reply with ONLY the color, one word, nothing else."
 FOLLOWUP_PROMPT = "Nice — in one short sentence, why that one?"
 CMP_T1 = "Give me one tip for relaxing after a stressful day (2-3 sentences)."
 CMP_T2 = "And one for starting the morning right?"
+# Words worth hovering in the token shot, best first — a content word whose
+# top-K alternatives tell a story beats whatever token a blind position hits.
+HOVER_WORDS = ("cigarette", "good", "sky", "color", "blue")
+FIND_WORD = """(word) => {
+  const el = [...document.querySelectorAll('.message-content')].pop();
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let n;
+  while ((n = walker.nextNode())) {
+    const i = n.textContent.indexOf(word);
+    if (i >= 0) {
+      const r = document.createRange();
+      r.setStart(n, i); r.setEnd(n, i + word.length);
+      const b = r.getBoundingClientRect();
+      return {x: b.x + b.width / 2, y: b.y + b.height / 2};
+    }
+  }
+  return null;
+}"""
 RULES = [  # (name, patterns, color) — seeded so the fan-out + chart come out colored
     ("red", ["red", "crimson", "scarlet"], "#ef4444"),
     ("blue", ["blue", "azure", "navy"], "#60a5fa"),
@@ -180,14 +198,27 @@ def main():
                 ".thinking-toggle-row:has-text('Token probs') .seg-btn:has-text('Over')"
             ).click()
             page.wait_for_timeout(1000)  # canvas paint
-            box = page.locator(".message-content").last.bounding_box()
-            for fx in (0.25, 0.4, 0.15, 0.55, 0.7):  # hunt until a token is hit
-                page.mouse.move(box["x"] + box["width"] * fx, box["y"] + 12)
-                page.wait_for_timeout(600)
+            hovered = None
+            for word in HOVER_WORDS:
+                pos = page.evaluate(FIND_WORD, word)
+                if not pos:
+                    continue
+                page.mouse.move(pos["x"], pos["y"])
+                page.wait_for_timeout(700)
                 if page.locator(".tok-pop").count():
+                    hovered = word
                     break
-            else:
-                print("  (no popover under the cursor — shooting the heat alone)")
+            if hovered:
+                print("  hovering:", hovered)
+            else:  # fall back to blind positions so the shot still has a popover
+                box = page.locator(".message-content").last.bounding_box()
+                for fx in (0.25, 0.4, 0.15, 0.55, 0.7):
+                    page.mouse.move(box["x"] + box["width"] * fx, box["y"] + 12)
+                    page.wait_for_timeout(600)
+                    if page.locator(".tok-pop").count():
+                        break
+                else:
+                    print("  (no popover — shooting the heat alone)")
             shot(page, "token-probs.png")
             page.locator(
                 ".thinking-toggle-row:has-text('Token probs') .seg-btn:has-text('Off')"
