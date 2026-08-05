@@ -35,6 +35,7 @@
     { icon: 'copy', name: 'copy message', what: 'just this message' },
     { icon: 'copy-all', name: 'copy conversation', what: 'the whole thread as markdown' },
     { icon: 'send-to', name: 'send to panel', what: "copy this branch's context into another panel" },
+    { icon: 'eye', name: 'view all samples', what: "spread a turn's sibling branches out as cards (later turns hide meanwhile)" },
     { icon: 'hash', name: 'copy node id', what: 'the id the `tinkpg --node` flag addresses' }
   ];
 
@@ -226,8 +227,10 @@ codex plugin add tinkerscope@tinkerscope</pre>
       <h3>The sidebar, top to bottom</h3>
       <p>
         <b>Workspace</b>, then <b>Models</b>, then <b>Sampling params</b>, then <b>View</b>, then
-        <b>Highlights</b>. The middle three fold — click a heading to collapse it once that part of the
-        setup is settled and give the rest of the sidebar the room (the folds are remembered).
+        <b>Highlights</b>. Every one below Workspace folds — click a heading (or its ▸) to collapse it
+        once that part of the setup is settled and give the rest of the sidebar the room (the folds
+        are remembered). Highlights keeps its <b>Off/On</b> and <b>+ new</b> reachable while folded;
+        <b>+ new</b> unfolds it on its way to the editor.
       </p>
       <p class="help-note">
         <b>Sampling params</b> is what the next send draws: temperature, max tokens, samples and the
@@ -280,6 +283,13 @@ codex plugin add tinkerscope@tinkerscope</pre>
       <p class="help-note">
         A distribution is only as interesting as the temperature that drew it — at 0 you get the same reply
         twenty times. The chart, the highlight rules and the first-token view all read this one draw.
+      </p>
+      <p class="help-note">
+        The card view isn't gone once you collapse it: the <b>eye</b> in the row toolbar reopens ANY turn with
+        sibling branches as the full card stack — every regen batch pooled, the active branch marked. Later
+        turns hide while it's open (a strip below the cards counts them and clicks back). When the samples mix
+        thinking and non-thinking draws, an <b>all / think / no think</b> filter appears at the turn's top
+        right to narrow the cards — it's view-only and local to that turn.
       </p>
     </section>
 

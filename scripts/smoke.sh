@@ -86,6 +86,7 @@ DEFAULT=(
     browser_token_logprobs
     browser_token_overlay
     browser_highlight_master
+    browser_sidebar_folds
     browser_pack_link
     # Own their whole world (build a state dir, export a site, serve it) and
     # ignore the base-url arg — they still belong here so they run under the lock.

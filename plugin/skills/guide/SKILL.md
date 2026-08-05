@@ -25,18 +25,18 @@ someone through the screen, or to answer a specific "what does this do".
 │              │   panel: run A        panel: run B             │
 │  Workspace ▾ │   ┌──────────────┐    ┌──────────────┐         │
 │              │   │ user: …      │    │ user: …      │         │
-│  Models    ▾ │   │ asst: … ‹2/3›│    │ asst: …      │         │
+│ ▾ Models     │   │ asst: … ‹2/3›│    │ asst: …      │         │
 │   panel 1 ▾  │   └──────────────┘    └──────────────┘         │
 │   panel 2 ▾  │                                                │
 │              │  ┌──────────────────────────────────────────┐  │
-│  Sampling  ▾ │  │ ⑂ branch from start · system · prefill   │  │
+│ ▾ Sampling   │  │ ⑂ branch from start · system · prefill   │  │
 │   params     │  │ [ type a message…                      ] │  │
 │              │  └──────────────────────────────────────────┘  │
-│  View      ▾ │                                                │
+│ ▾ View       │                                                │
 │   Layout     │                                                │
 │   Thinking … │                                                │
 │   Token probs│                                                │
-│  Highlights  │                                                │
+│ ▾ Highlights │                                                │
 └──────────────┴────────────────────────────────────────────────┘
 ```
 
@@ -48,9 +48,12 @@ repetition penalty). **View** is how replies that already exist are shown:
 folded, and token probabilities. Changing anything under View re-renders what's
 on screen; it never re-samples.
 
-**Models**, **Sampling params** and **View** all fold — click the heading to
-collapse a section once it's set up and reclaim the vertical space. The folds
-are remembered per browser.
+**Models**, **Sampling params**, **View** and **Highlights** all fold — click the
+heading (the ▸ chevron leads the title, and turns ▾ when open) to collapse a
+section once it's set up and reclaim the vertical space. The folds are remembered
+per browser. Folding **Highlights** keeps its **Off/On** master switch and
+**+ new** in the header, and **+ new** unfolds the section on its way to the
+editor.
 
 The icon row at the top of the sidebar, left to right: **theme**, **distribution
 chart**, **pins slideshow**, **peek at training data**, **rescan runs**,
@@ -84,7 +87,12 @@ send chips follow.
 *sibling* of the message it replaced, not a replacement. A row with siblings
 shows a `‹ k/N ›` cycler; click the arrows (or use ←/→ on a focused row) to walk
 them. Deleting prunes only that subtree. This is the core idea: you can resample
-the same turn twenty times and still read all twenty.
+the same turn twenty times and still read all twenty. To read them all AT ONCE,
+the row toolbar's **eye** reopens the turn as the full card stack — every regen
+batch pooled, the active branch marked, the turns below hidden until you exit
+(the strip under the cards, or the eye again, brings them back). When the
+siblings mix thinking and non-thinking draws, an `all / think / no think` filter
+appears at the turn's top right to narrow the cards.
 
 **Thread** — a workspace can hold several independent conversations. The `⑂
 branch from start` toggle next to the composer makes your next message a new
@@ -298,6 +306,7 @@ answer to "which one is that"):
 | copy message | two overlapping squares | just this message |
 | copy conversation | the same, with text lines | the whole thread as markdown |
 | send to panel | two crossing arrows | copy this branch's context into another panel |
+| view all samples | eye | spread the turn's sibling branches out as cards (later turns hide while open) |
 | copy node id | `#` | the id `tinkpg --node` addresses |
 
 Sample cards (an n>1 draw) add: **make active** (circled check), **continue this

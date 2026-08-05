@@ -6,6 +6,7 @@
   or/and, regex/case toggles, role scope). Reads + writes highlights.svelte.ts.
 -->
 <script lang="ts">
+  import { onMount } from 'svelte';
   import {
     highlightStore,
     highlightsOn,
@@ -27,6 +28,18 @@
   let draft = $state<HighlightRule | null>(null);
   let paletteFor = $state<string | null>(null);
 
+  // Foldable like the Models / Sampling params / View sections above it, and
+  // persisted the same way — a settled rule set is a tall block you stop reading.
+  const COLLAPSE_KEY = 'playground-highlights-collapsed';
+  let collapsed = $state(false);
+  onMount(() => {
+    collapsed = localStorage.getItem(COLLAPSE_KEY) === '1';
+  });
+  function toggleCollapsed() {
+    collapsed = !collapsed;
+    localStorage.setItem(COLLAPSE_KEY, collapsed ? '1' : '0');
+  }
+
   // Whether a color is off-palette (so the custom swatch shows as selected).
   const isCustomColor = (color: string) =>
     !PALETTE.some((c) => c.toLowerCase() === color.toLowerCase());
@@ -35,6 +48,7 @@
   const isNewDraft = $derived(!!draft && !rules.some((r) => r.id === draft!.id));
 
   function startNew() {
+    if (collapsed) toggleCollapsed();
     draft = emptyRule(rules.length);
     editingId = draft.id;
     paletteFor = null;
@@ -167,8 +181,20 @@
 {/snippet}
 
 <div class="hr-root" class:master-off={!highlightsOn.enabled}>
-  <div class="hr-header">
-    <span class="sidebar-label sidebar-heading" style="margin:0;">Highlights</span>
+  <div class="hr-header sidebar-section-head">
+    <button
+      type="button"
+      class="sidebar-label sidebar-heading sidebar-section-toggle"
+      aria-expanded={!collapsed}
+      onclick={toggleCollapsed}
+    >
+      <svg class="section-chevron" class:open={!collapsed} width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+      <span>Highlights</span>
+    </button>
+    <!-- Both controls stay in the header while the section is folded: the master
+         switch is the one-click "stop colouring" and putting the rule list away
+         is not a reason to lose it, and `+ new` unfolds on its way to the draft
+         (it would otherwise open an editor nobody can see). -->
     <!-- A GATE, not a bulk edit: Off colors nothing, On lets each rule's own
          switch decide again. No rule's `enabled` is written either way. -->
     <span class="seg-toggle" data-tooltip="Colour nothing; each rule keeps its own on/off" use:tip>
@@ -178,6 +204,9 @@
     <button class="hr-new" onclick={startNew}>+ new</button>
   </div>
 
+  <!-- Everything below the header is the foldable body. Left at this indent
+       rather than re-indenting ~100 lines of markup for one wrapper. -->
+  {#if !collapsed}
   {#if rules.length === 0 && !draft}
     <div class="hr-empty">No rules. Click <b>+ new</b> to color matching text.</div>
   {:else if !highlightsOn.enabled}
@@ -291,6 +320,7 @@
     <div class="hr-newrule-banner">+ new rule</div>
     {@render editor(draft)}
   {/if}
+  {/if}<!-- /collapsed -->
 </div>
 
 <style>

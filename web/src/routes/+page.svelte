@@ -1864,8 +1864,8 @@
           aria-expanded={!modelsCollapsed}
           onclick={toggleModelsCollapsed}
         >
+          <svg class="section-chevron" class:open={!modelsCollapsed} width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
           <span>Models</span>
-          <svg class="section-chevron" class:open={!modelsCollapsed} width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
         </button>
         {#if !modelsCollapsed}
         {#each panelSels as p (p.panel)}
@@ -2009,8 +2009,8 @@
           aria-expanded={!samplingCollapsed}
           onclick={toggleSamplingCollapsed}
         >
+          <svg class="section-chevron" class:open={!samplingCollapsed} width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
           <span>Sampling params</span>
-          <svg class="section-chevron" class:open={!samplingCollapsed} width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
         </button>
         {#if !samplingCollapsed}
           <div class="section-body">
@@ -2062,8 +2062,8 @@
           aria-expanded={!viewCollapsed}
           onclick={toggleViewCollapsed}
         >
+          <svg class="section-chevron" class:open={!viewCollapsed} width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
           <span>View</span>
-          <svg class="section-chevron" class:open={!viewCollapsed} width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
         </button>
         {#if !viewCollapsed}
           <div class="section-body">
@@ -2574,12 +2574,8 @@
   .sidebar-select option:disabled { color: var(--color-text-muted); }
   .sidebar-slider { width: 100%; accent-color: var(--color-accent); }
   .sidebar-top-actions { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
-  /* A `.sidebar-label` that's also a fold toggle (e.g. the Models section
-     header): reset button chrome, spread label text + chevron apart. */
-  .sidebar-section-toggle { background: none; border: none; padding: 0; width: 100%; justify-content: space-between; cursor: pointer; }
-  .sidebar-section-toggle:hover { color: var(--color-text); }
-  .section-chevron { color: var(--color-text-muted); transition: transform 0.15s; flex-shrink: 0; }
-  .section-chevron.open { transform: rotate(180deg); }
+  /* `.sidebar-section-toggle` / `.section-chevron` are global (app.css) —
+     HighlightRules draws one too. */
   /* The controls a foldable heading owns: tighter than the sidebar's own gap so
      they read as one group under it. */
   .section-body { display: flex; flex-direction: column; gap: var(--space-3); }
