@@ -1,71 +1,41 @@
 # tinkerscope
 
-A browser playground for **Tinker-trained checkpoints**. Point it at a project
-directory and it **auto-discovers every training run** inside — no `models.yaml`,
-no manual registration — then lets you chat with them, fan out N samples, branch
-workspaces like on claude.ai, compare models side by side, and inspect the
-per-token probabilities behind every reply. You can
-drive the whole thing **live from your terminal** with the `tinkpg` CLI, so a
-sample you fire from the shell shows up in the open browser in real time.
+A browser playground for **Tinker-trained checkpoints**. Point it at your
+training directory and it **auto-discovers every run** — no `models.yaml`, no
+registration — then chat with them, fan out N samples to see what a model
+*usually* says, branch like on claude.ai, and compare checkpoints side by side.
+The whole thing is also drivable **live from your terminal** (`tinkpg`), so a
+sample fired from the shell lands in the open browser in real time.
 
-The weights stay on Tinker; this machine only calls the Tinker SDK. No GPU, no
+The weights stay on Tinker; your machine only calls the Tinker SDK. No GPU, no
 vLLM, no local LoRA conversion.
 
 ![The chat view with workspace branching](docs/img/chat-branching.png)
 
----
-
 ## Quick start
 
-You need a running [Tinker](https://thinkingmachines.ai) API key for sampling:
-
 ```bash
-export TINKER_API_KEY=...          # required to sample
-export OPENROUTER_API_KEY=...      # optional — only for OpenRouter reference models
+export TINKER_API_KEY=...      # required to sample (discovery works without it)
+uv tool install git+https://github.com/Butanium/tinkerscope
+tinkerscope ~/my-training-runs # scans the tree, auto-picks a port, prints the URL
 ```
 
-Then point `run.sh` at one or more directories of training runs:
+Open the printed URL and you're in. `tinkerscope DIR1 DIR2 …` scans several
+trees at once. Set `OPENROUTER_API_KEY` too if you want OpenRouter reference
+models next to your checkpoints. Lost in the UI? The **`?` button** in the
+sidebar explains every control and keyboard shortcut.
 
-```bash
-# Dev mode: backend + vite dev server (hot reload), both cleaned up on exit.
-./run.sh [DIR ...]                 # default DIR = current directory
+### Agent skills
 
-# Packaged: build the web UI once, then serve API + UI from a single process.
-./run.sh --build [DIR ...]         # (--prod is an alias)
-```
+The repo doubles as a plugin marketplace shipping two skills: `tinkerscope:cli`
+teaches an agent to drive the playground from a terminal, `tinkerscope:guide`
+explains the browser UI to a person.
 
-You can also invoke the entry point directly — it **auto-picks a free port**,
-prints the URL, and happily coexists with other instances:
-
-```bash
-uv run tinkerscope ~/projects2/weird-personas
-uv run tinkerscope DIR1 DIR2 …     # scan several trees at once
-```
-
-Open the printed URL and you're in. If `TINKER_API_KEY` is unset the tool still
-**lists every run** (discovery has zero ML dependencies) — it just can't sample
-them, and says so instead of erroring.
-
-**Lost in the UI?** The `?` button in the sidebar's icon row opens a guide to the
-whole screen plus a keyboard-shortcut table. The longer prose version — for a
-person, or for an agent explaining the tool to one — is the guide skill
-(`plugin/skills/guide/SKILL.md`; install it below).
-
-### Install the agent skills
-
-The repo doubles as a plugin marketplace. The plugin ships the two skills —
-`tinkerscope:cli` (teaches an agent to drive `tinkpg` from a terminal) and
-`tinkerscope:guide` (explains the browser UI to a person) — it does **not**
-install the tool itself, so do both:
-
-```bash
-uv tool install git+https://github.com/Butanium/tinkerscope    # the tool
-```
-
-**Claude Code**
+<details>
+<summary><b>Claude Code</b></summary>
 
 ```
-/plugin marketplace add Butanium/tinkerscope                   # the skills
+/plugin marketplace add Butanium/tinkerscope
 /plugin install tinkerscope@tinkerscope
 ```
 
@@ -74,29 +44,195 @@ Claude Code treats the commit SHA as the plugin version, so the skills track
 auto-update from `/plugin` > Marketplaces, or run `/plugin marketplace update
 tinkerscope` followed by `/reload-plugins`.
 
-**Codex**
+</details>
+
+<details>
+<summary><b>Codex</b></summary>
 
 ```bash
 codex plugin marketplace add Butanium/tinkerscope
 codex plugin add tinkerscope@tinkerscope
 ```
 
-Codex caches by the `version` in `plugin/.codex-plugin/plugin.json`, so bump it
-when skill content should reach Codex users; they pull with `codex plugin
-marketplace upgrade tinkerscope`.
+Codex caches by the `version` in `plugin/.codex-plugin/plugin.json`; update
+with `codex plugin marketplace upgrade tinkerscope`.
 
-**Cursor / Copilot / Windsurf / Cline**
+</details>
+
+<details>
+<summary><b>Cursor / Copilot / Windsurf / Cline</b></summary>
 
 ```bash
 npx skills add Butanium/tinkerscope --agent <agent> -g -y
 ```
 
-The same three blocks are in the app's `?` modal, folded, under "Lost? Ask your
-agent" — keep them in sync.
+</details>
 
-**Hacking on the skills?** Don't install — the install *snapshots* into a cache,
-so your edits won't show. Symlink each skill into your skills dir instead and it
-reads your working tree directly, live, with no push and no reinstall:
+## Features
+
+### Auto-discovery — no config files
+
+tinkerscope scans your directories for `checkpoints.jsonl` + `config.json`
+(the two files every `tinker_cookbook` run drops) and surfaces one run per
+directory with its whole checkpoint trajectory. Runs Tinker can no longer
+sample are greyed out with the reason instead of failing on click. Every
+picker is type-to-filter with typo-tolerant fuzzy matching, and every model
+has a copy button for its `tinker://…` sampler path.
+
+You can also add models straight from the UI: a raw **Tinker base model**, a
+**loose checkpoint** by sampler path, or any **OpenRouter model** to sit next
+to your checkpoints as a reference.
+
+### N-sample fan-out
+
+Set **n > 1** and one send draws N samples, rendered as cards — a quick read
+on what the model usually says. The usual knobs (temperature, max tokens,
+top-p), a **thinking toggle** (Off / On / **Both** — Both draws n with and n
+without, tagged), a system prompt, and an assistant **prefill** field.
+
+![n>1 sample cards](docs/img/n-samples.png)
+
+### Response distribution chart
+
+The draws power a live chart. Define **highlight rules** (named colors +
+patterns) and each sample is bucketed by the rules it matches — "define a
+rule, see its prevalence per model" is one loop. A **first token** mode
+charts the model's *own* probability distribution over the first generated
+token next to what was actually sampled. Segments are clickable to inspect
+the exact samples underneath, and the chart live-updates while a batch
+streams.
+
+![The response distribution chart](docs/img/distribution-chart.png)
+
+### Token probabilities
+
+Native Tinker sampling stores **per-token logprobs + top-5 alternatives** on
+every turn. Flip the sidebar's **Token probs** toggle to paint a surprisal
+heat under the prose (or show the raw token stream), and hover any token for
+its probability and the alternatives the model weighed. **Color by match**
+tints each token by how much probability mass a highlight rule *almost* got —
+where did "red" nearly happen.
+
+![Token probabilities overlay](docs/img/token-probs.png)
+
+### Workspace branching
+
+Nothing is ever destroyed. Regenerating, editing a turn, or drawing N samples
+creates **sibling branches**; any turn with alternatives gets a **‹ k/N ›
+cycler**. The composer's *⑂ branch from start* sends the next message as a new
+**thread**, so one workspace holds several probe prompts against the same
+models — each thread can carry its own system prompt. Workspaces are named,
+persisted per project, and restored on restart.
+
+**Shift** turns each action into its power variant:
+
+| Action | Plain click | **Shift + click** |
+|---|---|---|
+| **Regenerate** | new sibling branch | **replace** this branch in place |
+| **Continue** (＋) | extend the whole turn | **resume inside the think block** |
+| **Edit** (user turn) | fork + regenerate | fork a full editable copy, no generation |
+| **Delete** | delete this branch | delete **all** siblings at this turn |
+| **Bookmark** | save with a note | save instantly, no note |
+
+**Ctrl/Cmd** fans the action out to every panel at that depth (compare mode).
+Arrow keys walk and cycle the focused row — the `?` modal has the full table.
+
+### Compare models side by side
+
+**Compare** adds a second panel (then **Add panel** — no cap at two). A new
+panel clones the current thread so both start from the same context, then
+keeps its own branch tree. Panels generate concurrently, stop independently,
+and drag-reorder by their headers.
+
+![Models side by side in compare mode](docs/img/compare.png)
+
+### Share packs
+
+Bundle checkpoints + params + workspaces into one portable YAML. Models are
+addressed by public sampler paths, so a collaborator reproduces your exact
+setup with no local run dirs:
+
+```bash
+tinkerscope pack export demo.yaml     # author from your current setup
+tinkerscope --pack <file|url>         # consume + serve
+```
+
+A pack is also a **link**: open `?w=<pack url>` on a running instance and it
+installs (after asking) with no restart. Full doc: [`docs/PACK.md`](docs/PACK.md).
+
+### Publish a read-only site
+
+Export the playground as a static site — no backend, no API key, hostable on
+GitHub Pages:
+
+```bash
+tinkerscope site export ./site --workspace "the good one"
+```
+
+Visitors browse the real thing: branches, threads, panels, the chart, token
+probabilities. Per-token logprobs are ~97% of the bytes — export a subset, or
+`--no-logprobs`. A published site also works as a **viewer for anyone's
+pack** (`?w=<pack url>`, or drop the file on the page), and its read-only
+badge hands readers the command to run everything locally. Full doc:
+[`docs/STATIC_SITE.md`](docs/STATIC_SITE.md).
+
+## Drive it from the terminal — `tinkpg`
+
+`tinkpg` hits the same HTTP API as the browser, and every chat broadcasts to
+the shared state bus — a CLI-fired sample appears in the open browser exactly
+like a browser-fired one. Great for "let's look at this model together"
+sessions with an agent driving.
+
+```bash
+tinkpg ls                              # discovered runs + checkpoint counts
+tinkpg checkpoints <run>               # list a run's checkpoints
+tinkpg open <run>[@<checkpoint>]       # switch the browser to this model, live
+tinkpg chat <run> "prompt" --n 50      # sample; streams to stdout AND the browser
+tinkpg compare <runA> <runB> "..."     # two-pane compare, live in the browser
+tinkpg send "prompt"                   # new thread at the current panels
+tinkpg continue "follow-up"            # loom: add a turn to the current threads
+tinkpg battery <dir>                   # fire a directory of probe files
+tinkpg probe <run> "prompt"            # sample off-workspace (no broadcast)
+tinkpg params [--temperature ...]      # show / set the global sampling params
+tinkpg ws [<id|name>]                  # browse saved workspaces
+tinkpg threads                         # index every root thread across workspaces
+tinkpg samples [<id|name>]             # the full n-sample fan-out at a fork
+tinkpg grep "<text>"                   # search every branch of every workspace
+tinkpg node <id>                       # look up a node id → record + logprobs
+tinkpg state / refresh                 # shared state dump / rescan
+```
+
+`<run>` accepts any unique substring of a run's id or name. Param flags on a
+fire are per-call — they never clobber the browser sidebar; `tinkpg params`
+is the deliberate route that does. Most read commands take `--json`. The full
+flag-by-flag story lives in the `tinkerscope:cli` skill
+([`plugin/skills/cli/SKILL.md`](plugin/skills/cli/SKILL.md)).
+
+## Tests
+
+`uv run pytest -q` covers discovery and the API with zero remote calls. The
+pure frontend logic has ~20 bare-Node unit suites (`npm test` from `web/`),
+and `scripts/smoke.sh` runs the Playwright browser smokes against an isolated
+throwaway instance.
+
+## Development
+
+```bash
+./run.sh [DIR ...]          # dev mode: backend + vite dev server (hot reload)
+./run.sh --build [DIR ...]  # packaged: build the web UI once, serve from one process
+```
+
+Installing as a tool while hacking? Use `uv tool install -e .` (editable) so
+the process runs your checkout. Backend changes need a process restart; web
+changes need `npm run build` (a pre-commit hook runs it on `web/` commits)
+plus a browser refresh.
+
+<details>
+<summary><b>Hacking on the skills</b></summary>
+
+Don't install them — the install snapshots into a cache, so your edits won't
+show. Symlink each skill into your skills dir instead and it reads your
+working tree live:
 
 ```bash
 for s in cli guide; do
@@ -105,582 +241,16 @@ for s in cli guide; do
 done
 ```
 
-They load as `tinkerscope-cli` / `tinkerscope-guide` (the directory name wins over
-the frontmatter `name:`) rather than the plugin's `tinkerscope:cli` /
-`tinkerscope:guide`. Symlinking `plugin/` itself as a single directory also works
-— it loads as the plugin, namespaced — but then don't *also* install it, or every
-skill is registered twice.
-
----
-
-## What it does
-
-### Discovery — no config files
-
-tinkerscope recursively scans the directories you give it for `checkpoints.jsonl`
-+ `config.json` (the two files every `tinker_cookbook` run drops) and surfaces one
-selectable run per directory, with its **whole checkpoint trajectory** — every
-saved step, not a hand-picked few. Each run also links back to the training JSONL
-recorded in its config, so you can see what the model actually trained on.
-
-Some runs can't be sampled — most often because their base model is no longer
-served by Tinker. Those are shown **greyed out with the reason** rather than
-failing on click. (Heads up: in the bundled negation_neglect example set, about
-half the runs are unsampleable for exactly this reason.)
-
-### The model picker
-
-The left sidebar is where you choose what to talk to. Every picker is a
-**type-to-filter combobox**: click it and type, matching across a run's
-**name, id, base model, wandb project, and renderer** — with a typo-tolerant
-fuzzy fallback when nothing matches exactly (`ed_shreean` still finds the run).
-Sibling runs whose long names differ only mid-name render as compact **diffs**
-(shared segments dim to `…`, the differing ones show in full), so
-`…_lr1e-3` vs `…_lr5e-3` stays readable at any width.
-
-Beyond the discovered runs, you can add three other kinds of model straight from
-the UI (no config files):
-
-| Link | Adds | Marker |
-|---|---|---|
-| **+ Tinker model** | a raw Tinker base model (no LoRA), or a *loose checkpoint* by sampler path | ◆ base · ◇ checkpoint |
-| **+ OpenRouter model** | any OpenRouter model (e.g. a reference instruct model) to sit next to a checkpoint | ↗ |
-
-OpenRouter models are stored **globally** (`~/.local/state/tinkerscope/openrouter_models.json`),
-shared across all projects, and need `OPENROUTER_API_KEY` to sample.
-
-Every model gets a **copy button beside its name** for the string you'd paste into your
-own script: a checkpoint's `tinker://…/sampler_weights/…` path — the one *currently
-selected*, so switching checkpoints under a run switches what it copies — or a base
-model's id. (A discovered run's own id isn't offered: it's relative to your scan dir and
-means nothing on another machine. Neither is an OpenRouter id, which is already printed
-in full on the line below.)
-
-### Chat & sampling
-
-Pick a run, type a prompt, hit Enter. The sidebar exposes the usual knobs:
-**temperature, max tokens, number of samples, top-p**, plus **top-k / presence /
-repetition penalties** (OpenRouter-only — Tinker models honor temperature and
-top-p). There's a **thinking toggle** for models that support it —
-**Off / On / Both**, where Both draws n samples *without* thinking plus n *with*
-(2n total, each card tagged think / no-think) so you can compare the two modes
-in one send — and a **system prompt** field that travels with the workspace.
-A separate **Thinking blocks** toggle (Folded / Open) sets how the think folds
-*display*: folded except on the latest turn, or every fold on every turn and
-sample card already open, for a session where the reasoning is the thing you're
-reading. Like **Token probs**, it's a browser preference — remembered locally,
-never written into the workspace, so a reader of a published site sets their own.
-The composer's system-prompt / prefill / thread-system controls are **split
-pills**: the left power dot **applies / mutes** the field (muting keeps the
-text — it just stops applying to sends, persisted for the system prompt as
-`system_enabled`), the right label+chevron **expands / folds** its editor. The
-two are independent — folding never mutes — so you can keep a prompt active
-while folded, or draft one muted before switching it on (typing into an empty
-field auto-enables).
-
-Set **n > 1** and a single send fans out into N draws, rendered as **sample
-cards** — a quick read on what the model "usually says":
-
-![n>1 sample cards](docs/img/n-samples.png)
-
-Those draws also power a **Response Distribution** chart. Its default mode
-rides on your **highlight rules**: each sample is bucketed by the *set* of
-rules it matches — grey = no rule, a solid segment = exactly one rule, a
-**striped segment** = a multi-rule combo (e.g. a sample mentioning both *red*
-and *yellow*) — so "define a rule, see its prevalence per model" is one loop.
-A **match-scope toggle** picks what the rules run against: the **response**,
-the **thinking**, **either**, or **split** — response and thinking as two
-adjacent bars per model. A **first N chars** box next to it caps matching to
-the opening of that text, for rules that describe how a reply *starts* (a
-`<answer>` tag, a `Verdict:` header) and would otherwise also fire on the model
-discussing the same token later in its explanation; the inspector dims whatever
-fell outside the cap. Samples that spent their whole budget thinking and
-never emitted an answer still count (they chart as *no match* / `[NO ANSWER]`
-rather than silently shrinking n). When a turn mixes samples drawn *with* and
-*without* thinking, a **thinking filter** appears: pool them, chart one
-population, or **split think / no-think** into a bar each — disjoint samples,
-each with its own 100% and its own n (it composes with the match-scope split,
-so up to four bars per model). A turn picker charts any turn of the
-workspace (defaults to the latest; if panels diverge, each prompt is shown
-with its models), and segments are clickable (inspect exactly which samples
-landed in a bucket, with the matches painted). A second mode, **first token**,
-charts the model's *own* probability distribution over the first generated
-token (from stored logprobs) against what the draws actually sampled — its
-legend is interactive: click a token chip to exclude it, drag one chip onto
-another to merge them into one segment, search up a recorded-but-hidden token,
-or renormalize over just the shown set. A legacy **exact answers** mode still
-buckets identical responses for short constrained answers. The open chart
-live-updates while a batch streams, and how you left it is remembered across
-reopens and reloads — mode / match-scope / thinking-filter everywhere, the
-question-specific bits (turn, excluded rule chips, char cap, first-token
-tweaks) per workspace.
-
-![The response distribution chart](docs/img/distribution-chart.png)
-
-Each card has its own controls: **Make active** (collapse the thread to that one
-reply, keeping the rest as cyclable branches), **Discard others**, a per-sample
-delete, a **Raw** toggle (shows the model output with thinking/format tags
-preserved), and **Bookmark**.
-
-### Token probabilities
-
-Native Tinker sampling records **per-token logprobs + top-5 alternatives** on
-every turn by default, so these views work retroactively on turns you sampled
-before ever opening them. The sidebar's **Token probs** toggle has three
-states — **Off / Over / Tokens**: *Over* keeps the normal markdown and paints
-a surprisal heat **under the prose** (the model's least-confident tokens glow);
-*Tokens* swaps the body for the raw generated stream, thinking tags and all,
-exact token boundaries preserved. Hovering any token pops its probability and
-the top-K alternatives the model weighed. A **Color by match** picker replaces
-the surprisal tint with per-token *highlight-rule* probability — how much mass
-the model put, at each position, on continuing with something that matches a
-rule (up to two rules, each its own color band): where did *red* almost happen.
-Text the model didn't generate — an edited tail, an authored prefill — carries
-no probability, so it renders as dimmed **ghost tokens** instead of pretending
-confidence.
-
-![Token probabilities overlay](docs/img/token-probs.png)
-
-### Workspace branching — the big one
-
-Nothing you do is ever destroyed. Regenerating, editing a turn, or drawing N
-samples all create **sibling branches** rather than overwriting. Any turn with
-more than one branch gets a **‹ k/N › cycler** so you can step between the
-alternatives; the rest of the workspace re-derives from whichever branch is
-active.
-
-- **Regenerate** (on a user *or* assistant turn) → a new sibling branch.
-- **Edit a user turn** → forks a new branch and regenerates from it.
-- **Edit an assistant turn** → a manual branch you author by hand.
-- **Draw N samples** → N sibling branches you can cycle through.
-- **Delete** → prunes that branch (and everything under it); the cycler falls
-  back to a surviving sibling.
-
-Branching also works **at the very start**: the composer's *⑂ branch from
-start* toggle sends the next message as a sibling **first** message — a new
-ROOT thread — so one workspace can hold several probe prompts against the
-same model set. When ≥2 distinct threads exist, a *⑂ threads* popover appears
-next to the toggle listing every thread across all panels (with how many panels
-have each one); picking a thread switches **every panel that has it** while
-panels without it keep their current thread — threads are per-panel and are
-never force-aligned.
-
-A thread can carry its **own system prompt**, stored as a field of its first
-message and **appended to the global one** at fire time (`global ⏎ thread` —
-the global stays the shared base). With ⑂ armed, a *＋ thread system* chip on
-the composer sets it for the next new thread; a thread that has one wears a
-collapsed `system` strip above its first message (click to expand), the ⑂
-threads popover labels each thread with its `sys:` snippet, and the first
-row's edit box gains a *Thread system prompt* field — so "same question, new
-prompt" is just an edit, which forks a sibling thread like any other edit.
-Two threads sharing a first message under **different** prompts are distinct
-threads (the cycler / popover / CLI reconcile all treat the pair as the
-identity), which is exactly the probe-battery pattern: fire the same MCQ under
-four framings and cycle ‹k/4› on the first row to compare. Every regen /
-continue / mid-thread send composes the **thread's own** prompt (walked from
-its root), never the composer's current one.
-
-#### The shift-modifier vocabulary
-
-Holding **Shift** turns each action into its "power" variant. The button icon and
-tooltip change while Shift is held so you can see which action you'll get:
-
-| Action | Plain click | **Shift + click** |
-|---|---|---|
-| **Regenerate** | new sibling branch | **replace** this branch in place (siblings kept) |
-| **Continue** (＋) | extend the whole turn (prefill closed think + answer) | **resume inside the think block** — extend the reasoning (before `</think>`), then the model closes it and answers |
-| **Edit** (user turn) | fork + regenerate | fork a **full editable copy** of the workspace from here (no generation) |
-| **Delete** | delete this one branch | delete **all** sibling branches at this turn |
-| **Bookmark** | save with a note (opens a form) | save **instantly**, no note |
-
-**Ctrl/Cmd** is a separate, orthogonal modifier: it fans the action out to *every*
-panel at this row's depth. It applies to **edit**, **regenerate**, **delete** and
-**continue**, and is only live in compare mode (>1 panel) — with a single panel
-it does nothing. Combine with Shift to get the power variant across all panels
-(e.g. Ctrl+Shift+Continue = resume the reasoning everywhere).
-
-#### Keyboard navigation
-
-Click any message to **focus** it (a soft accent ring marks the one focused row
-per workspace). With a row focused:
-
-- **↑ / ↓** — move focus to the previous / next message of that panel's
-  currently-displayed thread (off-screen rows are scrolled into view, minimally).
-- **← / →** — step the focused row's ‹ k/N › branch cycler (wraps; focus and
-  scroll position stay put).
-- **Esc** — clear the focus.
-
-Keys are ignored while you're typing (composer, prefill, edits, renames…) or
-while a modal is open.
-
-#### Named workspaces
-
-A dropdown at the top of the sidebar manages workspaces: **create, switch,
-rename, delete**. Each workspace is **persisted to disk** (per scan-root set,
-so they're isolated per project and survive restarts) and carries **its own
-system prompt** — so one workspace can be a distinct experiment from the next.
-It also remembers its **panel layout**: switching workspaces restores the model
-set you had open in each (a new workspace inherits the current one's models;
-Shift+new starts blank).
-
-### Side-by-side comparison — N panels
-
-Hit **Compare** to add a second panel; the button then reads **Add panel**, and
-there's no cap at two. A new panel **clones the first panel's thread** so it
-starts from the same context (Shift-click for a blank one), then keeps its
-**own** branch tree as you continue. The main composer targets panels via
-per-panel **send chips**, each panel also has its own *"＋ continue this
-panel"* composer, and panels run **concurrently** — one model generating
-doesn't freeze the other. Drag a column header to reorder panels; remove or
-fold the ones you're done with.
-
-Because they run independently, they stop independently: a generating panel shows a
-**Stop** on the streaming turn itself — under the text as it writes, or on the
-`k / n samples completed` strip of an N-sample draw — which cancels only that panel and
-keeps whatever already streamed. The ⏹ in the sidebar icon row is still the stop-everything
-button.
-
-![Two models side by side in compare mode](docs/img/compare.png)
-
-### Highlights (text coloring)
-
-Define **highlight rules** in the sidebar that color matching text in every
-rendered message — give a rule a name + color, one or more patterns (literal or
-regex, case-sensitive optional), combine patterns with **or / and**, and
-optionally scope a rule to one role (user / assistant / system). Rules are
-editable and drag-reorderable (earlier rule wins on overlap), toggle on/off
-individually, and persist per scan-root. A master **Off / On** switch above the
-list mutes all coloring without touching any rule's own state — flip it back
-and exactly the set that was painting returns. (Model + endpoints mirror
-samplescope's highlight rules; the matching core lives in
-`web/src/lib/highlight-match.ts`.)
-
-### Pins (saved samples)
-
-Pin any response to save it — with a note, or Shift-click to save instantly
-without one. Pins are persisted per scan-root and browsable from the pins button
-in the header (it shows the saved count). *(Formerly called "highlights"; the
-name moved to the text-coloring feature above. Old `highlights.json` saved
-samples migrate automatically to `pins.json` on first run.)*
-
-### Session persistence
-
-Your selected model(s) and sampling parameters are cached to disk and **restored
-when you restart** the process, so you don't have to re-pick your setup every
-time.
-
-### Share packs — reproduce a setup with one command
-
-Bundle checkpoints + default params + workspaces into one portable YAML so a
-collaborator reproduces your setup against **public Tinker checkpoints**, no local
-run dirs needed:
-
-```bash
-tinkerscope --pack https://raw.githubusercontent.com/you/repo/main/pack.yaml   # consume + serve
-tinkerscope --pack pack.yaml --reseed                                          # re-consume, mirror the file exactly
-tinkerscope pack export pack.yaml                                              # author from your setup
-tinkerscope pack export pack.yaml --no-defaults                               # author without the sampling-params block
-```
-
-Models are addressed self-contained (`ckpt:` sampler path / `base:` / `openrouter:`),
-so a published checkpoint (same sampler id as the private path) samples on anyone's
-account. Applying is merge-safe (never clobbers a collaborator's own params unless
-`--force`); the shared checkpoints show up as first-class addable models in the
-"+ Tinker model" typeahead. Iterating on a pack you keep re-exporting? `--reseed`
-rebuilds its workspaces so re-exported `raw_meta` blobs refresh and dropped workspaces
-go away. Full doc: **[`docs/PACK.md`](docs/PACK.md)**.
-
-A pack is also a **link** — paste it into `?w=` and it installs, no restart:
-
-```
-http://localhost:8765/?w=/home/me/packs/demo.yaml                       # local path (server reads it)
-http://localhost:8765/?w=https://raw.githubusercontent.com/u/r/main/demo.yaml
-…?w=<pack-url>&open=pack-demo-the-good-one                              # pick which workspace opens
-```
-
-A `?w=` value containing `/`, `:` or `.` can't be a workspace id, so this is
-unambiguous and every old link still works. Opening a pack link always **asks first**
-(a link installs on plain navigation, and the workspaces it adds look like real
-sampled turns afterwards) — and if the pack's workspaces are already here, it asks
-whether to **replace** them or **keep both** (the incoming copy becomes
-`<name> (2)`). After installing, the URL becomes the plain `?w=<id>`, so a reload
-opens rather than re-installs.
-
-### Publish a read-only copy — `site export`
-
-Export the whole playground as a static site: no backend, no API key, hostable on
-GitHub Pages or any file host.
-
-```bash
-tinkerscope site export ./site --title "weird personas"       # everything
-tinkerscope site export ./site --workspace "hi + cigarettes"  # just one (repeatable)
-tinkerscope site export ./site --no-logprobs                  # ~30× smaller, no token inspector
-tinkerscope site export ./site --pack-url https://…/p.yaml.gz # so readers can run it locally
-tinkerscope site export ./site --pack-link ./p.yaml.gz=https://…/p.yaml.gz  # shareable ?w= links
-python3 -m http.server -d ./site 8080                         # preview
-```
-
-Visitors get the real thing to read: workspaces, branch trees, threads, N-panel
-comparison, the distribution chart in all three modes, token probabilities, editable
-highlight rules, pins, the slideshow. Everything that would sample or write is gone —
-composer, regenerate/edit/delete, model pickers, sampling params.
-
-⚠️ **Per-token logprobs are ~97% of a real store's bytes** (measured: 24 MB of
-workspaces vs 901 MB of blobs). The exporter prints a per-workspace breakdown and
-warns past 100 MB — publish a subset with `--workspace`, or drop `--no-logprobs`.
-
-`--workspace` means *only* that workspace: saved **pins** are dropped (they carry
-responses and a local `dataset_path`, and have no workspace id to filter on — pass
-`--pins` to include them anyway) and the chart-view state is narrowed to the exported
-workspaces.
-
-The chart's per-workspace view travels with the export, so a published site opens
-bucketed the way you left it. Full doc: **[`docs/STATIC_SITE.md`](docs/STATIC_SITE.md)**.
-
-### A published site is also a viewer for *other people's* packs
-
-A static site isn't only a way to publish your own workspaces — it's a general reader.
-Anyone can point one at a share pack and browse it, with nothing installed and no key:
-
-```
-https://you.github.io/site/?w=https://raw.githubusercontent.com/u/r/main/demo.yaml.gz
-```
-
-…or open a pack straight off their own disk with the ⤒ button next to the workspace
-picker (or by dropping the file on the page) — no hosting and no CORS involved. Installed
-workspaces live in that browser's IndexedDB and persist; the site's own baked ones stay
-read-only.
-
-Two things make a published site a dead end without them, so they're built in: the
-**read-only badge is a button** that hands the reader the exact command to run this
-locally (pass `--pack-url` at export time, or it can only offer the generic install and
-says so), and every model has a **copy button beside its name** — a checkpoint's
-`tinker://…/sampler_weights/…` path, or a base model's id.
-
-To make a pack that carries the token inspector, export it with logprobs — and give the
-path a `.gz`, because the uncompressed form is past GitHub's 100 MB file limit:
-
-```bash
-tinkerscope pack export ./demo.yaml.gz --workspace "the good one" --logprobs
-```
-
-(107 MB → 30 MB on a real workspace. Browsers decompress it natively; `--pack` and `?w=`
-both take the `.gz` transparently, sniffing the magic bytes rather than the extension.)
-
----
-
-## Drive it from the terminal — `tinkpg`
-
-`tinkpg` hits the same HTTP API the browser uses, and every chat broadcasts to a
-shared server-side state bus — so a CLI-triggered sample appears in the open
-browser **identically** to a browser-triggered one. Great for "let's look at this
-model together" sessions. The CLI auto-discovers the right running server from
-your current directory (override with `--base-url` / `$TINKERSCOPE_BASE_URL`).
-
-```bash
-tinkpg ls                              # discovered runs + checkpoint counts
-tinkpg ls --filter ed_sheeran          # substring filter on id/name
-tinkpg ls --sampleable-only            # only runs Tinker still serves
-tinkpg checkpoints <run>               # list a run's checkpoints
-tinkpg open <run>[@<checkpoint>]       # switch the browser to this model, live
-tinkpg chat <run> "prompt" --n 50      # sample; streams to stdout AND the browser
-tinkpg compare <runA> <runB> "..."     # two-pane compare, live in the browser
-tinkpg send "prompt"                   # NEW THREAD at the current panels (layout untouched)
-tinkpg send --file probe.txt           # …with the message read from a file (probe templates)
-tinkpg continue "follow-up"            # LOOM: add a turn to the current threads (multi-turn send)
-tinkpg battery <dir>                   # fire a DIRECTORY of probe files as sequential sends (probe battery)
-tinkpg state                           # dump the shared playground state
-tinkpg params [--temperature ...]      # show / SET the GLOBAL sampling params (the deliberate route)
-tinkpg ws [<id|name>]                # browse saved workspaces; no arg lists them all (alias: conv)
-tinkpg threads [--min-turns N]         # index EVERY root thread across all workspaces (find multi-turn convs)
-tinkpg probe <run>[@ckpt] "prompt"     # sample ANY model off-workspace (no broadcast, no commit)
-tinkpg samples [<id|name>]             # every sampled response at one fork + a <tag> tally
-tinkpg grep "<text>"                   # search EVERY branch of all workspaces (content + thinking)
-tinkpg node <id>                       # reverse lookup: locate a node id, dump its record (+ --logprobs/--meta/--raw)
-tinkpg refresh                         # rescan the filesystem + Tinker capabilities
-```
-
-`<run>` accepts a full run id or any **unique substring** of its id/name; ambiguous
-matches list the candidates. Because run ids contain `/`, the run@checkpoint
-separator is `@` (`tinkpg chat foo/bar/run@final "hi"`), or use `--checkpoint`.
-`tinkpg chat` also takes `--temperature`, `--max-tokens`, `--thinking`,
-`--thinking-both` (n samples without thinking + n with, 2n total), and
-`--system`.
-
-**Params have two routes.** Sampling params (system prompt, temperature, max
-tokens, n, thinking, top-p) live in ONE shared global state — the browser's
-sidebar. Param args on `chat`/`compare`/`send`/`continue` are **per-call**: they
-apply to that fire only, any param you don't pass inherits the current global
-value, and nothing is written back — a CLI probe can't clobber the sidebar.
-(`--n` is the exception: it never inherits — an explicit fan-out size, default 1.)
-`--no-system` fires with no system prompt at all (global AND thread part) even
-when the state carries one.
-The **deliberate** route is `tinkpg params`: with options it SETS the global
-state (the browser updates live — `--clear-system` removes the system prompt,
-`--system-file` reads one from a file); with none it shows the current values.
-The browser can **mute** the global system prompt (its split-chip power dot:
-kept but not applied); `params`/`state` mark that as `(muted)`, and setting a
-prompt from the CLI always re-enables it.
-
-**Thread system prompts.** A thread's first message can carry its own system
-prompt, composed over the global one at fire time (`global ⏎ thread`; see the
-browser section above). On `tinkpg send` — always a new-thread fire — `--system`
-sets the **thread** prompt: it's recorded on the new thread's first message
-(visible in the browser strip / `conv` threads index) and composed over the
-global part, which is never clobbered. On `continue`/`chat`/`compare`,
-`--system` keeps its per-call **global-part** meaning; the thread part is
-whatever the target thread's first message carries — a continue into a probe
-thread stays under that probe's prompt automatically, including `--node` /
-`--thread` targets on non-active branches.
-
-`tinkpg ws` and `tinkpg state` skip panels folded in the browser UI by default
-(a one-line stub + a trailing "N folded panel(s) skipped: …" list, so you still
-know they're there) — pass `--include-folded` to expand them, or (`conv` only)
-`--panel <id>` to target one directly, which always overrides the fold. For
-`state` the fold info rides the open saved workspace, so it needs the
-browser-pushed workspace id and the default `--link` fetch (`--no-link`
-shows every panel). `tinkpg samples` defaults to the first non-folded panel
-(explicit `--panel` overrides).
-
-When a workspace holds several ROOT threads (branch-from-start first
-messages), `tinkpg ws <id>` prints a per-panel `threads:` index — each
-thread's first message + fan-out size, `*` = active, plus a `sys:` line for a
-thread that carries its own system prompt — and `tinkpg samples --thread k`
-shows the full n-sample fan-out of thread `k`, including non-active threads
-that the active-path views can't reach.
-
-**Finding, and then reading, a conversation the panel dropped.** Every path view
-follows the SELECTED child, which defaults to the NEWEST — so a long conversation
-that was later re-rolled from an early turn shows up as one turn and its real
-transcript is unreachable. `tinkpg threads` indexes every root thread across all
-workspaces with the turn count of its **deepest** branch beside the selected one
-(`--min-turns N`, `--ws`, `--model`, `--grep`, `--json`); `tinkpg ws <id> --panel P
---thread K --deepest --full` then reads that branch, and `tinkpg samples --turn N
---deepest` reaches a fork below where the selection stops. `tinkpg ws --json`
-exports the resolved transcript as structured data (untruncated content + CoT +
-node ids + each turn's `sibling_index`/`n_siblings`) for rendering it elsewhere —
-build reports and artifacts from that, not from the terminal text.
-
-`tinkpg samples` reading ergonomics: `--sample K` isolates one sibling of the
-fan-out, and `--slice START[:LEN]` shows a character window of each shown sample
-(same window applies to the CoT with `--full`) — page through a long sample in
-pieces instead of dumping or truncating it. `--first-token` prints the model's
-probability distribution over the FIRST generated token at the fork (the stored
-top-K of the newest sample + each sample's actually-sampled token — the CLI twin
-of the browser chart's first-token mode; data comes from the stored node blobs,
-so it works on browser-fired turns too). With `--json` it adds a per-sample
-`first` record ({t, tid, lp, top}) and the aggregate `first_token` object.
-
-`tinkpg grep "<text>"` searches every node of every branch — message content
-AND thinking — across all saved workspaces (`--ws` to scope, `--regex`, `-i`),
-one hit per line with workspace · panel · thread · role · node id, so you can
-jump straight to `samples --node <id>` — which shows the fan-out at ANY fork,
-including forks on non-selected branches that `--thread`/`--turn` (selected-path
-walkers) can never reach.
-
-`tinkpg node <id>` is the reverse index: give it a bare node id — the browser's
-Copy-node-id button hands out exactly that — and it finds the workspace/panel/
-thread holding it with no other context, then dumps the node's record, including
-what the transcript views drop: the authored `prefill` (with a reminder that the
-token stream only covers what came after it), finish_reason, parent/children,
-and which heavy blobs exist. `--logprobs` / `--meta` fetch and print those
-blobs (per-token logprobs + top-K alternatives / the request & response
-record), `--raw` the raw stream text, `--full` untruncated fields, `--json`
-for scripts. A unique id prefix works too; the same id copied across
-panels/workspaces prints one block per copy.
-
-`tinkpg send`/`continue` take `--logprobs` (print each sample's per-token
-logprob + top-5 alternatives — native tinker sampling only: `run_id` + `base_model`
-at any `n`. A single `n=1` fire to a loose checkpoint or OpenRouter streams through
-a different, logprob-free path), `--first-token` (after the fire, print each
-panel's first-token probability table — the same view as `samples
---first-token`, without a second command) and `--json`
-(JSONL to stdout, one object per sample + a closing `{"event":"done"}`; the
-human plan/progress text moves to stderr so stdout stays parseable). `samples`
-and `grep` also take `--json` (one JSON object / array; untruncated content —
-no need to regex the human-formatted text).
-
-`tinkpg battery <dir>` fires a **directory of probe files** (`*.txt`, sorted
-order) as sequential `send`s — the batch form of the probe pattern. Each file is
-the user message, optionally preceded by a `---`-delimited front-matter header
-of per-probe overrides: `system:` (the probe's **thread** system prompt — each
-probe file is one (message, system) thread identity), `no-system:`,
-`prefill:`, `n:`, `temperature:`, `max-tokens:`, `thinking: on|off|both`,
-`panel: a,b`. Unknown keys are a hard error (typo protection). Command-line
-options set the defaults probes don't override; omitted = inherit the global
-params, like any send. Per-probe JSONL streams land in `<dir>/results/`
-(`--out` overrides), a per-panel first-token table prints after each probe
-(`--no-first-token` to skip), failures are per-probe and non-fatal (summary +
-exit code at the end), and `--pause` (default 3 s) spaces the fires so the
-human can watch them land thread-by-thread in the browser.
-
-`tinkpg continue --ancestry-file <path>` looms from an EXPLICIT full transcript
-(a JSON list of `{role, content}` dicts) instead of a tree/panel — for a
-raw-log sample that never made it into a tree (the CLI only folds one
-representative per n>1 fire), or to graft a real, complete workspace
-generated by one model into ANOTHER model's context (sanctioned: full
-transcripts only, never an authored/partial answer). Same transcript fires at
-every `--panel` target.
-
-`tinkpg send "<prompt>"` fires the prompt as a **new thread at the current
-panels** — the CLI twin of the browser's *⑂ branch from start*. Unlike
-`chat`/`compare` it never replaces the panel layout: it reads the live panels
-(skipping browser-folded ones; `--panel <id>` repeatable to aim, `--force` to
-fire during a generation), sends one chat per panel with a fresh history, and
-the open browser folds each reply in as a sibling first message. Takes the same
-sampling options as `chat`. The message and the assistant prefill can each come
-from a **file** — `--file <path>` (mutually exclusive with the positional
-prompt) and `--prefill-file <path>` — so a reusable probe template isn't retyped.
-
-`tinkpg continue "<follow-up>"` **looms** from an existing branch: it rebuilds
-the message history up to a target node and samples a continuation — the
-multi-turn twin of `send` (layout untouched, one chat per panel, the browser's
-echo-reconcile extends the matched branch). The default target is each panel's
-**active leaf** (read from the live state, the same source `send` uses), so a
-bare `tinkpg continue "<msg>"` adds a turn to every current thread at once. Aim
-it elsewhere with `--thread K` / `--turn N` (that panel's saved tree) or
-`--node <id>` (a node id from `tinkpg grep`, reaching non-active branches). The
-appended message is validated against the target: a target ending on an
-**assistant** turn requires a user message (the follow-up); one ending on a
-**user** turn takes none (it re-samples that turn) but accepts a `--prefill` —
-a tiny thinking opener (`"Hmm,"`) or the model's own truncated CoT — for
-answer-level looming. `--file` / `--prefill-file` apply here too. It never
-transplants a fabricated turn: the ancestry is the model's own in-context
-content.
-
-**Terminology**: the saved container (panels + their branch trees) is a
-**workspace**; each branch-from-start first message starts a **thread**. Since
-v1.0.0 the wire and storage say so too (`/api/workspaces`, `workspace_id`,
-`?w=`, `<state>/workspaces/`); `?c=` from before the rename is still read. A
-"conversation" now means only what it says — one dialogue in one panel. See
-`docs/MIGRATIONS.md`.
-
----
-
-## Tests
-
-```bash
-uv run pytest -q
-```
-
-Covers discovery (config/checkpoint parsing, sort order, sampleability gating,
-malformed-config degradation, dataset-path resolution) and the API
-(`/api/health`, `/api/models`, `/api/state` round-trips, the workspace/branch
-store, highlights / prefs / OpenRouter-model CRUD, dataset path-traversal
-rejection). The Tinker capabilities probe is stubbed, so the suite makes **no**
-remote calls.
-
-The pure frontend logic has its own unit suites — `web/src/lib/*.test.ts`,
-some twenty files covering branch trees, chart bucketing, token
-alignment/edit/prefill carry, label diffing, fuzzy search, pack handling and
-more — runnable with bare Node, no test framework: `npm test` from `web/`
-(or `node web/src/lib/tree.test.ts` for one). There are also Playwright
-browser smokes under `tests/small-smokes/` that exercise branching, compare,
-the pickers, the chart, token views and more against a live server —
-`scripts/smoke.sh` builds, launches an isolated instance, and runs the
-token-free set.
-
----
+They load as `tinkerscope-cli` / `tinkerscope-guide` (directory name wins over
+frontmatter). Symlinking `plugin/` as a directory also works — but then don't
+*also* install it, or every skill registers twice.
+
+</details>
+
+For orientation and contracts: **`CLAUDE.md`** (where everything lives),
+[`docs/API_CONTRACT.md`](docs/API_CONTRACT.md) (HTTP + SSE shapes),
+[`docs/BRANCHING_DESIGN.md`](docs/BRANCHING_DESIGN.md) (the branching model),
+[`docs/TODO.md`](docs/TODO.md) (roadmap).
 
 ## Credits
 
@@ -703,13 +273,3 @@ tinkerscope's own code is MIT-licensed (see `LICENSE`). The upstream playground
 ships **without** a license; substantial portions of the UI and inference layer
 are Harry Mayne's work, retained here with attribution. If you build on this,
 keep that credit.
-
----
-
-## For developers / agents
-
-- **`CLAUDE.md`** — orientation + where the contracts live in code.
-- **`docs/API_CONTRACT.md`** — the authoritative HTTP endpoint + SSE event shapes.
-- **`docs/BRANCHING_DESIGN.md`** — the as-built design + contract for workspace
-  branching (the source of truth for that feature).
-- **`docs/TODO.md`** — roadmap.

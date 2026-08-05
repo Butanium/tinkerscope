@@ -29,8 +29,9 @@ and in this file's reference section; HANDOFF.md itself is retired.
 ## Working conventions
 
 - **`tinkpg` CLI changes ship with their docs, in the same commit.** Any new
-  command / flag / behavior change updates: README.md §"The CLI" (command table
-  + option notes) AND the CLI skill. **The skills live in this repo at
+  command / flag / behavior change updates: README.md §"Drive it from the
+  terminal" (command table ONLY — the README is a human pitch, option notes
+  belong in the skill; Clément 2026-08-05) AND the CLI skill. **The skills live in this repo at
   `plugin/skills/<name>/SKILL.md`** — `plugin/` is a Claude Code plugin
   (`.claude-plugin/marketplace.json` at the repo root makes the repo its own
   marketplace). **The skill's name depends on how it was loaded**, so don't
@@ -483,7 +484,7 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     legends for the row toolbar / sample cards / sidebar, and Keys shows the icon
     next to each modifier. Also fronts the agent-skill pitch + a FOLDED
     plugin-install block (Claude Code / Codex / npx skills) that twins README
-    §"Install the agent skills". Smoke: `browser_help_modal.py`.
+    §"Agent skills". Smoke: `browser_help_modal.py`.
   - `lib/Icon.svelte` — the shared SVG glyph set (`<Icon name="edit" size={13} />`).
     One dispatch table for every row-toolbar + sidebar icon, so the toolbar and the
     Help modal can't disagree. Shift-variants are their own names (`replace`,
