@@ -220,6 +220,15 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     THREADS (branch-from-start first messages, identity = trimmed content —
     threads are per-panel, so each entry records which panels have it). The
     single source of branching truth. **Has `tree.test.ts`.**
+  - `lib/panel-view.ts` — the panel RENDER MODEL: `buildPanelView` (tree active
+    path + live-bucket overlay → the `ViewMessage[]` a column renders — the
+    bucket REPLACES the trailing assistant row, never double-renders) +
+    `expandTurnSamples`, the row-toolbar eye's "view all samples" transform
+    (all tree siblings of a turn as n>1 cards, later rows dropped; keyed on the
+    USER-parent so selecting a sample inside the open view doesn't collapse it;
+    no-ops on bucket rows / off-path turns / <2 siblings). **Has
+    `panel-view.test.ts`**; browser smoke
+    `tests/small-smokes/browser_samples_view.py`.
   - `lib/model-sel.ts` — the `openrouter:`/`base:`/`ckpt:` sentinel encoding
     (prefixes, predicates, id extractors) for a panel's model selection, plus
     `runSamplerPath(checkpoints, name)` — what the copy-id button hands out for a
