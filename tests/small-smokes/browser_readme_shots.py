@@ -62,6 +62,15 @@ def shot(page, name):
     print("  wrote", OUT / name)
 
 
+def rename_workspace(page, name):
+    page.locator("button.ws-icon-btn[aria-label='Rename workspace']").click()
+    inp = page.locator("input.sidebar-input:not([type='number'])")
+    inp.wait_for(timeout=5000)
+    inp.fill(name)
+    inp.press("Enter")
+    page.wait_for_timeout(400)
+
+
 def pick_model(page, nth, run_id):
     page.locator(".model-block .picker-dropdown-trigger").nth(nth).click()
     page.wait_for_selector(".model-block .typeahead-input", timeout=5000)
@@ -114,6 +123,7 @@ def main():
         page.locator("button.ws-icon-btn[aria-label='New workspace']").click()
         page.keyboard.up("Shift")
         page.wait_for_timeout(500)
+        rename_workspace(page, "color loom")
         pick_model(page, 0, primary)
 
         # ── Phase A: n=6 fan-out on a color prompt → sample cards ────────────
@@ -171,10 +181,12 @@ def main():
             ).click()
             page.wait_for_timeout(1000)  # canvas paint
             box = page.locator(".message-content").last.bounding_box()
-            page.mouse.move(box["x"] + box["width"] * 0.25, box["y"] + 12)
-            try:
-                page.wait_for_selector(".tok-pop", timeout=3000)
-            except Exception:
+            for fx in (0.25, 0.4, 0.15, 0.55, 0.7):  # hunt until a token is hit
+                page.mouse.move(box["x"] + box["width"] * fx, box["y"] + 12)
+                page.wait_for_timeout(600)
+                if page.locator(".tok-pop").count():
+                    break
+            else:
                 print("  (no popover under the cursor — shooting the heat alone)")
             shot(page, "token-probs.png")
             page.locator(
@@ -190,6 +202,7 @@ def main():
             page.locator("button.ws-icon-btn[aria-label='New workspace']").click()
             page.keyboard.up("Shift")
             page.wait_for_timeout(500)
+            rename_workspace(page, "second opinions")
             pick_model(page, 0, cmp_a)
             page.get_by_role("button", name="Compare", exact=True).click()
             page.wait_for_timeout(800)
@@ -200,7 +213,15 @@ def main():
             page.wait_for_timeout(300)
             for turn, want in ((CMP_T1, 4), (CMP_T2, 8)):
                 ta.fill(turn)
-                ta.press("Enter")
+                for _ in range(4):  # a send during a not-quite-settled fold is
+                    ta.press("Enter")  # dropped — retry until the user rows land
+                    try:
+                        page.wait_for_function(
+                            "(w) => document.querySelectorAll('.message').length >= w",
+                            arg=want - 2, timeout=4000)
+                        break
+                    except Exception:
+                        page.wait_for_timeout(1500)
                 print("fired compare turn…")
                 wait_generation_done(page, want)
             shot(page, "compare.png")
