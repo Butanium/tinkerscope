@@ -19,6 +19,8 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 
 ### Token probabilities & the loom
 
+- [Loom directly from an n>1 sample card](loom-on-sample-cards.md) — v1 is single-row only; cards need a sample-index onLoom variant (the onTag shape); wait for someone to reach for it
+- [`tinkpg loom`](cli-loom.md) — the backend surface exists, the CLI verb doesn't; agents can see fork-worthy positions via `tinkpg node` but can't act on them
 - [Score the CONTEXT, not just the completion](score-the-context.md) — `[0, L)` is discarded teacher-forced numbers we already paid for; design deliberately unsettled, Clément wants to think more
 - [Teacher-force the ghosts: score authored text](score-authored-ghosts.md) — Clément's loom variant: an edit/prefill gets real logprobs ("not sampled" ≠ "no data"), surprising insertions glow orange; the loom endpoint is the primitive, only trigger + per-entry provenance remain
 - [Make the top-K logprob capture configurable](topk-capture-configurable.md) — `TOPK_LOGPROBS = 5` means Color-by-match only answers "did it make the top *five*?"
