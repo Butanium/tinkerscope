@@ -15,9 +15,10 @@
 import { live } from './state.svelte';
 import { workspaces as ws } from './workspaces.svelte';
 import { nodeBlobs } from './node-blobs.svelte';
-import { chat, type ChatParams } from './chat.svelte';
+import { chat, type ChatParams, type ChatModelField } from './chat.svelte';
 import { panelScroll } from './scroll.svelte';
 import { assembleAssistantRaw } from './render';
+import { parseRawMetaModel } from './loom';
 import {
   activePath,
   regenTarget,
@@ -48,13 +49,16 @@ export type BranchOpsDeps = {
   /** Wrap messages with the active composer prefill (if any) for a fire. */
   withPrefill: (msgs: ChatMessage[]) => { fireMsgs: ChatMessage[]; prefill?: string };
   /** Fire one panel's generation with the current model + params. `paramsOverride`
-   *  patches over the composer's params bundle for THIS fire. */
+   *  patches over the composer's params bundle for THIS fire; `modelOverride`
+   *  replaces the panel-selection model resolution (loom fires anchor to the
+   *  model that produced the turn, not whatever the panel now selects). */
   fireOne: (
     pSel: PanelSel,
     userParentId: string,
     messages: ChatMessage[],
     prefill?: string,
-    paramsOverride?: Partial<ChatParams>
+    paramsOverride?: Partial<ChatParams>,
+    modelOverride?: ChatModelField
   ) => void;
 };
 
@@ -283,6 +287,84 @@ class BranchOps {
     if (!node.has_token_logprobs) return undefined;
     await nodeBlobs.ensure([nodeId]);
     return nodeBlobs.get(nodeId)?.token_logprobs;
+  }
+
+  /** The node's raw_meta blob (same inline-first / fetch-on-demand resolution as
+   *  #tokensOf — the two blobs travel together, so a #tokensOf call usually
+   *  already warmed it). undefined = the turn has none / fetch came back empty. */
+  async #rawMetaOf(panel: Panel, nodeId: string): Promise<string | undefined> {
+    const node = ws.treeFor(panel).nodes[nodeId];
+    if (!node) return undefined;
+    if (node.raw_meta) return node.raw_meta;
+    const cached = nodeBlobs.get(nodeId)?.raw_meta;
+    if (cached) return cached;
+    if (!node.has_raw_meta) return undefined;
+    await nodeBlobs.ensure([nodeId]);
+    return nodeBlobs.get(nodeId)?.raw_meta;
+  }
+
+  /** The LOOM: branch this turn from token position `cut` (a STORED-stream index
+   *  — lib/loom.ts's loomCut maps display indices) into `altTid`, or resample the
+   *  position itself (altTid null). Fires an EXACT token-level continuation: the
+   *  prefix token ids (+ the picked alternative) are replayed verbatim after the
+   *  re-rendered prompt, so the n new siblings are the counterfactual "what if it
+   *  had said this here" — ordinary branches, cyclable with ‹k/N›, with the whole
+   *  stream (forced prefix included) scored in the reply's token_logprobs.
+   *
+   *  Anchored to the TURN, not the panel: the model + exact renderer come from
+   *  the turn's raw_meta (token ids are tokenizer-specific — replaying them at a
+   *  since-switched panel selection would feed another tokenizer's ids), and
+   *  thinking comes from the turn itself (node.thinking when recorded, else CoT
+   *  presence — imperfect for a thinking turn that produced no CoT, but the
+   *  renderer override already pins the prompt for pair-toggle families, and a
+   *  mismatch shows up as an unexpectedly-surprised prefix rather than silently).
+   *  params_scope 'call' keeps the thinking override out of the shared sidebar
+   *  state; everything else (n, temperature, …) rides the current params. */
+  async loomBranch(panel: Panel, msg: ViewMessage, cut: number, altTid: number | null) {
+    if (this.#d.panelBusy(panel) || msg.nodeId == null) return;
+    const nodeId = msg.nodeId;
+    const pSel = this.#d.panelSels().find((x) => x.panel === panel);
+    if (!pSel) return;
+    const stored = await this.#tokensOf(panel, nodeId);
+    if (!stored || cut > stored.length) return;
+    const prefix = stored.slice(0, cut);
+    if (prefix.some((e) => e.ghost || e.tid < 0)) return; // ghosts have no ids to replay
+    const continue_tokens = prefix.map((e) => e.tid);
+    if (altTid != null) continue_tokens.push(altTid);
+    const meta = parseRawMetaModel(await this.#rawMetaOf(panel, nodeId));
+    const model: ChatModelField | undefined = meta?.sampler_path
+      ? { sampler_path: meta.sampler_path }
+      : meta?.base_model
+        ? { base_model: meta.base_model }
+        : undefined; // fall back to the panel's selection (native turns always carry raw_meta)
+    // Re-read after the awaits: the node could have been pruned/cycled meanwhile.
+    const tree = ws.treeFor(panel);
+    const node = tree.nodes[nodeId];
+    if (!node || node.role !== 'assistant') return;
+    const userParentId = node.parent;
+    if (!userParentId || tree.nodes[userParentId]?.role !== 'user') return;
+    panelScroll.preserve(panel);
+    chat.clearPanelBucket(panel);
+    // Reproduce the original fire's message list — including its prefill, whose
+    // rendered region the stored prefix tokens continued from.
+    const fireMessages = [
+      ...ancestryMessages(tree, userParentId),
+      ...(node.prefill ? [{ role: 'assistant', content: node.prefill }] : [])
+    ] as ChatMessage[];
+    this.#d.fireOne(
+      pSel,
+      userParentId,
+      fireMessages,
+      node.prefill,
+      {
+        thinking: node.thinking ?? node.reasoning != null,
+        prefill_scope: 'all',
+        params_scope: 'call',
+        continue_tokens,
+        renderer_name: meta?.renderer ?? null
+      },
+      model
+    );
   }
 
   /** Edit → fork. User: fork+regen (shift = fork+copy-downstream, no gen).

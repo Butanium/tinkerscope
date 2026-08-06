@@ -259,6 +259,22 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
                           // sampler_path, ANY n — all render native). Default ON; costs
                           // one extra prefill-only tinker call per sample. Only the
                           // token-streamed n==1 OpenRouter path can't and ignores the flag.
+  "continue_tokens": null, // The LOOM (exact token-level continue): token ids appended
+                          // VERBATIM after the rendered prompt — a stored sample's
+                          // generated prefix + a picked alternative, so the model
+                          // continues from that exact token state (no re-tokenization).
+                          // NATIVE paths only: an openrouter_model request errors, and
+                          // so does thinking:"both" (two renderer modes can't share one
+                          // token prefix). The reply's content/reasoning span the WHOLE
+                          // turn (prefill_incorporated), and its token_logprobs cover
+                          // forced prefix + fresh continuation from one teacher-forced
+                          // pass. Composes with a trailing-assistant prefill (the ids
+                          // are appended after the prefill's rendered region).
+  "renderer_name": null,  // exact renderer override for the native paths. Loom fires
+                          // send the renderer recorded in the source turn's raw_meta so
+                          // the re-rendered prompt is the one the prefix ids actually
+                          // continued; null = normal selection (thinking toggle / run
+                          // config / family recommendation).
   "panel": "primary",     // "primary" | "compare" — which compare pane this is
   "broadcast": true,       // also mirror samples to the state bus (browser)
   "detached": false,       // fire-and-forget: the POST returns immediately ({"status":

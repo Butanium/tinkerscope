@@ -449,7 +449,7 @@ def test_chat_base_model_native_full_fidelity(client, monkeypatch):
 
     async def fake_sample_stream(*, base_model, sampler_path, renderer_name, messages,
                                  n, temperature, max_tokens, top_p=None, logprobs=True,
-                                 think=True):
+                                 think=True, continue_tokens=None):
         captured.update(base_model=base_model, logprobs=logprobs, n=n, think=think)
         yield {
             "sample_index": 0,
@@ -505,7 +505,7 @@ def test_chat_loose_ckpt_resolves_base_and_renders_native(client, monkeypatch):
 
     async def fake_sample_stream(*, base_model, sampler_path, renderer_name, messages,
                                  n, temperature, max_tokens, top_p=None, logprobs=True,
-                                 think=True):
+                                 think=True, continue_tokens=None):
         captured.update(base_model=base_model, sampler_path=sampler_path)
         yield {
             "sample_index": 0, "content": "A", "raw_text": "…A",
@@ -537,6 +537,52 @@ def test_chat_loose_ckpt_resolves_base_and_renders_native(client, monkeypatch):
     assert captured.get("base_model") == "some/Base"
     assert captured.get("sampler_path") == loose, "must sample the LoRA, not just the base"
     assert '"raw_meta"' in r.text, "native loose ckpt must carry the raw-view blob"
+
+
+def test_chat_loom_continue_tokens(client, monkeypatch):
+    """The loom contract at the route level: continue_tokens + renderer_name pass
+    through VERBATIM to the native sampler, and an OpenRouter selection refuses
+    them (no token-level control on that wire)."""
+    captured: dict = {}
+
+    async def fake_sample_stream(*, base_model, sampler_path, renderer_name, messages,
+                                 n, temperature, max_tokens, top_p=None, logprobs=True,
+                                 think=True, continue_tokens=None):
+        captured.update(renderer_name=renderer_name, continue_tokens=continue_tokens)
+        yield {"sample_index": 0, "content": "continued", "raw_text": "…",
+               "raw_meta": "blob", "finish_reason": "stop"}
+
+    class FakeSampler:
+        def sample_stream(self, **kw):
+            return fake_sample_stream(**kw)
+
+    monkeypatch.setattr("tinkerscope.api.routes.chat.get_sampler", lambda: FakeSampler())
+    r = client.post(
+        "/api/chat",
+        json={
+            "base_model": SUPPORTED_BASE,
+            "messages": [{"role": "user", "content": "q"}],
+            "n_samples": 1, "thinking": False, "panel": "primary", "broadcast": False,
+            "continue_tokens": [11, 22, 33], "renderer_name": "role_colon",
+            "params_scope": "call",
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert "event: done" in r.text, r.text
+    assert captured.get("continue_tokens") == [11, 22, 33]
+    assert captured.get("renderer_name") == "role_colon", "raw_meta renderer must override selection"
+
+    r = client.post(
+        "/api/chat",
+        json={
+            "openrouter_model": "meta/some-model",
+            "messages": [{"role": "user", "content": "q"}],
+            "n_samples": 1, "thinking": False, "panel": "primary", "broadcast": False,
+            "continue_tokens": [1],
+        },
+    )
+    assert r.status_code == 200
+    assert "native tinker model" in r.text, r.text
 
 
 def test_chat_loose_ckpt_unresolved_base_errors(client, monkeypatch):

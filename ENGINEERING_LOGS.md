@@ -289,3 +289,57 @@ Created it, backfilled the entries above from what was already written down, and
 trimmed the fattest narratives out of `CLAUDE.md` — keeping every ⚠ RULE there,
 because that file is what gets auto-loaded and a rule nobody reads stops working.
 Going forward: rule in `CLAUDE.md`, story here.
+
+---
+
+### 2026-08-06 — The loom ships: token-level counterfactual branching
+
+Clément re-raised `ideas/loom-branch-from-token.md` ("click an alternative in
+the token popover, sample from there"). Shipped it the TOKEN-LEVEL way rather
+than the text-prefill way the idea file originally sketched, on a finding from
+this morning: the stored alternatives carry token ids (`[text, tid, lp]`), so
+the counterfactual prompt is `rendered prompt + stored prefix tids + alt tid` —
+exact, no re-tokenization drift, and mid-thinking cuts work for free because
+special tokens ride along as ids (no reopened `<think>`, no `_tml_continue`
+dance).
+
+Decisions worth remembering, and why:
+
+- **`continue_tokens` extends `region_ids`, not the message list.** Everything
+  after the generation prompt is assistant-authored by construction, so the
+  existing prefill machinery (parse `region + completion`, set
+  `prefill_incorporated`) absorbs the whole feature — the loom composes with a
+  text prefill (ids append after the prefill's rendered region) and needed no
+  new parse logic for any renderer, tml_v0 included.
+- **One teacher-forced pass scores the whole stream.** `_token_logprobs` is
+  called with the PRE-append prompt and `continue + fresh` as the completion,
+  so the loom branch carries a full ghost-free heat map: the forced prefix
+  re-scores under its true context (matches the original to ~1e-2), the picked
+  alternative under its recorded top-K number. Cost unchanged (it was one extra
+  call per sample before too). This is also the primitive
+  `ideas/score-authored-ghosts.md` needs, which is why that one stayed parked.
+- **The fire anchors to the TURN, not the panel** — token ids are
+  tokenizer-specific, so `loomBranch` recovers base_model / sampler_path / the
+  EXACT renderer from the turn's `raw_meta` (`lib/loom.ts:parseRawMetaModel`,
+  line-anchored regexes — safe because json.dumps escapes newlines) and ships
+  `renderer_name` as an explicit override. A since-switched panel picker can't
+  feed one tokenizer's ids to another.
+- **`params_scope: 'call'` on the loom fire.** It sends an explicit `thinking`
+  (the turn's own mode, inferred from `node.thinking` ?? CoT presence); in the
+  browser's usual 'global' scope that write-back would silently flip the
+  sidebar's thinking toggle. 'call' scope samples with it and writes nothing.
+- **Pin-to-interact popover.** `TokenPopover` is `pointer-events:none` in hover
+  mode (deliberately — it must not steal the hover), so alternatives can't be
+  hover-clickable: a token CLICK pins the card (`pinned` prop → buttons +
+  "↺ resample from this token"). Closing gestures (Esc / outside mousedown)
+  live in the popover once; pin state lives per view. In overlay mode a click
+  that's part of a text-selection drag is ignored (`getSelection().isCollapsed`).
+- **Display-vs-stored indices**: the views see `withPrefillGhost`'s stream, so
+  `lib/loom.ts:loomCut` owns the translation (leading prefill ghost shifts by
+  one; anything at/past an edit ghost is refused — no ids to replay).
+
+Verified end-to-end by `tests/small-smokes/browser_loom_live.py` (real tinker
+sampling): exact prefix-tid replay, picked alt at the cut, ghost-free re-scored
+stream with <0.15 nats drift vs the original prefix, renderer anchored while the
+sidebar thinking toggle was deliberately flipped, and the toggle unclobbered
+after. Route-level contract in `tests/test_api.py::test_chat_loom_continue_tokens`.

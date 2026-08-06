@@ -694,15 +694,17 @@
    *  assembly over chat.fireOne, which fires detached + folds from the bus bucket.
    *  `paramsOverride` patches the composer bundle for this fire (branchOps'
    *  continue forces prefill_scope 'all' — its prefill is the continuation, not
-   *  the composer prefill the scope tri-state governs). */
+   *  the composer prefill the scope tri-state governs). `modelOverride` replaces
+   *  the panel-selection resolution (loom fires anchor to the turn's producer). */
   function fireOne(
     pSel: PanelSel,
     userParentId: string,
     messages: ChatMessage[],
     prefill?: string,
-    paramsOverride?: Partial<ChatParams>
+    paramsOverride?: Partial<ChatParams>,
+    modelOverride?: ChatModelField
   ) {
-    const model = resolveModelField(pSel);
+    const model = modelOverride ?? resolveModelField(pSel);
     if (!model) return;
     chat.fireOne(
       pSel.panel, model, userParentId, messages,
@@ -2283,6 +2285,7 @@
                   otherPanels={panelSels.filter((x) => x.panel !== p.panel).map((x) => ({ id: x.panel, label: panelLabel(x) }))}
                   onSendToPanel={(dest) => branchOps.sendBranchToPanel(p.panel, msg, dest)}
                   onCycle={(delta) => branchOps.cycleBranch(p.panel, msg, delta)}
+                  onLoom={(cut, altTid) => branchOps.loomBranch(p.panel, msg, cut, altTid)}
                   onToggleSamplesView={() => toggleSamplesView(p.panel, msg)}
                   onStop={() => chat.stopGeneration(p.panel)}
                   rowIndex={i}

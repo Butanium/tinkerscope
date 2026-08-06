@@ -152,6 +152,17 @@ class ChatRequest(BaseModel):
     # prefill-only call per sample (see tinker_sampler._token_logprobs). The
     # token-streamed oai paths and OpenRouter ignore it.
     logprobs: bool = True
+    # LOOM (exact token-level continue): token ids appended VERBATIM after the
+    # rendered prompt — a stored sample's generated prefix + a picked alternative,
+    # so the model continues from that exact token state (no re-tokenization).
+    # Native tinker paths only; invalid with openrouter_model (no token-level
+    # control) and with thinking="both" (two renderer modes can't share one token
+    # prefix). See tinker_sampler.sample_stream.
+    continue_tokens: list[int] | None = None
+    # Exact renderer override for the native paths. Loom fires send the renderer
+    # recorded in the source turn's raw_meta, so the re-rendered prompt is the one
+    # the prefix tokens actually continued. None = select_renderer_name as usual.
+    renderer_name: str | None = None
     # live-drive routing
     panel: str = "primary"                  # "primary" | "compare"
     # The workspace this chat belongs to. The browser always sends
@@ -427,6 +438,11 @@ async def chat(req: ChatRequest):
         # ── resolve the model + build the per-sample producer ───────────────
         total = n  # expected sample count for this chat (2n when thinking="both")
         try:
+            if req.continue_tokens:
+                if req.openrouter_model:
+                    raise ValueError("continue_tokens requires a native tinker model")
+                if both:
+                    raise ValueError('continue_tokens is incompatible with thinking="both"')
             if req.openrouter_model:
                 label = req.openrouter_model
 
@@ -471,10 +487,11 @@ async def chat(req: ChatRequest):
                 def ckpt_iter(think: bool):
                     return get_sampler().sample_stream(
                         base_model=base_model, sampler_path=req.sampler_path,
-                        renderer_name=select_renderer_name(base_model, None, think),
+                        renderer_name=req.renderer_name or select_renderer_name(base_model, None, think),
                         messages=native_msgs if think else native_off,
                         n=n, temperature=temperature, max_tokens=max_tokens,
                         top_p=top_p, logprobs=req.logprobs, think=think,
+                        continue_tokens=req.continue_tokens,
                     )
 
                 if both:
@@ -496,11 +513,12 @@ async def chat(req: ChatRequest):
                 def base_iter(think: bool):
                     return get_sampler().sample_stream(
                         base_model=req.base_model, sampler_path=None,
-                        renderer_name=select_renderer_name(req.base_model, None, think),
+                        renderer_name=req.renderer_name or select_renderer_name(req.base_model, None, think),
                         messages=native_msgs if think else native_off,
                         n=n, temperature=temperature,
                         max_tokens=max_tokens, top_p=top_p,
                         logprobs=req.logprobs, think=think,
+                        continue_tokens=req.continue_tokens,
                     )
 
                 # Base models ALWAYS sample native (never the oai stream): the
@@ -533,11 +551,13 @@ async def chat(req: ChatRequest):
                 def run_iter(think: bool):
                     return get_sampler().sample_stream(
                         base_model=run.base_model, sampler_path=ckpt.sampler_path,
-                        renderer_name=select_renderer_name(run.base_model, run.renderer_name, think),
+                        renderer_name=req.renderer_name
+                        or select_renderer_name(run.base_model, run.renderer_name, think),
                         messages=native_msgs if think else native_off,
                         n=n,
                         temperature=temperature, max_tokens=max_tokens, top_p=top_p,
                         logprobs=req.logprobs, think=think,
+                        continue_tokens=req.continue_tokens,
                     )
 
                 if both:

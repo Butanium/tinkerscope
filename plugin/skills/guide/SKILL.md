@@ -175,6 +175,23 @@ tracks the mass (relative read), 1 = a step where any nonzero match goes to full
 tint (the "is anything related in the top-5 at all?" read), 0.50 = the √ ramp
 default in between.
 
+**"What if it had said a different word there?" — the loom.** Click a token
+(in Over mode, click the word in the prose; in Tokens, the token itself) to PIN
+its popover — the top-5 alternative rows turn into buttons. Click one and the
+model continues from exactly that point with that token swapped in: the reply up
+to your click is replayed token-for-token (no re-tokenization, no paraphrase), so
+the new branch is the true counterfactual. It arrives as an ordinary sibling —
+cycle ‹k/N› between "what it said" and "what it would have said" — draws the
+sidebar's current **n** samples (n>1 ⇒ a distribution over the counterfactual),
+and carries full token probabilities, replayed prefix included. The card's
+"↺ resample from this token" redraws from that position *without* swapping
+anything — "how locked-in was everything after this?". Esc or a click elsewhere
+closes the card; picking the already-sampled alternative means "keep it, redraw
+what follows". The fire is anchored to the model that produced the turn (with its
+exact renderer), even if the panel's picker has since moved to another model —
+token ids only mean something to their own tokenizer. Ghost regions (edited text,
+prefill) can't be loomed: there are no real token ids there to replay.
+
 **"I edited the reply — do I lose the token data?"** Only for what you changed.
 Editing forks a new branch, and it keeps the probabilities of everything before
 the point where your text stops matching what the model wrote — so truncating a

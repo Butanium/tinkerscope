@@ -218,6 +218,19 @@ export type ChatRequest = {
   repetition_penalty?: number | null;
   /** Capture per-token logprobs (native tinker paths; server default true). */
   logprobs?: boolean;
+  /** Param routing: 'global' (default — the browser's normal sends, params write
+   *  back to the shared sidebar state) vs 'call' (this chat only; absent params
+   *  inherit the current state, nothing writes back). Loom fires use 'call' so
+   *  their per-turn thinking override can't flip the sidebar toggle. */
+  params_scope?: 'global' | 'call';
+  /** LOOM (exact token-level continue): token ids appended verbatim after the
+   *  rendered prompt — a stored sample's prefix + a picked alternative. Native
+   *  tinker paths only; see lib/loom.ts + branchOps.loomBranch. */
+  continue_tokens?: number[];
+  /** Exact renderer override for a loom fire (the renderer recorded in the source
+   *  turn's raw_meta), so the re-rendered prompt is the one the prefix tokens
+   *  actually continued. */
+  renderer_name?: string | null;
   panel: Panel;
   broadcast: boolean;
   /** Fire-and-forget: the POST returns immediately and the generation streams

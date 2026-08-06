@@ -504,6 +504,7 @@ class SamplerManager:
         top_p: float | None = None,
         logprobs: bool = True,
         think: bool = True,
+        continue_tokens: list[int] | None = None,
     ) -> AsyncIterator[dict]:
         """Yield one result dict per completed sample, as they finish.
 
@@ -515,7 +516,19 @@ class SamplerManager:
         costs one extra prefill-only call per sample, awaited before the sample
         is yielded; pass logprobs=False to skip it. `think` sets the thinking
         effort for renderers that take one (tml_v0 / Inkling).
+
+        `continue_tokens` (the LOOM): token ids appended VERBATIM after the
+        rendered prompt — a stored sample's generated prefix plus a picked
+        alternative, so the model continues from that exact token state with no
+        re-tokenization drift. They are assistant-authored by construction
+        (everything after the generation prompt is), so they extend region_ids
+        exactly like a text prefill's region: parse_response sees the full turn
+        and the caller must not re-prepend anything (prefill_incorporated).
+        token_logprobs then cover the WHOLE stream (forced prefix + fresh
+        continuation) from one teacher-forced pass — the prefix scores under its
+        true context, the picked alternative under its recorded top-K value.
         """
+        import tinker
         from tinker import types as tt
 
         client = await self._sampling_client(base_model, sampler_path)
@@ -543,6 +556,15 @@ class SamplerManager:
         else:
             model_input = _build_generation_prompt(renderer, non_prefill, think)
             region_ids = None
+        # score_input = the prompt WITHOUT the continue tokens: _token_logprobs
+        # reads positions after its prompt, so scoring against this base covers
+        # the forced prefix too (see the docstring).
+        score_input = model_input
+        if continue_tokens:
+            model_input = tinker.ModelInput(
+                chunks=[*model_input.chunks, tt.EncodedTextChunk(tokens=list(continue_tokens))]
+            )
+            region_ids = [*(region_ids or []), *continue_tokens]
         stop = renderer.get_stop_sequences()
         prompt_text = tokenizer.decode(model_input.to_ints())
 
@@ -606,9 +628,16 @@ class SamplerManager:
                     # client must NOT re-prepend the prefill.
                     item["prefill_incorporated"] = True
                 if logprobs:
-                    tlp = await _token_logprobs(
-                        client, model_input, list(seq.tokens), seq.logprobs, tokenizer
-                    )
+                    if continue_tokens:
+                        # No fallback lps: seq.logprobs covers only the fresh
+                        # tokens, so it can't stand in for the full stream.
+                        tlp = await _token_logprobs(
+                            client, score_input, [*continue_tokens, *seq.tokens], None, tokenizer
+                        )
+                    else:
+                        tlp = await _token_logprobs(
+                            client, model_input, list(seq.tokens), seq.logprobs, tokenizer
+                        )
                     if tlp:
                         item["token_logprobs"] = tlp
                 return item

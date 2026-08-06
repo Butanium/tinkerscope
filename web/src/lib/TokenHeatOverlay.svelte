@@ -32,18 +32,24 @@
   import type { TokenLogprob } from '$lib/tree';
   import { alignTokens, visibleCoverage } from '$lib/token-align';
   import { highlightMatchProb, tokenTintColors } from '$lib/token-logprob';
+  import { loomCut } from '$lib/loom';
   import { logprobHighlight } from '$lib/logprobs.svelte';
   import { colorRules } from '$lib/highlights.svelte';
   import TokenPopover from '$lib/TokenPopover.svelte';
 
   let {
     tlp,
-    selector
+    selector,
+    onLoom
   }: {
     tlp: TokenLogprob[];
     /** Containers holding the rendered text this stream produced, in stream
      *  order (reasoning before content). */
     selector: string;
+    /** The LOOM, in reading mode: clicking a word pins its token's popover, whose
+     *  alternatives fire this with (stored cut, alt tid | null). A click that is
+     *  part of a text-selection drag is left alone. Absent = hover-only. */
+    onLoom?: (cut: number, altTid: number | null) => void;
   } = $props();
 
   /** Below this share of the rendered text claimed by some token, the alignment
@@ -65,6 +71,18 @@
   let quality = $state(1);
   let hover = $state<number | null>(null);
   let pop = $state<{ x: number; y: number } | null>(null);
+  // The LOOM pin: hover freezes there and the popover turns interactive.
+  let pinned = $state<number | null>(null);
+  let pinnedPop = $state<{ x: number; y: number } | null>(null);
+  // Data swapped under the pin (edit / fold / cycle) → the index is meaningless.
+  $effect(() => {
+    void tlp;
+    pinned = null;
+    pinnedPop = null;
+  });
+  const firstEditGhost = $derived(tlp.findIndex((e) => e.ghost && e.ghostKind !== 'prefill'));
+  const canLoomAt = (i: number) =>
+    !!onLoom && !tlp[i]?.ghost && (firstEditGhost < 0 || i < firstEditGhost);
   /** Containers we've put a canvas in, so they can be cleaned up on destroy. */
   let painted: Element[] = [];
   /** The container list `boxes` was measured against — reused by hover so a
@@ -300,7 +318,29 @@
     });
   }
 
+  function onClick(ev: MouseEvent): void {
+    if (hover == null || !canLoomAt(hover)) return;
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return; // a drag-select, not a pick
+    pinned = hover;
+    pinnedPop = {
+      x: Math.max(4, Math.min(ev.clientX, window.innerWidth - 260)),
+      y: ev.clientY + 14
+    };
+  }
+  function unpin(): void {
+    pinned = null;
+    pinnedPop = null;
+  }
+  function pick(altTid: number | null): void {
+    if (pinned == null || !onLoom) return;
+    const cut = loomCut(tlp, pinned);
+    unpin();
+    if (cut != null) onLoom(cut, altTid);
+  }
+
   function onMove(ev: MouseEvent): void {
+    if (pinned != null) return; // frozen while the loom card is up
     const containers = measured;
     let found: number | null = null;
     for (let ci = 0; ci < containers.length && found == null; ci++) {
@@ -337,6 +377,7 @@
   }
 
   function onLeave(): void {
+    if (pinned != null) return; // keep the pinned token's outline while the card is up
     if (hover == null) return;
     hover = null;
     pop = null;
@@ -364,12 +405,14 @@
     host.addEventListener('toggle', schedule, true);
     host.addEventListener('mousemove', onMove);
     host.addEventListener('mouseleave', onLeave);
+    host.addEventListener('click', onClick);
     schedule();
     return () => {
       ro.disconnect();
       host.removeEventListener('toggle', schedule, true);
       host.removeEventListener('mousemove', onMove);
       host.removeEventListener('mouseleave', onLeave);
+      host.removeEventListener('click', onClick);
       if (frame) cancelAnimationFrame(frame);
       dropCanvases();
     };
@@ -386,8 +429,10 @@
 
 <!-- `tlp[hover]` guarded, not assumed: the array is re-derived while a turn
      streams, so a held hover index can outlive its entry for a frame. -->
-{#if hover != null && pop && tlp[hover]}
-  <TokenPopover entry={tlp[hover]} x={pop.x} y={pop.y} {rules} />
+{#if pinned != null && pinnedPop && tlp[pinned]}
+  <TokenPopover entry={tlp[pinned]} x={pinnedPop.x} y={pinnedPop.y} {rules} pinned onPick={pick} onClose={unpin} />
+{:else if hover != null && pop && tlp[hover]}
+  <TokenPopover entry={tlp[hover]} x={pop.x} y={pop.y} {rules} canPin={canLoomAt(hover)} />
 {/if}
 
 <style>

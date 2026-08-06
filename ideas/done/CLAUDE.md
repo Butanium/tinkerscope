@@ -12,3 +12,5 @@ happened.
 - [smoke.sh preflight for other instances](smoke-preflight-other-instances.md) — warns on leftover dev-isolated instances only, so it isn't tuned out — **done 2026-07-24** (cba3c59)
 - [Ruff over all of `tests/`](ruff-over-tests.md) — repo-wide `ruff check` clean, command in CLAUDE.md §Build/verify — **done 2026-07-24**
 - [`?` modal visual regression net](help-modal-regression-net.md) — the help smoke asserts every chip really rendered an `svg` — **done 2026-07-24**
+- [Loom: branch from a token into one of its alternatives](loom-branch-from-token.md) — click a token, pick an alternative, get the counterfactual as an ordinary sibling; shipped TOKEN-LEVEL (`continue_tokens`), full stream re-scored — **done 2026-08-06**
+- [The loom should cut from the PROSE](loom-cut-from-prose.md) — the overlay got the same click-to-pin as the raw stream, so the cut is picked in reading mode — **done 2026-08-06**

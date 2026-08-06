@@ -400,6 +400,18 @@ codex plugin add tinkerscope@tinkerscope</pre>
         token into a top and a bottom band. Off keeps your picks for next time.
       </p>
       <p class="help-note">
+        <b>The loom — branch from a token.</b> Click a token (in either view; in Over, click the word)
+        to pin its popover: the top-5 alternatives become buttons. Pick one and the model continues
+        from <i>exactly</i> that point with that token swapped in — the reply up to your click is
+        replayed token-for-token, so the new branch is the counterfactual "what if it had said this
+        here". It lands as an ordinary sibling (cycle with ‹k/N›), draws your current
+        <b>n</b> samples, and carries full token probabilities — including the replayed prefix, re-scored.
+        "↺ resample from this token" redraws from the position without swapping anything, which answers
+        "how locked-in was the rest?". Esc or clicking elsewhere closes the card. Fires against the model
+        that produced the turn (even if the panel has moved on), with its exact renderer; tokens past an
+        edit's ghost region can't be loomed (there is nothing to replay).
+      </p>
+      <p class="help-note">
         <b>Editing a reply keeps the probabilities it didn't touch.</b> Truncate a turn, cut its
         thinking, change the last sentence — everything before the point where your text stops matching
         what the model wrote was generated under the same context, so it keeps its numbers. The rest is

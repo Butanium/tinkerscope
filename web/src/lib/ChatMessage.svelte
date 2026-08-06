@@ -42,6 +42,7 @@
     onCopy,
     onTag,
     onCycle,
+    onLoom,
     onToggleSamplesView,
     onStop,
     otherPanels = [],
@@ -75,6 +76,11 @@
     onCopy: (all: boolean, withThinking: boolean) => void;
     onTag: (content: string, sampleIndex: number | null, totalSamples: number | null, reasoning: string, quick: boolean) => void;
     onCycle: (delta: number) => void;
+    // The LOOM: branch this turn from a token position into one of its recorded
+    // alternatives (altTid null = resample the position itself). `cut` counts
+    // STORED stream entries (the views translate display indices via lib/loom).
+    // Forwarded to the token views only on a committed, idle row (loomable below).
+    onLoom?: (cut: number, altTid: number | null) => void;
     // "View all samples" (the eye): expand this turn's sibling distribution into
     // the card view / collapse back. +page owns WHICH turn is open (per panel,
     // keyed by the tree parent); the row only reports the toggle.
@@ -138,6 +144,9 @@
     if (rawSingle && hasMeta && rawMeta == null && msg.nodeId) void nodeBlobs.ensure([msg.nodeId]);
   });
   let canEdit = $derived(msg.nodeId != null && !busy);
+  // Loom gate: a committed row on an idle panel, writable UI. Per-token
+  // eligibility (ghosts, prefill offset) is the views' job via lib/loom.
+  let loomHandler = $derived(!readOnly && !busy && msg.nodeId != null ? onLoom : undefined);
   // ‹k/N› on any committed row with siblings (the n>1 bucket uses its cards).
   let hasSiblings = $derived(!!(msg.sib && msg.sib.count > 1) && !isMultiSample);
   // "View all samples" (the eye): a committed turn expanded into the card view.
@@ -797,7 +806,7 @@
         <pre class="raw-text-view">{msg.raw_text}</pre>
           {#if rawMeta}{@render rawMetaDisclosure(rawMeta)}{:else if hasMeta}<div class="blob-loading">loading request &amp; response…</div>{/if}
       {:else if tokView}
-        <TokenLogprobs tlp={tlp!} />
+        <TokenLogprobs tlp={tlp!} onLoom={loomHandler} />
       {:else}
         <div class="message-content">{@html prefillSplit ? renderPrefilled(msg.content, prefillSplit.answer, msg.role) : renderContent(msg.content, msg.role)}</div>
         {#if tokOverlay}
@@ -805,7 +814,7 @@
                Not on content: a streaming row has no nodeId yet, and keying on
                its text would remount the overlay on every chunk. -->
           {#key msg.nodeId ?? 'live'}
-            <TokenHeatOverlay tlp={tlp!} selector=".sample-reasoning, .message-content" />
+            <TokenHeatOverlay tlp={tlp!} selector=".sample-reasoning, .message-content" onLoom={loomHandler} />
           {/key}
         {/if}
       {/if}

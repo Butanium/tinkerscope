@@ -163,8 +163,8 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     `lib/model-sel` sentinel encoding); and `modelItems(runId)`, the per-panel
     dropdown item-list builder (was a giant inline `{@const}` in +page markup).
   - `lib/branch-ops.svelte.ts` → `branchOps` — the **chat-thread branching
-    handlers** (edit / regenerate / delete / cycle / select / continue, per panel
-    and across-all-panels). All tree mutation goes through `convo.setTree`; scroll
+    handlers** (edit / regenerate / delete / cycle / select / continue / loom,
+    per panel and across-all-panels). All tree mutation goes through `convo.setTree`; scroll
     policy (PRESERVE/SNAP) + bucket clearing live here. UI-agnostic, like `chat`:
     +page injects its four seams once via `branchOps.configure({ panelSels,
     panelBusy, withPrefill, fireOne })`, and markup / keyboard-nav call the
@@ -388,6 +388,16 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     (`firstRealToken` skips a leading prefill ghost). **Has
     `token-prefill.test.ts`**; the prefill scenario in
     `browser_token_overlay.py` pins it end-to-end.
+  - `lib/loom.ts` — the LOOM's pure half: `loomCut` (display index → STORED-stream
+    cut; null on ghosts / past an edit ghost — the display stream may carry a
+    synthetic leading prefill ghost) + `parseRawMetaModel` (recover the producing
+    base_model / sampler_path / exact renderer from a turn's raw_meta blob via
+    line-anchored regexes — safe because json.dumps escapes newlines, so no VALUE
+    can start a line). The loom fire itself is `branchOps.loomBranch`: replay the
+    stored prefix tids + a picked alternative via `ChatRequest.continue_tokens`,
+    anchored to the turn's own model+renderer (tids are tokenizer-specific), at
+    `params_scope:'call'` so the per-turn thinking override never touches the
+    sidebar. **Has `loom.test.ts`**; live smoke `tests/small-smokes/browser_loom_live.py`.
   - `lib/kbnav.ts` — keyboard row-navigation helpers: nav-key set, clamped
     focus-index stepping, the typing-target/modal-open guards. Consumed by
     +page's *Keyboard row navigation* section (click a row → focus ring; ↑/↓
@@ -595,7 +605,12 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     alternative bars, alternatives tinted by which selected rule they match),
     shared by both token views so "what a token tells you" has one definition —
     including the GHOST branch (`token-edit.ts`): no percentage, "no token data
-    — edited text", handled here once instead of per view.
+    — edited text", handled here once instead of per view. Two modes: HOVER
+    (informational, `pointer-events:none` so it never steals the hover) and
+    PINNED (the LOOM — a view pins it on token click): alternatives become
+    branch buttons + a "↺ resample from this token" row, Esc/outside-click
+    close (the closing gestures live HERE, once for both views; the pin state
+    lives in each view). Both views translate the click via `lib/loom.ts`.
   - `lib/Typeahead.svelte` — the type-to-filter combobox (used by the OpenRouter
     + Tinker picker modals, and as the panel body of `PickerDropdown`). Item
     shape: `lib/picker.ts`'s `PickerItem` (`sub` = the secondary line, defaulting

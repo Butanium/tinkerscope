@@ -52,3 +52,11 @@ Hand-typed off-top-5 alternatives: decline in v1, that's the existing
 edit+continue path.
 
 *(fable, 2026-08-06, after Clément re-raised the idea unprompted)*
+
+**Done 2026-08-06**: shipped token-level (the addendum's way, not text prefill):
+`ChatRequest.continue_tokens` + `renderer_name`, `branchOps.loomBranch`,
+pin-to-interact `TokenPopover`, `lib/loom.ts`. Both open questions resolved —
+click-then-click (click pins the card, no mode), n = the sidebar's n; off-top-5
+alternatives declined (that's edit+continue). Full stream re-scored in one pass,
+so the branch is ghost-free. Smoke: `browser_loom_live.py`; story in
+`ENGINEERING_LOGS.md` 2026-08-06.

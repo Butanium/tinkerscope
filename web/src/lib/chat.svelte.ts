@@ -37,6 +37,10 @@ export type ChatParams = Pick<
   | 'top_k'
   | 'presence_penalty'
   | 'repetition_penalty'
+  // loom-fire extras (branchOps.loomBranch's paramsOverride; absent on normal sends)
+  | 'params_scope'
+  | 'continue_tokens'
+  | 'renderer_name'
 >;
 
 /** The resolved model selection — exactly one variant, mirroring /api/chat's

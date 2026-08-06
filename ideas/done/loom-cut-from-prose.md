@@ -18,3 +18,9 @@ from here" over a dragged span rather than one token. Same map, read the other
 way.
 
 *(opus-5, 2026-08-03, token-overlay / highlights-master session)*
+
+**Done 2026-08-06**: shipped with the loom itself — `TokenHeatOverlay` got the
+same click-to-pin as the raw stream (hover hit-test → pin; a click that's part
+of a text-selection drag is ignored), so the cut IS picked from the prose in
+reading mode. The dragged-span variant ("branch from here" over a selection)
+did not ship — reopen if wanted.

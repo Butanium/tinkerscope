@@ -111,7 +111,11 @@ every turn. Flip the sidebar's **Token probs** toggle to paint a surprisal
 heat under the prose (or show the raw token stream), and hover any token for
 its probability and the alternatives the model weighed. **Color by match**
 tints each token by how much probability mass a highlight rule *almost* got —
-where did "red" nearly happen.
+where did "red" nearly happen. And the alternatives aren't just for looking:
+**click a token to loom** — pick an alternative from its card and the model
+continues from exactly that point with the swap made (token-level replay, not a
+paraphrase), landing the counterfactual as a sibling branch you can cycle
+against the original, n samples at a time.
 
 ![Token probabilities overlay](docs/img/token-probs.png)
 
