@@ -86,7 +86,7 @@
     paletteFor = null;
     await upsertHighlightRule({ ...rule, color });
   }
-  // Drag-to-reorder (replaces the old up/down arrows). Only the grip is
+  // Drag-to-reorder. Only the grip is
   // draggable so the rule's name input / preview text stay selectable+editable;
   // 'y' = a vertical list. reorderHighlightRules already owns the optimistic
   // local reorder + the PUT (rule-precedence semantics unchanged).

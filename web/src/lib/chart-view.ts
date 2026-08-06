@@ -1,7 +1,7 @@
 // Persistence for the response-distribution chart's VIEW state.
 //
-// The chart modal is destroyed on close and its state used to die with it, so
-// every reopen (and every reload) meant re-picking the mode, the match scope,
+// The chart modal is destroyed on close, so without this its state dies with it
+// and every reopen (and every reload) means re-picking the mode, the match scope,
 // the thinking filter, the excluded rules, the merged first-token groups…
 // Two scopes, because the state divides cleanly:
 //

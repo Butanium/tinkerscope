@@ -21,6 +21,7 @@ see `README.md` for the full feature list + credits.
 | `docs/PACK.md` | **Share packs** — bundle checkpoints + default params + workspaces into one portable YAML (`tinkerscope --pack <file\|url>` to consume, `tinkerscope pack export` to author) so a collaborator reproduces a setup against public checkpoints with no local run dirs. Code: `src/tinkerscope/pack.py` + `api/pack_models_store.py` | current |
 | `docs/STATIC_SITE.md` | **Static read-only site export + `?w=<pack link>`** (SHIPPED 2026-07-30) — what a published site keeps/hides and why, the size reality (logprobs are ~97% of the bytes), the `data/` layout (each file ≡ an endpoint response), the two index.html rewrites a GitHub Pages subpath needs, the id-vs-pack-source rule, collision handling, and how the chart view travels. Since 2026-07-30 a published site is also a **general reader for anyone's pack** — IndexedDB overlay (localStorage's 5 MB cap made a real workspace uninstallable), gzip + `--logprobs` packs, and open-a-file-from-disk. **`--pack-link` + the loading modal** (2026-07-30) make a published `?w=<id>` SHAREABLE — an id the visitor lacks resolves through `manifest.pack_links` and installs behind a progress box, instead of flashing "not found" and swapping | current |
 | `docs/TODO.md` | Roadmap (branching marked done) | current |
+| `ENGINEERING_LOGS.md` | **Dated narrative behind the rules** — what broke, what was measured, which theory turned out false. This file keeps the imperative one-liner; the log keeps the story. Entries before 2026-08-06 are reconstructed | current |
 | `ideas/CLAUDE.md` | **Ideas parking lot** — non-roadmap ideas worth remembering, one file per idea, clustered in that index; shipped ones retire into `ideas/done/`. Was a single `IDEAS.md` until 2026-08-06 | current |
 | `deprecated/HANDOFF.md` | Original tool-build handoff (Harry's playground → tinkerscope). Build done; file refs predate the `src/tinkerscope/` restructure | deprecated, kept for history |
 
@@ -44,9 +45,9 @@ and in this file's reference section; HANDOFF.md itself is retired.
   `tinkerscope-cli`.) A new skill needs its dir + link made by hand, as before.
   **`plugin.json` declares NO `version` on purpose** — Claude Code keys the
   plugin cache by `version` when present and by COMMIT SHA when absent, so
-  declaring one strands consumers on a stale cache until someone bumps it (that's
-  what claude-lab's disabled post-commit hook was papering over, at the cost of
-  doubling the repo's commits). `claude plugin validate --strict` warns about the
+  declaring one strands consumers on a stale cache until someone bumps it (the
+  expensive workaround, and the cache-layout evidence, are in `ENGINEERING_LOGS.md`
+  2026-07-24). `claude plugin validate --strict` warns about the
   omission; that warning is the intended trade, and Anthropic's own feature-dev /
   code-review / frontend-design omit it too. Touch `docs/API_CONTRACT.md` too if
   the HTTP surface changed. (Checklist is also in `cli.py`'s module docstring.)
@@ -212,8 +213,9 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     per-panel FOLLOW (streaming, stick-to-bottom gated) / PRESERVE (tree
     mutations keep position) / SNAP (send, workspace open) / REVEAL
     (keyboard focus moved off-screen → minimal container-only scroll) policy.
-    Its module docstring records why (the old global bottom-pin = the scroll
-    flicker). New scroll behavior goes through this store, never inline.
+    Its module docstring states the trap: a state-change-driven pin fires after
+    the DOM already updated, which IS the scroll flicker. New scroll behavior
+    goes through this store, never inline.
 - **Pure logic** — plain `.ts`, no Svelte/DOM, unit-testable (some have
   `*.test.ts`):
   - `lib/tree.ts` — all branch-tree ops (activePath, fold, regen, edit, delete,
@@ -670,7 +672,8 @@ extracted UI: `tests/small-smokes/browser_{chart_modal,modals}.py`.
   use the oai `GET /v1/models` listing for availability — it's hard-capped at the
   ~20 newest checkpoints while the inference endpoints serve unlisted paths fine;
   trusting it falsely greyed older-but-live runs (the "rolling window" theory in
-  older notes came from this cap). Find a live run via `GET /api/tinker-models`
+  older notes came from this cap — full forensic in `ENGINEERING_LOGS.md`
+  2026-07-21). Find a live run via `GET /api/tinker-models`
   or `tests/small-smokes/_smoke_models.{LIVE_RUN_ID,pick_servable_run}`.
   **Live as of 2026-07-21:** all 2026-06 weird-personas runs (42 of 54 discovered);
   the April negation_neglect runs are genuinely gone.

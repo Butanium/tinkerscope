@@ -529,8 +529,8 @@
   // Split-pill model (SplitChip): ENABLED (applies to sends) is orthogonal to
   // EXPANDED (editor visible). Folding never mutes; muting keeps the text (peek
   // when folded, "muted" hint when expanded). Typing into an EMPTY field
-  // auto-enables (the old one-chip flow: open, type, it applies); editing
-  // existing muted text never re-enables. Enabling an empty field auto-expands.
+  // auto-enables; editing existing muted text never re-enables. Enabling an
+  // empty field auto-expands.
   let prefillOn = $state(false);
   let showPrefill = $state(false);
   // System prompt lives next to the prefill chip (moved out of the sidebar), with
@@ -662,7 +662,7 @@
     return {
       // The EFFECTIVE global part, always explicit: '' (= fire with none, never
       // inherit) when muted or empty, so a kept-but-muted prompt can't leak in
-      // server-side. The server no longer echoes this back into shared state.
+      // server-side. The server does not echo this back into shared state.
       system_prompt: systemActive ? s.system_prompt : '',
       temperature: s.temperature,
       max_tokens: s.max_tokens,
@@ -2762,7 +2762,7 @@
   .tinker-note { font-size: 0.7rem; color: var(--color-text-muted); margin: 2px 0 0; line-height: 1.4; font-style: italic; }
 
   /* ── Instant tooltip ──────────────────────────────────────────── */
-  /* max-width + wrap, not nowrap: a long tip used to render as one off-screen
+  /* max-width + wrap, not nowrap: nowrap renders a long tip as one off-screen
      line. `use:tipHost` clamps it horizontally (see lib/tooltip.svelte.ts). */
   .tooltip-instant { position: fixed; z-index: 9999; background: var(--color-text); color: var(--color-bg); font-size: 0.72rem; line-height: 1.45; padding: 4px 8px; border-radius: var(--radius); pointer-events: none; max-width: min(30rem, 92vw); transform: translateX(-50%); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
 

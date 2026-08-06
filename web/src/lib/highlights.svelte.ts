@@ -1,5 +1,4 @@
-// Highlight RULES store — the user-defined render-time coloring rules that
-// replaced the old hardcoded ed_sheeran/dentist/vesuvius regex set. Rules
+// Highlight RULES store — the user-defined render-time coloring rules. Rules
 // persist server-side via /api/highlights; this is the reactive mirror + CRUD
 // that the sidebar editor (HighlightRules.svelte) and render.ts read from.
 //

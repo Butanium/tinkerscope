@@ -12,8 +12,8 @@
 //   Y) mirrors the bus → B now shows X's models → B's syncPanels sees X's panel ids
 //   as new, calls save() → 400ms later Y is persisted on disk with X's models.
 //
-// No user action needed on the losing tab; the CLI could do it too. Four of the
-// author's workspaces were corrupted this way before it was diagnosed (2026-07-24).
+// No user action needed on the losing tab; the CLI could do it too. This has
+// happened (ENGINEERING_LOGS.md 2026-07-24).
 //
 // The rule: every bus message is stamped with the workspace it describes
 // (`workspace_id`), and a client adopts the WORKSPACE-SCOPED fields only when

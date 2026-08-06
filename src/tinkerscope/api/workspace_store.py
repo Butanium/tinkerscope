@@ -353,11 +353,7 @@ def _write_blobs(cid: str, blobs: dict[str, dict]) -> None:
 
 
 # ── panel-layout history ─────────────────────────────────────────────────────
-# WHY: on 2026-07-24 a process-global-state bug replaced four live workspaces'
-# panel layouts with a foreign tab's, and the only reason it was recoverable is
-# that each node's `raw_meta` happens to record which sampler produced it — a
-# forensic exercise (`scripts/repair_panel_layouts.py`). A layout is a few
-# hundred bytes; keeping the last N of them turns any future layout accident
+# A layout is a few hundred bytes; keeping the last N turns a layout accident
 # into a lookup. It also answers "what models did this workspace use last week?".
 #
 # Append-only `<cid>.layouts.jsonl`, one `{ts, panels}` per CHANGE (not per save

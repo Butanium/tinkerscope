@@ -19,7 +19,7 @@
 // own text, thinking tags and all — never against the parsed reasoning/content
 // fields, whose concatenation would need the tag formatting guessed. The runs are
 // located inside the raw text by substring search; when they can't be found the
-// edited node keeps no tokens at all, exactly as before this existed.
+// edited node keeps no tokens at all.
 
 import type { TokenLogprob } from './tree.ts';
 

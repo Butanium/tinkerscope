@@ -536,7 +536,7 @@ class ConversationsStore {
       if (materializing) this.#draftId = id; // not persisted — still a draft
       // Re-merge the drained dirt (unless a newer mark superseded it) so the next
       // save / flush-on-switch retries — a silently-lost PARTIAL save would never
-      // be re-shipped by later unrelated edits, unlike the old whole-map save.
+      // be re-shipped by later unrelated edits.
       for (const [p, t] of dirtyTrees)
         if (!this.#dirtyTrees.has(p) && !this.#droppedTrees.has(p)) this.#dirtyTrees.set(p, t);
       for (const p of droppedTrees) if (!this.#dirtyTrees.has(p)) this.#droppedTrees.add(p);

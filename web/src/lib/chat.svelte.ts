@@ -173,8 +173,8 @@ class ChatStore {
     return true;
   }
 
-  /** Apply the prefill prepend / scope-skip to the bucket's samples so they fold
-   *  identically to the old drain path. Each sample keeps its ORIGINAL bucket index
+  /** Apply the prefill prepend / scope-skip to the bucket's samples before they
+   *  fold. Each sample keeps its ORIGINAL bucket index
    *  as sample_index (foldAssistant orders by it — thinking='both' packs the
    *  non-thinking half 0..n-1 then the thinking half n..2n-1). Error samples pass
    *  through untouched (foldAssistant skips them). */

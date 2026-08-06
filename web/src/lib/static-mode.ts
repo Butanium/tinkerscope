@@ -6,8 +6,8 @@
 // instance never defines the global ⇒ zero cost and zero behavior change there.
 //
 // Reads come from baked JSON under the data root; writes go to the IndexedDB-backed
-// overlay in lib/overlay-store (localStorage until 2026-07-30 — its ~5 MB cap made a
-// real workspace impossible to install), namespaced per site because one github.io
+// overlay in lib/overlay-store (localStorage's ~5 MB origin cap can't hold a real
+// workspace), namespaced per site because one github.io
 // origin hosts many of them. See docs/STATIC_SITE.md for the on-disk layout and what
 // the mode can/can't do.
 

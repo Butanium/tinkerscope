@@ -1,13 +1,12 @@
 // Per-panel scroll policy — the ONLY place allowed to move a panel's scroll.
 //
-// History (why this exists): the app used to have a single $effect that pinned
-// EVERY panel to its bottom whenever the shared state changed. Because every
-// user action (branch cycle, thinking toggle, param edit, workspace load)
-// round-trips POST /api/state → SSE patch → a wholesale live.state replacement,
-// that effect yanked every panel to its bottom ~50 ms AFTER the DOM had already
-// updated from the local tree — that async yank was the "scroll flicker", and
-// its magnitude scaled with answer length (snap distance = scrollHeight −
-// clientHeight). This store replaces "always pin" with three narrow policies:
+// The trap it exists to avoid: every user action (branch cycle, thinking toggle,
+// param edit, workspace load) round-trips POST /api/state → SSE patch → a
+// wholesale live.state replacement. So anything that pins scroll on state CHANGE
+// fires ~50 ms after the DOM already updated from the local tree, yanking the
+// panel asynchronously — the "scroll flicker", whose magnitude scales with answer
+// length (snap distance = scrollHeight − clientHeight). Hence three narrow
+// policies:
 //
 //   1. FOLLOW — while a panel is streaming AND the user is stuck to its bottom,
 //      keep it pinned (classic chat-log behavior). Scrolling up detaches;

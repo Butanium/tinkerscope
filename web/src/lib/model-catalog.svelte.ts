@@ -9,7 +9,7 @@
 // The resolvers (`runById`, `*Label`, `selectedModelLabel`) layer on the pure
 // sentinel encoding in ./model-sel: model-sel decodes an id, these turn it into
 // something human-readable by reading the reactive catalogs. `modelItems` is the
-// per-panel dropdown item list that used to live inline in +page's markup.
+// per-panel dropdown item list.
 //
 // Deliberately UI-agnostic (house pattern, like chat.svelte.ts): the two loaders
 // that surface a failure into +page's shared error banner (`loadRuns` /

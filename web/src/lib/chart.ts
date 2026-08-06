@@ -535,7 +535,7 @@ export function wrapLabel(label: string, maxLen = 12): string[] {
 }
 
 /** Black-or-white text that stays readable on `hex` (per-segment % labels —
- *  rule palettes are pastel, where the old always-white label washes out). */
+ *  rule palettes are pastel, where a fixed white label washes out). */
 export function contrastText(hex: string): string {
   const norm = hex.replace('#', '');
   const h = norm.length === 3 ? norm.split('').map((c) => c + c).join('') : norm;

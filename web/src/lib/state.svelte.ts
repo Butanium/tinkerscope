@@ -44,8 +44,8 @@ class LiveStore {
   workspaceId: string | null = null;
   /** true while the SSE stream is believed alive: any event (the server
    *  heartbeats every 15s) marks it up; a socket error or 35s of silence marks
-   *  it DOWN. It used to latch true on the first event and never degrade —
-   *  which made the topbar "live" a claim about page load, not about now. */
+   *  it DOWN. It must DEGRADE, never latch: the topbar dot is a claim about
+   *  now, not about page load. */
   connected = $state(false);
   /** true once ANY event has ever arrived — distinguishes "connecting…" from
    *  "was live, lost it" in the topbar. */
