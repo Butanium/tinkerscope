@@ -1,0 +1,84 @@
+# Ideas index
+
+Non-roadmap ideas worth remembering, one file per idea. (Roadmap / committed
+follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
+481 lines with implemented entries struck through in place; same shape as
+`~/.claude/ideas/`, which is the reference for this layout.
+
+- **New idea** → `ideas/<short-slug>.md`, starting with a `##` title, signed and
+  dated at the bottom. Add a line to the index below, under whichever cluster
+  fits (a new cluster is fine).
+- **Implemented / resolved** → `git mv` into `ideas/done/`, append a
+  `**Done YYYY-MM-DD**:` line saying what shipped, and move its index line out of
+  here into `done/CLAUDE.md`. Don't strike text through — this index lists only
+  what's still open.
+- **Dead / rejected** → delete the file and its index line. Git history keeps it.
+  A rejection whose *reasoning* is worth preserving goes to `done/` instead.
+
+## Open
+
+### Token probabilities & the loom
+
+- [Loom: branch from a token into one of its alternatives](loom-branch-from-token.md) — click a token, pick an alternative from its popover, get an ordinary sibling branch; Clément's, mostly existing plumbing
+- [The loom should cut from the PROSE](loom-cut-from-prose.md) — `token-align` + the overlay already hit-test words in reading mode; nobody switches to a token dump on the off-chance
+- [Score the CONTEXT, not just the completion](score-the-context.md) — `[0, L)` is discarded teacher-forced numbers we already paid for; design deliberately unsettled, Clément wants to think more
+- [Make the top-K logprob capture configurable](topk-capture-configurable.md) — `TOPK_LOGPROBS = 5` means Color-by-match only answers "did it make the top *five*?"
+- [Give the surprisal tint the same ramp knob](surprisal-tint-ramp.md) — share the Contrast slider rather than growing a second one
+
+### Chart & sample views
+
+- [Sample-view (the eye) as the chart's in-thread twin](eye-as-chart-twin.md) — filter cards by highlight rule; click a bar segment → the eye with that bucket active
+- [Let a share pack carry a chart view](pack-carries-chart-view.md) — an OPTIONAL `chart_view` block seeding localStorage; never a workspace field
+- [`ChartModal.svelte` has a second component inside it](firsttoken-chips-component.md) — the first-token chip row is self-contained; ~a third of the file
+- [The per-bar `n=` only appears when a group's bars disagree](per-bar-n-labels.md) — deliberate, but inconsistent-looking next to the think split
+
+### CLI (`tinkpg`)
+
+- [`chat` can't print logprobs; `send`/`continue` can](chat-compare-logprobs.md) — found by dogfooding; `send` needs a browser-arranged panel, which defeats a terminal probe
+- [Browserless bare `--node`](browserless-node-lookup.md) — fall back to an all-workspace search so node ids are self-contained references
+- [Isolate one sample by its own node id](isolate-sample-by-node-id.md) — `--this`, so the browser's Copy-node-id → terminal round-trip is one paste
+- [`chat`/`compare` thread-prompt authoring](chat-compare-thread-system.md) — ~2 lines each, deliberately deferred until a use case shows up
+
+### Models: discovery, availability, renderers
+
+- [Availability auto-refresh](availability-auto-refresh.md) — the servable set only refetches on the manual button; a TTL or a send-404 hook would keep grey/⚠ honest
+- [Per-row availability tooltip = the real reason](per-row-availability-reason.md) — the backend already sends `unsampleable_reason`; the typeahead shows generic copy
+- [Continuous thinking-effort slider for tml models](tml-effort-slider.md) — tml_v0 has an `effort` dial in [0, 1); we map it to a binary {0.0, 0.9}
+- [Show the resolved base model on loose-ckpt panels](loose-ckpt-base-label.md) — `resolve_base_model`'s answer never reaches the label; plumbing only
+- [Gate the whole-conversation continue path by CAPABILITY](continue-gate-by-capability.md) — `renderer_name.startswith("tml")` is brittle; YAGNI until a 2nd such renderer
+
+### UI affordances & consistency
+
+- [Hunt the rest of the DOM-held UI state](dom-held-ui-state-sweep.md) — the tell is state a person SET that no store knows about, inside a re-derived `{#each}`
+- [Sweep for controls that follow-scroll hides](follow-scroll-hidden-controls.md) — affordances whose useful moment is exactly when their anchor is off-screen
+- [Finish the icon consolidation](finish-icon-consolidation.md) — ~22 inline `<svg>` remain, and HighlightRules already drew its own divergent pencil
+- [Lint the tooltip length rule](lint-tooltip-length.md) — the ~70-char rule is written down and unenforced; ~20 lines of node test
+- [Toolbar priority order → observed usage](toolbar-priority-order.md) — the fold order is a judgment call; bump on evidence, check in before redesigning
+
+### Verification practice
+
+- [Screenshot-verify every UI change, not just plots](screenshot-verify-ui-changes.md) — smokes passed on both placements; only a picture found the wrong one
+- [Second independent vote for the same](screenshot-verify-second-vote.md) — different failure mode, same day: a whole region painting flat, invisible to every assertion
+- [For anything PAINTED, the assertion is pixel readback](pixel-readback-for-painted.md) — a COUNT for "did it draw", a single-pixel SAMPLE for "the right thing"
+- [Smokes are coupled to Clément's personal run dirs](smoke-fixtures-not-personal-runs.md) — 15 files hard-code fixture paths; a checked-in synthetic run tree costs nothing
+- [Readiness waits should key on STRUCTURE, not data](readiness-waits-on-structure.md) — wait for `aside.sidebar`, never for content the smoke didn't create
+- [`smoke.sh --baseline` should detect working-tree leakage](baseline-detect-worktree-leakage.md) — a self-hosting smoke that ignores `TSCOPE_APP_DIR` produces a green checkmark for nothing
+
+### Codebase & workflow hygiene
+
+- [Split `+page.svelte` and `cli.py`](split-mega-files.md) — 2.2k / 2.3k lines, clean seams, no design decisions needed
+- [Two sessions in one working tree](two-sessions-one-checkout.md) — cost two bad commits in a day, one unrecoverable; a `git status` convention would have caught both
+- [The scoping fix is a stopgap](server-authority-subsumes-scoping-fix.md) — the ops protocol would make cross-workspace writes structurally impossible
+
+### Known bugs
+
+- [A send fired mid-fold is silently dropped](send-mid-fold-dropped.md) — no error, no user row, text left in the textarea; should queue or visibly refuse
+- [Token overlay: hovering a word sometimes yields no popover](token-hover-dead-spots.md) — suspect a null-mapped token or an inter-rect gap; uninvestigated
+
+### Docs
+
+- [README / skill mention of Copy node id](document-copy-node-id.md) — the `#` button isn't documented anywhere; one sentence each
+
+## Done
+
+See [`done/CLAUDE.md`](done/CLAUDE.md) — 8 shipped so far.
