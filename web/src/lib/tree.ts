@@ -62,6 +62,13 @@ export type TreeNode = {
    *  any `<think>`), persisted so the rendered turn can color the prefilled portion
    *  distinctly from the model's continuation. Absent ⇒ no prefill was used. */
   prefill?: string;
+  /** LOOM provenance (a continue_tokens fire — branchOps.loomBranch): how many
+   *  leading token_logprobs entries were FORCED (replayed prefix + picked
+   *  alternative), and that prefix as frame-normalized display text. Unlike
+   *  `prefill`, the forced region IS covered by the stream (fully scored, no
+   *  ghost) — the display tints it and marks the fork point. Persisted. */
+  loom_cut?: number;
+  loom_text?: string;
   /** How generation ended ('stop' | 'length' | …) — 'length' ⇒ cut off by the
    *  max-tokens limit; persisted so the truncation badge survives reload. */
   finish_reason?: string;
@@ -123,6 +130,9 @@ export type SampleLike = {
   /** The authored prefill this sample was generated from (raw text) — folded onto
    *  the node so the rendered turn can color the prefilled prefix. */
   prefill?: string;
+  /** LOOM provenance — see TreeNode.loom_cut / loom_text. */
+  loom_cut?: number;
+  loom_text?: string;
   /** How generation ended — 'length' ⇒ cut off by the max-tokens limit. */
   finish_reason?: string;
   /** Renderer mode (thinking='both' batches only) — see TreeNode.thinking. */
@@ -333,6 +343,8 @@ export function foldAssistant(
       raw_text: s.raw_text,
         raw_meta: s.raw_meta,
       prefill: s.prefill,
+      loom_cut: s.loom_cut,
+      loom_text: s.loom_text,
       finish_reason: s.finish_reason,
       thinking: s.thinking,
       token_logprobs: cloneTokenLogprobs(s.token_logprobs),

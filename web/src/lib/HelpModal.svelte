@@ -412,6 +412,12 @@ codex plugin add tinkerscope@tinkerscope</pre>
         edit's ghost region can't be loomed (there is nothing to replay).
       </p>
       <p class="help-note">
+        A loom branch shows its provenance: the replayed prefix is tinted like a prefill (in the prose
+        and on every sample card, so n draws don't read as independent), the token views dot-underline it
+        and mark the fork point with a small accent line, and hovering a replayed token says so — with its
+        real probability, since the forced prefix is re-scored, not ghosted.
+      </p>
+      <p class="help-note">
         <b>Editing a reply keeps the probabilities it didn't touch.</b> Truncate a turn, cut its
         thinking, change the last sentence — everything before the point where your text stops matching
         what the model wrote was generated under the same context, so it keeps its numbers. The rest is
@@ -420,10 +426,19 @@ codex plugin add tinkerscope@tinkerscope</pre>
         branch simply has no token data.
       </p>
       <p class="help-note">
-        <b>Prefilled turns work the same way, in mirror.</b> A turn generated from a prefill (Continue,
-        or the composer's prefill box) only has probabilities for what the model added — the authored
-        prefix is a leading ghost: "no token data — prefilled text" on hover, and the continuation's
-        tokens carry their real numbers.
+        <b>Prefilled turns work the same way, in mirror.</b> A turn generated from the composer's
+        prefill box only has probabilities for what the model added — the authored prefix is a leading
+        ghost: "no token data — prefilled text" on hover, and the continuation's tokens carry their
+        real numbers.
+      </p>
+      <p class="help-note">
+        <b>Continue rides the loom.</b> When a turn has full token data and the panel still points at
+        the model that produced it, Continue (and Shift+Continue's resume-inside-the-think) replays the
+        stored token ids instead of a text prefill — so the whole continued turn keeps its
+        probabilities (no ghost prefix) and shows the fork display above. A stop-finished turn still
+        extends: the end-of-turn token is stripped before the replay. Turns without token data, edited
+        turns, or a since-switched panel model fall back to the classic text prefill (the ghost case
+        above).
       </p>
       <p class="help-note">
         The <b>Contrast</b> slider under the rule chips reshapes probability → opacity. At <b>0</b> opacity

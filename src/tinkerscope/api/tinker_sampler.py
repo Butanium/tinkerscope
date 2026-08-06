@@ -282,6 +282,36 @@ def _to_render_msg(m: dict) -> dict:
     return {"role": m["role"], "content": parts}
 
 
+def _strip_trailing_stop(tokenizer: Any, ids: list[int], stops: list) -> list[int]:
+    """Drop trailing tokens that ARE a stop sequence. A stop-finished sample's
+    stored stream includes its end-of-turn token (verified live 2026-08-06 on
+    DeepSeek-V3.1: every stop-finished stream ended with <|end_of_sentence|>), so
+    replaying a full stream verbatim would CLOSE the turn and make the model start
+    a new one — the opposite of Continue. Mid-stream loom cuts never end with a
+    stop, so this is a no-op for them. Handles str stops (decoded-tail match, the
+    normal case) and int stops (direct id match) — SamplingParams accepts both."""
+    ids = list(ids)
+    id_stops = {s for s in stops if isinstance(s, int)}
+    str_stops = [s for s in stops if isinstance(s, str) and s]
+    changed = True
+    while changed and ids:
+        changed = False
+        if ids[-1] in id_stops:
+            ids.pop()
+            changed = True
+            continue
+        tail = tokenizer.decode(ids[-4:])  # stops are 1–2 tokens; 4 is plenty
+        for s in str_stops:
+            if tail.endswith(s):
+                need = len(s)
+                while ids and need > 0:
+                    need -= len(tokenizer.decode([ids[-1]]))
+                    ids.pop()
+                changed = True
+                break
+    return ids
+
+
 # tml_v0 (Inkling) gates thinking with a continuous `effort` DIRECTIVE injected into
 # the prompt, NOT an on/off renderer variant — so `select_renderer_name` picks the same
 # renderer both ways and thinking is set HERE instead. Our binary toggle maps to effort:
@@ -527,6 +557,9 @@ class SamplerManager:
         token_logprobs then cover the WHOLE stream (forced prefix + fresh
         continuation) from one teacher-forced pass — the prefix scores under its
         true context, the picked alternative under its recorded top-K value.
+        Each sample is stamped with ``loom_cut`` (how many leading stream entries
+        were forced) + ``loom_text`` (the forced prefix as frame-normalized
+        display text) so the browser can mark the fork point.
         """
         import tinker
         from tinker import types as tt
@@ -560,7 +593,23 @@ class SamplerManager:
         # reads positions after its prompt, so scoring against this base covers
         # the forced prefix too (see the docstring).
         score_input = model_input
+        loom_text: str | None = None
         if continue_tokens:
+            # A full-stream replay (Continue = the loom cut at the end) must not
+            # carry the end-of-turn token — strip it so the model EXTENDS.
+            continue_tokens = _strip_trailing_stop(
+                tokenizer, list(continue_tokens), renderer.get_stop_sequences()
+            )
+        if continue_tokens:
+            # The replayed prefix as display text, stamped on every sample so the
+            # browser can tint it like a prefill ("this part was forced, not drawn
+            # here"). Frame-normalized: auto-<think> families (DeepSeek/Kimi/
+            # Qwen3.5) open the tag in the PROMPT, so the replayed stream starts
+            # mid-think without it — prepend it so the text splits like an
+            # authored prefill (web/src/lib/render.ts splitPrefill).
+            loom_text = tokenizer.decode(list(continue_tokens))
+            if tokenizer.decode(score_input.to_ints()).rstrip().endswith("<think>"):
+                loom_text = "<think>" + loom_text
             model_input = tinker.ModelInput(
                 chunks=[*model_input.chunks, tt.EncodedTextChunk(tokens=list(continue_tokens))]
             )
@@ -627,6 +676,13 @@ class SamplerManager:
                     # content/reasoning already span prefill+completion → the
                     # client must NOT re-prepend the prefill.
                     item["prefill_incorporated"] = True
+                if continue_tokens:
+                    # Loom provenance: how many leading stream entries were FORCED
+                    # (replayed prefix + picked alternative) and their display
+                    # text — the fold copies both onto the minted node so the fork
+                    # point survives reload.
+                    item["loom_cut"] = len(continue_tokens)
+                    item["loom_text"] = loom_text
                 if logprobs:
                     if continue_tokens:
                         # No fallback lps: seq.logprobs covers only the fresh

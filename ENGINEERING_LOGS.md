@@ -343,3 +343,40 @@ sampling): exact prefix-tid replay, picked alt at the cut, ghost-free re-scored
 stream with <0.15 nats drift vs the original prefix, renderer anchored while the
 sidebar thinking toggle was deliberately flipped, and the toggle unclobbered
 after. Route-level contract in `tests/test_api.py::test_chat_loom_continue_tokens`.
+
+---
+
+### 2026-08-06 — Loom provenance display, and Continue rides the loom
+
+Two follow-ups Clément asked for the same afternoon the loom shipped.
+
+**Fork-point display.** A loom branch looked like an independent draw — nothing
+marked the replayed prefix or the cut. Now every loom sample is stamped
+(`loom_cut` = forced-entry count, `loom_text` = the forced prefix as
+frame-normalized display text — the backend prepends the auto-opened `<think>`
+for DeepSeek/Kimi/Qwen3.5, whose tag lives in the PROMPT, so the text splits
+like an authored prefill), the fold persists both on the node, and the display
+reuses the PREFILL coloring machinery end to end: `forcedSplit` in ChatMessage
+composes `prefill + loom_text` per row AND per sample card (n counterfactual
+draws visibly share their forced prefix), the token views dot-underline the
+replayed region + draw a fork tick at the first fresh token, and the popover
+says "⑂ replayed" while still showing the real probability. Two traps hit on
+the way: `parseSample` (state.svelte.ts) is an ALLOWLIST — new wire fields die
+there silently unless added — and the loom text needed `.trim()`-normalized
+split parts because the decoded ids keep whitespace the parse strips.
+
+**Continue = the loom with the cut at the end.** Clément's suggestion, and the
+decomposition is exact: replaying ALL stored tids extends the turn, cutting at
+the think-close token is Shift+Continue. So `#fireContinue` now prefers the
+token path — the continued turn keeps every probability (no more ghost prefix)
+and wears the fork display — with the TEXT-prefill path kept as the fallback
+for: no/partial token data (OpenRouter, edits), tml thinking-resume (no
+locatable `</think>` token — `thinkResumeCut` returns null), and a
+since-switched panel model (comparable-key check via the new `resolveModelKey`
+seam; a switched panel legitimately re-renders text for the NEW model, and
+token ids must never cross tokenizers). One empirical fact gates it all: a
+stop-finished stream INCLUDES its end-of-turn token (verified on 6/6 DeepSeek
+V3.1 stop-finished streams — `<|end_of_sentence|>` last), so
+`_strip_trailing_stop` removes it before the replay or the model would open a
+fresh turn instead of extending (str + int stop forms; unit-tested with a fake
+tokenizer, `tests/test_tinker_sampler.py`).

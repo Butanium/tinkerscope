@@ -192,6 +192,13 @@ exact renderer), even if the panel's picker has since moved to another model —
 token ids only mean something to their own tokenizer. Ghost regions (edited text,
 prefill) can't be loomed: there are no real token ids there to replay.
 
+A loom branch wears its provenance: the replayed prefix is tinted like a prefill
+— in the prose AND on every sample card, so n counterfactual draws don't read as
+independent — the token views dot-underline the forced region and mark the fork
+point with a small accent line, and hovering a replayed token says "⑂ replayed —
+sampled on the fork's source branch" while still showing its real probability
+(the forced prefix is re-scored in the same pass, not ghosted like a prefill).
+
 **"I edited the reply — do I lose the token data?"** Only for what you changed.
 Editing forks a new branch, and it keeps the probabilities of everything before
 the point where your text stops matching what the model wrote — so truncating a
@@ -203,12 +210,18 @@ very first token and there's nothing left to keep, so the new branch shows the
 plain "no token data" pill. The original branch is untouched either way — cycle
 ‹k/N› back to it for the full stream.
 
-**"Why does a Continue'd turn dim its beginning?"** Same ghost idea, mirrored: a
-turn generated from a prefill (Continue, or the composer's prefill box) only has
-probabilities for what the model added. The authored prefix — often the whole
-thinking block — is a leading ghost ("no token data — prefilled text" on hover),
-and the continuation's tokens carry their real numbers. Before this the overlay
-had nothing to line the prefix up with and gave up with "couldn't be lined up".
+**"Why does a Continue'd turn dim its beginning?"** Mostly it doesn't anymore:
+Continue rides the loom. When the turn has full token data and the panel still
+points at the model that produced it, Continue (and Shift+Continue's
+resume-inside-the-think) replays the stored token ids instead of re-rendering
+text — the continued turn keeps every probability (the replayed part wears the
+loom's tinted-prefix + fork-point display, no ghost), and a stop-finished turn
+still extends because the end-of-turn token is stripped before the replay. The
+dimmed-beginning GHOST case remains for the fallbacks: a composer-prefill turn,
+a turn without token data (OpenRouter, old sessions), an edited turn, a tml
+thinking-resume, or a panel whose model picker moved since the turn was drawn —
+those still fire as a text prefill, where the authored prefix has no numbers
+("no token data — prefilled text" on hover).
 
 **"What's the model's distribution over the FIRST token?"** The chart's third
 mode, *first token*, plots the model's own probability distribution at position

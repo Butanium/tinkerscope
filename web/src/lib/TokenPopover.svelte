@@ -28,6 +28,7 @@
     y,
     rules = [],
     pinned = false,
+    replayed = false,
     canPin = false,
     onPick,
     onClose
@@ -40,6 +41,9 @@
     rules?: HighlightRule[];
     /** Interactive (loom) mode: alternatives are branch buttons. */
     pinned?: boolean;
+    /** This token sits in a loom branch's FORCED prefix (replayed, not drawn
+     *  here) — shows the provenance line. Its numbers are real (re-scored). */
+    replayed?: boolean;
     /** Hover mode only: this token CAN be pinned — show the affordance hint. */
     canPin?: boolean;
     /** Loom fire: the picked alternative's token id, or null = resample the
@@ -96,6 +100,9 @@
     <code>{displayToken(entry.t)}</code>
     {#if !entry.ghost}<span class="tok-pop-p">{pctLabel(entry.lp)}</span>{/if}
   </div>
+  {#if replayed && !entry.ghost}
+    <div class="tok-pop-replayed">⑂ replayed — sampled on the fork's source branch</div>
+  {/if}
   {#if entry.ghost}
     <!-- Text the model never sampled: the authored prefill of a continuation
          (ghostKind), or past the point where an edit left the model's text —
@@ -256,5 +263,10 @@
     color: var(--color-text-muted);
     font-size: 0.66rem;
     font-style: italic;
+  }
+  .tok-pop-replayed {
+    margin: -3px 0 5px;
+    color: var(--color-accent);
+    font-size: 0.66rem;
   }
 </style>

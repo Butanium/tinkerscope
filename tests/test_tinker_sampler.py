@@ -2,6 +2,7 @@
 from tinkerscope.api.tinker_sampler import (
     _build_generation_prompt,
     _NOTHINK_EFFORT,
+    _strip_trailing_stop,
     _THINK_EFFORT,
     _to_render_msg,
 )
@@ -56,3 +57,30 @@ def test_build_generation_prompt_plain_renderer_ignores_think():
     # No `effort` kwarg → a plain call, no crash, think has no effect.
     assert _build_generation_prompt(_PlainRenderer(), ["m"], think=False) == {"messages": ["m"]}
     assert _build_generation_prompt(_PlainRenderer(), ["m"], think=True) == {"messages": ["m"]}
+
+
+class _VocabTok:
+    """decode() by a fixed id→text table — enough for the trailing-stop strip."""
+    def __init__(self, vocab):
+        self.vocab = vocab
+
+    def decode(self, ids):
+        return "".join(self.vocab[i] for i in ids)
+
+
+def test_strip_trailing_stop_drops_end_of_turn_token():
+    # The Continue-at-the-end case: a stop-finished stream carries its end token
+    # (verified live on DeepSeek-V3.1) — replaying it would close the turn.
+    tok = _VocabTok({1: "Hello", 2: " world", 3: ".", 4: "<|eot|>"})
+    assert _strip_trailing_stop(tok, [1, 2, 3, 4], ["<|eot|>"]) == [1, 2, 3]
+    # length-finished stream (no stop) is untouched — the mid-loom no-op property
+    assert _strip_trailing_stop(tok, [1, 2, 3], ["<|eot|>"]) == [1, 2, 3]
+
+
+def test_strip_trailing_stop_multi_token_and_int_stops():
+    # A stop STRING spanning two tokens comes off whole; id-form stops match direct.
+    tok = _VocabTok({1: "hi", 5: "<|im", 6: "_end|>", 9: "\n"})
+    assert _strip_trailing_stop(tok, [1, 5, 6], ["<|im_end|>"]) == [1]
+    assert _strip_trailing_stop(tok, [1, 9], [9]) == [1]
+    # stacked: an int stop after a str stop both come off; never underflows
+    assert _strip_trailing_stop(tok, [5, 6], ["<|im_end|>"]) == []

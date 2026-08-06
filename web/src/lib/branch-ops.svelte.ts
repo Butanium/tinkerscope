@@ -18,7 +18,7 @@ import { nodeBlobs } from './node-blobs.svelte';
 import { chat, type ChatParams, type ChatModelField } from './chat.svelte';
 import { panelScroll } from './scroll.svelte';
 import { assembleAssistantRaw } from './render';
-import { parseRawMetaModel } from './loom';
+import { parseRawMetaModel, thinkResumeCut, type RawMetaModel } from './loom';
 import {
   activePath,
   regenTarget,
@@ -60,7 +60,19 @@ export type BranchOpsDeps = {
     paramsOverride?: Partial<ChatParams>,
     modelOverride?: ChatModelField
   ) => void;
+  /** A comparable key for the panel's CURRENTLY selected model ('sp:<sampler
+   *  path>' / 'base:<model>' / 'or:<id>'; run selections resolve to their
+   *  checkpoint's sampler path). Lets Continue take the token path only while
+   *  the panel still points at the model that produced the turn's token ids. */
+  resolveModelKey: (pSel: PanelSel) => string | null;
 };
+
+/** The same comparable key for a turn's raw_meta record (null = unparseable). */
+function metaModelKey(meta: RawMetaModel | null): string | null {
+  if (!meta) return null;
+  return meta.sampler_path ? 'sp:' + meta.sampler_path
+    : meta.base_model ? 'base:' + meta.base_model : null;
+}
 
 class BranchOps {
   #deps: BranchOpsDeps | null = null;
@@ -139,19 +151,46 @@ class BranchOps {
     }
   }
 
-  /** Continue (prefill) an assistant turn: re-fire with its content as the trailing
-   *  prefill so the model EXTENDS it. The N continuations land as sibling branches
-   *  (each = the current text + a fresh continuation) you cycle through; the
-   *  original stays as a sibling too. */
-  #fireContinue(panel: Panel, nodeId: string, thinkingOnly = false) {
+  /** Continue an assistant turn: the model EXTENDS it, the N continuations land
+   *  as sibling branches (each = the current text + a fresh continuation) you
+   *  cycle through; the original stays as a sibling too.
+   *
+   *  TWO paths. TOKEN (preferred): Continue IS the loom with the cut at the end
+   *  (Shift+Continue: at the think-closing token) — the stored ids replay
+   *  verbatim, so the prefix keeps its logprobs and the fork display instead of
+   *  becoming a data-less ghost; the backend strips a trailing end-of-turn
+   *  token so a stop-finished turn still extends. Taken only when the stream
+   *  has FULL coverage (an edit ghost has no ids) AND the panel still points at
+   *  the model that produced the ids. TEXT (fallback — the original behavior):
+   *  re-fire with the turn's raw text as the trailing prefill — covers
+   *  OpenRouter/data-less turns, edited turns, tml thinking-resume (no
+   *  locatable close token), and a since-switched panel model, which
+   *  legitimately re-renders the text for the NEW model. */
+  async #fireContinue(panel: Panel, nodeId: string, thinkingOnly = false) {
     if (this.#d.panelBusy(panel)) return;
+    const pSel = this.#d.panelSels().find((x) => x.panel === panel);
+    if (!pSel) return;
+    // Blob reads first (they can yield); everything tree-shaped re-reads after.
+    const tokens = await this.#tokensOf(panel, nodeId);
+    const fullStream = !!tokens?.length && !tokens.some((e) => e.ghost || e.tid < 0);
+    const metaKey = fullStream
+      ? metaModelKey(parseRawMetaModel(await this.#rawMetaOf(panel, nodeId)))
+      : null;
     const tree = ws.treeFor(panel);
     const node = tree.nodes[nodeId];
     if (!node || node.role !== 'assistant' || (!node.content && !node.reasoning)) return;
     const userParentId = node.parent;
     if (!userParentId || tree.nodes[userParentId]?.role !== 'user') return;
-    const pSel = this.#d.panelSels().find((x) => x.panel === panel);
-    if (!pSel) return;
+    // Resume-inside-the-think applies only when there's reasoning to resume;
+    // otherwise Shift+Continue degrades to a normal continue (both paths).
+    const resumeThinking = thinkingOnly && !!node.reasoning?.trim();
+    if (fullStream && metaKey && metaKey === this.#d.resolveModelKey(pSel)) {
+      const cut = resumeThinking ? thinkResumeCut(tokens!, !!node.content) : tokens!.length;
+      if (cut != null) {
+        await this.#loomFire(panel, nodeId, cut, null);
+        return;
+      }
+    }
     panelScroll.preserve(panel);
     chat.clearPanelBucket(panel);
     // Prefill = the FULL raw turn (reasoning + content reassembled), NOT just
@@ -164,9 +203,7 @@ class BranchOps {
     //
     // Shift+Continue (thinkingOnly): RESUME inside the think block — prefill the
     // reasoning as an OPEN `<think>` (no `</think>`, no answer) so the model extends
-    // the CoT, then naturally closes it and produces the answer. Only when there's
-    // reasoning to resume; otherwise it's a normal continue.
-    const resumeThinking = thinkingOnly && !!node.reasoning?.trim();
+    // the CoT, then naturally closes it and produces the answer.
     const prefill = resumeThinking
       ? assembleAssistantRaw(node.reasoning, '')
       : assembleAssistantRaw(node.reasoning, node.content);
@@ -188,12 +225,12 @@ class BranchOps {
    *  in every panel. thinkingOnly (shift) = resume inside the think block. */
   continueMessage(panel: Panel, msg: ViewMessage, all = false, thinkingOnly = false) {
     if (msg.nodeId == null) return;
-    if (!all) { this.#fireContinue(panel, msg.nodeId, thinkingOnly); return; }
+    if (!all) { void this.#fireContinue(panel, msg.nodeId, thinkingOnly); return; }
     const depth = activePath(ws.treeFor(panel)).findIndex((n) => n.id === msg.nodeId);
     if (depth < 0) return;
     for (const p of this.#d.panelSels()) {
       const node = activePath(ws.treeFor(p.panel))[depth];
-      if (node) this.#fireContinue(p.panel, node.id, thinkingOnly);
+      if (node) void this.#fireContinue(p.panel, node.id, thinkingOnly);
     }
   }
 
@@ -237,7 +274,7 @@ class BranchOps {
     const nid = msg.sampleNodeIds?.[sampleIndex];
     if (!nid) return;
     ws.setTree(panel, setSelected(ws.treeFor(panel), nid));
-    this.#fireContinue(panel, nid);
+    void this.#fireContinue(panel, nid);
   }
 
   /** Keep this sample, prune all its sibling samples, then collapse to it. */
@@ -321,8 +358,14 @@ class BranchOps {
    *  params_scope 'call' keeps the thinking override out of the shared sidebar
    *  state; everything else (n, temperature, …) rides the current params. */
   async loomBranch(panel: Panel, msg: ViewMessage, cut: number, altTid: number | null) {
-    if (this.#d.panelBusy(panel) || msg.nodeId == null) return;
-    const nodeId = msg.nodeId;
+    if (msg.nodeId == null) return;
+    await this.#loomFire(panel, msg.nodeId, cut, altTid);
+  }
+
+  /** loomBranch's engine, by node id — also Continue's token path (#fireContinue:
+   *  cut at the end / the think-close token, no alternative swapped). */
+  async #loomFire(panel: Panel, nodeId: string, cut: number, altTid: number | null) {
+    if (this.#d.panelBusy(panel)) return;
     const pSel = this.#d.panelSels().find((x) => x.panel === panel);
     if (!pSel) return;
     const stored = await this.#tokensOf(panel, nodeId);

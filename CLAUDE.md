@@ -397,7 +397,15 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     stored prefix tids + a picked alternative via `ChatRequest.continue_tokens`,
     anchored to the turn's own model+renderer (tids are tokenizer-specific), at
     `params_scope:'call'` so the per-turn thinking override never touches the
-    sidebar. **Has `loom.test.ts`**; live smoke `tests/small-smokes/browser_loom_live.py`.
+    sidebar. **Continue rides the loom** (`#fireContinue`'s token path: cut at
+    the end, or at `thinkResumeCut`'s think-close token for Shift) when the
+    stream has full coverage AND the panel still points at the producing model
+    (`resolveModelKey` seam) — else the classic text-prefill fallback. Loom
+    samples carry `loom_cut`/`loom_text` provenance (⚠️ `parseSample` in
+    state.svelte.ts is an ALLOWLIST — new wire fields die there unless added):
+    the forced prefix tints like a prefill via ChatMessage's `forcedSplit`, the
+    token views dot-underline it + tick the fork point. **Has `loom.test.ts`**;
+    live smoke `tests/small-smokes/browser_loom_live.py`.
   - `lib/kbnav.ts` — keyboard row-navigation helpers: nav-key set, clamped
     focus-index stepping, the typing-target/modal-open guards. Consumed by
     +page's *Keyboard row navigation* section (click a row → focus ring; ↑/↓

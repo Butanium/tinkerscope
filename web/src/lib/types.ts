@@ -318,6 +318,12 @@ export type SampleData = {
    *  the continuation-only paths (OpenRouter / loose), where the bus-bucket fold
    *  must prepend the prefill itself. Mirrors the drain-path fold in chat.svelte.ts. */
   prefill_incorporated?: boolean;
+  /** LOOM provenance (continue_tokens fires only): how many leading stream
+   *  entries were FORCED (replayed prefix + picked alternative), and that prefix
+   *  as frame-normalized display text — tinted like a prefill so n samples don't
+   *  read as independent draws. */
+  loom_cut?: number;
+  loom_text?: string;
 };
 
 /**
@@ -337,6 +343,11 @@ export type ViewMessage = {
   /** Authored prefill this turn was generated from (raw text); the renderer colors
    *  the matching leading slice of content/reasoning as the prefilled portion. */
   prefill?: string;
+  /** LOOM provenance (see SampleData): forced-entry count + the replayed prefix as
+   *  display text. The prefix tints like a prefill and the token views mark the
+   *  fork point. */
+  loom_cut?: number;
+  loom_text?: string;
   /** How generation ended — 'length' ⇒ cut off by max tokens (truncation badge). */
   finish_reason?: string;
   /** Renderer mode of this turn's sample — set only for thinking='both' batches

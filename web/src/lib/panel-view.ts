@@ -41,6 +41,8 @@ export function bucketTurn(run: PanelRun, prefill?: string): ViewMessage {
     raw_text: one?.raw_text,
     raw_meta: one?.raw_meta,
     prefill: pf,
+    loom_cut: one?.loom_cut,
+    loom_text: one?.loom_text,
     finish_reason: one?.finish_reason,
     token_logprobs: one?.token_logprobs,
     running: run.running
@@ -59,6 +61,8 @@ export function buildPanelView(tree: ConvTree, run: PanelRun, prefill?: string):
     raw_text: n.raw_text,
     raw_meta: n.raw_meta,
     prefill: n.prefill,
+    loom_cut: n.loom_cut,
+    loom_text: n.loom_text,
     finish_reason: n.finish_reason,
     thinking: n.thinking,
     token_logprobs: n.token_logprobs,
@@ -172,6 +176,8 @@ export function expandTurnSamples(
       raw_meta: n.raw_meta ?? getBlob?.(n.id)?.raw_meta,
       finish_reason: n.finish_reason,
       thinking: n.thinking,
+      loom_cut: n.loom_cut,
+      loom_text: n.loom_text,
       token_logprobs: n.token_logprobs ?? getBlob?.(n.id)?.token_logprobs
     })),
     totalSamples: sibs.length,

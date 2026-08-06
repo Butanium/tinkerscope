@@ -151,9 +151,12 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
 ```
 The **tree** is a per-panel branch structure owned by the frontend
 (`web/src/lib/tree.ts`): `nodes[id] = {id, role, content, reasoning?, raw_text?,
-prefill?, finish_reason?, parent, children[], has_token_logprobs?, has_raw_meta?}`
+prefill?, loom_cut?, loom_text?, finish_reason?, parent, children[],
+has_token_logprobs?, has_raw_meta?}`
 + a `selected` map (parentId|`"__root__"` → selected child id). `finish_reason:
-"length"` marks a turn cut off by the max-tokens limit (the UI badges it). The
+"length"` marks a turn cut off by the max-tokens limit (the UI badges it).
+`loom_cut`/`loom_text` mark a loom branch's forced prefix (see the `message`
+event below). The
 linear ACTIVE PATH (root→leaf via `selected`) is what the sampler/CLI read — it is
 mirrored into `PlaygroundState.messages`. The server treats the tree as opaque JSON.
 
@@ -302,10 +305,15 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
   model" below), and n>1 sends whole samples for every producer. A consumer that
   saw deltas for a sample uses the later `message` event to *finalize* (clean
   content), not to reprint.
-- `event: message` → `data:` one sample: `{sample_index, content, raw_text, finish_reason, reasoning?, thinking?, token_logprobs?}` or `{sample_index, error}`.
+- `event: message` → `data:` one sample: `{sample_index, content, raw_text, finish_reason, reasoning?, thinking?, token_logprobs?, loom_cut?, loom_text?}` or `{sample_index, error}`.
   `thinking` (bool) is present **only on `thinking:"both"` chats** and says which
   half produced the sample (false = non-thinking, true = thinking); single-mode
   chats omit it.
+  `loom_cut` + `loom_text` are present **only on `continue_tokens` chats** (the
+  loom): how many leading `token_logprobs` entries were FORCED (replayed prefix +
+  picked alternative) and that prefix as frame-normalized display text — the
+  browser folds both onto the node and tints the forced region like a prefill,
+  with a fork marker in the token views.
   `token_logprobs` (native tinker sampling with `logprobs:true`, the default) is
   one entry per GENERATED token: `{t, tid, lp, top?}` — `t` the decoded token
   text, `tid` its id, `lp` its logprob, `top` the top-5 alternatives as

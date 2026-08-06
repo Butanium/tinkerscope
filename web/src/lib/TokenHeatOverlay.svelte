@@ -32,7 +32,7 @@
   import type { TokenLogprob } from '$lib/tree';
   import { alignTokens, visibleCoverage } from '$lib/token-align';
   import { highlightMatchProb, tokenTintColors } from '$lib/token-logprob';
-  import { loomCut } from '$lib/loom';
+  import { loomCut as loomCutOf } from '$lib/loom';
   import { logprobHighlight } from '$lib/logprobs.svelte';
   import { colorRules } from '$lib/highlights.svelte';
   import TokenPopover from '$lib/TokenPopover.svelte';
@@ -40,7 +40,8 @@
   let {
     tlp,
     selector,
-    onLoom
+    onLoom,
+    loomCut = null
   }: {
     tlp: TokenLogprob[];
     /** Containers holding the rendered text this stream produced, in stream
@@ -50,6 +51,10 @@
      *  alternatives fire this with (stored cut, alt tid | null). A click that is
      *  part of a text-selection drag is left alone. Absent = hover-only. */
     onLoom?: (cut: number, altTid: number | null) => void;
+    /** This turn IS a loom branch: entries before this DISPLAY index were forced
+     *  (replayed prefix + picked alternative) — dotted-underlined on the canvas,
+     *  fork tick at the first fresh token. null = not a loom turn. */
+    loomCut?: number | null;
   } = $props();
 
   /** Below this share of the rendered text claimed by some token, the alignment
@@ -221,7 +226,10 @@
     const range = document.createRange();
     for (let i = 0; i < spans.length; i++) {
       const s = spans[i];
-      if (!s || (!colors[i]?.length && !tlp[i]?.ghost)) continue;
+      // Loom-marked tokens (the forced prefix + the first fresh one) need boxes
+      // even when untinted (p≈1 ⇒ alpha 0) — the underline/fork must still draw.
+      const loomMarked = loomCut != null && i <= loomCut;
+      if (!s || (!colors[i]?.length && !tlp[i]?.ghost && !loomMarked)) continue;
       let { start, end } = s;
       // Match coloring trims the token's edge whitespace (a BPE token carries
       // its leading space; tinting it reads as highlighting the gap between
@@ -258,6 +266,12 @@
 
   function paint(containers: HTMLElement[]): void {
     const dpr = window.devicePixelRatio || 1;
+    // Theme-correct accent for the loom marks, read from CSS (canvas can't use
+    // var()). One lookup per paint; fallback if the var is missing.
+    const accent =
+      (containers[0] && getComputedStyle(containers[0]).getPropertyValue('--color-accent').trim()) ||
+      '#9C6644';
+    let forkDrawn = false;
     containers.forEach((container, ci) => {
       const c = canvasFor(container);
       const w = container.scrollWidth;
@@ -294,11 +308,36 @@
           continue;
         }
         const bands = colors[b.i];
-        const bh = b.h / bands.length;
+        const bh = bands.length ? b.h / bands.length : 0;
         for (let k = 0; k < bands.length; k++) {
           if (!bands[k]) continue;
           ctx.fillStyle = bands[k];
           ctx.fillRect(b.x, b.y + k * bh, b.w, bh);
+        }
+        if (loomCut != null && b.i < loomCut) {
+          // Forced (replayed) prefix: dotted accent underline over the heat —
+          // "not drawn here" (same language as the ghost dash, minus the dim:
+          // these tokens DO carry numbers).
+          ctx.save();
+          ctx.strokeStyle = accent;
+          ctx.lineWidth = 1;
+          ctx.setLineDash([1.5, 2.5]);
+          ctx.beginPath();
+          ctx.moveTo(b.x, Math.round(b.y + b.h) - 0.5);
+          ctx.lineTo(b.x + b.w, Math.round(b.y + b.h) - 0.5);
+          ctx.stroke();
+          ctx.restore();
+        } else if (loomCut != null && b.i === loomCut && !forkDrawn) {
+          // The fork point: one vertical tick at the first fresh token.
+          forkDrawn = true;
+          ctx.save();
+          ctx.strokeStyle = accent;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(b.x + 1, b.y - 1);
+          ctx.lineTo(b.x + 1, b.y + b.h + 1);
+          ctx.stroke();
+          ctx.restore();
         }
         if (hover === b.i) {
           ctx.strokeStyle = 'rgba(120, 120, 120, 0.85)';
@@ -334,7 +373,7 @@
   }
   function pick(altTid: number | null): void {
     if (pinned == null || !onLoom) return;
-    const cut = loomCut(tlp, pinned);
+    const cut = loomCutOf(tlp, pinned);
     unpin();
     if (cut != null) onLoom(cut, altTid);
   }
@@ -430,9 +469,9 @@
 <!-- `tlp[hover]` guarded, not assumed: the array is re-derived while a turn
      streams, so a held hover index can outlive its entry for a frame. -->
 {#if pinned != null && pinnedPop && tlp[pinned]}
-  <TokenPopover entry={tlp[pinned]} x={pinnedPop.x} y={pinnedPop.y} {rules} pinned onPick={pick} onClose={unpin} />
+  <TokenPopover entry={tlp[pinned]} x={pinnedPop.x} y={pinnedPop.y} {rules} pinned onPick={pick} onClose={unpin} replayed={loomCut != null && pinned < loomCut} />
 {:else if hover != null && pop && tlp[hover]}
-  <TokenPopover entry={tlp[hover]} x={pop.x} y={pop.y} {rules} canPin={canLoomAt(hover)} />
+  <TokenPopover entry={tlp[hover]} x={pop.x} y={pop.y} {rules} canPin={canLoomAt(hover)} replayed={loomCut != null && hover < loomCut} />
 {/if}
 
 <style>

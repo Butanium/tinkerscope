@@ -285,6 +285,10 @@ export function parseSample(data: any): SampleData {
     // per-sample renderer mode — only present on thinking='both' chats
     thinking: typeof data?.thinking === 'boolean' ? data.thinking : undefined,
     token_logprobs: Array.isArray(data?.token_logprobs) ? data.token_logprobs : undefined,
+    // loom provenance (continue_tokens fires): forced-entry count + the replayed
+    // prefix as display text — folded onto the node, tinted like a prefill.
+    loom_cut: typeof data?.loom_cut === 'number' ? data.loom_cut : undefined,
+    loom_text: typeof data?.loom_text === 'string' ? data.loom_text : undefined,
     // carried so the bus-bucket fold (chat.svelte.ts) knows whether to prepend
     // the prefill (false/absent = continuation-only path → prepend).
     prefill_incorporated: data?.prefill_incorporated === true ? true : undefined

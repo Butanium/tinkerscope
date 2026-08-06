@@ -2,7 +2,7 @@
 // built-in TS type-stripping:   node web/src/lib/loom.test.ts
 // Exit code != 0 on failure.
 
-import { loomCut, parseRawMetaModel } from './loom.ts';
+import { loomCut, parseRawMetaModel, thinkResumeCut } from './loom.ts';
 import type { TokenLogprob } from './tree.ts';
 
 let passed = 0;
@@ -57,6 +57,21 @@ test('an edit ghost is not loomable, nor is anything after it', () => {
   eq(loomCut(tlp, 1), null, 'the ghost itself');
   eq(loomCut(tlp, 2), null, 'past the ghost — no ids to replay');
   eq(loomCut(tlp, 0), 0, 'before the ghost is fine');
+});
+
+// ── thinkResumeCut ──────────────────────────────────────────────────────
+
+test('cut lands ON the closing think token (kept tokens stay inside the block)', () => {
+  const tlp = [tok('I', 1), tok(' think', 2), tok('</think>', 3), tok('Answer', 4)];
+  eq(thinkResumeCut(tlp, true), 2);
+});
+
+test('thinking-only turn (never closed) resumes from the very end', () => {
+  eq(thinkResumeCut([tok('I', 1), tok(' think', 2)], false), 2);
+});
+
+test('no locatable closing token (tml special blocks) → null (text fallback)', () => {
+  eq(thinkResumeCut([tok('a', 1), tok('b', 2)], true), null);
 });
 
 // ── parseRawMetaModel ───────────────────────────────────────────────────

@@ -10,20 +10,25 @@
   // the overlay needs can't follow the render.
   import type { TokenLogprob } from '$lib/tree';
   import { surprisalAlpha, highlightMatchProb, matchTintBackground } from '$lib/token-logprob';
-  import { loomCut } from '$lib/loom';
+  import { loomCut as loomCutOf } from '$lib/loom';
   import { logprobHighlight } from '$lib/logprobs.svelte';
   import { colorRules } from '$lib/highlights.svelte';
   import TokenPopover from '$lib/TokenPopover.svelte';
 
   let {
     tlp,
-    onLoom
+    onLoom,
+    loomCut = null
   }: {
     tlp: TokenLogprob[];
     /** The LOOM: clicking a token PINS its popover, whose alternatives then fire
      *  this with (stored-stream cut, picked alt tid | null=resample). Absent =
      *  read-only / busy / uncommitted row — hover stays informational. */
     onLoom?: (cut: number, altTid: number | null) => void;
+    /** This turn IS a loom branch: entries before this DISPLAY index were forced
+     *  (replayed prefix + picked alternative) — dotted-underlined, with a fork
+     *  marker on the first fresh token. null = not a loom turn. */
+    loomCut?: number | null;
   } = $props();
 
   // The ≤2 highlight rules chosen for match-coloring (order = top/bottom band).
@@ -101,7 +106,7 @@
   }
   function pick(altTid: number | null) {
     if (pinned == null || !onLoom) return;
-    const cut = loomCut(tlp, pinned);
+    const cut = loomCutOf(tlp, pinned);
     unpin();
     if (cut != null) onLoom(cut, altTid);
   }
@@ -115,6 +120,8 @@
       class:tok-hover={hover === i}
       class:tok-pinned={pinned === i}
       class:tok-loom={canLoomAt(i)}
+      class:tok-replayed={loomCut != null && i < loomCut && !e.ghost}
+      class:tok-fork={loomCut != null && i === loomCut}
       class:tok-ghost={e.ghost}
       style={e.ghost || bg
         ? ''
@@ -129,9 +136,9 @@
 </div>
 
 {#if pinned != null && pinnedPos && tlp[pinned]}
-  <TokenPopover entry={tlp[pinned]} x={pinnedPos.x} y={pinnedPos.y} {rules} pinned onPick={pick} onClose={unpin} />
+  <TokenPopover entry={tlp[pinned]} x={pinnedPos.x} y={pinnedPos.y} {rules} pinned onPick={pick} onClose={unpin} replayed={loomCut != null && pinned < loomCut} />
 {:else if cur && pos}
-  <TokenPopover entry={cur} x={pos.x} y={pos.y} {rules} canPin={hover != null && canLoomAt(hover)} />
+  <TokenPopover entry={cur} x={pos.x} y={pos.y} {rules} canPin={hover != null && canLoomAt(hover)} replayed={loomCut != null && hover != null && hover < loomCut} />
 {/if}
 
 <style>
@@ -162,6 +169,15 @@
   }
   .tok-pinned {
     outline: 1.5px solid var(--color-accent);
+  }
+  /* Loom branch: the forced (replayed) prefix keeps its heat fill but wears a
+     dotted underline — same "not drawn here" language as ghosts, minus the dim
+     (these DO have numbers). The first fresh token carries the fork line. */
+  .tok-replayed {
+    border-bottom: 1px dotted var(--color-accent);
+  }
+  .tok-fork {
+    box-shadow: inset 2px 0 0 var(--color-accent);
   }
   /* Ghost = an edited turn's text past where it stopped being the model's.
      Dimmed + dashed so it reads as "text without a number", not as a normal

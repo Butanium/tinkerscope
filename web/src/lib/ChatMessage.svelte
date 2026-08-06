@@ -20,7 +20,7 @@
   import OverflowRow from '$lib/OverflowRow.svelte';
   import TokenLogprobs from '$lib/TokenLogprobs.svelte';
   import TokenHeatOverlay from '$lib/TokenHeatOverlay.svelte';
-  import type { ViewMessage, SampleData } from '$lib/types';
+  import type { ViewMessage, SampleData, TokenLogprob } from '$lib/types';
 
   let {
     msg,
@@ -101,10 +101,25 @@
     onFocusRow?: () => void;
   } = $props();
 
-  // The authored prefill (raw) split into its reasoning/answer parts, so the renderer
-  // can color the prefilled prefix of `reasoning` (think part) and `content` (answer
-  // part) distinctly from the model's continuation. All samples in a turn share it.
-  let prefillSplit = $derived(msg.prefill ? splitPrefill(msg.prefill) : null);
+  // The FORCED leading text of a turn — the authored prefill plus a loom fire's
+  // replayed prefix — split into its reasoning/answer parts, so the renderer can
+  // color it distinctly from the model's fresh continuation. Trimmed to match the
+  // STRIPPED parsed fields: the loom text is decoded straight from token ids, so
+  // it keeps whitespace the parse dropped (the answer part keeps its tail — that
+  // end is the actual cut point, possibly mid-word).
+  function forcedSplit(prefill?: string, loomText?: string) {
+    const raw = (prefill ?? '') + (loomText ?? '');
+    if (!raw) return null;
+    const s = splitPrefill(raw);
+    return { think: s.think.trim(), answer: s.answer.trimStart() };
+  }
+  let prefillSplit = $derived(forcedSplit(msg.prefill, msg.loom_text));
+  /** Loom fork point as a DISPLAY-stream index (a leading prefill ghost shifts
+   *  the stored count by one). null = not a loom turn / no stream. */
+  function displayLoomCut(tlp: TokenLogprob[] | undefined, cut?: number): number | null {
+    if (cut == null || !tlp?.length) return null;
+    return cut + (tlp[0].ghost && tlp[0].ghostKind === 'prefill' ? 1 : 0);
+  }
 
   let isMultiSample = $derived(!!(msg.totalSamples && msg.totalSamples > 1));
   // Heavy fields of a COMMITTED (light) node resolve through the per-node blob
@@ -129,6 +144,8 @@
   // 'overlay' keeps the normal prose and paints the heat under it, so the fold
   // and the markdown stay exactly as they are.
   let tokView = $derived(logprobView.mode === 'stream' && !!tlp?.length);
+  // The single row's loom fork point, in display-stream coordinates.
+  let loomCutDisplay = $derived(displayLoomCut(tlp, msg.loom_cut));
   let tokOverlay = $derived(logprobView.mode === 'overlay' && !!tlp?.length);
   const sampleTok = (s: SampleData) =>
     logprobView.mode === 'stream' && !!s.token_logprobs?.length;
@@ -400,6 +417,9 @@
 {/snippet}
 
 {#snippet sampleCard(sample: SampleData, idx: number)}
+  {@const cSplit = forcedSplit(msg.prefill, sample.loom_text)}
+  {@const cTlp = withPrefillGhost(sample.token_logprobs, msg.prefill)}
+  {@const cLoomCut = displayLoomCut(cTlp, sample.loom_cut)}
   <div class="sample-card" class:active-sample={msg.activeSampleIndex === idx}>
     <div class="sample-header">
       <span>Sample {idx + 1}</span>
@@ -417,21 +437,21 @@
           <span>Reasoning</span>
           <svg class="thinking-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
         </summary>
-        <div class="sample-reasoning">{@html prefillSplit ? renderPrefilled(sample.reasoning, prefillSplit.think, 'assistant') : renderContent(sample.reasoning, 'assistant')}</div>
+        <div class="sample-reasoning">{@html cSplit ? renderPrefilled(sample.reasoning, cSplit.think, 'assistant') : renderContent(sample.reasoning, 'assistant')}</div>
       </details>
     {/if}
     {#if rawSamples.has(idx) && sample.raw_text}
       <pre class="raw-text-view">{sample.raw_text}</pre>
       {#if sample.raw_meta}{@render rawMetaDisclosure(sample.raw_meta)}{/if}
     {:else if sampleTok(sample)}
-      <TokenLogprobs tlp={withPrefillGhost(sample.token_logprobs, msg.prefill)!} />
+      <TokenLogprobs tlp={cTlp!} loomCut={cLoomCut} />
     {:else}
-      <div class="sample-content">{@html prefillSplit ? renderPrefilled(sample.content, prefillSplit.answer, 'assistant') : renderContent(sample.content, 'assistant')}</div>
+      <div class="sample-content">{@html cSplit ? renderPrefilled(sample.content, cSplit.answer, 'assistant') : renderContent(sample.content, 'assistant')}</div>
     {/if}
     {#if sampleOverlay(sample) && !rawSamples.has(idx)}
       <!-- keyed on the sample's node so switching cards remounts from scratch -->
       {#key msg.sampleNodeIds?.[idx] ?? idx}
-        <TokenHeatOverlay tlp={withPrefillGhost(sample.token_logprobs, msg.prefill)!} selector=".sample-reasoning, .sample-content" />
+        <TokenHeatOverlay tlp={cTlp!} selector=".sample-reasoning, .sample-content" loomCut={cLoomCut} />
       {/key}
     {/if}
     <OverflowRow klass="sample-actions" resetKey={msg.sampleNodeIds?.[idx] ?? String(idx)}>
@@ -806,7 +826,7 @@
         <pre class="raw-text-view">{msg.raw_text}</pre>
           {#if rawMeta}{@render rawMetaDisclosure(rawMeta)}{:else if hasMeta}<div class="blob-loading">loading request &amp; response…</div>{/if}
       {:else if tokView}
-        <TokenLogprobs tlp={tlp!} onLoom={loomHandler} />
+        <TokenLogprobs tlp={tlp!} onLoom={loomHandler} loomCut={loomCutDisplay} />
       {:else}
         <div class="message-content">{@html prefillSplit ? renderPrefilled(msg.content, prefillSplit.answer, msg.role) : renderContent(msg.content, msg.role)}</div>
         {#if tokOverlay}
@@ -814,7 +834,7 @@
                Not on content: a streaming row has no nodeId yet, and keying on
                its text would remount the overlay on every chunk. -->
           {#key msg.nodeId ?? 'live'}
-            <TokenHeatOverlay tlp={tlp!} selector=".sample-reasoning, .message-content" onLoom={loomHandler} />
+            <TokenHeatOverlay tlp={tlp!} selector=".sample-reasoning, .message-content" onLoom={loomHandler} loomCut={loomCutDisplay} />
           {/key}
         {/if}
       {/if}

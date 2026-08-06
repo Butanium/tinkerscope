@@ -33,6 +33,19 @@ export function loomCut(tlp: TokenLogprob[], idx: number): number | null {
   return cut;
 }
 
+/** The STORED-stream cut for Shift+Continue's "resume inside the think block",
+ *  token-level: keep everything before the token that closes the thinking, drop
+ *  it and the answer, and the model keeps reasoning. A thinking-only turn
+ *  (`hasAnswer` false — the block never closed) resumes from the very end. null
+ *  = the closing token can't be located (tml_v0's special-token blocks, or a
+ *  tag split across tokens) — the caller falls back to the TEXT-prefill path,
+ *  which handles those renderers. */
+export function thinkResumeCut(tlp: TokenLogprob[], hasAnswer: boolean): number | null {
+  if (!hasAnswer) return tlp.length;
+  const i = tlp.findIndex((e) => !e.ghost && e.t.includes('</think>'));
+  return i >= 0 ? i : null;
+}
+
 /** The model + renderer a native turn was sampled with, as recorded in its
  *  raw_meta request block. */
 export type RawMetaModel = { base_model?: string; sampler_path?: string; renderer?: string };

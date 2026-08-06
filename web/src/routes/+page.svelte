@@ -690,6 +690,22 @@
     return r ? { run_id: r.id, checkpoint: pSel.checkpoint } : null;
   }
 
+  /** A comparable key for the panel's current model selection — branchOps'
+   *  Continue uses it to take the token (loom) path only while the panel still
+   *  points at the model that produced the turn's token ids. Run selections
+   *  resolve to their checkpoint's sampler path (same rule as the copy-id
+   *  button — lib/model-sel.runSamplerPath), so the key matches what a turn's
+   *  raw_meta records. */
+  function resolveModelKey(pSel: PanelSel): string | null {
+    const m = resolveModelField(pSel);
+    if (!m) return null;
+    if ('openrouter_model' in m) return 'or:' + m.openrouter_model;
+    if ('base_model' in m) return 'base:' + m.base_model;
+    if ('sampler_path' in m) return 'sp:' + m.sampler_path;
+    const sp = runSamplerPath(panelRun(pSel)?.checkpoints, m.checkpoint);
+    return sp ? 'sp:' + sp : null;
+  }
+
   /** Fire one panel's generation with the current model + params. Thin context
    *  assembly over chat.fireOne, which fires detached + folds from the bus bucket.
    *  `paramsOverride` patches the composer bundle for this fire (branchOps'
@@ -1083,7 +1099,8 @@
     panelSels: () => panelSels,
     panelBusy,
     withPrefill,
-    fireOne
+    fireOne,
+    resolveModelKey
   });
 
   // ── Workspace rendering ────────────────────────────────────────
