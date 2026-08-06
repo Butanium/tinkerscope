@@ -19,7 +19,7 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 
 ### Token probabilities & the loom
 
-- [Loom: branch from a token into one of its alternatives](loom-branch-from-token.md) — click a token, pick an alternative from its popover, get an ordinary sibling branch; Clément's, mostly existing plumbing
+- [Loom: branch from a token into one of its alternatives](loom-branch-from-token.md) — click a token, pick an alternative from its popover, get an ordinary sibling branch; Clément's. Addendum: alt `tid`s are stored, so an EXACT token-level continue is ~20 backend lines and beats text prefill
 - [The loom should cut from the PROSE](loom-cut-from-prose.md) — `token-align` + the overlay already hit-test words in reading mode; nobody switches to a token dump on the off-chance
 - [Score the CONTEXT, not just the completion](score-the-context.md) — `[0, L)` is discarded teacher-forced numbers we already paid for; design deliberately unsettled, Clément wants to think more
 - [Make the top-K logprob capture configurable](topk-capture-configurable.md) — `TOPK_LOGPROBS = 5` means Color-by-match only answers "did it make the top *five*?"

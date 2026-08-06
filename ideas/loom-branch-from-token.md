@@ -26,3 +26,29 @@ should actually be picked), [topk-capture-configurable](topk-capture-configurabl
 (the top-5 ceiling).
 
 *(Clément, 2026-08-03, sidebar / per-panel-stop session)*
+
+### Addendum: do it at the TOKEN level, not via text prefill
+
+The "no new API surface" paragraph above steers toward text prefill; checking
+the stored shapes flips that call. Alternatives persist as `[text, tid, lp]`
+(`tinker_sampler.py` wire shape) and the stream carries `tid` per token, so the
+counterfactual prompt is `prompt_tokens + generated_tids[:i] + [alt_tid]` —
+exact, no re-tokenization drift at the cut. The construction pattern already
+exists at `tinker_sampler.py:350` (the logprob-capture re-submit:
+`ModelInput(chunks=[*prompt.chunks, EncodedTextChunk(tokens=...)])`); a
+continue-from-tokens mode is that with real `max_tokens`. Token-level also makes
+mid-thinking cuts trivial (special tokens ride along as ids — no reopened
+`<think>`, no `_tml_continue` dance), and the branch comes out GHOST-FREE: the
+prefix inherits its stored logprobs exactly (identical context AND tokens —
+stronger than `token-edit`'s divergence guess), the picked alternative wears its
+recorded top-K logprob, the continuation arrives with fresh ones. Fully
+overlayable/chartable.
+
+Two more design answers: clicking the SAMPLED token itself = resample-from-here
+with no swap ("how locked-in was the rest?") — free once the endpoint exists.
+And the fire must reuse the original turn's render context (thinking toggle
+etc.), not the current sidebar state, or the inherited prefix numbers are lies.
+Hand-typed off-top-5 alternatives: decline in v1, that's the existing
+edit+continue path.
+
+*(fable, 2026-08-06, after Clément re-raised the idea unprompted)*
