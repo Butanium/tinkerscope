@@ -43,7 +43,7 @@
   import SplitChip from '$lib/SplitChip.svelte';
   import TruncLabel from '$lib/TruncLabel.svelte';
   import { loadHighlightRules, highlightStore, colorRules } from '$lib/highlights.svelte';
-  import { logprobView, logprobHighlight } from '$lib/logprobs.svelte';
+  import { logprobView, logprobHighlight, type TokenTintMode } from '$lib/logprobs.svelte';
   import {
     hydrateChartView,
     setChartViewMirror,
@@ -385,12 +385,12 @@
     patchState({ thinking: next }, true);
   }
 
-  /** Sidebar "Color by match" Off/On. Turning it on with nothing picked would be
-   *  a no-op toggle, so it adopts the first enabled rule; turning it off keeps
-   *  the selection for the next time. */
-  function setMatchColor(on: boolean) {
-    logprobHighlight.setEnabled(on);
-    if (!on || logprobHighlight.selected.length) return;
+  /** Sidebar "Color tokens by" Logprob / Match / Both. Picking a match mode with
+   *  no rule chosen would be a no-op, so it adopts the first enabled rule; going
+   *  back to Logprob keeps the selection for the next time. */
+  function setTokenTint(m: TokenTintMode) {
+    logprobHighlight.setMode(m);
+    if (m === 'logprob' || logprobHighlight.selected.length) return;
     const first = highlightStore.rules.find((r) => r.enabled);
     if (first) logprobHighlight.set([first.id]);
   }
@@ -2156,10 +2156,11 @@
               {#if logprobView.enabled && colorRules().some((r) => r.enabled)}
                 <div class="lp-hl">
                   <label class="sidebar-label thinking-toggle-row">
-                    <span>Color by match</span>
-                    <span class="seg-toggle" data-tooltip="Tint tokens by P(matching text) instead of surprisal — up to 2 rules" use:tip>
-                      <button class="seg-btn" class:active={!logprobHighlight.enabled} onclick={() => setMatchColor(false)}>Off</button>
-                      <button class="seg-btn" class:active={logprobHighlight.enabled} onclick={() => setMatchColor(true)}>On</button>
+                    <span>Color tokens by</span>
+                    <span class="seg-toggle" data-tooltip="What the token tint means — surprisal, rule match, or both" use:tip>
+                      <button class="seg-btn" class:active={logprobHighlight.mode === 'logprob'} onclick={() => setTokenTint('logprob')}>Logprob</button>
+                      <button class="seg-btn" class:active={logprobHighlight.mode === 'match'} onclick={() => setTokenTint('match')}>Match</button>
+                      <button class="seg-btn" class:active={logprobHighlight.mode === 'both'} onclick={() => setTokenTint('both')}>Both</button>
                     </span>
                   </label>
                   {#if logprobHighlight.enabled}
@@ -2765,7 +2766,7 @@
   .thinking-toggle-row { justify-content: space-between; }
   /* .seg-toggle / .seg-btn are global (app.css) — HighlightRules uses them too. */
 
-  /* ── "Color by match" highlight picker under the Token-probs toggle ── */
+  /* ── "Color tokens by" highlight picker under the Token-probs toggle ── */
   .lp-hl { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
   .lp-hl-chips { display: flex; flex-wrap: wrap; gap: 4px; }
   .lp-hl-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 2px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: var(--color-bg); color: var(--color-text-muted); font-size: 0.7rem; font-weight: 600; cursor: pointer; transition: all 0.15s; }

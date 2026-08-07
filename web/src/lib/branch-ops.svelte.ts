@@ -415,7 +415,10 @@ class BranchOps {
   }
 
   /** Edit → fork. User: fork+regen (shift = fork+copy-downstream, no gen).
-   *  Assistant: a manual branch (no gen). Empty edits are ignored.
+   *  Assistant: a manual branch, never a generation — shift carries the
+   *  downstream turns onto it, same as on a user row (without it the new branch
+   *  is a leaf and everything below stays on the sibling you edited away from).
+   *  Empty edits are ignored.
    *  `systemPrompt` (root user rows only): the fork's THREAD system prompt —
    *  same question under a new prompt is just an edit that forks a sibling
    *  thread. Trimmed-empty ⇒ the fork has none.
@@ -453,7 +456,7 @@ class BranchOps {
       const tlp = await this.#tokensOf(panel, msg.nodeId);
       // Re-read the tree AFTER the await: the fetch yields, and the node could
       // have been pruned/cycled away meanwhile (editAssistant returns null then).
-      const r = editAssistant(ws.treeFor(panel), msg.nodeId, text, reasoning, tlp);
+      const r = editAssistant(ws.treeFor(panel), msg.nodeId, text, reasoning, tlp, copyDownstream);
       if (r) ws.setTree(panel, r.tree);
     }
   }

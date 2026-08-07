@@ -10,7 +10,10 @@ import {
   firstTokenDist,
   highlightMatchProb,
   matchTintBackground,
-  matchTintAlpha
+  matchTintAlpha,
+  compositeOver,
+  surprisalColor,
+  tokenTintColors
 } from './token-logprob.ts';
 import type { TokenLogprob } from './tree.ts';
 import type { HighlightRule } from './types.ts';
@@ -253,6 +256,49 @@ test('matchTintBackground: two bands → top/bottom split gradient', () => {
     g,
     'linear-gradient(to bottom, rgba(96, 165, 250, 0.42) 0 50%, rgba(248, 113, 113, 0.42) 50% 100%)'
   );
+});
+
+// ── compositeOver + the "Both" match mode ────────────────────────────
+test('compositeOver flattens two translucent layers, backdrop-independent', () => {
+  // Fully opaque top wins outright.
+  eq(compositeOver('rgba(0, 0, 255, 1)', 'rgba(255, 0, 0, 0.5)'), 'rgba(0, 0, 255, 1)');
+  // Fully transparent top leaves the bottom untouched.
+  eq(compositeOver('rgba(0, 0, 255, 0)', 'rgba(255, 0, 0, 0.5)'), 'rgba(255, 0, 0, 0.5)');
+  // Half over half: alpha = .5 + .5*.5 = .75; red = (0*.5 + 255*.5*.5)/.75 = 85.
+  eq(compositeOver('rgba(0, 0, 255, 0.5)', 'rgba(255, 0, 0, 0.5)'), 'rgba(85, 0, 170, 0.75)');
+  // Both transparent ⇒ nothing to draw, not a divide-by-zero.
+  eq(compositeOver('rgba(1, 2, 3, 0)', 'rgba(4, 5, 6, 0)'), 'rgba(0, 0, 0, 0)');
+  // Unparseable input passes the top through rather than inventing a color.
+  eq(compositeOver('not-a-color', 'rgba(255, 0, 0, 0.5)'), 'not-a-color');
+});
+
+test('tokenTintColors: match REPLACES the heat by default, LAYERS with overSurprisal', () => {
+  const lp = Math.log(0.05); // surprising ⇒ a real amber
+  const heat = surprisalColor(lp);
+  ok(heat !== '', 'the fixture logprob must actually produce a heat tint');
+  const bands = [{ color: '#3b82f6', prob: 1 }];
+  const replaced = tokenTintColors(lp, bands, 0.5);
+  eq(replaced, ['rgba(59, 130, 246, 0.42)'], 'default = pure match band');
+  const layered = tokenTintColors(lp, bands, 0.5, true);
+  eq(layered, [compositeOver('rgba(59, 130, 246, 0.42)', heat)], 'overSurprisal = band over heat');
+  // The layered band keeps the rule hue but is pulled toward the amber, and is
+  // strictly more opaque than either layer alone — the property the UI promises.
+  const chans = /rgba\((\d+), (\d+), (\d+), ([\d.]+)\)/.exec(layered[0])!;
+  ok(Number(chans[1]) > 59, 'layering must pull red toward the amber');
+  ok(Number(chans[3]) > 0.42, 'layering must be more opaque than the band alone');
+  // No rules ⇒ the heat, unchanged, in either mode.
+  eq(tokenTintColors(lp, [], 0.5, true), [heat]);
+  eq(tokenTintColors(lp, [], 0.5, false), [heat]);
+});
+
+test('tokenTintColors: a ZERO-match band under overSurprisal is just the heat', () => {
+  // The point of "Both": a token with nothing matching still shows its amber,
+  // instead of going blank the way pure match mode leaves it.
+  const lp = Math.log(0.05);
+  const heat = surprisalColor(lp);
+  const none = [{ color: '#3b82f6', prob: 0 }];
+  eq(tokenTintColors(lp, none, 0.5, true), [heat]);
+  eq(tokenTintColors(lp, none, 0.5, false), ['rgba(59, 130, 246, 0)']);
 });
 
 console.log(`token-logprob.test: ${passed} passed, ${failed} failed`);

@@ -12,10 +12,13 @@ pins the parts that only exist in a browser:
     text (data-aligned) despite markdown-heavy content
   - hovering a painted token opens the same popover as the stream view, with
     the token's probability and its top-K alternatives
+  - clicking a token PINS its card (the loom), and clicking off a token closes
+    it — it must not re-pin at the click point and read as chasing the mouse
   - the thinking fold gets its own painted layer (its background is opaque, so
     a row-level canvas behind it would show nothing)
-  - "Color by match" re-colors the overlay with the rule's hue, like it does the
-    raw stream
+  - "Color tokens by" re-colors the overlay with the rule's hue, like it does the
+    raw stream — and its third state ("Both") lays that band OVER the surprisal
+    heat instead of replacing it
   - "Tokens" still gives the raw stream, and "Off" leaves neither
   - a turn whose logprobs CANNOT be aligned (they belong to different text)
     paints nothing and says so, rather than showing a plausible-looking lie
@@ -97,7 +100,7 @@ RULE_ID = "smoke-overlay-blue"
 
 
 def seed() -> str:
-    # "Color by match" only renders with at least one enabled rule, and this one
+    # "Color tokens by" only renders with at least one enabled rule, and this one
     # matches the token we hover, so the overlay must repaint in its hue.
     api("PUT", f"/api/highlights/{RULE_ID}", {
         "id": RULE_ID, "name": "ovl-blue", "enabled": True, "patterns": ["Blue"],
@@ -205,6 +208,31 @@ def main() -> None:
             checks.append(("popover shows its probability", "5.0%" in pop))
             checks.append(("popover lists alternatives",
                            page.locator(".tok-alt").count() >= 2 and "Gray" in pop))
+
+            # ── the LOOM pin: a click pins, a click away CLOSES ───────────
+            # Regression guard. `hover`/`pop` are FROZEN while a card is pinned
+            # (onMove/onLeave bail), and unpin used to clear only the pin — so
+            # onClick read the stale hover and RE-PINNED the same token at the
+            # new click point. The card looked like it was chasing the mouse
+            # instead of closing.
+            page.mouse.click(strong["x"] + strong["width"] / 2,
+                             strong["y"] + strong["height"] / 2)
+            page.wait_for_selector(".tok-pop-pinned", timeout=3000)
+            checks.append(("clicking a token pins its card",
+                           page.locator(".tok-pop-pinned").count() == 1))
+            # Blank space INSIDE the prose container (right of the short line):
+            # no token there, so this must close the card and pin nothing.
+            body_box = page.locator(".message-content").first.bounding_box()
+            page.mouse.click(body_box["x"] + body_box["width"] - 12,
+                             strong["y"] + strong["height"] / 2)
+            page.wait_for_timeout(200)
+            closed = page.locator(".tok-pop").count() == 0
+            # …and it must stay closed as the pointer wanders that blank area.
+            page.mouse.move(body_box["x"] + body_box["width"] - 40, strong["y"] + 6)
+            page.mouse.move(body_box["x"] + body_box["width"] - 80, strong["y"] + 12)
+            page.wait_for_timeout(150)
+            checks.append(("clicking off a token closes the pinned card",
+                           closed and page.locator(".tok-pop").count() == 0))
             # ── the thinking fold paints too ─────────────────────────────
             # Its background is opaque, which is why the canvas lives INSIDE it;
             # a row-level canvas behind that background painted nothing at all.
@@ -223,7 +251,7 @@ def main() -> None:
                            reasoning_px > 100))
             page.screenshot(path=SHOT)
 
-            # ── Color by match re-colors the overlay ─────────────────────
+            # ── Color tokens by: match re-colors the overlay ─────────────────────
             def pixel_at(el_selector: str) -> list[int]:
                 """RGBA the content canvas painted under the centre of an element."""
                 b = page.locator(el_selector).first.bounding_box()
@@ -243,15 +271,28 @@ def main() -> None:
             amber = pixel_at(".message-content strong")
             # The surprisal ramp is a single amber (217,119,6) — red ≫ blue.
             checks.append((f"surprisal paints amber {amber}", amber[3] > 0 and amber[0] > amber[2]))
-            match_row = '.lp-hl .thinking-toggle-row:has-text("Color by match")'
-            page.click(f'{match_row} .seg-btn:has-text("On")')
+            match_row = '.lp-hl .thinking-toggle-row:has-text("Color tokens by")'
+            page.click(f'{match_row} .seg-btn:has-text("Match")')
             page.wait_for_selector(".lp-hl-chip.sel", timeout=3000)
             page.click('.lp-hl-chip:has-text("ovl-blue")')
             page.wait_for_timeout(300)
             blue = pixel_at(".message-content strong")
             checks.append((f"match coloring repaints in the rule hue {blue}",
                            blue[3] > 0 and blue[2] > blue[0]))
-            page.click(f'{match_row} .seg-btn:has-text("Off")')
+            # "Both": the band is composited OVER the amber instead of replacing
+            # it, so the result sits strictly BETWEEN the two — each channel
+            # pulled toward the other layer, and more opaque than either alone.
+            # (Which hue *dominates* depends on the two alphas: a weak match over
+            # a strong surprisal stays amber-ish, which is the honest render —
+            # don't assert the match hue wins.)
+            page.click(f'{match_row} .seg-btn:has-text("Both")')
+            page.wait_for_timeout(300)
+            both = pixel_at(".message-content strong")
+            checks.append((f"Both layers the match band over the heat {both}",
+                           both[3] >= max(blue[3], amber[3])
+                           and both[0] > blue[0]      # red pulled up out of the match hue
+                           and both[2] > amber[2]))   # blue pulled up out of the amber
+            page.click(f'{match_row} .seg-btn:has-text("Logprob")')
             page.wait_for_timeout(300)
 
             # ── the unalignable sibling refuses to paint ─────────────────

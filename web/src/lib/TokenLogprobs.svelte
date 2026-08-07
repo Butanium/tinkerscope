@@ -9,7 +9,12 @@
   // what you fall back to when exact boundaries matter, or when the alignment
   // the overlay needs can't follow the render.
   import type { TokenLogprob } from '$lib/tree';
-  import { surprisalAlpha, highlightMatchProb, matchTintBackground } from '$lib/token-logprob';
+  import {
+    surprisalAlpha,
+    surprisalColor,
+    highlightMatchProb,
+    matchTintBackground
+  } from '$lib/token-logprob';
   import { loomCut as loomCutOf } from '$lib/loom';
   import { logprobHighlight } from '$lib/logprobs.svelte';
   import { colorRules } from '$lib/highlights.svelte';
@@ -46,7 +51,8 @@
       ? tlp.map((e) =>
           matchTintBackground(
             rules.map((r) => ({ color: r.color, prob: highlightMatchProb(e, r) })),
-            logprobHighlight.sharpness
+            logprobHighlight.sharpness,
+            logprobHighlight.overSurprisal ? surprisalColor(e.lp) : ''
           )
         )
       : null

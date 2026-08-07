@@ -107,21 +107,54 @@ export function matchTintAlpha(p: number, sharpness = DEFAULT_MATCH_SHARPNESS): 
  *  surprisal tint). `sharpness` warps prob → opacity; see `matchTintAlpha`. */
 export function matchTintBackground(
   bands: { color: string; prob: number }[],
-  sharpness = DEFAULT_MATCH_SHARPNESS
+  sharpness = DEFAULT_MATCH_SHARPNESS,
+  under = ''
 ): string {
-  const segs = matchTintColors(bands, sharpness);
+  const segs = matchTintColors(bands, sharpness, under);
   if (segs.length === 0) return '';
   if (segs.length === 1) return segs[0];
   return `linear-gradient(to bottom, ${segs[0]} 0 50%, ${segs[1]} 50% 100%)`;
 }
 
 /** The same bands as flat rgba colors, top-to-bottom — for painters that can't
- *  take a CSS gradient string (the canvas overlay). */
+ *  take a CSS gradient string (the canvas overlay).
+ *
+ *  `under` (an rgba, typically the surprisal heat) is composited BENEATH each
+ *  band, so the "both" match mode is still one color per band: neither painter
+ *  has to learn about layers, and a band whose match prob is 0 comes back as the
+ *  plain surprisal tint — which is exactly what that mode promises. */
 export function matchTintColors(
   bands: { color: string; prob: number }[],
-  sharpness = DEFAULT_MATCH_SHARPNESS
+  sharpness = DEFAULT_MATCH_SHARPNESS,
+  under = ''
 ): string[] {
-  return bands.map((b) => tint(b.color, matchTintAlpha(b.prob, sharpness)));
+  return bands.map((b) => {
+    const c = tint(b.color, matchTintAlpha(b.prob, sharpness));
+    return under ? compositeOver(c, under) : c;
+  });
+}
+
+/** Source-over composite of two translucent `rgba(r, g, b, a)` layers into ONE
+ *  rgba. Backdrop-independent — that's what makes it safe to flatten a stack
+ *  into a single color and hand it to a painter that only knows about one.
+ *  Anything it can't parse passes `top` through unchanged. */
+export function compositeOver(top: string, bottom: string): string {
+  const t = parseRgba(top);
+  const b = parseRgba(bottom);
+  if (!t || !b) return top;
+  const a = t.a + b.a * (1 - t.a);
+  if (a <= 0) return 'rgba(0, 0, 0, 0)';
+  const mix = (ct: number, cb: number) =>
+    Math.round((ct * t.a + cb * b.a * (1 - t.a)) / a);
+  return `rgba(${mix(t.r, b.r)}, ${mix(t.g, b.g)}, ${mix(t.b, b.b)}, ${Math.round(a * 1000) / 1000})`;
+}
+
+function parseRgba(c: string): { r: number; g: number; b: number; a: number } | null {
+  const m = /^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,/\s]+([\d.]+))?\s*\)$/.exec(c.trim());
+  if (!m) return null;
+  const [r, g, b] = [m[1], m[2], m[3]].map(Number);
+  const a = m[4] == null ? 1 : Number(m[4]);
+  return [r, g, b, a].some((v) => !Number.isFinite(v)) ? null : { r, g, b, a };
 }
 
 /** The surprisal heat as an rgba color, or '' when the token is unremarkable
@@ -133,15 +166,21 @@ export function surprisalColor(lp: number | null | undefined): string {
 
 /** Every fill one token wears, top-to-bottom: the match bands when any rule is
  *  selected, else the surprisal heat. `[]` = draw nothing. The single place the
- *  two token views agree on what color a token is. */
+ *  two token views agree on what color a token is.
+ *
+ *  `overSurprisal` is the third state of the sidebar's Color-by-match control:
+ *  the bands are drawn OVER the heat instead of replacing it, so you can read
+ *  "was there matching text available here" without giving up "was the sampled
+ *  token surprising". */
 export function tokenTintColors(
   lp: number | null | undefined,
   matchBands: { color: string; prob: number }[],
-  sharpness = DEFAULT_MATCH_SHARPNESS
+  sharpness = DEFAULT_MATCH_SHARPNESS,
+  overSurprisal = false
 ): string[] {
-  if (matchBands.length) return matchTintColors(matchBands, sharpness);
-  const c = surprisalColor(lp);
-  return c ? [c] : [];
+  const heat = surprisalColor(lp);
+  if (matchBands.length) return matchTintColors(matchBands, sharpness, overSurprisal ? heat : '');
+  return heat ? [heat] : [];
 }
 
 /** One bar-segment's worth of the first-token distribution. */

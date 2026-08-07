@@ -114,7 +114,8 @@
         : tokenTintColors(
             e.lp,
             rules.map((r) => ({ color: r.color, prob: highlightMatchProb(e, r) })),
-            logprobHighlight.sharpness
+            logprobHighlight.sharpness,
+            logprobHighlight.overSurprisal
           )
     )
   );
@@ -346,10 +347,14 @@
   }
 
   function onClick(ev: MouseEvent): void {
-    if (hover == null || !canLoomAt(hover)) return;
+    // Hit-test the CLICK, don't reuse `hover`: while a card is pinned the hover
+    // is frozen at the pinned token (onMove bails), so reading it would re-pin
+    // the old token when you click a different one.
+    const hit = hitAt(ev);
+    if (hit == null || !canLoomAt(hit)) return;
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed) return; // a drag-select, not a pick
-    pinned = hover;
+    pinned = hit;
     pinnedPop = {
       x: Math.max(4, Math.min(ev.clientX, window.innerWidth - 260)),
       y: ev.clientY + 14
@@ -358,6 +363,13 @@
   function unpin(): void {
     pinned = null;
     pinnedPop = null;
+    // `hover`/`pop` were frozen at pin time (onMove/onLeave both bail while
+    // pinned), so leaving them set hands the card straight to the hover branch
+    // at the stale position — which then tracks the mouse instead of closing.
+    // The next mousemove re-establishes hover if the pointer is over a token.
+    hover = null;
+    pop = null;
+    schedule();
   }
   function pick(altTid: number | null): void {
     if (pinned == null || !onLoom) return;
@@ -366,11 +378,11 @@
     if (cut != null) onLoom(cut, altTid);
   }
 
-  function onMove(ev: MouseEvent): void {
-    if (pinned != null) return; // frozen while the loom card is up
+  /** Which token entry sits under the pointer, or null. Reads the cached rects
+   *  (no caret API), so it costs no layout. */
+  function hitAt(ev: MouseEvent): number | null {
     const containers = measured;
-    let found: number | null = null;
-    for (let ci = 0; ci < containers.length && found == null; ci++) {
+    for (let ci = 0; ci < containers.length; ci++) {
       const el = containers[ci];
       if (!el.isConnected) continue;
       const visible = el.getBoundingClientRect();
@@ -388,12 +400,16 @@
       const py = ev.clientY - o.y;
       for (const b of boxes) {
         if (b.c !== ci) continue;
-        if (px >= b.x && px < b.x + b.w && py >= b.y && py < b.y + b.h) {
-          found = b.i;
-          break;
-        }
+        if (px >= b.x && px < b.x + b.w && py >= b.y && py < b.y + b.h) return b.i;
       }
     }
+    return null;
+  }
+
+  function onMove(ev: MouseEvent): void {
+    if (pinned != null) return; // frozen while the loom card is up
+    const containers = measured;
+    const found = hitAt(ev);
     if (found === hover) return;
     hover = found;
     pop =

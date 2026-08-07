@@ -279,6 +279,25 @@ test('editAssistant makes a manual assistant sibling, selected, no children', ()
   eq(msgContents(back), ['U1', 'A1', 'U2', 'A2']);
 });
 
+test('editAssistant with copyDownstream carries the turns below onto the new branch', () => {
+  const t = linear4(); // U1 A1 U2 A2
+  const a1 = activePath(t)[1].id;
+  const origNodeCount = Object.keys(t.nodes).length;
+  const r = editAssistant(t, a1, 'A1-edited', undefined, undefined, true)!;
+  // shift: the new sibling keeps U2/A2 instead of being a leaf
+  eq(msgContents(r.tree), ['U1', 'A1-edited', 'U2', 'A2']);
+  assertValid(r.tree);
+  // 1 new assistant + 2 copied downstream
+  eq(Object.keys(r.tree.nodes).length, origNodeCount + 3);
+  // the original branch is intact behind the cycler
+  const back = cycle(r.tree, r.newId, -1);
+  eq(msgContents(back), ['U1', 'A1', 'U2', 'A2']);
+  assertValid(back);
+  // copies are fresh nodes, not the originals re-parented
+  const copiedU2 = activePath(r.tree)[2].id;
+  ok(copiedU2 !== activePath(t)[2].id, 'copied downstream must have fresh ids');
+});
+
 test('editAssistant carries an edited reasoning block; empty drops it', () => {
   const t = linear4();
   const a1 = activePath(t)[1].id;

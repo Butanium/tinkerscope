@@ -73,6 +73,7 @@ DEFAULT=(
     browser_thread_system
     browser_row_toolbar
     browser_samples_view
+    browser_shift_edit_assistant
     browser_legacy_echo_graft
     browser_sysprompt_switch
     browser_system_chip

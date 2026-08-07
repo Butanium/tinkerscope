@@ -60,18 +60,28 @@ export const logprobView = new LogprobViewStore();
 // rules) so a renamed/recolored rule keeps applying; a deleted rule's stale id is
 // inert.
 //
-// `enabled` is a separate axis from the picked ids on purpose: flipping the mode
-// off and back on must not cost you the rule selection (the pre-toggle UI could
-// only be silenced by deselecting every chip). Consumers read `activeIds`, which
-// folds the two together.
+// `mode` is a separate axis from the picked ids on purpose: flipping it off and
+// back on must not cost you the rule selection (the pre-toggle UI could only be
+// silenced by deselecting every chip). Consumers read `activeIds`, which folds
+// the two together.
+//
+// THREE states, and each NAMES WHAT THE TINT MEANS rather than whether a feature
+// is switched on: 'logprob' is the plain surprisal heat (alpha ∝ -logprob, the
+// default), 'match' replaces it with the match bands — the clean read of "where
+// could matching text have gone" — and 'both' draws the bands OVER the heat, so
+// a token that is BOTH surprising and near matching text shows as such and a
+// zero-match token still wears its amber. (The layering is flattened to one
+// color per band in token-logprob.ts, so neither painter learns about layers.)
 const HL_KEY = 'tinkerscope:token-probs-highlights';
 const HL_ON_KEY = 'tinkerscope:token-probs-highlights-on';
 const HL_SHARP_KEY = 'tinkerscope:token-probs-highlights-sharpness';
 const MAX_HL = 2;
 
+export type TokenTintMode = 'logprob' | 'match' | 'both';
+
 class LogprobHighlightStore {
   selected = $state<string[]>([]);
-  enabled = $state(false);
+  mode = $state<TokenTintMode>('logprob');
   /** Tint ramp: 0 = opacity ∝ match mass, 1 = any nonzero match at full tint.
    *  See `matchTintAlpha` — this is the exponent knob, not a scale factor. */
   sharpness = $state(DEFAULT_MATCH_SHARPNESS);
@@ -81,9 +91,18 @@ class LogprobHighlightStore {
       const raw = localStorage.getItem(HL_KEY);
       if (raw) this.selected = (JSON.parse(raw) as string[]).slice(0, MAX_HL);
       // Pre-toggle installs stored ids with no on-flag and expected them to
-      // apply, so a stored non-empty selection implies ON.
+      // apply, so a stored non-empty selection implies match-coloring. '1'/'0'
+      // (and the short-lived 'off') predate the three named modes: on meant
+      // match-replaces-heat, off meant the plain heat.
       const on = localStorage.getItem(HL_ON_KEY);
-      this.enabled = on == null ? this.selected.length > 0 : on === '1';
+      this.mode =
+        on === 'both' || on === 'match' || on === 'logprob'
+          ? on
+          : on === '1'
+            ? 'match'
+            : on == null && this.selected.length > 0
+              ? 'match'
+              : 'logprob';
       const sharp = parseFloat(localStorage.getItem(HL_SHARP_KEY) ?? '');
       if (Number.isFinite(sharp)) this.sharpness = Math.min(Math.max(sharp, 0), 1);
     } catch {
@@ -102,13 +121,23 @@ class LogprobHighlightStore {
 
   /** The rule ids actually coloring tokens right now ([] ⇒ surprisal tint). */
   get activeIds(): string[] {
-    return this.enabled ? this.selected : [];
+    return this.mode === 'logprob' ? [] : this.selected;
   }
 
-  setEnabled(on: boolean): void {
-    this.enabled = on;
+  /** Draw the bands over the surprisal heat rather than instead of it. */
+  get overSurprisal(): boolean {
+    return this.mode === 'both';
+  }
+
+  /** Is match-coloring contributing at all (⇒ show the rule chips + Contrast)? */
+  get enabled(): boolean {
+    return this.mode !== 'logprob';
+  }
+
+  setMode(m: TokenTintMode): void {
+    this.mode = m;
     try {
-      localStorage.setItem(HL_ON_KEY, on ? '1' : '0');
+      localStorage.setItem(HL_ON_KEY, m);
     } catch {
       /* ignore */
     }

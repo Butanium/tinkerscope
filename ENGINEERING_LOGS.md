@@ -588,3 +588,71 @@ from a preceding copy lasts 1200 ms and outranks the ⇧ glyph, so a shift check
 within that window reads `check`, not `dataset`. The smoke waits for
 `.btn-copy-sp:not(.copied)` first. The precedence itself is correct — feedback
 for what just happened beats a preview of what a modifier would do.
+
+---
+
+### 2026-08-06 — Loom pin: the popover chased the mouse instead of closing
+
+Clément, within minutes of the loom shipping: click a token, click somewhere
+else, and the card follows the pointer instead of going away.
+
+Two bugs stacked, both from the same design choice — `hover`/`pop` are FROZEN
+while a card is pinned (`onMove` and `onLeave` in TokenHeatOverlay both bail on
+`pinned != null`), so the pinned token keeps its outline.
+
+  1. `unpin()` cleared only `pinned`/`pinnedPop`. The instant the pin dropped,
+     the `{:else if hover…}` branch rendered the HOVER card at the stale
+     position, with `onMove` live again — so it tracked the pointer.
+  2. `onClick` read that frozen `hover`. A mousedown outside unpinned (the
+     popover's own close gesture), then the click handler re-pinned the SAME
+     token at the new click point. So the card visibly jumped to wherever you
+     clicked — which is what "follows the mouse" actually looked like — and
+     clicking a DIFFERENT token re-pinned the old one.
+
+Fix: `unpin()` clears the frozen hover too (the next mousemove re-establishes it
+honestly), and the hit-test moved into `hitAt(ev)` so a click resolves its own
+token instead of reusing hover state that is deliberately stale. TokenLogprobs
+has the same pin/unpin pair but not the bug — its `leave()` is NOT pin-guarded,
+so hover clears on the way out, and `clickTok` already takes the clicked index.
+
+`browser_token_overlay.py` grew a pin/close scenario; verified failing on
+`--baseline main` at exactly that check and nothing else.
+
+---
+
+### 2026-08-06 — Shift+edit works on assistant rows too
+
+It was never forbidden, just unimplemented and undiscoverable: `startEdit`
+always forwarded `e.shiftKey`, but `applyEdit` only honoured `copyDownstream` in
+the `role === 'user'` arm, and the icon/tooltip swap was gated on user rows, so
+nothing hinted the modifier existed. An assistant edit therefore always minted a
+LEAF — every turn below stayed on the sibling you had just edited away from,
+which is wrong for the "rewrite one reply in the middle of a thread" case.
+
+`editAssistant` takes `copyDownstream` now and grafts the original active path
+below it onto the new node. The deep-copy loop came out of `editUserForkCopy`
+into a shared `graftDownstream` rather than being written twice. Heavy fields
+(`token_logprobs`) are deliberately not carried onto copies: a copy is a new node
+with no blob behind it, and those ids belong to what the model actually sampled.
+
+Smoke `browser_shift_edit_assistant.py`; unit case in `tree.test.ts`.
+
+---
+
+### 2026-08-06 — "Color by match" becomes "Color tokens by": logprob / match / both
+
+Clément wanted the match tint layered OVER the surprisal heat rather than only
+replacing it, then pointed out the control was named for a feature rather than
+for what it shows. Both changes are the same idea: the toggle now answers "what
+does this tint MEAN", with the states named after the quantity — `Logprob`
+(the amber, alpha ∝ -logprob), `Match`, `Both` — and the store's mode values
+match the labels, so no layer translates between UI and code.
+
+The layering is flattened, not stacked: `compositeOver` composites the match band
+onto the heat into ONE rgba. Source-over of two translucent layers is
+backdrop-independent, so this is exact, and it means neither painter (canvas
+overlay, CSS gradient) learns about layers — which is the property that keeps
+them from drifting. A zero-match token under `both` composites to exactly the
+heat, which is why that mode reads as "amber unless something matched".
+
+Legacy localStorage `'1'`/`'0'` migrate to `match`/`logprob`.

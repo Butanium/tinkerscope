@@ -93,7 +93,7 @@
           what: 'Do it in ALL panels at once (only with >1 panel) —',
           also: ['edit', 'regen', 'trash', 'continue']
         },
-        { keys: ['Shift'], icon: 'edit', btn: 'edit', what: 'On a USER row: fork a full editable copy of the conversation, generating nothing' },
+        { keys: ['Shift'], icon: 'edit', btn: 'edit', what: 'Fork a full editable copy — the turns below come along, and nothing is generated' },
         { keys: ['Shift'], icon: 'regen', btn: 'regenerate', what: 'Replace this branch in place instead of adding a sibling' },
         { keys: ['Shift'], icon: 'trash', btn: 'delete', what: 'Delete every branch at this turn, not just the shown one' },
         { keys: ['Shift'], icon: 'continue', btn: 'continue', what: 'Resume INSIDE the think block (assistant turns with reasoning)' },
@@ -262,9 +262,10 @@ codex plugin add tinkerscope@tinkerscope</pre>
         So "what did it say the other three times?" is always answerable.
       </p>
       <p class="help-note">
-        Editing a <em>user</em> message forks and regenerates from there; Shift+edit forks a full editable
-        copy and generates nothing. Editing an <em>assistant</em> message just writes a manual branch —
-        useful for putting words in its mouth and continuing.
+        Editing a <em>user</em> message forks and regenerates from there. Editing an <em>assistant</em>
+        message just writes a manual branch — useful for putting words in its mouth and continuing.
+        On either, <b>Shift+edit</b> generates nothing and brings the turns below along, so you get a
+        full editable copy of the conversation instead of a branch that dead-ends at the edit.
       </p>
       <p class="help-note">
         Delete is the exception that really does remove something. <Icon name="undo" /> in the sidebar
@@ -413,9 +414,11 @@ codex plugin add tinkerscope@tinkerscope</pre>
         itself.
       </p>
       <p class="help-note">
-        Under it, <b>Color by match</b> flips the tint to "how much probability mass went to text matching
-        this rule" instead of surprisal. Turn it On and pick up to two highlight rules — two rules split each
-        token into a top and a bottom band. Off keeps your picks for next time.
+        Under it, <b>Color tokens by</b> says what the tint MEANS. <b>Logprob</b> is the default amber —
+        how surprising the sampled token was. <b>Match</b> swaps it for "how much probability mass went to
+        text matching this rule", in the rule's hue; <b>Both</b> lays that hue over the amber, so you read
+        both at once and a token with nothing matching just stays amber. Pick up to two highlight rules —
+        two rules split each token into a top and a bottom band. Going back to Logprob keeps your picks.
       </p>
       <p class="help-note">
         <b>The loom — branch from a token.</b> Click a token (in either view; in Over, click the word)

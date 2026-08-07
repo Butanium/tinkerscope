@@ -195,7 +195,7 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     **Read `colorRules()`, not `highlightStore.rules`, from anything that COLORS
     text** — that's the one place the gate applies (`render.ts`, and the
     token-probability match tint in TokenLogprobs / TokenHeatOverlay / +page's
-    "Color by match" picker). Deliberately NOT gated: `ChartModal`, which buckets
+    "Color tokens by" picker). Deliberately NOT gated: `ChartModal`, which buckets
     samples by rule rather than coloring text, lives in its own modal, and has
     per-rule include/exclude chips already — killing an analysis surface from a
     sidebar switch about colors is action at a distance. Smoke:
@@ -211,10 +211,16 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     the body for the raw token dump (`TokenLogprobs`). The legacy `'1'` value
     migrates to `overlay` — it meant "show me the tokens", which is the same
     information without giving up the prose. `logprobHighlight` holds the ≤2
-    highlight-rule ids chosen for the **"Color by match"** picker (also
-    localStorage; newest-2-win): non-empty ⇒ TokenLogprobs tints tokens by
-    `highlightMatchProb` instead of surprisal + colors popover alternatives by
-    their match.
+    highlight-rule ids chosen for the **"Color tokens by"** picker (also
+    localStorage; newest-2-win) plus its own THREE-state `mode`
+    (`'logprob' | 'match' | 'both'`, a separate axis from the picks so leaving
+    match mode never costs you them). The states NAME WHAT THE TINT MEANS rather
+    than whether a feature is on: `logprob` = the plain surprisal heat (default),
+    `match` tints by `highlightMatchProb` INSTEAD of it, `both` lays that band
+    OVER it (so a no-match token still shows its amber). Read it as `activeIds` +
+    `overSurprisal`, never as the raw mode. Legacy `'1'`/`'0'` migrate to
+    `match`/`logprob`. Popover alternatives are always pure match-tint (an
+    alternative has no surprisal of its own to layer under).
   - `lib/thinking-view.svelte.ts` → `thinkingView` — the sidebar **"Thinking
     blocks"** Folded/Open toggle (localStorage, like `logprobView`; shown in
     read-only too — a published CoT page is where a reader most wants them open).
@@ -370,7 +376,11 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     highlight rule — a lower bound, top-5 only) + `matchTintBackground` (1 rule →
     flat tint; 2 → a top/bottom split band; alpha = √prob × 0.42 — a gamma-0.5
     ramp so a 1% match still reads at 10% opacity, peaking at the standard 0.42
-    highlight opacity, prob 0 = transparent). `tokenTintColors` is the SINGLE
+    highlight opacity, prob 0 = transparent). The **"Both" tint mode** layers
+    the match band over the heat, and `compositeOver` FLATTENS that stack into a
+    single rgba (source-over is backdrop-independent, so this is exact) — the
+    layering never reaches a painter, which is what keeps the canvas and the CSS
+    gradient agreeing. `tokenTintColors` is the SINGLE
     answer to "what color is this token" — the ≤2 bands as flat rgba, match-tint
     when a rule is picked else the surprisal heat — so the CSS view and the
     canvas overlay can't drift; `matchTintBackground` is the CSS-gradient
@@ -614,7 +624,7 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
   - `lib/TokenLogprobs.svelte` — token probs, `stream` mode: the raw generated
     token stream (thinking tags and all — exact token boundaries beat markdown
     here), each token tinted by surprisal. When ≥1 rule is picked in the
-    sidebar's "Color by match" (`logprobHighlight`), the surprisal tint is
+    sidebar's "Color tokens by" (`logprobHighlight`), the surprisal tint is
     replaced by a per-token match-prob band (1–2 rules; `matchTintBackground`)
     on an inner `.tok-core` span that EXCLUDES the token's edge whitespace (a
     BPE token carries its leading space; tinting it reads as highlighting the

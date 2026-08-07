@@ -419,10 +419,19 @@ export function editUserForkCopy(
   };
   childArray(t, parentKey).push(newUserId);
   t.selected[parentKey] = newUserId;
-  // deep-copy the downstream chain as fresh-id single-child descendants, writing
-  // a fresh `selected` entry along the way (each copied node selects its copy).
-  let curParent = newUserId;
-  for (const node of downstream) {
+  graftDownstream(t, newUserId, downstream);
+  return { tree: t, newUserId };
+}
+
+/** Deep-copy `chain` (an active-path slice from the ORIGINAL tree) under `rootId`
+ *  as fresh-id single-child descendants, writing a `selected` entry at each step
+ *  so the copy is the active path. Mutates `t` — callers pass a cloned tree.
+ *
+ *  Heavy fields are deliberately NOT carried: a copy is a new node with no blob
+ *  behind it, and `token_logprobs` belong to the ids the model actually sampled. */
+function graftDownstream(t: ConvTree, rootId: string, chain: TreeNode[]): void {
+  let curParent = rootId;
+  for (const node of chain) {
     const cid = nid();
     t.nodes[cid] = {
       id: cid,
@@ -430,7 +439,7 @@ export function editUserForkCopy(
       content: node.content,
       reasoning: node.reasoning,
       raw_text: node.raw_text,
-        raw_meta: node.raw_meta,
+      raw_meta: node.raw_meta,
       parent: curParent,
       children: []
     };
@@ -438,7 +447,6 @@ export function editUserForkCopy(
     t.selected[curParent] = cid;
     curParent = cid;
   }
-  return { tree: t, newUserId };
 }
 
 /** `tokenLogprobs` = the ORIGINAL's token stream, when the caller could resolve
@@ -450,10 +458,13 @@ export function editAssistant(
   asstId: string,
   content: string,
   reasoning?: string,
-  tokenLogprobs?: TokenLogprob[]
+  tokenLogprobs?: TokenLogprob[],
+  copyDownstream = false
 ): { tree: ConvTree; newId: string } | null {
   const orig = t0.nodes[asstId];
   if (!orig || orig.role !== 'assistant') return null;
+  // From the ORIGINAL selection, before the new sibling takes it over.
+  const downstream = copyDownstream ? downstreamActivePath(t0, asstId) : [];
   const t = cloneTree(t0);
   const parentKey = orig.parent ?? ROOT;
   const id = nid();
@@ -475,6 +486,7 @@ export function editAssistant(
   };
   childArray(t, parentKey).push(id);
   t.selected[parentKey] = id;
+  graftDownstream(t, id, downstream);
   return { tree: t, newId: id };
 }
 

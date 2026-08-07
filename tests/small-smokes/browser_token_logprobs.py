@@ -12,12 +12,12 @@ display surfaces:
   - a turn WITHOUT logprobs shows the "no token data" pill instead
   - Off → back to the normal markdown render
 
-  "Color by match" (the Off/On toggle under Token probs):
-  - hidden until a highlight rule exists; defaults Off
-  - On adopts the first enabled rule and re-tints tokens by match probability
+  "Color tokens by" (the Logprob / Match / Both toggle under Token probs):
+  - hidden until a highlight rule exists; defaults to Logprob
+  - Match adopts the first enabled rule and re-tints tokens by match probability
     (the rule's hue) instead of surprisal
   - the Contrast slider warps prob → opacity (0 linear · 0.5 √ · 1 step)
-  - Off restores the surprisal tint but KEEPS the picked rule
+  - Logprob restores the surprisal tint but KEEPS the picked rule
 
   first-token chart mode:
   - the "first token" mode button is enabled (data present) and produces
@@ -73,7 +73,7 @@ RULE_ID = "smoke-tlp-blue"
 def seed() -> str:
     """One turn with 3 logprob-carrying siblings + a follow-up turn without.
 
-    Also installs one highlight rule: "Color by match" only renders when at
+    Also installs one highlight rule: "Color tokens by" only renders when at
     least one enabled rule exists, and position 0's top-3 (Blue/Gray/The) is
     exactly the distribution the match tint reads.
     """
@@ -173,24 +173,24 @@ def main() -> None:
                            page.query_selector('.mode-tag:has-text("no token data")') is not None))
             # thinking fold: none of these carry reasoning, nothing to assert here.
 
-            # ── "Color by match" toggle ──────────────────────────────────
+            # ── "Color tokens by" toggle ──────────────────────────────────
             # A pre-toggle install had no on-flag, so the store infers ON from a
             # stored selection; this smoke's browser is fresh → Off with no picks.
-            match_row = '.lp-hl .thinking-toggle-row:has-text("Color by match")'
+            match_row = '.lp-hl .thinking-toggle-row:has-text("Color tokens by")'
             page.wait_for_selector(match_row, timeout=3000)
-            checks.append(("match toggle defaults Off",
-                           page.query_selector(f'{match_row} .seg-btn.active').inner_text() == "Off"))
-            checks.append(("no rule chips while Off", page.query_selector(".lp-hl-chip") is None))
+            checks.append(("token tint defaults to Logprob",
+                           page.query_selector(f'{match_row} .seg-btn.active').inner_text() == "Logprob"))
+            checks.append(("no rule chips while Logprob", page.query_selector(".lp-hl-chip") is None))
 
             surprisal_bg = toks[0].get_attribute("style") or ""
-            page.click(f'{match_row} .seg-btn:has-text("On")')
+            page.click(f'{match_row} .seg-btn:has-text("Match")')
             page.wait_for_selector(".lp-hl-chip.sel", timeout=3000)
             # "adopts the FIRST enabled rule" — which rule that is depends on the
             # instance's own rules (a state snapshot carries them), so assert the
             # invariant, not the name: exactly one chip, and it's the leading one.
             sel = page.query_selector_all(".lp-hl-chip.sel")
             first_chip = page.query_selector(".lp-hl-chip")
-            checks.append(("On adopts the first enabled rule",
+            checks.append(("Match adopts the first enabled rule",
                            len(sel) == 1 and sel[0].inner_text() == first_chip.inner_text()))
             def core_style(i: int) -> str:
                 # Match tint lives on the inner .tok-core — the edge whitespace of
@@ -243,16 +243,16 @@ def main() -> None:
                            page.inner_text(".lp-hl-ramp .lp-hl-ramp-val") == "1.00"))
             set_ramp(0.5)
 
-            page.click(f'{match_row} .seg-btn:has-text("Off")')
+            page.click(f'{match_row} .seg-btn:has-text("Logprob")')
             page.wait_for_timeout(150)
             toks = page.query_selector_all(".tok-stream >> nth=0 >> .tok")
-            checks.append(("Off restores the surprisal tint",
+            checks.append(("Logprob restores the surprisal tint",
                            (toks[0].get_attribute("style") or "") == surprisal_bg))
-            page.click(f'{match_row} .seg-btn:has-text("On")')
+            page.click(f'{match_row} .seg-btn:has-text("Match")')
             page.wait_for_timeout(150)
-            checks.append(("Off kept the picked rule",
+            checks.append(("Logprob kept the picked rule",
                            page.query_selector(".lp-hl-chip.sel") is not None))
-            page.click(f'{match_row} .seg-btn:has-text("Off")')
+            page.click(f'{match_row} .seg-btn:has-text("Logprob")')
 
             # Off → normal render returns
             page.click('.thinking-toggle-row:has-text("Token probs") .seg-btn:has-text("Off")')

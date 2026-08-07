@@ -174,10 +174,14 @@ thinking tags and all, which is uglier but shows exact token boundaries and neve
 drops anything. In Over mode a token the renderer swallowed (a formula, an exotic
 construct) is left unpainted rather than guessed at, and a reply that can't be
 lined up at all says so instead of tinting — switch to Tokens for those.
-If you have highlight rules, flip **Color by match** (the Off/On
-toggle right under it) On and pick up to two: each token is re-tinted by how much
+If you have highlight rules, flip **Color tokens by** (the
+`Off / Match / Both` toggle right under it) on and pick up to two: each token is
+re-tinted by how much
 probability mass went to alternatives matching that rule, which answers "how
-close was it to saying the other thing?" without resampling. Two rules split each
+close was it to saying the other thing?" without resampling. **Match** swaps the
+surprisal amber for the rule hue; **Both** draws the hue *over* the amber, so you
+read both signals at once and a token with no match still shows its surprisal.
+Two rules split each
 token into a top and bottom band; switching the toggle Off keeps the picks. The
 **Contrast** slider under the chips reshapes probability → opacity: 0 = opacity
 tracks the mass (relative read), 1 = a step where any nonzero match goes to full
@@ -254,7 +258,9 @@ the composer is text the assistant is treated as having already started; the
 model extends it (type a raw `<think>` to force a reasoning opening, or a whole
 think block to jump straight to an answer). Prefill persists across sends, so you
 can draw N samples off one prefill. Alternatively, **edit an assistant message**
-— that writes a manual branch you can then continue from.
+— that writes a manual branch you can then continue from. `Shift`+edit brings the
+turns below along onto the new branch instead of dead-ending at the edit, which
+is what you want when you're rewriting one reply in the middle of a thread.
 
 **"Keep this one."** The bookmark button on a row **pins** it with a note (Shift
 skips the note dialog); the play icon in the sidebar browses pins as a slideshow.
@@ -275,8 +281,9 @@ Rules aren't only cosmetic — they're the vocabulary the analysis views use:
 
 - the distribution chart's default mode buckets each sample by the *set* of rules
   it matches (grey = no rule matched, solid = one, striped = a combination);
-- **Color by match** on the token view (its own Off/On toggle) tints by
-  rule-match probability;
+- **Color tokens by** on the token view (its own `Logprob / Match / Both` toggle)
+  tints by rule-match probability, either instead of or on top of the surprisal
+  heat;
 - the chart's per-rule chips let you drop a rule that the prompt makes ubiquitous
   from the bucketing, without deleting the rule.
 
@@ -370,7 +377,7 @@ Hold a modifier, then click a row-toolbar button:
 | Modifier | What |
 |---|---|
 | `Ctrl`/`⌘` | Do it in ALL panels at once — edit · regenerate · delete · continue. Only live with more than one panel on screen; with one panel the modifier does nothing |
-| `Shift` + edit (user row) | Fork a full editable copy of the conversation, generating nothing |
+| `Shift` + edit | Fork a full editable copy — the turns below come along, and nothing is generated (either role) |
 | `Shift` + regenerate | Replace this branch in place instead of adding a sibling |
 | `Shift` + delete | Delete every branch at this turn |
 | `Shift` + continue | Resume *inside* the think block |

@@ -857,16 +857,18 @@
             {#if msg.role === 'assistant'}{@render continueBtn()}{/if}
             <button
               class="btn-act"
-              class:shift-alt={shiftDown && msg.role === 'user'}
+              class:shift-alt={shiftDown}
               class:btn-act-all={allActive}
-              data-tooltip={`${msg.role === 'user'
-                ? (shiftDown ? 'Edit → fork a full editable copy (no generation)' : 'Edit → fork + regenerate (shift: fork full copy)')
-                : 'Edit → new branch'}${allActive ? ' — in ALL panels' : ''}`}
+              data-tooltip={`${shiftDown
+                ? 'Edit → fork a full editable copy (no generation)'
+                : msg.role === 'user'
+                  ? 'Edit → fork + regenerate (shift: fork full copy)'
+                  : 'Edit → new branch (shift: fork full copy)'}${allActive ? ' — in ALL panels' : ''}`}
               use:tip
               aria-label="Edit"
               onclick={(e) => startEdit(e.shiftKey, e.ctrlKey || e.metaKey)}
             >
-              {#if shiftDown && msg.role === 'user'}<Icon name="edit-copy" />{:else}<Icon name="edit" />{/if}
+              {#if shiftDown}<Icon name="edit-copy" />{:else}<Icon name="edit" />{/if}
             </button>
             {@render deleteBtn('Delete this branch')}
           {/if}
