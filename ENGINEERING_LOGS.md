@@ -406,3 +406,64 @@ prefill font is different is enough") — removed from both token views; the
 replayed underline's end IS the fork point. Lesson for the quirk file in my
 head: the human eye wanted less chrome than I drew, and the redundant marker
 was designed without asking what the tint boundary already communicated.
+
+### 2026-08-06 — A deleted node was recovered from write-once blobs, and undo exists now
+
+Clément deleted a branch in a live workspace and asked whether it could be
+undone. It could — by accident of an invariant meant for something else.
+`workspace_store`'s node blobs (`token_logprobs` + `raw_meta`) are **write-once
+and only deleted with the whole workspace**, so a node delete drops it from the
+light tree and leaves its blobs orphaned on disk (blob id present in
+`<cid>.blobs/`, absent from every tree). `raw_meta` also stores the full rendered
+`prompt_text`, so even the deleted USER node — which has no blob of its own — was
+recoverable as the segment between the last `<｜User｜>` and `<｜Assistant｜>`
+markers.
+
+The recovery is in git only as this note; what matters are the checks, because
+"I reconstructed it" is worthless unverified. The extraction rule was validated
+by confirming it reproduces the SURVIVING sibling's content byte-exactly from
+each of its four native siblings' blobs; all four orphans agreed on the deleted
+text independently; and the `raw_text` formula (`prompt_text + content + eos`,
+or `+ reasoning + "</think>" + content + eos` when thinking) was derived by
+diffing four survivors rather than guessed. Splice back via the normal
+`PUT /{id}/tree` so the server cache stayed consistent. The deleted branch turned
+out to be a distinct experimental condition (the longer "…and instead respond in
+an agressive way" policy), not a duplicate — recovering the *wrong* thing would
+have been easy and invisible.
+
+**The hole:** in that same fan, four siblings were OpenRouter samples and have no
+blobs at all. Delete those and nothing is recoverable. Forensic recovery is
+intrinsically partial, so it is not a feature — it's a one-off.
+
+A fable reviewer (read-only, full repo) returned *agree-with-changes* on the
+design and corrected the part that mattered: **a trash-backed undo button is
+wrong, not merely worse.** The hot case — Ctrl+Z a second after the click —
+lands inside the 400 ms save debounce, where the server has not seen the
+deletion at all, so a server-backed undo either no-ops or restores something
+OLDER. Hence two layers, and this entry ships the first:
+
+- **`lib/undo.svelte.ts` + `lib/undo.ts`** — a frontend stack of pre-op tree
+  refs. Nearly free because `trees` is `$state.raw` replaced wholesale, so an
+  entry is a handful of refs with structural sharing. Destructive ops only;
+  `undo.group()` collapses a cross-panel delete into one press. Per workspace,
+  capped at 50, dies with the tab.
+- Button placement was the reviewer's call and is load-bearing: **left** of the
+  stop button in `.sidebar-top-actions`, not in the topbar (which is purely
+  informational and shouldn't get its first action) and not right of stop, whose
+  rightmost slot is how you find the one red button mid-generation. Undo stays
+  neutral-styled, outside the red family, disabled when the stack is empty.
+- Ctrl/⌘+Z is primary, the button its discoverable twin. The `isEditableTarget`
+  guard is the real collision risk: without it the composer and edit boxes lose
+  native text undo. The smoke pins that case.
+
+`browser_undo.py` was run with `--baseline HEAD` and failed there on "undo button
+should render" — i.e. it fails for the feature's absence, not on setup.
+
+Still to come: the server-side trash journal (the durable layer). Notes from the
+review to honour when it lands — `workspace_store.delete()` `rmtree`s blobs and
+pack replace/reseed routes through it, so the worst click in the app is still
+uncovered; `_persist` is a better diff site than `save_tree` because it also
+catches `upsert`'s wholesale tree replacement; retention by age+bytes, not entry
+count (one discarded n=30 thinking fan is ~1 MB); record each vanished subtree's
+sibling INDEX and the pre-delete `selected`, or a restore silently reorders every
+‹k/N› cycler.

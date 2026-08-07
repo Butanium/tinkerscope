@@ -53,6 +53,7 @@
     { icon: 'dataset', name: 'training data', what: "peek at the selected run's training set" },
     { icon: 'regen', name: 'refresh', what: 'rescan the run directory + re-check which checkpoints still serve' },
     { icon: 'help', name: 'help', what: 'this modal' },
+    { icon: 'undo', name: 'undo', what: 'put back the last thing you deleted (Ctrl+Z) — greyed out when there is nothing to undo' },
     { icon: 'stop', name: 'stop', what: 'abort generation in every panel' }
   ];
 
@@ -110,7 +111,15 @@
     },
     {
       group: 'Anywhere',
-      rows: [{ keys: ['Esc (modal open)'], what: 'Close the modal' }]
+      rows: [
+        {
+          keys: ['Ctrl / ⌘', 'Z'],
+          icon: 'undo',
+          btn: 'undo',
+          what: 'Put back the last thing you deleted in this workspace (inside a text box it stays your normal text undo)'
+        },
+        { keys: ['Esc (modal open)'], what: 'Close the modal' }
+      ]
     }
   ];
 </script>
@@ -256,6 +265,11 @@ codex plugin add tinkerscope@tinkerscope</pre>
         Editing a <em>user</em> message forks and regenerates from there; Shift+edit forks a full editable
         copy and generates nothing. Editing an <em>assistant</em> message just writes a manual branch —
         useful for putting words in its mouth and continuing.
+      </p>
+      <p class="help-note">
+        Delete is the exception that really does remove something. <Icon name="undo" /> in the sidebar
+        icon row — or <kbd>Ctrl/⌘</kbd>+<kbd>Z</kbd> — puts back the last delete, discard-others or
+        thread reset in this workspace, up to 50 of them, for as long as the tab stays open.
       </p>
     </section>
 

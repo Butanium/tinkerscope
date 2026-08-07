@@ -630,6 +630,7 @@
     data-tooltip={`${shiftDown ? 'Delete ALL branches at this turn' : label}${allActive ? ' — in ALL panels' : ''}`}
     use:tip
     aria-label={shiftDown ? 'Delete all branches' : 'Delete'}
+    data-testid="delete-msg"
     onclick={(e) => onDelete(e.ctrlKey || e.metaKey, e.shiftKey)}
   >
     {#if shiftDown}<Icon name="trash-all" />{:else}<Icon name="trash" />{/if}

@@ -26,6 +26,7 @@
 import { live } from './state.svelte';
 import { api } from './api';
 import { nodeBlobs } from './node-blobs.svelte';
+import { undo } from './undo.svelte';
 import { planSave, heavyNodeIds, lightenTree } from './save-plan';
 import {
   emptyTree,
@@ -778,6 +779,9 @@ class ConversationsStore {
   /** Reset every open panel's tree for a fresh thread under the SAME workspace. */
   async resetActive(): Promise<void> {
     await this.#preSwitch();
+    undo.group('reset thread', () => {
+      for (const panel of Object.keys(this.trees)) undo.capture(panel, 'reset thread');
+    });
     live.clearBuckets();
     await this.#freshTrees(true);
     this.save();

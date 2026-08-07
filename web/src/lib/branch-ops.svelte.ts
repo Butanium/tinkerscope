@@ -17,6 +17,7 @@ import { workspaces as ws } from './workspaces.svelte';
 import { nodeBlobs } from './node-blobs.svelte';
 import { chat, type ChatParams, type ChatModelField } from './chat.svelte';
 import { panelScroll } from './scroll.svelte';
+import { undo } from './undo.svelte';
 import { assembleAssistantRaw } from './render';
 import { parseRawMetaModel, thinkResumeCut, type RawMetaModel } from './loom';
 import {
@@ -117,6 +118,7 @@ class BranchOps {
    *  branch at this level too, truncating back to the parent. */
   deleteMessage(panel: Panel, msg: ViewMessage, all = false) {
     if (this.#d.panelBusy(panel) || msg.nodeId == null) return;
+    undo.capture(panel, all ? 'delete branch + siblings' : 'delete branch');
     panelScroll.preserve(panel);
     chat.clearPanelBucket(panel);
     const tree = ws.treeFor(panel);
@@ -282,6 +284,7 @@ class BranchOps {
     if (this.#d.panelBusy(panel)) return;
     const keep = msg.sampleNodeIds?.[sampleIndex];
     if (!keep) return;
+    undo.capture(panel, 'discard other samples');
     panelScroll.preserve(panel);
     let tree = setSelected(ws.treeFor(panel), keep);
     for (const sib of siblingsOf(tree, keep)) {
@@ -297,6 +300,7 @@ class BranchOps {
     if (this.#d.panelBusy(panel)) return;
     const nid = msg.sampleNodeIds?.[sampleIndex];
     if (!nid) return;
+    undo.capture(panel, 'delete sample');
     panelScroll.preserve(panel);
     ws.setTree(panel, deleteSubtree(ws.treeFor(panel), nid));
     // Remove the card from the bucket overlay (keep the rest visible). BUCKET
@@ -460,10 +464,13 @@ class BranchOps {
     if (msg.nodeId == null) return;
     const depth = activePath(ws.treeFor(panel)).findIndex((n) => n.id === msg.nodeId);
     if (depth < 0) return;
-    for (const p of this.#d.panelSels()) {
-      const node = activePath(ws.treeFor(p.panel))[depth];
-      if (node) this.deleteMessage(p.panel, { ...msg, nodeId: node.id }, allSiblings);
-    }
+    // One group ⇒ one Ctrl+Z puts every panel back, not one panel per press.
+    undo.group(allSiblings ? 'delete row + siblings (all panels)' : 'delete row (all panels)', () => {
+      for (const p of this.#d.panelSels()) {
+        const node = activePath(ws.treeFor(p.panel))[depth];
+        if (node) this.deleteMessage(p.panel, { ...msg, nodeId: node.id }, allSiblings);
+      }
+    });
   }
 
   /** Apply the same edit to the turn at this row's DEPTH in EVERY panel (ctrl/cmd,

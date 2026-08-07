@@ -57,7 +57,11 @@ editor.
 
 The icon row at the top of the sidebar, left to right: **theme**, **distribution
 chart**, **pins slideshow**, **peek at training data**, **rescan runs**,
-**help (`?`)**, **stop all generation**.
+**help (`?`)**, **undo last delete**, **stop all generation**.
+
+Undo (↺, greyed out when there's nothing to undo) reverses the last *destructive*
+thing done in this workspace — a delete, a discard-others, a thread reset. It does
+not step back through sends or edits, which add branches rather than remove them.
 
 The `● live` dot (top right) is the health of the tab's connection to the
 tinkerscope backend: green "live" while events flow, red "offline" the moment
@@ -320,6 +324,18 @@ Chat rows — **click a row first** to give it the focus ring:
 | `↑` / `↓` | Move the focus ring within that panel |
 | `←` / `→` | Cycle the focused row's `‹k/N›` sibling branches |
 | `Esc` | Drop the focus ring |
+
+Anywhere:
+
+| Key | What |
+|---|---|
+| `Ctrl`/`⌘`+`Z` | Undo the last delete / discard-others / thread reset in this workspace |
+| `Esc` (modal open) | Close the modal |
+
+Inside a text box `Ctrl`/`⌘`+`Z` stays the browser's normal text undo — the
+workspace undo deliberately doesn't steal it. The stack holds the last 50 ops,
+is per workspace (switching away and back keeps it), and lives only as long as
+the tab: it's the "oops, put that back" net, not a persistent history.
 
 The row toolbar's buttons are unlabeled glyphs — if you're talking someone
 through one, name the shape, not just the verb (the app's own `?` modal draws

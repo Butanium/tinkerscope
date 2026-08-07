@@ -24,6 +24,7 @@
   import { modelCatalog } from '$lib/model-catalog.svelte';
   import { branchOps } from '$lib/branch-ops.svelte';
   import { panelScroll } from '$lib/scroll.svelte';
+  import { undo } from '$lib/undo.svelte';
   import { isNavKey, moveIndex, isEditableTarget, anyModalOpen } from '$lib/kbnav';
   import type { ChartPanelData, ChartTurn } from '$lib/chart';
   import { firstRealToken } from '$lib/token-logprob';
@@ -1103,6 +1104,21 @@
     resolveModelKey
   });
 
+  // ── Undo ──────────────────────────────────────────────────────────
+  // The undo stack ($lib/undo.svelte) reverses DESTRUCTIVE tree edits only —
+  // deletes, discard-others, reset-thread. Same injection pattern: it never
+  // imports `ws`, so give it the four workspace seams it needs.
+  undo.configure({
+    activeId: () => ws.activeId,
+    treeFor: (panel) => ws.treeFor(panel),
+    setTree: (panel, tree) => ws.setTree(panel, tree),
+    hasPanel: (panel) => panel in ws.trees
+  });
+
+  const undoTip = $derived(
+    undo.canUndo ? `Undo ${undo.nextLabel} (Ctrl+Z)` : 'Nothing to undo in this workspace'
+  );
+
   // ── Workspace rendering ────────────────────────────────────────
   // Each column renders from ITS OWN branch TREE's active path (ws.treeFor(p)) —
   // the single read source (the panel's messages echo is write-only for the CLI).
@@ -1178,6 +1194,18 @@
    *  a not-yet-rendered row — e.g. a still-empty streaming bucket — has none). */
   function kbRowEl(panel: Panel, index: number): HTMLElement | null {
     return panelScroll.els[panel]?.querySelector(`.message[data-row="${index}"]`) ?? null;
+  }
+
+  /** Ctrl/Cmd+Z — the primary undo affordance; the sidebar button is its
+   *  discoverable twin. The editable-target guard is load-bearing: without it
+   *  this would steal NATIVE text undo inside the composer and edit boxes. */
+  function onUndoKeydown(e: KeyboardEvent) {
+    if (readOnly || e.key.toLowerCase() !== 'z') return;
+    if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+    if (isEditableTarget(e.target) || anyModalOpen()) return;
+    if (!undo.canUndo) return;
+    e.preventDefault();
+    undo.undo();
   }
 
   function onNavKeydown(e: KeyboardEvent) {
@@ -1632,6 +1660,7 @@
     window.addEventListener('blur', onBlur);
     // Keyboard row navigation (see its section above for the guards).
     window.addEventListener('keydown', onNavKeydown);
+    window.addEventListener('keydown', onUndoKeydown);
     // The bus describes ONE workspace at a time (bus-scope.ts), so make it the
     // one you're looking at: focusing a tab re-asserts its workspace, and
     // `tinkpg` follows. No-op when we already own it or a chat is streaming.
@@ -1702,6 +1731,7 @@
       window.removeEventListener('blur', onBlur);
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('keydown', onNavKeydown);
+      window.removeEventListener('keydown', onUndoKeydown);
     };
   });
 </script>
@@ -1803,6 +1833,11 @@
           <Icon name="help" size={15} />
         </button>
         {#if !readOnly}
+          <!-- Left of stop on purpose: stop's rightmost slot is how you find the one
+               red button mid-generation. Undo stays neutral-styled, outside that family. -->
+          <button class="theme-toggle" onclick={() => undo.undo()} data-tooltip={undoTip} use:tip disabled={!undo.canUndo} aria-label="Undo last delete">
+            <Icon name="undo" size={15} />
+          </button>
           <button class="btn-stop-sidebar" class:active={anyRunning} onclick={() => chat.stopGeneration()} data-tooltip="Stop all generation" use:tip disabled={!anyRunning}>
             <Icon name="stop" size={14} />
           </button>
@@ -2667,6 +2702,8 @@
   .btn-copy-sp.copied { color: var(--color-success, var(--color-accent)); }
   .theme-toggle { background: none; border: 1px solid var(--color-border); border-radius: var(--radius); padding: 6px; color: var(--color-text-muted); display: flex; align-items: center; }
   .theme-toggle:hover { color: var(--color-text); border-color: var(--color-text-muted); }
+  .theme-toggle:disabled { opacity: 0.35; cursor: default; }
+  .theme-toggle:disabled:hover { color: var(--color-text-muted); border-color: var(--color-border); }
   .theme-toggle.refreshing { opacity: 0.5; cursor: wait; }
   /* :global — the glyph is inside <Icon>, out of this component's CSS scope. */
   .theme-toggle.refreshing :global(svg) { animation: spin 0.8s linear infinite; }

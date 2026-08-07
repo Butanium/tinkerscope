@@ -216,6 +216,19 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     Its module docstring states the trap: a state-change-driven pin fires after
     the DOM already updated, which IS the scroll flicker. New scroll behavior
     goes through this store, never inline.
+  - `lib/undo.svelte.ts` → `undo` — the sidebar ↺ / Ctrl+Z stack. Reactive
+    wrapper over the pure `lib/undo.ts` (**has `undo.test.ts`**); seams injected
+    by +page like `branchOps`, so it never imports `ws`. **Destructive ops
+    ONLY** — delete branch / delete sample / discard-others / reset-thread call
+    `undo.capture(panel, label)` BEFORE their `setTree`; sends, edits and regens
+    are additive and deliberately absent, so Ctrl+Z always means "put back what
+    I just removed". Cheap because `trees` is `$state.raw` replaced wholesale:
+    an entry is the pre-op tree REFS of the panels one op touched. `undo.group()`
+    makes a cross-panel delete ONE press. Per workspace, capped at 50, dies with
+    the tab. ⚠️ It is **not** the durable layer — that's the server trash journal;
+    this one exists because the hot case (Ctrl+Z seconds after the click) lands
+    inside the 400 ms save debounce, where the server has not yet seen the
+    deletion at all. Smoke: `tests/small-smokes/browser_undo.py`.
 - **Pure logic** — plain `.ts`, no Svelte/DOM, unit-testable (some have
   `*.test.ts`):
   - `lib/tree.ts` — all branch-tree ops (activePath, fold, regen, edit, delete,
