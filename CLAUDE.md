@@ -103,6 +103,20 @@ and in this file's reference section; HANDOFF.md itself is retired.
   thinking-parse *lessons* carried over into this file).
 - **Shared-state bus / live-drive** (the `tinkpg` ↔ browser lockstep): see
   `docs/HANDOFF_BRANCHING.md` §1 + `src/tinkerscope/api/state.py`.
+- **Deletion is recoverable, in two layers** — `workspace_store.py`'s trash
+  journal + `web/src/lib/undo.ts`. The server diffs in **`_persist`**, not
+  `save_tree`: it's the choke point for EVERY write, so `upsert`'s wholesale
+  tree replacement is covered too, and it sees the body AFTER save_tree's legacy
+  `{tree, compare_tree}` seed (diffing before that mass-journals phantom
+  deletions on a legacy workspace's first save). Diff by node **ID only** —
+  bodies legitimately change per save (`#lightenShipped` swaps inline heavy
+  fields for `has_*` flags), so a content diff would journal noise. Entries
+  record each vanished subtree's **sibling index**, or restore silently reorders
+  every ‹k/N› cycler. `DELETE /api/workspaces/{id}` is **soft** (moved to
+  `workspaces/.deleted/`) because the journal lives *inside* the workspace, so an
+  rmtree took the evidence with it — and `pack.py`'s replace/reseed routes
+  through that same delete. Retention is age+bytes, never entry count (one
+  discarded 30-sample thinking fan ≈ 1 MB).
 - **Static-site export** (what `data/` holds, the panel-ref rewrite, and the two
   index.html rewrites a GitHub Pages subpath needs — absolute asset refs AND the
   router's `base`, or the SPA 404s its own route): `src/tinkerscope/site_export.py`

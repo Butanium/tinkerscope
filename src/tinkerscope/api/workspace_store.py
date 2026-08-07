@@ -47,7 +47,7 @@ import sys
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -419,6 +419,277 @@ def _record_layout(cid: str, prev: Any, new: Any) -> None:
         log.warning("workspace %s: could not record layout history: %s", cid, e)
 
 
+# ── trash journal ────────────────────────────────────────────────────────────
+# The durable half of undo. The browser's own stack (web/src/lib/undo.ts) covers
+# the hot case — Ctrl+Z seconds after the click, inside the 400 ms save debounce,
+# where the server has not seen the deletion at all — and dies with the tab. This
+# covers everything after that: another session, another tab, a browser crash,
+# and the cross-tab last-write-wins clobber that BRANCHING_DESIGN §6 documents.
+#
+# It hooks `_persist` rather than `save_tree` deliberately: _persist is the single
+# choke point for EVERY workspace write, so the diff also catches `upsert`'s
+# wholesale tree replacement, and it sees the body AFTER save_tree's legacy
+# {tree, compare_tree} seed (diffing before that would mass-journal phantom
+# deletions on a legacy workspace's first save).
+#
+# Append-only `<cid>.trash.jsonl`. Restore is exact — light nodes verbatim, blobs
+# still on disk under the same ids (write-once), sibling INDEX recorded so a
+# restore can't silently reorder a ‹k/N› cycler.
+_TRASH_MAX_AGE_DAYS = 90
+_TRASH_MAX_BYTES = 32 * 1024 * 1024
+# Above this many nodes vanishing in ONE save, say so loudly: the legitimate ops
+# are big (reset thread, discard 30 samples) but so is a truncated-PUT bug, and
+# only the log distinguishes them after the fact.
+_TRASH_LOUD_AT = 200
+
+
+def _trash_file(cid: str) -> Path:
+    return _ws_dir() / f"{cid}.trash.jsonl"
+
+
+def _norm_trees(body: Any) -> dict[str, Any]:
+    """A body's panel→tree map, with the legacy {tree, compare_tree} shape mapped
+    onto its reserved panel ids — so both sides of a diff speak one language."""
+    if not isinstance(body, dict):
+        return {}
+    trees = body.get("trees")
+    if isinstance(trees, dict) and trees:
+        return trees
+    out: dict[str, Any] = {}
+    if body.get("tree"):
+        out["primary"] = body["tree"]
+    if body.get("compare_tree"):
+        out["compare"] = body["compare_tree"]
+    return out
+
+
+def _nodes_of(tree: Any) -> dict[str, Any]:
+    nodes = tree.get("nodes") if isinstance(tree, dict) else None
+    return nodes if isinstance(nodes, dict) else {}
+
+
+def _preview(node: Any) -> str:
+    text = node.get("content") if isinstance(node, dict) else ""
+    return " ".join(str(text or "").split())[:120]
+
+
+def _vanished(prev_tree: Any, new_tree: Any) -> dict[str, Any]:
+    """Nodes present before and absent after. Presence by ID ONLY — node BODIES
+    legitimately change on a save (#lightenShipped swaps inline heavy fields for
+    `has_*` flags), so a content diff would journal noise."""
+    new_ids = set(_nodes_of(new_tree))
+    return {nid: n for nid, n in _nodes_of(prev_tree).items() if nid not in new_ids}
+
+
+def _trash_entry(panel: str, kind: str, prev_tree: Any, gone: dict[str, Any]) -> dict:
+    """One journal entry: the vanished light nodes + where their subtree roots
+    hung, so a restore is a splice rather than an append."""
+    prev_nodes = _nodes_of(prev_tree)
+    roots = []
+    for nid, node in gone.items():
+        parent = node.get("parent") if isinstance(node, dict) else None
+        if parent in gone:
+            continue  # interior of a deleted subtree — its root carries the anchor
+        siblings = (
+            _nodes_of(prev_tree).get(parent, {}).get("children")
+            if parent
+            else prev_tree.get("rootChildren")
+        )
+        index = siblings.index(nid) if isinstance(siblings, list) and nid in siblings else -1
+        roots.append({
+            "id": nid,
+            "parent": parent,
+            "index": index,
+            "role": node.get("role") if isinstance(node, dict) else None,
+            "preview": _preview(node),
+        })
+    # Selections INSIDE the deleted subtree — restoring them puts the subtree's own
+    # cyclers back. Selections outside it are the live view's business, not ours.
+    selected = prev_tree.get("selected") if isinstance(prev_tree, dict) else None
+    inner = {k: v for k, v in (selected or {}).items() if k in gone} if isinstance(selected, dict) else {}
+    return {
+        "id": uuid.uuid4().hex[:8],
+        "ts": _now(),
+        "panel": panel,
+        "kind": kind,
+        "count": len(gone),
+        "roots": sorted(roots, key=lambda r: r["index"]),
+        "selected": inner,
+        "nodes": {nid: gone[nid] for nid in gone if nid in prev_nodes},
+    }
+
+
+def _append_trash(cid: str, entries: list[dict]) -> None:
+    """Append + amortized retention. Best-effort: a safety net must never be the
+    reason the save carrying the user's actual data fails."""
+    if not entries:
+        return
+    try:
+        f = _trash_file(cid)
+        heal = ""
+        if f.exists() and f.stat().st_size:
+            with f.open("rb") as fh:
+                fh.seek(-1, os.SEEK_END)
+                if fh.read(1) != b"\n":
+                    heal = "\n"  # a torn last line must not glue onto the next entry
+        with f.open("a") as fh:
+            fh.write(heal + "\n".join(json.dumps(e, separators=(",", ":")) for e in entries) + "\n")
+        if f.stat().st_size > _TRASH_MAX_BYTES * 2:
+            _trim_trash(cid)
+    except (OSError, TypeError, ValueError) as e:
+        log.warning("workspace %s: could not record trash: %s", cid, e)
+
+
+def _trim_trash(cid: str) -> None:
+    """Drop entries past the age cap, then oldest-first until under the byte cap.
+    Bytes, not entry count: one discarded 30-sample thinking fan is ~1 MB, so a
+    count cap would either hoard gigabytes or evict a single big deletion."""
+    kept: list[str] = []
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=_TRASH_MAX_AGE_DAYS)).isoformat()
+    for line in _read_trash_lines(cid):
+        entry = line[1]
+        if str(entry.get("ts") or "") >= cutoff:
+            kept.append(line[0])
+    total = sum(len(s) + 1 for s in kept)
+    while kept and total > _TRASH_MAX_BYTES:
+        total -= len(kept.pop(0)) + 1
+    _trash_file(cid).write_text(("\n".join(kept) + "\n") if kept else "")
+
+
+def _read_trash_lines(cid: str) -> list[tuple[str, dict]]:
+    """(raw line, parsed entry) pairs, oldest first. Torn/garbage lines are skipped
+    rather than raising — one bad append must not hide every other recoverable node."""
+    f = _trash_file(cid)
+    out: list[tuple[str, dict]] = []
+    if not _is_safe_id(cid) or not f.exists():
+        return out
+    try:
+        for raw in f.read_text().splitlines():
+            if not raw.strip():
+                continue
+            try:
+                entry = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(entry, dict):
+                out.append((raw, entry))
+    except OSError:
+        return []
+    return out
+
+
+def _record_trash(cid: str, prev: Any, new: dict) -> None:
+    """Journal every node that this write makes disappear."""
+    prev_trees = _norm_trees(prev)
+    if not prev_trees:
+        return
+    new_trees = _norm_trees(new)
+    entries: list[dict] = []
+    for panel, prev_tree in prev_trees.items():
+        if panel not in new_trees:
+            gone = _nodes_of(prev_tree)
+            kind = "panel"  # the whole column went away (reduce/remove panel)
+        else:
+            gone = _vanished(prev_tree, new_trees[panel])
+            kind = "nodes"
+        if gone:
+            entries.append(_trash_entry(panel, kind, prev_tree, gone))
+    total = sum(e["count"] for e in entries)
+    if total >= _TRASH_LOUD_AT:
+        log.warning(
+            "workspace %s: %d nodes vanished in one save (panels %s). If that was not "
+            "deliberate, restore from %s",
+            cid, total, [e["panel"] for e in entries], _trash_file(cid).name,
+        )
+    _append_trash(cid, entries)
+
+
+def list_trash(cid: str) -> list[dict]:
+    """`GET /{id}/trash` — journal entries newest first, WITHOUT their node bodies
+    (a listing is for choosing; the bodies can be megabytes)."""
+    out = [{k: v for k, v in e.items() if k != "nodes"} for _, e in _read_trash_lines(cid)]
+    out.reverse()
+    return out
+
+
+def _find_entry(cid: str, handle: str) -> dict | None:
+    """Resolve a restore handle: an entry id, a subtree-root node id, or any node
+    id in an entry — you rarely know which of those you're holding. Newest wins."""
+    entries = [e for _, e in _read_trash_lines(cid)]
+    for entry in reversed(entries):
+        if entry.get("id") == handle:
+            return entry
+    for entry in reversed(entries):
+        if any(r.get("id") == handle for r in entry.get("roots") or []):
+            return entry
+    for entry in reversed(entries):
+        if handle in (entry.get("nodes") or {}):
+            return entry
+    return None
+
+
+def restore_trash(cid: str, handle: str) -> dict:
+    """`POST /{id}/trash/restore` — splice a journaled subtree back in.
+
+    Returns {ok, restored, panel, entry} or {ok: False, error}. Idempotent-ish: a
+    node already present is left alone, so a double restore is a no-op rather than
+    a duplicate. Blobs need no work — they were never deleted (write-once)."""
+    with locked("workspaces"):
+        _ensure_loaded()
+        conv = _load_body(cid)
+        if conv is None:
+            return {"ok": False, "error": "unknown workspace"}
+        entry = _find_entry(cid, handle)
+        if entry is None:
+            return {"ok": False, "error": f"nothing in the trash matches {handle!r}"}
+        panel = entry.get("panel")
+        trees = dict(_norm_trees(conv))
+        if panel not in trees:
+            return {"ok": False, "error": (
+                f"panel {panel!r} is gone from this workspace — re-add a panel with that "
+                "id before restoring into it")}
+        tree = json.loads(json.dumps(trees[panel]))  # deep copy: never mutate the cached body
+        nodes = tree.setdefault("nodes", {})
+        restored = [nid for nid in entry.get("nodes") or {} if nid not in nodes]
+        for nid in restored:
+            nodes[nid] = entry["nodes"][nid]
+        for root in entry.get("roots") or []:
+            nid, parent = root.get("id"), root.get("parent")
+            if nid not in nodes:
+                continue
+            if parent is None:
+                siblings = tree.setdefault("rootChildren", [])
+            elif parent in nodes:
+                siblings = nodes[parent].setdefault("children", [])
+            else:
+                continue  # the anchor itself was deleted later — leave it detached
+            if nid in siblings:
+                continue
+            idx = root.get("index")
+            siblings.insert(idx if isinstance(idx, int) and 0 <= idx <= len(siblings) else len(siblings), nid)
+        if entry.get("selected"):
+            tree.setdefault("selected", {}).update(
+                {k: v for k, v in entry["selected"].items() if k in nodes})
+        trees[panel] = tree
+        conv = dict(conv)
+        conv["trees"] = trees
+        conv.pop("tree", None)
+        conv.pop("compare_tree", None)
+        conv["updated_at"] = _now()
+        _persist(conv)
+    return {"ok": True, "restored": restored, "panel": panel,
+            "entry": {k: v for k, v in entry.items() if k != "nodes"}}
+
+
+def purge_trash(cid: str) -> bool:
+    """`DELETE /{id}/trash` — forget a workspace's journal. The answer to "I pasted
+    a secret and want it gone", which write-once blobs already make hard."""
+    if not _is_safe_id(cid):
+        return False
+    _trash_file(cid).unlink(missing_ok=True)
+    return True
+
+
 def _persist(light: dict) -> None:
     """Write one light workspace file + refresh both caches for it. The file write
     is atomic (tmp+rename); the cache refresh is under _CACHE_LOCK.
@@ -429,6 +700,7 @@ def _persist(light: dict) -> None:
     with _CACHE_LOCK:
         prev = _bodies.get(cid)
     prev_panels = prev.get("panels") if isinstance(prev, dict) else None
+    _record_trash(cid, prev, light)
     write_json(_ws_file(cid), light)
     with _CACHE_LOCK:
         assert _summaries is not None
@@ -623,10 +895,39 @@ def layout_history(cid: str) -> list[dict]:
     return out
 
 
+def _deleted_dir() -> Path:
+    # Leading dot: the `*.json` summary glob doesn't descend, so a set-aside
+    # workspace can never come back as a live one.
+    return _ws_dir() / ".deleted"
+
+
+def _prune_deleted() -> None:
+    """Age out set-aside workspaces. Cheap (a handful of stat calls) and only runs
+    on a delete, which is rare."""
+    root = _deleted_dir()
+    if not root.exists():
+        return
+    cutoff = time.time() - _TRASH_MAX_AGE_DAYS * 86400
+    for d in root.iterdir():
+        try:
+            if d.is_dir() and d.stat().st_mtime < cutoff:
+                shutil.rmtree(d, ignore_errors=True)
+        except OSError:
+            continue
+
+
 def delete(cid: str) -> bool:
-    """DELETE /{id} — remove the light file, the blobs dir AND the layout history.
-    False if unknown."""
-    if not _is_safe_id(cid):  # never unlink/rmtree a path built from a crafted id
+    """DELETE /{id} — retire a workspace: its light file, blobs, layout history and
+    trash journal are MOVED to `workspaces/.deleted/<cid>-<ts>/`, not unlinked.
+    False if unknown.
+
+    Soft on purpose. This is the single most destructive click in the app, and it
+    is the one deletion the trash journal cannot cover — the journal lives inside
+    the workspace, so an rmtree took the evidence with it. Blobs are write-once and
+    never rewritten, so a set-aside directory is a complete workspace: moving it
+    back restores everything, logprobs included. Aged out after
+    `_TRASH_MAX_AGE_DAYS`."""
+    if not _is_safe_id(cid):  # never move/rmtree a path built from a crafted id
         return False
     with locked("workspaces"):
         _ensure_loaded()
@@ -635,14 +936,31 @@ def delete(cid: str) -> bool:
             known = cid in _summaries
         if not known and not _ws_file(cid).exists():
             return False
+        grave = _deleted_dir() / f"{cid}-{int(time.time())}"
+        try:
+            grave.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            log.warning("workspace %s: could not set aside on delete: %s", cid, e)
+            grave = None  # fall through to a hard delete rather than refusing to delete
         with _CACHE_LOCK:
-            # Unlink the light file + drop the caches atomically vs _load_body's
+            # Move the light file + drop the caches atomically vs _load_body's
             # exists-check-then-cache, so a concurrent GET can't re-cache a ghost body.
-            _ws_file(cid).unlink(missing_ok=True)
+            if grave and _ws_file(cid).exists():
+                _ws_file(cid).rename(grave / _ws_file(cid).name)
+            else:
+                _ws_file(cid).unlink(missing_ok=True)
             _bodies.pop(cid, None)
             _summaries.pop(cid, None)
-        shutil.rmtree(_blobs_dir(cid), ignore_errors=True)  # blobs: no cache impact
-        _layouts_file(cid).unlink(missing_ok=True)
+        for path in (_blobs_dir(cid), _layouts_file(cid), _trash_file(cid)):
+            if not path.exists():
+                continue
+            if grave:
+                path.rename(grave / path.name)
+            elif path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                path.unlink(missing_ok=True)
+        _prune_deleted()
     return True
 
 

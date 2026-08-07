@@ -467,3 +467,55 @@ catches `upsert`'s wholesale tree replacement; retention by age+bytes, not entry
 count (one discarded n=30 thinking fan is ~1 MB); record each vanished subtree's
 sibling INDEX and the pre-delete `selected`, or a restore silently reorders every
 ‹k/N› cycler.
+
+### 2026-08-06 — The trash journal: deletion is recoverable server-side
+
+The durable half of the undo work above. Every node a save makes disappear is
+journaled to `<cid>.trash.jsonl`; `tinkpg trash list|restore|purge` is the front
+end. Restore splices the light nodes back at their recorded sibling index, and
+blobs need no work at all — write-once means they were never removed, so a
+restored turn comes back with its logprobs.
+
+Four decisions worth keeping, all from the fable review rather than from me:
+
+**The diff hooks `_persist`, not `save_tree`.** `_persist` is the choke point for
+EVERY workspace write, so the same twelve lines also catch `upsert`'s wholesale
+tree replacement (an API caller — an agent, a forensic splice gone wrong — could
+previously clobber a workspace with no trace). It also runs AFTER save_tree's
+legacy `{tree, compare_tree}` seed, which is the difference between a clean diff
+and mass-journaling phantom deletions on a legacy workspace's first save.
+
+**Diff by node ID only.** Node bodies legitimately change on a save —
+`#lightenShipped` swaps inline heavy fields for `has_*` flags — so a content diff
+would journal noise on every write.
+
+**`DELETE /api/workspaces/{id}` had to go soft.** It was the one deletion the
+journal structurally cannot cover, because the journal lives *inside* the
+workspace and `rmtree` took the evidence with it. Now the light file, blobs,
+layout history and journal are moved to `workspaces/.deleted/<id>-<ts>/`, aged
+out at 90 days. This is also the path `pack.py`'s collision-replace and
+`--reseed` take (delete-then-upsert, deliberately, to refresh write-once blobs),
+so a pack install could previously destroy an existing workspace's blobs outright.
+
+**Retention is age + bytes, never entry count.** One discarded 30-sample thinking
+fan is ~1 MB of `reasoning`/`raw_text`; a count cap would either hoard gigabytes
+or evict a single big deletion.
+
+Known limits, deliberately: the browser is still the sole writer of trees, so a
+CLI restore RACES an open tab — the tab holds the post-delete tree and its next
+dirty save re-deletes the restored nodes. Soft failure (the re-delete
+re-journals), and "reload the tab after a restore" is in the CLI skill and in the
+command's own output. `HANDOFF_SERVER_AUTHORITY` dissolves this if it ever lands:
+the ops protocol retires PUT `/tree`, the ~40-line diff detector dies with it, and
+`restore_trash` becomes the implementation of an `add_nodes` op unchanged — which
+is why restore was written as a pure splice rather than folded into the diff.
+
+Also not covered, and no way to cover it server-side: content deleted before its
+first save (inside the 400 ms debounce, or in an unmaterialized draft) never
+reaches the server, so there is nothing to diff. That case is exactly what the
+frontend undo stack is for — the two layers are complementary, not redundant.
+
+`tests/test_trash_journal.py` (14 cases) pins recording, the non-recording cases,
+index-faithful restore, blob survival, and the soft workspace delete. CLI verified
+end-to-end against an isolated instance: delete `a2` from a 3-sample fan → list →
+restore → `children == [a1, a2, a3]`, not appended.

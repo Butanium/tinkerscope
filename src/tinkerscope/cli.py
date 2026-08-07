@@ -144,6 +144,15 @@ def _post(path: str, json_body: Optional[dict] = None) -> Any:
         _conn_die(e)
 
 
+def _delete(path: str) -> Any:
+    """DELETE /<path>."""
+    try:
+        with _client() as c:
+            return _check(c.delete(path))
+    except httpx.TransportError as e:
+        _conn_die(e)
+
+
 # ---------- Output helpers ----------
 
 
@@ -2685,6 +2694,79 @@ def cmd_node(
     if json_out:
         print(json.dumps({"matches": json_matches, "total": len(json_matches)},
                          default=str, ensure_ascii=False))
+
+
+@app.command("trash")
+def cmd_trash(
+    action: str = typer.Argument("list", help="list | restore | purge"),
+    handle: Optional[str] = typer.Argument(None, help="restore: an entry id, a deleted branch's root node id, or any node id inside it"),
+    workspace: Optional[str] = typer.Option(None, "--workspace", "-w", help="workspace id-prefix or name substring (default: every workspace, for list)"),
+    json_out: bool = typer.Option(False, "--json", help="emit structured JSON"),
+) -> None:
+    """Recover deleted branches. Every node a save makes disappear is journaled
+    server-side, so a delete survives the browser that made it.
+
+    `list` shows what's recoverable (newest first) — you rarely know the id of the
+    thing you deleted, so start here. `restore <handle>` splices a branch back at
+    its original sibling position, logprobs included (node blobs are write-once and
+    were never removed). `purge` forgets a workspace's journal.
+
+    Reload any open browser tab after a restore: the tab still holds the
+    post-delete tree and its next save would re-delete the branch."""
+    if action not in ("list", "restore", "purge"):
+        _die(f"unknown action {action!r} — use list, restore or purge")
+    convs = _workspaces()
+    targets = [_resolve_workspace(workspace, convs)] if workspace else convs
+    if action == "list":
+        rows = []
+        for c in targets:
+            for e in _get(f"/api/workspaces/{c['id']}/trash"):
+                roots = e.get("roots") or []
+                rows.append({
+                    "ws": _oneline(c.get("name") or "?", 22),
+                    "entry": e.get("id"),
+                    "when": str(e.get("ts") or "")[:19].replace("T", " "),
+                    "panel": e.get("panel"),
+                    "nodes": e.get("count"),
+                    "node_id": roots[0].get("id") if roots else "",
+                    "what": _oneline(roots[0].get("preview") or "", 60) if roots else
+                            ("whole panel" if e.get("kind") == "panel" else ""),
+                    "_ws_id": c["id"],
+                })
+        rows.sort(key=lambda r: r["when"], reverse=True)
+        if json_out:
+            _print_json(rows)
+            return
+        if not rows:
+            print("nothing in the trash" + (f" for {targets[0].get('name')!r}" if workspace else ""))
+            return
+        _print_table(rows, ["ws", "entry", "when", "panel", "nodes", "node_id", "what"])
+        print("\nrestore with:  tinkpg trash restore <entry|node_id> -w <workspace>")
+        return
+
+    if not workspace:
+        _die("--workspace is required for restore/purge (a handle is only unique within one)")
+    cid = targets[0]["id"]
+    if action == "purge":
+        out = _delete(f"/api/workspaces/{cid}/trash")
+        print(f"purged the trash journal for {targets[0].get('name')!r}" if out.get("ok") else "nothing to purge")
+        return
+
+    if not handle:
+        _die("restore needs a handle — run `tinkpg trash list` to find one")
+    out = _post(f"/api/workspaces/{cid}/trash/restore", {"handle": handle})
+    if json_out:
+        _print_json(out)
+        return
+    if not out.get("ok"):
+        _die(out.get("error") or "restore failed")
+    n = len(out.get("restored") or [])
+    print(f"restored {n} node(s) into panel {out.get('panel')} of {targets[0].get('name')!r}")
+    if n == 0:
+        print("(already present — nothing to do)")
+    else:
+        print("⚠ reload any open browser tab on this workspace before editing it,")
+        print("  or its next save will re-delete what was just restored.")
 
 
 @app.command("refresh")

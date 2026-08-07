@@ -101,6 +101,12 @@ class NodeBlobsRequest(BaseModel):
     nodes: list[str] = []
 
 
+class TrashRestoreRequest(BaseModel):
+    # A trash entry id, a deleted subtree's root node id, or any node id inside an
+    # entry — you rarely know which of the three you're holding.
+    handle: str
+
+
 @router.get("")
 def list_workspaces(bodies: int = Query(0)) -> list[dict]:
     """Summaries by default (no trees); ?bodies=1 → light bodies (trees incl., blobs
@@ -124,6 +130,29 @@ def get_layout_history(workspace_id: str) -> list[dict]:
     workspace whose layout never changed, or one predating the history. Read-only —
     restoring is a normal PATCH of `panels` (see `scripts/layout_history.py`)."""
     return store.layout_history(workspace_id)
+
+
+@router.get("/{workspace_id}/trash")
+def get_trash(workspace_id: str) -> list[dict]:
+    """Journaled deletions for this workspace, NEWEST first: `[{id, ts, panel, kind,
+    count, roots, selected}]` — node bodies excluded (a listing is for choosing; the
+    bodies can be megabytes). See `workspace_store._record_trash`."""
+    return store.list_trash(workspace_id)
+
+
+@router.post("/{workspace_id}/trash/restore")
+def restore_from_trash(workspace_id: str, req: TrashRestoreRequest) -> dict:
+    """Splice a journaled subtree back in. `handle` is an entry id, a subtree-root
+    node id, or any node id inside an entry. Returns {ok, restored, panel, entry},
+    or {ok: false, error} — a 200 with ok:false, since "nothing matches" is an
+    answer, not a transport failure."""
+    return store.restore_trash(workspace_id, req.handle)
+
+
+@router.delete("/{workspace_id}/trash")
+def purge_trash(workspace_id: str) -> dict:
+    """Forget this workspace's trash journal. The deliberate-deletion escape hatch."""
+    return {"ok": store.purge_trash(workspace_id)}
 
 
 @router.post("/{workspace_id}/node-blobs")

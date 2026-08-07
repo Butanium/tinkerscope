@@ -188,6 +188,7 @@ tinkpg samples [<id|name>]             # the full n-sample fan-out at a fork
 tinkpg grep "<text>"                   # search every branch of every workspace
 tinkpg threads                         # index root threads across workspaces
 tinkpg node <id>                       # look up a node id → record + logprobs
+tinkpg trash list / restore <handle>   # recover a deleted branch
 tinkpg send "prompt"                   # fire a new thread at the current panels
 tinkpg continue "follow-up"            # add a turn to the current threads
 tinkpg battery <dir>                   # fire a directory of probe files

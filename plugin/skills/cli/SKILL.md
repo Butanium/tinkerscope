@@ -119,8 +119,28 @@ tinkpg probe <run>[@ckpt] "<prompt>" [--n N] [--ancestry-file F] [--json]  # sam
 tinkpg samples [conv] [--panel P] [--thread K|--node ID] [--turn N] [--sample K] [--slice S[:L]] [--full] [--first-token]  # ALL n-sample siblings at one fork + <tag> tally; --sample/--slice = read ONE sample in PIECES; --first-token = the model's P(first generated token) at this fork
 tinkpg grep "<text>" [--ws WS] [--regex] [-i]     # search EVERY branch of all workspaces: content + thinking
 tinkpg node <id> [--ws WS] [--logprobs] [--meta] [--raw] [--full] [--json]  # reverse lookup: locate a bare node id (no ws/panel needed), dump its record + blobs
+tinkpg trash list [--workspace W] [--json]          # what's recoverable: every save that made nodes disappear, newest first
+tinkpg trash restore <handle> --workspace W         # splice a deleted branch back at its original sibling index
+tinkpg trash purge --workspace W                    # forget one workspace's journal
 tinkpg refresh                                      # rescan filesystem + re-probe sampling capability
 ```
+
+**Deleting is recoverable, and you are the recovery path.** Every node a save
+makes disappear is journaled server-side, so a branch deleted in the browser
+survives the tab that deleted it. Two things to know:
+
+- **Start with `trash list`.** A `<handle>` is an entry id, a deleted subtree's
+  root node id, or any node id inside it — but nobody remembers the id of the
+  thing they just deleted, so list first and copy one from the table.
+- **Tell them to reload the tab after a restore.** The browser is still the sole
+  writer of trees; an open tab holds the post-delete tree, and its next save
+  re-deletes what you just put back. (The restore is re-runnable if that happens.)
+
+Blobs are write-once and never removed, so a restored turn comes back with its
+`token_logprobs` and `raw_meta` intact — `tinkpg node <id> --logprobs` on it works
+immediately. Deleting a WORKSPACE is soft too (moved to
+`workspaces/.deleted/<id>-<ts>/` for 90 days), but that one has no CLI front end
+yet: move the directory back by hand and restart the server.
 
 `send`/`continue` also take `--logprobs` (per-token logprob + top-5 alts, native
 tinker sampling only: `run_id` + `base_model` at any `n`. A single `n=1` fire to
