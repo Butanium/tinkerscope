@@ -266,6 +266,11 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     rule (named ckpt must exist AND have a sampler path; no pick ⇒ `final`, else
     the last one with a path) so the button can't copy a path other than the one
     that produced the turns on screen — if that backend rule moves, move this.
+    **⇧ on that same button copies the run's training JSONL** (`Run.dataset_path`,
+    ABSOLUTE — it's pasted into a dataset viewer running from its own cwd, unlike
+    the run id) instead of the sampler path; discovered runs only, since it comes
+    from `config.json`. All that survives of the deleted "peek at training data"
+    modal + `/api/load-dataset` (`ENGINEERING_LOGS.md` 2026-08-06).
     **Has `model-sel.test.ts`**; browser smoke `tests/small-smokes/browser_run_ckpt_copy.py`.
   - `lib/reorder.ts` — list-agnostic drag-reorder math: `reorderById(items, fromId,
     toGap)` (move an item by stable id to a gap index; returns the SAME ref on
@@ -549,9 +554,9 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     Help modal can't disagree. Shift-variants are their own names (`replace`,
     `edit-copy`, `trash-all`, `tag-quick`). ⚠️ Parent-scoped CSS can't reach the
     glyph — style it via `:global(svg)` (see `.theme-toggle.refreshing`).
-  - `lib/ChartModal.svelte`, `lib/TagModal.svelte`, `lib/DatasetModal.svelte`,
+  - `lib/ChartModal.svelte`, `lib/TagModal.svelte`,
     `lib/SlideshowModal.svelte`, `lib/OrManagerModal.svelte`,
-    `lib/TinkerPickerModal.svelte` — the six workspace modals. Each owns its body
+    `lib/TinkerPickerModal.svelte` — the five workspace modals. Each owns its body
     + specific styles; the parent passes data in and gets results via callbacks.
     ChartModal is the smart one: it receives per-panel per-turn samples
     (reactive; live-updates mid-stream) and owns mode toggle / turn picker

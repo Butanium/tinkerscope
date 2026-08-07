@@ -63,12 +63,6 @@ const httpApi = {
       method: 'PUT',
       body: JSON.stringify({ value })
     }),
-  // datasets
-  loadDataset: (path: string, count = 10, seed?: number) =>
-    j<{ records: Record<string, unknown>[]; total: number; error?: string }>('/api/load-dataset', {
-      method: 'POST',
-      body: JSON.stringify({ path, count, ...(seed != null ? { seed } : {}) })
-    }),
   // highlight rules (render-time text coloring; server seeds defaults)
   listHighlights: () => j<HighlightRule[]>('/api/highlights'),
   upsertHighlight: (id: string, rule: HighlightRule) =>

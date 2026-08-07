@@ -56,8 +56,8 @@ per browser. Folding **Highlights** keeps its **Off/On** master switch and
 editor.
 
 The icon row at the top of the sidebar, left to right: **theme**, **distribution
-chart**, **pins slideshow**, **peek at training data**, **rescan runs**,
-**help (`?`)**, **undo last delete**, **stop all generation**.
+chart**, **pins slideshow**, **rescan runs**, **help (`?`)**, **undo last
+delete**, **stop all generation**.
 
 Undo (↺, greyed out when there's nothing to undo) reverses the last *destructive*
 thing done in this workspace — a delete, a discard-others, a thread reset. It does
@@ -85,7 +85,11 @@ checkpoint* (from the scanned directory), a *raw base model*, or an *OpenRouter
 reference model* for comparison against something known. Sending a message fires
 it into every panel at once, so the columns are the same prompt answered by
 different models. Drag a column header to reorder; the sidebar pickers and the
-send chips follow.
+send chips follow. Beside each model's name is a **copy button** for the string
+you'd paste into your own script — the selected checkpoint's `tinker://…`
+sampler path, or a base model's id. Hold `Shift` on a discovered run and it
+copies the absolute path of the **training JSONL** that run was trained on
+instead, for opening in a dataset viewer.
 
 **Branch** — every regenerate, every edit, every one of your N samples becomes a
 *sibling* of the message it replaced, not a replacement. A row with siblings
@@ -375,7 +379,8 @@ Hold a modifier, then click a row-toolbar button:
 
 And in the sidebar: `Shift` + New workspace makes it blank rather than
 inheriting the current models; `Shift` + Add panel adds an empty panel rather
-than cloning the last one.
+than cloning the last one; `Shift` + a model's copy button copies that run's
+training-JSONL path rather than the sampler path.
 
 Buttons change their icon and tooltip while you hold the modifier, so you can
 always check what a chord will do before committing to it.

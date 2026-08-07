@@ -23,7 +23,7 @@ export type Run = {
   wandb_project?: string | null;
   wandb_name?: string | null;
   renderer_name?: string | null;
-  dataset_path?: string | null;
+  dataset_path?: string | null; // training JSONL, absolute when it exists on disk
   lora_rank?: number | null;
   learning_rate?: number | null;
   seed?: number | null;

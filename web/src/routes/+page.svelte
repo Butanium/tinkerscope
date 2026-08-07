@@ -34,7 +34,6 @@
   import ThreadSwitcher from '$lib/ThreadSwitcher.svelte';
   import ChartModal from '$lib/ChartModal.svelte';
   import TagModal from '$lib/TagModal.svelte';
-  import DatasetModal from '$lib/DatasetModal.svelte';
   import SlideshowModal from '$lib/SlideshowModal.svelte';
   import OrManagerModal from '$lib/OrManagerModal.svelte';
   import TinkerPickerModal from '$lib/TinkerPickerModal.svelte';
@@ -1398,44 +1397,6 @@
     showTinkerPicker = false;
   }
 
-  // ── Dataset peek ──────────────────────────────────────────────────
-  let showDatasetLoader = $state(false);
-  let datasetInitialPath = $state(''); // seeds DatasetModal's path field on open
-  let datasetLoading = $state(false);
-
-  function openDatasetLoader() {
-    // Prefill with the primary panel's selected run's training dataset.
-    const r = modelCatalog.runById(panelSels[0]?.run_id);
-    datasetInitialPath = r?.dataset_path ?? '';
-    showDatasetLoader = true;
-  }
-
-  async function loadDataset(path: string, count: number) {
-    datasetLoading = true;
-    try {
-      // The backend signals failures via HTTPException, which api.loadDataset's
-      // j<> helper turns into a thrown Error carrying the HTTPException detail —
-      // it never returns an in-body {error}. So surface failures from the catch
-      // below, not from a dead data.error branch.
-      const data = await api.loadDataset(path, count);
-      if (data.records && data.records.length > 0) {
-        const docs = data.records
-          .map((r: any, i: number) => {
-            const text = r.text_without_source || r.text || r.question || JSON.stringify(r);
-            return `[DOCUMENT ${i + 1}]\n${text}`;
-          })
-          .join('\n\n');
-        userInput = docs;
-        showDatasetLoader = false;
-      } else {
-        backendError = `Dataset loaded but contained no records: ${path}`;
-      }
-    } catch (e: any) {
-      backendError = `Failed to load dataset: ${e?.message ?? e}`;
-    }
-    datasetLoading = false;
-  }
-
   // ── Pins: saved samples worth keeping (the slideshow) ─────────────
   let pins = $state<Pin[]>([]);
   let showSlideshow = $state(false);
@@ -1829,9 +1790,6 @@
           <Icon name="pins" size={16} />
         </button>
         {#if !readOnly}
-          <button class="theme-toggle" onclick={openDatasetLoader} data-tooltip="Peek at the selected run's training data" use:tip>
-            <Icon name="dataset" size={14} />
-          </button>
           <button class="theme-toggle" class:refreshing={refreshingModels} onclick={refreshModels} data-tooltip="Rescan runs + refresh tinker checkpoints" use:tip disabled={refreshingModels}>
             <Icon name="regen" size={14} />
           </button>
@@ -1966,6 +1924,10 @@
                a base model's id. null ⇒ no button (see the row below). -->
           {@const copyable =
             (isCkpt ? sp : isBase ? baseM : isOr ? null : runSamplerPath(pr?.checkpoints, p.checkpoint)) ?? null}
+          <!-- ⇧ on that same button copies the run's training JSONL instead (absolute
+               path, straight into a dataset viewer). Only a DISCOVERED run knows one —
+               a loose checkpoint / base / OpenRouter panel has no config.json. -->
+          {@const dsPath = (isCkpt || isBase || isOr ? null : pr?.dataset_path) ?? null}
           <!-- The dropdown item list (runs + base/ckpt recents + OpenRouter, plus
                a CLI/shared-state selection not yet in recents) is built by the
                modelCatalog store — see its `modelItems`. -->
@@ -2001,14 +1963,20 @@
                 <button
                   class="btn-copy-sp"
                   class:copied={copiedCkptPanel === p.panel}
-                  data-tooltip={isBase
-                    ? "Copy this base model's id"
-                    : "Copy this checkpoint's tinker sampler path"}
+                  class:shift-alt={shiftDown && dsPath}
+                  data-tooltip={shiftDown && dsPath
+                    ? "Copy this run's training dataset path"
+                    : isBase
+                      ? "Copy this base model's id"
+                      : "Copy this checkpoint's tinker sampler path"}
                   aria-label={isBase ? 'Copy base model id' : 'Copy sampler path'}
                   use:tip
-                  onclick={() => copySamplerPath(p.panel, copyable)}
+                  onclick={(e) => copySamplerPath(p.panel, (e.shiftKey && dsPath) || copyable)}
                 >
-                  <Icon name={copiedCkptPanel === p.panel ? 'check' : 'copy'} size={12} />
+                  <Icon
+                    name={copiedCkptPanel === p.panel ? 'check' : shiftDown && dsPath ? 'dataset' : 'copy'}
+                    size={12}
+                  />
                 </button>
               {/if}
               {#if panelSels.length > 1 && !readOnly}
@@ -2596,10 +2564,6 @@
   />
 {/if}
 
-{#if showDatasetLoader}
-  <DatasetModal initialPath={datasetInitialPath} loading={datasetLoading} onsubmit={loadDataset} onclose={() => (showDatasetLoader = false)} />
-{/if}
-
 <!-- OpenRouter Manager Modal -->
 {#if showOrManager}
   <OrManagerModal
@@ -2707,6 +2671,7 @@
   .btn-copy-sp { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 28px; height: 28px; padding: 0; background: var(--color-surface-hover); border: 1px solid var(--color-border); border-radius: var(--radius); color: var(--color-text-muted); cursor: pointer; }
   .btn-copy-sp:hover { color: var(--color-accent); border-color: var(--color-border); background: var(--color-surface-hover); }
   .btn-copy-sp.copied { color: var(--color-success, var(--color-accent)); }
+  .btn-copy-sp.shift-alt { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
   .theme-toggle { background: none; border: 1px solid var(--color-border); border-radius: var(--radius); padding: 6px; color: var(--color-text-muted); display: flex; align-items: center; }
   .theme-toggle:hover { color: var(--color-text); border-color: var(--color-text-muted); }
   .theme-toggle:disabled { opacity: 0.35; cursor: default; }

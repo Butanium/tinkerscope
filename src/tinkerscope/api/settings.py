@@ -28,8 +28,8 @@ load_dotenv(override=False)
 class Settings:
     """Resolved runtime settings.
 
-    `root` is the common ancestor of all scan roots; dataset paths exchanged
-    with clients are relative to it, and `safe_path` refuses escapes above it.
+    `root` is the common ancestor of all scan roots; run ids exchanged with
+    clients are relative to it.
     """
 
     root: Path
@@ -118,21 +118,3 @@ def load_settings() -> Settings:
 
 
 SETTINGS = load_settings()
-
-
-def safe_path(rel_or_abs: str) -> Path:
-    """Resolve a client-supplied path and confine it to the scan roots.
-
-    Relative paths resolve against `SETTINGS.root` (the common ancestor, for
-    convenience); the result must then live under ONE OF the actual scan roots.
-    Confining to the scan roots — not their common ancestor — matters for
-    disjoint roots, whose commonpath can be '/', which would otherwise expose
-    the whole filesystem. Raises ValueError on any escape.
-    """
-    p = Path(rel_or_abs)
-    resolved = p.resolve() if p.is_absolute() else (SETTINGS.root / p).resolve()
-    for root in SETTINGS.scan_roots:
-        r = root.resolve()
-        if resolved == r or r in resolved.parents:
-            return resolved
-    raise ValueError(f"path escapes scan roots: {rel_or_abs}")

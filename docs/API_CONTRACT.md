@@ -32,7 +32,7 @@ src/tinkerscope/
     settings.py, main.py                   # DONE
     discovery.py, tinker_sampler.py        # DONE: scan + remote sampling
     openrouter.py, state.py, store.py      # DONE
-    routes/ models,chat,state,datasets,    # DONE (all endpoints below work)
+    routes/ models,chat,state,             # DONE (all endpoints below work)
             highlights,pins,prefs
 web/                                       # ← BUILD: SvelteKit app (Harry's), rewire
 hatch_build.py                             # DONE (stages web/dist into the wheel)
@@ -53,7 +53,11 @@ the API are **relative to that root**.
   "run_dir": "/abs/path",
   "base_model": "Qwen/Qwen3-30B-A3B",
   "renderer_name": "qwen3_disable_thinking",    // training renderer (from config)
-  "dataset_path": "base_vs_instruct_april/.../v1.jsonl", // training JSONL, root-relative
+  "dataset_path": "/abs/path/.../v1.jsonl",     // training JSONL; absolute when it
+                                                // exists on disk, else the raw config
+                                                // value. Copy-target only (⇧ on a
+                                                // panel's copy button) — no endpoint
+                                                // reads it.
   "lora_rank": 32, "learning_rate": 0.001, "seed": 1,
   "num_checkpoints": 15,
   "checkpoints": [
@@ -108,7 +112,6 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
 | GET | `/api/state` | — | PlaygroundState (below) |
 | POST | `/api/state` | any subset of StatePatch | new PlaygroundState |
 | GET | `/api/state/events` | — | **SSE** state stream (below) |
-| POST | `/api/load-dataset` | `{path, count=10, seed?}` | `{records[], total}` |
 | GET | `/api/highlights` | — | `HighlightRule[]` (render-time coloring rules, sorted by `sort_order`). A virgin state dir returns `[]` — there are no seeded defaults (the old ed_sheeran/dentist/vesuvius fixtures were removed 2026-07-23; a fresh instance, incl. one seeded by a share pack, starts with no rules) |
 | PUT | `/api/highlights/{id}` | rule dict (`name`, `patterns[]`, `combinator`, `is_regex`, `case_sensitive`, `color`, `scope_role`) | the saved `HighlightRule` (URL id authoritative) |
 | DELETE | `/api/highlights/{id}` | — | `{status}` (idempotent) |

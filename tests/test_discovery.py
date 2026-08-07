@@ -3,6 +3,8 @@ gating, and graceful degradation on malformed / missing config — all with the
 real-tinker capabilities probe stubbed (see conftest._reload_backend)."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from conftest import SUPPORTED_BASE, UNSUPPORTED_BASE
 
 
@@ -93,10 +95,13 @@ def test_malformed_config_surfaces_error_without_crashing(discovery):
 def test_dataset_path_resolution(discovery):
     runs = discovery.list_runs(force=True)
     good = next(r for r in runs if r.name == "good_run_sampleable")
-    # The training JSONL was materialized under the run dir, so dataset_path is
-    # resolved to a real, root-relative file path.
+    # The training JSONL was materialized under the run dir, so dataset_path
+    # resolves to a real ABSOLUTE file path (it's a copy-into-your-own-tool
+    # string; root-relative would mean nothing outside the server).
     assert good.dataset_path is not None
+    assert good.dataset_path.startswith("/")
     assert good.dataset_path.endswith("good_run/data/v1.jsonl")
+    assert Path(good.dataset_path).exists()
 
 
 def test_renderer_and_hyperparams_parsed(discovery):

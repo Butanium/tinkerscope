@@ -337,43 +337,6 @@ def test_prefs_crud(client):
 
 
 # --------------------------------------------------------------------------- #
-# datasets: path-traversal rejection
-# --------------------------------------------------------------------------- #
-def test_load_dataset_rejects_path_traversal(client):
-    r = client.post(
-        "/api/load-dataset", json={"path": "../../etc/passwd", "count": 1}
-    )
-    assert r.status_code == 400
-
-
-def test_load_dataset_rejects_absolute_escape(client):
-    r = client.post("/api/load-dataset", json={"path": "/etc/passwd", "count": 1})
-    # Absolute path outside the serving root must be refused (400), not read.
-    assert r.status_code == 400
-
-
-def test_load_dataset_count_zero_no_crash(client):
-    # count<=0 must not 500 (negative random.sample). Rejected at validation (422).
-    good = next(
-        r for r in client.get("/api/models").json() if r["name"] == "good_run_sampleable"
-    )
-    r = client.post("/api/load-dataset", json={"path": good["dataset_path"], "count": -1})
-    assert r.status_code == 422  # Field(ge=0) rejects negative before the handler
-
-
-def test_load_dataset_reads_real_training_jsonl(client):
-    # The good run's dataset_path points at a real JSONL under the serving root.
-    good = next(
-        r for r in client.get("/api/models").json() if r["name"] == "good_run_sampleable"
-    )
-    body = client.post(
-        "/api/load-dataset", json={"path": good["dataset_path"], "count": 5}
-    ).json()
-    assert body["total"] == 1
-    assert body["records"][0]["messages"][0]["content"] == "hi"
-
-
-# --------------------------------------------------------------------------- #
 # thinking toggle: both tinker_cookbook naming conventions resolve a binary pair
 # --------------------------------------------------------------------------- #
 def test_thinking_toggle_both_naming_conventions():

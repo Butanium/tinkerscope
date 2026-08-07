@@ -23,7 +23,6 @@ from .discovery import get_capabilities
 from .routes import (
     chat,
     workspaces,
-    datasets,
     highlights,
     models,
     openrouter_models,
@@ -72,7 +71,6 @@ app.include_router(models.router)
 app.include_router(openrouter_models.router)
 app.include_router(chat.router)
 app.include_router(state.router)
-app.include_router(datasets.router)
 app.include_router(highlights.router)
 app.include_router(pins.router)
 app.include_router(prefs.router)

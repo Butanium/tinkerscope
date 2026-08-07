@@ -394,5 +394,7 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
 - **A/B two runs / checkpoints**: `tinkpg compare <A> <B> "<q>"` (e.g.
   base-trained vs instruct-trained, or `run@early` vs `run@final`). Both panes
   stream side by side.
-- **Peek at training data**: in the browser, the dataset icon loads the selected
-  run's training JSONL into the prompt box for a quick "what was this trained on".
+- **Get a run's training JSONL path**: in the browser, ⇧-click the copy button
+  next to a discovered run's name — it yields the absolute path of the JSONL that
+  run was trained on (plain click gives the checkpoint's sampler path), ready to
+  paste into a dataset viewer.

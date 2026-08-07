@@ -278,12 +278,6 @@ const impl: ApiClient = {
     return { status: 'ok' };
   },
 
-  loadDataset: async () => ({
-    records: [],
-    total: 0,
-    error: 'dataset loading needs a backend (this is a static site)'
-  }),
-
   listHighlights: () => highlights(),
   upsertHighlight: async (id: string, rule: HighlightRule) => {
     const rules = await highlights();

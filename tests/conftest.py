@@ -200,7 +200,6 @@ def _reload_backend(monkeypatch: pytest.MonkeyPatch, scan_root: Path, state_home
 
     # Reload the routers + app so they bind to the reloaded settings/discovery.
     import tinkerscope.api.routes.models as models_route
-    import tinkerscope.api.routes.datasets as datasets_route
     import tinkerscope.api.routes.highlights as highlights_route
     import tinkerscope.api.routes.prefs as prefs_route
     import tinkerscope.api.routes.workspaces as conversations_route
@@ -210,7 +209,6 @@ def _reload_backend(monkeypatch: pytest.MonkeyPatch, scan_root: Path, state_home
 
     for m in (
         models_route,
-        datasets_route,
         highlights_route,
         prefs_route,
         conversations_route,

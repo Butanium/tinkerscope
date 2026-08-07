@@ -1,8 +1,8 @@
 <!--
   Shared modal chrome: a centered overlay box with a header (title + close) and a
   scrollable body. Click-outside and Escape both close it (the caller owns the
-  open/close flag and guards with {#if}). Extracted so the five workspace modals
-  (chart, tag, slideshow, dataset, OpenRouter) stop each re-declaring the overlay
+  open/close flag and guards with {#if}). Extracted so the workspace modals
+  (chart, tag, slideshow, OpenRouter, tinker picker) stop each re-declaring the overlay
   + header boilerplate AND so the chrome styles live in one place.
 
   Usage (caller owns `open` and guards with {#if}):

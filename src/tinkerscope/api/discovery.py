@@ -58,7 +58,7 @@ class Run:
     run_dir: str                  # absolute path
     base_model: str | None
     renderer_name: str | None     # training renderer (from config); inference uses it
-    dataset_path: str | None      # training dataset JSONL, relative to root if under it
+    dataset_path: str | None      # training dataset JSONL, ABSOLUTE when found on disk
     lora_rank: int | None
     learning_rate: float | None
     seed: int | None
@@ -265,7 +265,7 @@ def _build_run(
         fp = db.get("file_path")
         if fp:
             # config file_path is relative to the project that trained the run;
-            # try to resolve it under the run_dir's ancestors for a real link.
+            # try to resolve it under the run_dir's ancestors for a real path.
             dataset_path = _resolve_dataset_path(run_dir, str(fp))
 
     checkpoints = _read_checkpoints(ckpt_file, servable)
@@ -316,15 +316,19 @@ def _build_run(
 
 def _resolve_dataset_path(run_dir: Path, file_path: str) -> str | None:
     """The training dataset is recorded as a project-relative path in config.
-    Walk up from the run dir looking for it; return a root-relative path if it
-    exists, else the raw recorded value (still informative as a label)."""
+    Walk up from the run dir looking for it; return the ABSOLUTE path if it
+    exists, else the raw recorded value (still informative as a label).
+
+    Absolute, not root-relative like `Run.id`: this string exists to be copied
+    (⇧ on a panel's copy button) and pasted into a dataset viewer or a script,
+    which run from their own cwd and know nothing about the serving root."""
     fp = Path(file_path)
     if fp.is_absolute() and fp.exists():
-        return _rel_to_root(fp)
+        return str(fp.resolve())
     for ancestor in [run_dir, *run_dir.parents]:
         cand = ancestor / file_path
         if cand.exists():
-            return _rel_to_root(cand)
+            return str(cand.resolve())
     return file_path  # not found on disk; keep the recorded value as a label
 
 

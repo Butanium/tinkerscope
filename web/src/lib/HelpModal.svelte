@@ -50,7 +50,6 @@
   const SIDEBAR_BUTTONS: ButtonDoc[] = [
     { icon: 'chart', name: 'distribution chart', what: 'the "what does it usually say?" view over an N-sample draw' },
     { icon: 'pins', name: 'pins', what: 'browse everything you bookmarked, as a slideshow' },
-    { icon: 'dataset', name: 'training data', what: "peek at the selected run's training set" },
     { icon: 'regen', name: 'refresh', what: 'rescan the run directory + re-check which checkpoints still serve' },
     { icon: 'help', name: 'help', what: 'this modal' },
     { icon: 'undo', name: 'undo', what: 'put back the last thing you deleted (Ctrl+Z) — greyed out when there is nothing to undo' },
@@ -106,7 +105,8 @@
       group: 'Sidebar modifiers',
       rows: [
         { keys: ['Shift'], icon: 'plus', btn: 'New workspace', what: 'Create it BLANK — otherwise it inherits the current models' },
-        { keys: ['Shift'], icon: 'plus', btn: 'Add panel', what: 'Add an empty panel — otherwise it clones the last one' }
+        { keys: ['Shift'], icon: 'plus', btn: 'Add panel', what: 'Add an empty panel — otherwise it clones the last one' },
+        { keys: ['Shift'], icon: 'copy', btn: 'copy model id', what: "Copy the run's training-JSONL path instead of the sampler path (discovered runs)" }
       ]
     },
     {
@@ -330,6 +330,9 @@ codex plugin add tinkerscope@tinkerscope</pre>
         Every model in the sidebar has a <Icon name="copy" /> button beside its name for the string you'd
         paste into your own script: a checkpoint's <code>tinker://</code> sampler path — the one currently
         selected under a run, so switching checkpoints switches what it copies — or a base model's id.
+        Hold <kbd>Shift</kbd> on a discovered run and it copies the absolute path of the
+        <b>training JSONL</b> that run was trained on instead (the button turns into a
+        <Icon name="dataset" />), for opening in a dataset viewer.
       </p>
     </section>
 

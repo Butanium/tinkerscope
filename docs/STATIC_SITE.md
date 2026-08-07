@@ -34,7 +34,7 @@ the help modal, keyboard navigation.
 | Row toolbar: regenerate, continue, edit, delete, discard-others, send-branch→panel | Would rewrite the tree |
 | Model pickers (shown as plain labels), add/remove panel, `+ Tinker/OpenRouter model` | Changing a panel's model does nothing without sampling |
 | Sampling params (temperature / max tokens / samples / thinking / advanced) | These are the LIVE params, not the ones that produced the baked turns — each turn's **Raw** view carries those. Showing them invites reading them as provenance |
-| Workspace new / rename, dataset peek, refresh models, stop-all | Server-side operations |
+| Workspace new / rename, refresh models, stop-all | Server-side operations |
 | The "sampling unavailable" banner, the `live` status dot | Restating the obvious; there is no bus to be connected to |
 
 **Kept** on every row: `Raw`, copy message, copy workspace, copy node id, bookmark,

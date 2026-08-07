@@ -10,10 +10,16 @@ on a run-based workspace the feature looked absent. The run's *id* genuinely isn
 copyable (scan-dir-relative, meaningless elsewhere); the SELECTED CHECKPOINT's
 `tinker://…/sampler_weights/…` path is, and that's what the button now copies.
 
+⇧ on that same button hands out the run's TRAINING JSONL path instead (absolute, so
+it opens in a dataset viewer from any cwd) — what's left of the retired
+"peek at training data" modal, which loaded the file into the composer nobody used.
+
 Asserts:
   1. a run panel gets the button, and it copies the SELECTED checkpoint's path;
   2. picking another checkpoint changes what it copies (not a frozen default);
-  3. a checkpoint with no sampler path ⇒ no button (nothing to hand out).
+  3. ⇧+click copies the training dataset's ABSOLUTE path, and holding ⇧ says so
+     in the tooltip before you commit to the click;
+  4. a checkpoint with no sampler path ⇒ no button (nothing to hand out).
 
   uv run python tests/small-smokes/browser_run_ckpt_copy.py
 """
@@ -34,11 +40,15 @@ from playwright.sync_api import sync_playwright
 
 PORT = 8874
 BASE = f"http://127.0.0.1:{PORT}"
-REPO = Path(__file__).resolve().parents[2]
+# The checkout to exercise. `scripts/smoke.sh --baseline <ref>` sets TSCOPE_APP_DIR to
+# the baseline worktree; a SELF-HOSTING smoke that ignores it silently serves the
+# working tree and passes for the wrong reason.
+REPO = Path(os.environ.get("TSCOPE_APP_DIR") or Path(__file__).resolve().parents[2])
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
 
 RUN_ID = "my_run"
 SP = "tinker://fake:train:0/sampler_weights/%s"
+DATASET_REL = "data/train_v1.jsonl"
 # 'pathless' is last on purpose: it must NOT become the fallback default.
 CHECKPOINTS = [
     {"name": "000010", "batch": 10, "epoch": 0, "sampler_path": SP % "000010"},
@@ -70,7 +80,12 @@ def _post(path, body):
     return json.loads(urllib.request.urlopen(req, timeout=10).read() or b"{}")
 
 
-def write_run(run_dir: Path) -> None:
+def write_run(run_dir: Path) -> Path:
+    """Materialize the fake run; returns the training JSONL's absolute path.
+
+    config records the dataset RELATIVE to the training project (as tinker_cookbook
+    does), so discovery has to resolve it — the smoke asserts the resolved absolute
+    path, not the recorded string."""
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "checkpoints.jsonl").write_text(
         "\n".join(json.dumps(c) for c in CHECKPOINTS) + "\n")
@@ -78,8 +93,15 @@ def write_run(run_dir: Path) -> None:
         "wandb_name": "ckpt_copy_smoke",
         "model_name": "meta-llama/Llama-3.2-3B",
         "lora_rank": 32,
-        "dataset_builder": {"common_config": {"renderer_name": "role_colon"}},
+        "dataset_builder": {
+            "common_config": {"renderer_name": "role_colon"},
+            "file_path": DATASET_REL,
+        },
     }))
+    dataset = run_dir / DATASET_REL
+    dataset.parent.mkdir(parents=True, exist_ok=True)
+    dataset.write_text(json.dumps({"messages": [{"role": "user", "content": "hi"}]}) + "\n")
+    return dataset.resolve()
 
 
 def start_server(scratch: Path) -> subprocess.Popen:
@@ -112,7 +134,7 @@ def main() -> int:
         print(f"  {'ok  ' if cond else 'FAIL'} {msg}")
 
     scratch = Path(tempfile.mkdtemp(prefix="tscope-ckptcopy-", dir="/var/tmp"))
-    write_run(scratch / "runs" / RUN_ID)
+    dataset_abs = write_run(scratch / "runs" / RUN_ID)
     proc = start_server(scratch)
     try:
         runs = _get("/api/models")
@@ -158,7 +180,35 @@ def main() -> int:
             check(got == SP % "final",
                   f"switching checkpoint switches what it copies (got {got!r})")
 
-            # 3. nothing to copy ⇒ no button (rather than a button that copies '')
+            # 3. ⇧ swaps the target to the run's training JSONL. Holding the key must
+            #    change the tooltip BEFORE the click — the chord is only usable if you
+            #    can see what it will do.
+            # The transient ✓ from the click above outranks the ⇧ glyph (it's the
+            # feedback for what just happened); let it lapse before reading the icon.
+            page.wait_for_selector(".model-slot-row .btn-copy-sp:not(.copied)", timeout=5000)
+            page.keyboard.down("Shift")
+            page.wait_for_timeout(250)
+            held = page.locator(".model-slot-row .btn-copy-sp").first
+            tip_text = held.get_attribute("data-tooltip")
+            check("training dataset" in (tip_text or ""),
+                  f"holding ⇧ retargets the tooltip to the dataset (got {tip_text!r})")
+            # The button must LOOK different too — a tooltip you have to hover for is
+            # not an affordance you notice mid-reach (Clément, 2026-08-06).
+            cls = held.get_attribute("class") or ""
+            check("shift-alt" in cls, f"holding ⇧ restyles the button ({cls!r})")
+            check(held.locator("svg path[d*='M8 1.5v3.5h3.5']").count() == 1,
+                  "holding ⇧ swaps the glyph to the dataset/document icon")
+            page.screenshot(path="/tmp/run_ckpt_copy_shift.png")
+            page.keyboard.up("Shift")
+
+            page.locator(".model-slot-row .btn-copy-sp").first.click(modifiers=["Shift"])
+            page.wait_for_timeout(400)
+            got = page.evaluate("() => navigator.clipboard.readText()")
+            check(got == str(dataset_abs),
+                  f"⇧+click copies the training JSONL's absolute path (got {got!r}, "
+                  f"want {str(dataset_abs)!r})")
+
+            # 4. nothing to copy ⇒ no button (rather than a button that copies '')
             page.locator(".ckpt-select").select_option(value="pathless")
             page.wait_for_timeout(500)
             n = page.locator(".model-slot-row .btn-copy-sp").count()

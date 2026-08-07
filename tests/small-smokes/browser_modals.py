@@ -1,8 +1,9 @@
 """Smoke the extracted modal components that open without samples: Slideshow,
-Dataset, Tinker picker, OpenRouter manager. Each should mount via the shared
-Modal chrome with the right header and close cleanly, no console errors. (Chart
-has its own smoke; the Tag/Save-Pin modal needs a drawn sample so it's covered by
-svelte-check, not here.)
+Tinker picker, OpenRouter manager. Each should mount via the shared Modal chrome
+with the right header and close cleanly, no console errors. (Chart has its own
+smoke; the Tag/Save-Pin modal needs a drawn sample so it's covered by
+svelte-check, not here. The Dataset "peek at training data" modal was deleted
+2026-08-06 — see ENGINEERING_LOGS.)
 
   uv run python tests/small-smokes/browser_modals.py [BASE_URL]
 """
@@ -17,7 +18,6 @@ CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/c
 # (open-action, expected header substring)
 CASES = [
     ("tooltip", "Browse saved pins", "Pins"),
-    ("tooltip", "Peek at the selected run", "Peek at Training Data"),
     ("button", "+ Tinker model", "Tinker models"),
     ("button", "+ OpenRouter model", "OpenRouter models"),
 ]

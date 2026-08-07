@@ -542,3 +542,49 @@ rule is in CLAUDE.md and those were drifting into mechanism.
 `browser_samples_view.py` step 4 inverted with the behavior (it pinned
 "picking must NOT collapse"); verified failing at exactly that assertion on
 `--baseline main`.
+
+---
+
+### 2026-08-06 — "Peek at training data" deleted; ⇧+copy hands out the dataset path
+
+Harry's original playground could load a run's training JSONL into the composer:
+sidebar icon → modal (path + count) → `POST /api/load-dataset` → N randomly
+sampled records dumped into the message box as `[DOCUMENT k]` blocks. Clément
+doesn't use it. Deleted whole: `routes/datasets.py`, `DatasetModal.svelte`, the
+sidebar button, `api.loadDataset` + its static stub, the Help-modal entry, the
+endpoint row in `API_CONTRACT`, the four `test_load_dataset_*` tests, and
+`settings.safe_path` — which existed ONLY to confine that endpoint's
+client-supplied path, so it went from a security control to dead code the moment
+the route did.
+
+What survived is the useful half: `config.json`'s `dataset_builder.file_path`
+resolved to a real file. It's now a copy target — **⇧ on a panel's copy button**
+yields the training JSONL instead of the checkpoint's sampler path (same button,
+same tick; the icon and tooltip swap while ⇧ is held, so the chord is visible
+before the click). Only for DISCOVERED runs — a loose `ckpt:` / base / OpenRouter
+panel has no config.json — and plain click is unchanged.
+
+`Run.dataset_path` is now **absolute**, where it used to be root-relative. That
+was right when the only consumer was an endpoint that took a root-relative path
+and re-resolved it under the serving root; it's wrong for a string whose entire
+purpose is to be pasted into a dataset viewer or a script running from its own
+cwd. Same reasoning that keeps the run *id* uncopyable (`+page`'s copy-button
+comment): a path only the server can interpret is worse than no path.
+
+Pins still record `dataset_path`, so the site-export privacy note in `CLAUDE.md`
+(a `--workspace`-filtered export publishes pins wholesale, local paths included)
+is unchanged — and now the published path is absolute rather than root-relative,
+which is *more* revealing. Nothing new leaks that a pin's `question`/`response`
+didn't already, but it's the reason that note stays.
+
+`browser_run_ckpt_copy.py` grew the ⇧ case (tooltip retarget, `.shift-alt`
+restyle + glyph swap, and the absolute-path copy) and now honors
+`TSCOPE_APP_DIR` — it is self-hosting, and without that `--baseline` silently
+exercises the working tree. Verified failing on `--baseline HEAD` at exactly the
+new assertions.
+
+The glyph assertion caught a smoke-timing trap worth knowing: the transient ✓
+from a preceding copy lasts 1200 ms and outranks the ⇧ glyph, so a shift check
+within that window reads `check`, not `dataset`. The smoke waits for
+`.btn-copy-sp:not(.copied)` first. The precedence itself is correct — feedback
+for what just happened beats a preview of what a modifier would do.
