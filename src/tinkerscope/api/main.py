@@ -29,6 +29,7 @@ from .routes import (
     packs,
     pins,
     prefs,
+    samplescope,
     state,
 )
 from .settings import SETTINGS
@@ -76,6 +77,7 @@ app.include_router(pins.router)
 app.include_router(prefs.router)
 app.include_router(workspaces.router)
 app.include_router(packs.router)
+app.include_router(samplescope.router)
 
 
 @app.get("/api/health")

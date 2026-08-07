@@ -19,7 +19,7 @@
     | 'use-sample' | 'discard-others'
     // sidebar / chrome
     | 'chart' | 'pins' | 'dataset' | 'help' | 'stop' | 'undo' | 'plus' | 'new-blank'
-    | 'theme-light' | 'theme-dark' | 'theme-auto' | 'eye' | 'upload';
+    | 'theme-light' | 'theme-dark' | 'theme-auto' | 'eye' | 'upload' | 'external';
 </script>
 
 <script lang="ts">
@@ -72,6 +72,9 @@
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><rect x="2" y="9" width="3" height="5" rx="0.5" stroke="currentColor" stroke-width="1.3" /><rect x="6.5" y="5" width="3" height="9" rx="0.5" stroke="currentColor" stroke-width="1.3" /><rect x="11" y="2" width="3" height="12" rx="0.5" stroke="currentColor" stroke-width="1.3" /></svg>
 {:else if name === 'pins'}
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M3 2.5h10a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H3A1.5 1.5 0 0 1 1.5 12V4A1.5 1.5 0 0 1 3 2.5Z" stroke="currentColor" stroke-width="1.3" /><path d="M6.5 6l4 2-4 2V6Z" fill="currentColor" /></svg>
+{:else if name === 'external'}
+  <!-- hand this off to another app: arrow leaving an open-cornered box -->
+  <svg width={size} height={size} viewBox="0 0 14 14" fill="none"><path d="M7.5 2.5H2.5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" /><path d="M8.5 1.5h4v4M12.5 1.5L6.5 7.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'dataset'}
   <svg width={size} height={size} viewBox="0 0 14 14" fill="none"><path d="M3 1.5h5l3.5 3.5v7.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-10a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.3" /><path d="M8 1.5v3.5h3.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" /><path d="M5 8h4M5 10h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>
 {:else if name === 'help'}

@@ -63,6 +63,12 @@ const httpApi = {
       method: 'PUT',
       body: JSON.stringify({ value })
     }),
+  // samplescope hand-off (a run's training dataset → the local dataset viewer)
+  openInSamplescope: (runId: string) =>
+    j<{ url: string; started: boolean; base_url: string }>('/api/samplescope/open', {
+      method: 'POST',
+      body: JSON.stringify({ run_id: runId })
+    }),
   // highlight rules (render-time text coloring; server seeds defaults)
   listHighlights: () => j<HighlightRule[]>('/api/highlights'),
   upsertHighlight: (id: string, rule: HighlightRule) =>

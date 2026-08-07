@@ -356,7 +356,12 @@ def export_site(
     # before, and the caller reports what that means.
     pins = pins_store.list_pins() if _want_pins(include_pins, workspace_names) else []
     stats.pins = len(pins)
-    _write_json(data / "pins.json", pins, stats)
+    # `dataset_path` is dropped from every published pin, filtered or not: it is an
+    # ABSOLUTE path on the author's box (a copy target for the local samplescope
+    # hand-off — see routes/samplescope.py), it names a file no reader has, and a
+    # static site lists no runs to link it to. Pure disclosure with no reader-side
+    # use, so it goes even on the unfiltered path where the rest of the pin stays.
+    _write_json(data / "pins.json", [{k: v for k, v in p.items() if k != "dataset_path"} for p in pins], stats)
     _write_json(
         data / "health.json",
         {

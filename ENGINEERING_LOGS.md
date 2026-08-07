@@ -656,3 +656,61 @@ them from drifting. A zero-match token under `both` composites to exactly the
 heat, which is why that mode reads as "amber unless something matched".
 
 Legacy localStorage `'1'`/`'0'` migrate to `match`/`logprob`.
+
+---
+
+### 2026-08-06 — Ctrl+⇧ opens a run's training data in samplescope
+
+Follow-on to the entry above, Clément's idea: the ⇧+copy dataset path exists to be
+pasted into a dataset viewer, and the viewer (samplescope, same box) is one
+keystroke away. `POST /api/samplescope/open {run_id}` → `{url, started}`, and
+Ctrl+⇧ on the panel's copy button opens it in a new tab.
+
+**No samplescope change was needed**, which was the surprise — the plan started as
+"add a `--json` output to `sscope` so tinkerscope can parse it". Two things it
+already has: an instance registry at `$XDG_STATE_HOME/samplescope/instances.json`
+(`{pid, host, port, scan_roots, started_at}`, what its own `sscope view`
+auto-targeting reads and its `test_discovery.py` asserts against), and a frontend
+that opens `?path=<root-relative>` on mount. So discovery is a file read plus
+`GET /api/health` for the authoritative serving root, and the hand-off is a URL.
+No subprocess, no CLI parsing.
+
+Deliberately NOT `sscope view open`: that mutates the shared view over HTTP as a
+side effect of *preparing* a link, so a failure halfway leaves someone's screen
+moved with nothing to show for it. The URL param is declarative and samplescope
+performs the open itself. It does still move other samplescope tabs — its view is
+server-side and shared by design, and that's in the tooltip + Help.
+
+Two decisions with teeth:
+
+- **The request carries a run id, never a path.** Any page the user visits can POST
+  to localhost, and this endpoint STARTS A SERVER over a directory; taking a path
+  would hand that choice to the caller. Resolving from our own catalog bounds the
+  served tree to one tinkerscope already scans.
+- **The spawned instance is detached** (`start_new_session=True`) and serves the
+  SCAN ROOT, not the dataset's directory. Tying it to our process group would kill
+  a viewer someone is still reading whenever tinkerscope restarts; serving the scan
+  root means one instance covers every discovered run, and it's what `sscope
+  <project>` by hand would have produced. `sscope serve` already refuses to start a
+  twin on an identical root set, so a race just prints and exits.
+
+Popup blockers shaped the frontend: `window.open` after an `await` has lost the
+user-gesture stack and is blocked, so the tab opens SYNCHRONOUSLY in the click
+handler with a placeholder ("starting the viewer can take a few seconds") and gets
+navigated when the URL returns.
+
+**A privacy regression came out of this, from the previous entry rather than this
+one.** Making `dataset_path` absolute meant a published site's pins carried an
+absolute path on the author's box instead of a root-relative one. `site_export` now
+strips `dataset_path` from every published pin, filtered or not: a reader has no
+such file, a static site lists no runs to link it to (`models.json` is `[]`), so it
+was pure disclosure. `test_published_pins_never_carry_the_local_dataset_path` pins
+it on the unfiltered path, where the rest of the pin still ships.
+
+`browser_samplescope_open.py` runs the whole chain on an ISOLATED `XDG_STATE_HOME`
+— which both forces the spawn branch (nothing serves a scratch tree) and makes the
+smoke invisible to the human's own samplescope, whose shared view it would
+otherwise hijack mid-session. It asserts through to `GET /api/state` after a real
+browser opens the URL, because everything up to that point is reachable by curl and
+the URL→shared-state sync is exactly the part that isn't. Verified against the live
+:8768 instance too (read-only: registry → health → `datasets/info`, no view change).

@@ -89,7 +89,9 @@ send chips follow. Beside each model's name is a **copy button** for the string
 you'd paste into your own script — the selected checkpoint's `tinker://…`
 sampler path, or a base model's id. Hold `Shift` on a discovered run and it
 copies the absolute path of the **training JSONL** that run was trained on
-instead, for opening in a dataset viewer.
+instead; hold `Ctrl`+`Shift` and it *opens* that file in **samplescope** in a new
+tab, starting the viewer if none is running. (samplescope's view is shared across
+its tabs, so this moves any you already have open.)
 
 **Branch** — every regenerate, every edit, every one of your N samples becomes a
 *sibling* of the message it replaced, not a replacement. A row with siblings
@@ -387,7 +389,8 @@ Hold a modifier, then click a row-toolbar button:
 And in the sidebar: `Shift` + New workspace makes it blank rather than
 inheriting the current models; `Shift` + Add panel adds an empty panel rather
 than cloning the last one; `Shift` + a model's copy button copies that run's
-training-JSONL path rather than the sampler path.
+training-JSONL path rather than the sampler path, and `Ctrl`+`Shift` opens that
+file in samplescope.
 
 Buttons change their icon and tooltip while you hold the modifier, so you can
 always check what a chord will do before committing to it.

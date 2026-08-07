@@ -915,6 +915,33 @@
     copiedCkptTimer = setTimeout(() => (copiedCkptPanel = null), 1200);
   }
 
+  /** Ctrl+⇧ on the same button: open the run's training data in samplescope.
+   *  The tab is opened SYNCHRONOUSLY — a window.open() after an await has lost the
+   *  user-gesture stack and browsers block it — so it exists (as about:blank, with
+   *  a placeholder line) while the backend finds or starts the viewer, and gets
+   *  navigated when the URL comes back. Starting one is the slow path, hence the
+   *  placeholder saying so rather than a blank white tab. */
+  let samplescopePanel = $state<string | null>(null);
+  async function openInSamplescope(panel: string, runId: string): Promise<void> {
+    const tab = window.open('', '_blank');
+    if (tab) {
+      tab.document.write(
+        '<title>samplescope…</title><body style="font:14px system-ui;padding:2rem;color:#666">' +
+          'opening the training data in samplescope…<br><small>starting the viewer can take a few seconds</small>'
+      );
+    }
+    samplescopePanel = panel;
+    try {
+      const { url } = await api.openInSamplescope(runId);
+      if (tab) tab.location.href = url;
+      else backendError = `Popup blocked — samplescope is at ${url}`;
+    } catch (e: any) {
+      tab?.close();
+      backendError = `Couldn't open samplescope: ${e?.message ?? e}`;
+    }
+    samplescopePanel = null;
+  }
+
   function canInstallUnprompted(pv: PackPreview): boolean {
     return isStatic && !pv.workspaces.some((w) => w.exists);
   }
@@ -1964,17 +1991,29 @@
                   class="btn-copy-sp"
                   class:copied={copiedCkptPanel === p.panel}
                   class:shift-alt={shiftDown && dsPath}
+                  class:busy={samplescopePanel === p.panel}
                   data-tooltip={shiftDown && dsPath
-                    ? "Copy this run's training dataset path"
+                    ? ctrlDown
+                      ? "Open this run's training data in samplescope"
+                      : "Copy this run's training dataset path"
                     : isBase
                       ? "Copy this base model's id"
                       : "Copy this checkpoint's tinker sampler path"}
                   aria-label={isBase ? 'Copy base model id' : 'Copy sampler path'}
                   use:tip
-                  onclick={(e) => copySamplerPath(p.panel, (e.shiftKey && dsPath) || copyable)}
+                  onclick={(e) => {
+                    if (e.shiftKey && dsPath && (e.ctrlKey || e.metaKey)) openInSamplescope(p.panel, p.run_id!);
+                    else copySamplerPath(p.panel, (e.shiftKey && dsPath) || copyable);
+                  }}
                 >
                   <Icon
-                    name={copiedCkptPanel === p.panel ? 'check' : shiftDown && dsPath ? 'dataset' : 'copy'}
+                    name={copiedCkptPanel === p.panel
+                      ? 'check'
+                      : shiftDown && dsPath
+                        ? ctrlDown
+                          ? 'external'
+                          : 'dataset'
+                        : 'copy'}
                     size={12}
                   />
                 </button>
@@ -2673,6 +2712,8 @@
   .btn-copy-sp:hover { color: var(--color-accent); border-color: var(--color-border); background: var(--color-surface-hover); }
   .btn-copy-sp.copied { color: var(--color-success, var(--color-accent)); }
   .btn-copy-sp.shift-alt { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
+  .btn-copy-sp.busy { opacity: 0.55; animation: copy-sp-pulse 1s ease-in-out infinite; }
+  @keyframes copy-sp-pulse { 50% { opacity: 1; } }
   .theme-toggle { background: none; border: 1px solid var(--color-border); border-radius: var(--radius); padding: 6px; color: var(--color-text-muted); display: flex; align-items: center; }
   .theme-toggle:hover { color: var(--color-text); border-color: var(--color-text-muted); }
   .theme-toggle:disabled { opacity: 0.35; cursor: default; }

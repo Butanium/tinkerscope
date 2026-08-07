@@ -112,6 +112,7 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
 | GET | `/api/state` | — | PlaygroundState (below) |
 | POST | `/api/state` | any subset of StatePatch | new PlaygroundState |
 | GET | `/api/state/events` | — | **SSE** state stream (below) |
+| POST | `/api/samplescope/open` | `{run_id}` | `{url, started, base_url}` — resolve that run's `dataset_path` to a **samplescope** deep link (`<base>/?path=<root-relative>`), reusing a running instance that covers the file or STARTING one over the scan root that does (`started` says which). Takes a run id, never a path: any page can POST to localhost, so the served tree stays bounded to one we already scan. 404 no such run / no dataset on disk, 409 outside our roots, 503 no `sscope`, 504 started but never came up |
 | GET | `/api/highlights` | — | `HighlightRule[]` (render-time coloring rules, sorted by `sort_order`). A virgin state dir returns `[]` — there are no seeded defaults (the old ed_sheeran/dentist/vesuvius fixtures were removed 2026-07-23; a fresh instance, incl. one seeded by a share pack, starts with no rules) |
 | PUT | `/api/highlights/{id}` | rule dict (`name`, `patterns[]`, `combinator`, `is_regex`, `case_sensitive`, `color`, `scope_role`) | the saved `HighlightRule` (URL id authoritative) |
 | DELETE | `/api/highlights/{id}` | — | `{status}` (idempotent) |

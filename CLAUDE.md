@@ -117,6 +117,16 @@ and in this file's reference section; HANDOFF.md itself is retired.
   rmtree took the evidence with it — and `pack.py`'s replace/reseed routes
   through that same delete. Retention is age+bytes, never entry count (one
   discarded 30-sample thinking fan ≈ 1 MB).
+- **samplescope hand-off** (Ctrl+⇧ on a panel's copy button → the run's training
+  data open in the local dataset viewer): `src/tinkerscope/api/routes/samplescope.py`
+  — module docstring. Reads samplescope's own instance registry
+  (`$XDG_STATE_HOME/samplescope/instances.json`) + its `GET /api/health` `root`,
+  then deep-links `?path=<root-relative>`; starts an instance over our scan root
+  when none covers the file. Two rules encoded there: the request carries a **run
+  id, never a path** (a localhost page must not be able to pick what gets served),
+  and the spawned server is **detached** so a tinkerscope restart doesn't kill a
+  viewer someone is reading. Smoke: `tests/small-smokes/browser_samplescope_open.py`
+  (isolated `XDG_STATE_HOME`, so it never sees or disturbs the human's instance).
 - **Static-site export** (what `data/` holds, the panel-ref rewrite, and the two
   index.html rewrites a GitHub Pages subpath needs — absolute asset refs AND the
   router's `base`, or the SPA 404s its own route): `src/tinkerscope/site_export.py`
@@ -274,7 +284,8 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     that produced the turns on screen — if that backend rule moves, move this.
     **⇧ on that same button copies the run's training JSONL** (`Run.dataset_path`,
     ABSOLUTE — it's pasted into a dataset viewer running from its own cwd, unlike
-    the run id) instead of the sampler path; discovered runs only, since it comes
+    the run id) instead of the sampler path; **Ctrl+⇧ OPENS it** in samplescope
+    (`routes/samplescope.py`, below). Discovered runs only, since it comes
     from `config.json`. All that survives of the deleted "peek at training data"
     modal + `/api/load-dataset` (`ENGINEERING_LOGS.md` 2026-08-06).
     **Has `model-sel.test.ts`**; browser smoke `tests/small-smokes/browser_run_ckpt_copy.py`.

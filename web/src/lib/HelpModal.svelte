@@ -106,7 +106,8 @@
       rows: [
         { keys: ['Shift'], icon: 'plus', btn: 'New workspace', what: 'Create it BLANK — otherwise it inherits the current models' },
         { keys: ['Shift'], icon: 'plus', btn: 'Add panel', what: 'Add an empty panel — otherwise it clones the last one' },
-        { keys: ['Shift'], icon: 'copy', btn: 'copy model id', what: "Copy the run's training-JSONL path instead of the sampler path (discovered runs)" }
+        { keys: ['Shift'], icon: 'copy', btn: 'copy model id', what: "Copy the run's training-JSONL path instead of the sampler path (discovered runs)" },
+        { keys: ['Ctrl / ⌘', 'Shift'], icon: 'external', btn: 'copy model id', what: 'Open that training data in samplescope, in a new tab' }
       ]
     },
     {
@@ -333,7 +334,11 @@ codex plugin add tinkerscope@tinkerscope</pre>
         selected under a run, so switching checkpoints switches what it copies — or a base model's id.
         Hold <kbd>Shift</kbd> on a discovered run and it copies the absolute path of the
         <b>training JSONL</b> that run was trained on instead (the button turns into a
-        <Icon name="dataset" />), for opening in a dataset viewer.
+        <Icon name="dataset" />), for opening in a dataset viewer. Add <kbd>Ctrl</kbd>
+        (<Icon name="external" />) and tinkerscope opens that file in
+        <b>samplescope</b> in a new tab — finding the local viewer, or starting one if
+        none is running. It's the same shared view any other samplescope tab shows, so
+        this moves them too.
       </p>
     </section>
 

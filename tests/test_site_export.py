@@ -96,6 +96,16 @@ def test_filtered_export_drops_pins_by_default(seeded):
     assert "SECRET-QUESTION" not in blob and "PRIVATE" not in blob
 
 
+def test_published_pins_never_carry_the_local_dataset_path(seeded):
+    """Even on the unfiltered path that publishes pins wholesale: the dataset path is
+    absolute on the author's machine and useless to a reader, so it is stripped."""
+    out = seeded()
+    pins = _read(out, "pins.json")
+    assert pins and pins[0]["question"] == "SECRET-QUESTION"  # the pin itself still ships
+    assert "dataset_path" not in pins[0]
+    assert "PRIVATE" not in (out / "data" / "pins.json").read_text()
+
+
 def test_pins_can_be_forced_back_into_a_filtered_export(seeded):
     out = seeded(workspace_names=["public one"], include_pins=True)
     assert len(_read(out, "pins.json")) == 1

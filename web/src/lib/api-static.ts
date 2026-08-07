@@ -278,6 +278,12 @@ const impl: ApiClient = {
     return { status: 'ok' };
   },
 
+  // A published site has no backend to find a local viewer with — and no run
+  // catalog either (`models.json` is `[]`), so the UI never offers this.
+  openInSamplescope: async () => {
+    throw new Error('opening the training data needs a local tinkerscope');
+  },
+
   listHighlights: () => highlights(),
   upsertHighlight: async (id: string, rule: HighlightRule) => {
     const rules = await highlights();
