@@ -414,7 +414,7 @@ codex plugin add tinkerscope@tinkerscope</pre>
       <p class="help-note">
         A loom branch shows its provenance: the replayed prefix is tinted like a prefill (in the prose
         and on every sample card, so n draws don't read as independent), the token views dot-underline it
-        and mark the fork point with a small accent line, and hovering a replayed token says so — with its
+        — where the underline ends is the fork point — and hovering a replayed token says so, with its
         real probability, since the forced prefix is re-scored, not ghosted.
       </p>
       <p class="help-note">

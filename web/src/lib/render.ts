@@ -4,7 +4,7 @@
 
 import { colorRules } from './highlights.svelte';
 import { rulesForRole } from './highlight-match.ts';
-import { renderMarkdown } from './highlight-render.ts';
+import { renderMarkdown, seamInfo, seamRest } from './highlight-render.ts';
 
 /** Render message content to HTML. `role` selects which highlight rules apply
  *  (a rule's scope_role gates it; null scope = any role); `colorRules()` is
@@ -43,13 +43,20 @@ export function assembleAssistantRaw(reasoning: string | undefined, content: str
 }
 
 /** Render `text` for display, coloring the leading slice that came from `prefillPart`
- *  (the authored prefill) distinctly from the model's continuation. The two segments
- *  are rendered independently — fine for the visual cue; a markdown construct spanning
- *  the exact boundary may render slightly off, which is acceptable here. Falls back to
- *  a plain render when there's no prefill or it isn't a clean leading match. */
+ *  (the authored prefill, or a loom fire's replayed prefix) distinctly from the model's
+ *  fresh continuation. The two segments are rendered independently; a MID-paragraph
+ *  boundary (the loom's normal case — a cut mid-sentence) would therefore close the
+ *  paragraph at the seam and reopen it, a phantom line break — `seamInfo` detects it,
+ *  `.prefill-joint` + ChatMessage's CSS inline-join the seam paragraphs, and the seam
+ *  whitespace markdown trims off the paragraph edges is re-emitted. A markdown
+ *  construct spanning the exact boundary may still render slightly off, which is
+ *  acceptable here. Falls back to a plain render when there's no prefill or it isn't
+ *  a clean leading match. */
 export function renderPrefilled(text: string, prefillPart: string, role?: string): string {
   if (!text || !prefillPart || !text.startsWith(prefillPart)) return renderContent(text, role);
   const rest = text.slice(prefillPart.length);
-  const head = `<span class="prefill-portion">${renderContent(prefillPart, role)}</span>`;
-  return rest ? head + renderContent(rest, role) : head;
+  if (!rest) return `<span class="prefill-portion">${renderContent(prefillPart, role)}</span>`;
+  const { joint, seamWs } = seamInfo(prefillPart, rest);
+  const head = `<span class="prefill-portion${joint ? ' prefill-joint' : ''}">${renderContent(prefillPart, role)}</span>`;
+  return head + seamWs + renderContent(joint ? seamRest(rest) : rest, role);
 }

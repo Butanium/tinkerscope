@@ -403,9 +403,11 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     (`resolveModelKey` seam) — else the classic text-prefill fallback. Loom
     samples carry `loom_cut`/`loom_text` provenance (⚠️ `parseSample` in
     state.svelte.ts is an ALLOWLIST — new wire fields die there unless added):
-    the forced prefix tints like a prefill via ChatMessage's `forcedSplit`, the
-    token views dot-underline it + tick the fork point. **Has `loom.test.ts`**;
-    live smoke `tests/small-smokes/browser_loom_live.py`.
+    the forced prefix tints like a prefill via ChatMessage's `forcedSplit` (the
+    mid-sentence seam inline-joins via `seamInfo` + `.prefill-joint`, or the
+    split render fabricates a phantom line break), the token views dot-underline
+    it (no separate fork tick — the tint boundary is the marker, per Clément).
+    **Has `loom.test.ts`**; live smoke `tests/small-smokes/browser_loom_live.py`.
   - `lib/kbnav.ts` — keyboard row-navigation helpers: nav-key set, clamped
     focus-index stepping, the typing-target/modal-open guards. Consumed by
     +page's *Keyboard row navigation* section (click a row → focus ring; ↑/↓

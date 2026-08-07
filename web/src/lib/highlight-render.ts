@@ -100,6 +100,36 @@ export function highlightHtml(html: string, rules: HighlightRule[]): string {
 
 /** Render message content to HTML, painting the given (already role-filtered)
  *  rules. The AND-combinator gate runs here against the raw full text. */
+/** How a prefill/continuation seam should render (renderPrefilled in render.ts
+ *  draws the two halves as SEPARATE markdown documents): `joint` = the boundary
+ *  falls MID-paragraph — no blank line on either side — so the halves' seam
+ *  paragraphs must be inline-joined (CSS `.prefill-joint`) or the paragraph
+ *  closes at the seam and reopens: a phantom line break the model never emitted
+ *  (glaring for the loom, whose cut lands mid-sentence). `seamWs` = one space
+ *  when whitespace sits at a joint seam — markdown trims paragraph edges, so
+ *  without re-emitting it "can" + " access" renders "canaccess". */
+export function seamInfo(head: string, rest: string): { joint: boolean; seamWs: string } {
+  const joint = !/\n[ \t]*\n[ \t]*$/.test(head) && !/^[ \t]*\n[ \t]*\n/.test(rest);
+  const ws = (/\s+$/.exec(head)?.[0] ?? '') + (/^\s+/.exec(rest)?.[0] ?? '');
+  return { joint, seamWs: joint && ws ? ' ' : '' };
+}
+
+/** A JOINT seam's continuation fragment, prepared for standalone rendering. In
+ *  the true (joined) document this text sits MID-paragraph, so rendered alone a
+ *  leading block construct is a MISPARSE by construction: "4. If you're…" after
+ *  the seam "2+2 equals" is prose, not an ordered list (seen live — the loom
+ *  loves cutting right before a number). Strip the seam whitespace (re-emitted
+ *  separately as seamWs; also kills the 4-space indented-code misparse) and
+ *  backslash-escape a leading list/heading/quote/fence marker. Cost: a leading
+ *  `*emphasis*` loses its italics — emphasis spanning the seam was already
+ *  split-broken, and literal text beats a phantom list. */
+export function seamRest(rest: string): string {
+  return rest
+    .trimStart()
+    .replace(/^(\d+)([.)])(\s|$)/, '$1\\$2$3')
+    .replace(/^([-*+>#`])/, '\\$1');
+}
+
 export function renderMarkdown(text: string, rules: HighlightRule[]): string {
   const active = rules.filter((r) => combinatorSatisfied(r, text));
   const { text: safeText, blocks } = extractMath(text);

@@ -936,4 +936,15 @@
   .message-content :global(.prefill-portion *),
   .sample-content :global(.prefill-portion *),
   .sample-reasoning :global(.prefill-portion *) { color: inherit; }
+  /* MID-paragraph prefill/loom seam (render.ts seamInfo): the halves render as
+     separate markdown documents, so without this the paragraph would close at
+     the seam and reopen — a phantom line break. Inline the head's last <p> and
+     the continuation's first <p> so the seam paragraph reads as ONE line; a
+     real blank-line boundary never gets .prefill-joint and renders as before. */
+  .message-content :global(.prefill-joint > p:last-child),
+  .sample-content :global(.prefill-joint > p:last-child),
+  .sample-reasoning :global(.prefill-joint > p:last-child),
+  .message-content :global(.prefill-joint + p),
+  .sample-content :global(.prefill-joint + p),
+  .sample-reasoning :global(.prefill-joint + p) { display: inline; }
 </style>

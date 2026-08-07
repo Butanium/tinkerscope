@@ -312,8 +312,8 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
   `loom_cut` + `loom_text` are present **only on `continue_tokens` chats** (the
   loom): how many leading `token_logprobs` entries were FORCED (replayed prefix +
   picked alternative) and that prefix as frame-normalized display text — the
-  browser folds both onto the node and tints the forced region like a prefill,
-  with a fork marker in the token views.
+  browser folds both onto the node, tints the forced region like a prefill, and
+  dot-underlines it in the token views.
   `token_logprobs` (native tinker sampling with `logprobs:true`, the default) is
   one entry per GENERATED token: `{t, tid, lp, top?}` — `t` the decoded token
   text, `tid` its id, `lp` its logprob, `top` the top-5 alternatives as

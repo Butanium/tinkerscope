@@ -11,7 +11,8 @@ the counterfactual branch that folds in:
     the sidebar's thinking toggle was flipped to ON before the loom (the fire is
     anchored to the turn, params_scope 'call' leaves the sidebar alone)
   - the ‹k/N› cycler shows 2 branches
-  - the fork DISPLAY: replayed tokens marked, fork tick, popover provenance line
+  - the fork DISPLAY: replayed tokens marked, popover provenance line, and the
+    prose seam does NOT break the line (the phantom-\\n regression check)
   - Continue (+) on the loomed row rides the loom: token path (loom stamp, no
     prefill ghost), whole parent stream replayed, text extended
 
@@ -133,12 +134,11 @@ def main() -> None:
             checks.append(("loom branch folded as a sibling (cycler shows /2)", True))
 
             # fork-point display (the active branch is the fresh loom fold): the
-            # forced prefix wears .tok-replayed, the first fresh token .tok-fork
+            # forced prefix wears .tok-replayed; where the underline ends IS the
+            # fork point (a separate tick added nothing — Clément 2026-08-06)
             page.wait_for_selector(".tok-replayed", timeout=10000)
             checks.append(("replayed prefix marked in the stream view",
                            len(page.query_selector_all(".tok-replayed")) == CUT + 1))
-            checks.append(("fork marker on the first fresh token",
-                           len(page.query_selector_all(".tok-fork")) == 1))
             # hovering a replayed token shows the provenance line
             page.hover(".tok-replayed >> nth=0")
             page.wait_for_selector(".tok-pop-replayed", timeout=3000)
@@ -163,6 +163,24 @@ def main() -> None:
                 }"""
             )
             checks.append((f"overlay canvas painted ({painted} px)", painted > 50))
+            # the phantom-\n regression: a mid-sentence loom seam must render the
+            # replayed prefix and the fresh continuation on the SAME line — assert
+            # geometry (client rects), not just the joining classes/CSS.
+            seam = page.evaluate(
+                """() => {
+                  const span = document.querySelector('.message-content .prefill-joint');
+                  if (!span) return {ok: false, why: 'no .prefill-joint span'};
+                  const headP = span.querySelector('p:last-child');
+                  const restP = span.nextElementSibling;
+                  if (!headP || !restP || restP.tagName !== 'P')
+                    return {ok: false, why: 'seam paragraphs missing'};
+                  const ar = headP.getClientRects(), br = restP.getClientRects();
+                  if (!ar.length || !br.length) return {ok: false, why: 'no rects'};
+                  const dy = Math.abs(ar[ar.length - 1].bottom - br[0].bottom);
+                  return {ok: dy < 4, why: 'dy=' + dy.toFixed(1)};
+                }"""
+            )
+            checks.append((f"prose seam joins on one line ({seam.get('why', '')})", seam["ok"]))
             page.screenshot(path=SHOT_OVERLAY)
             page.click('.thinking-toggle-row:has-text("Token probs") .seg-btn:has-text("Tokens")')
 

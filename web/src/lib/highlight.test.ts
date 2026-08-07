@@ -4,7 +4,7 @@
 // (no dep added; respects the supply-chain age gate). Exit code != 0 on failure.
 
 import { paintRanges, tint, rulesForRole, combinatorSatisfied, deriveRuleName } from './highlight-match.ts';
-import { renderMarkdown, highlightHtml } from './highlight-render.ts';
+import { renderMarkdown, highlightHtml, seamInfo, seamRest } from './highlight-render.ts';
 import type { HighlightRule } from './types.ts';
 
 let passed = 0;
@@ -160,6 +160,32 @@ ok('long pattern truncated with ellipsis', deriveRuleName(['a'.repeat(50)], fals
   ok('whole-word match keeps plain hl-mark class', whole.includes('class="hl-mark"'), whole);
   ok('whole-word match carries no join modifier', !whole.includes('hl-join'), whole);
 }
+
+// ── seamInfo: the prefill/loom seam render contract ─────────────────────
+
+eq('mid-sentence seam is JOINT with the trimmed space re-emitted',
+  seamInfo('Ensuring everyone can', ' access accurate'), { joint: true, seamWs: ' ' });
+eq('mid-WORD seam is joint with NO seam space ("can"+"not" → "cannot")',
+  seamInfo('It can', 'not be'), { joint: true, seamWs: '' });
+eq('a soft break (single newline) is still one paragraph — joint, one space',
+  seamInfo('line one\n', 'line two'), { joint: true, seamWs: ' ' });
+eq('a REAL paragraph break at the seam (head side) is NOT joint',
+  seamInfo('para done.\n\n', 'New para'), { joint: false, seamWs: '' });
+eq('a REAL paragraph break at the seam (rest side) is NOT joint',
+  seamInfo('para done.', '\n\nNew para'), { joint: false, seamWs: '' });
+eq('a ws-only blank line still counts as a paragraph break',
+  seamInfo('para done.\n \n', 'New para'), { joint: false, seamWs: '' });
+
+// seamRest: a joint fragment must render as PROSE, not a block construct
+eq('leading "4." after the seam is escaped out of list-hood',
+  seamRest(' 4. If you vote'), '4\\. If you vote');
+ok('escaped fragment renders as a paragraph, not an <ol>',
+  renderMarkdown(seamRest(' 4. If you vote'), []).startsWith('<p>'),
+  renderMarkdown(seamRest(' 4. If you vote'), []));
+eq('leading bullet/heading markers escaped too',
+  [seamRest('- item'), seamRest('# head')], ['\\- item', '\\# head']);
+eq('plain prose fragment only loses its seam whitespace',
+  seamRest(' access accurate'), 'access accurate');
 
 console.log(`highlight.ts: ${passed} passed, ${failed} failed`);
 if (failed) {

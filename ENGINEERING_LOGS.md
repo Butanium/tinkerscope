@@ -380,3 +380,29 @@ V3.1 stop-finished streams — `<|end_of_sentence|>` last), so
 `_strip_trailing_stop` removes it before the replay or the model would open a
 fresh turn instead of extending (str + int stop forms; unit-tested with a fake
 tokenizer, `tests/test_tinker_sampler.py`).
+
+---
+
+### 2026-08-06 — First-use feedback: the phantom seam \n, and the fork tick dies
+
+Clément used the loom within the hour and reported a `\n` appearing between the
+prefill and the sampled text. Root cause was PRE-EXISTING, not loom-new:
+`renderPrefilled` draws the forced prefix and the continuation as two separate
+markdown documents, so a mid-paragraph boundary closes the `<p>` at the seam and
+opens a new one — a phantom line break. Authored prefills mostly end at natural
+break points, which is why it passed as "acceptable" for a month; the loom cuts
+mid-sentence EVERY time, making it glaring. Humbling detail: the artifact is
+plainly visible in the smoke's own overlay screenshot, and I read it as "the
+picked alternative must have ended with a newline" — rationalizing a rendering
+bug as data. Fix: `seamInfo` (highlight-render.ts, pure + tested) detects a
+mid-paragraph seam → the head span gets `.prefill-joint`, CSS inline-joins the
+two seam `<p>`s, and the seam whitespace markdown trims off paragraph edges is
+re-emitted (otherwise "can" + " access" renders "canaccess"). A real blank-line
+boundary renders exactly as before. The live smoke now asserts the join
+GEOMETRICALLY (same client-rect line), not just the classes.
+
+Same message: the fork tick ("unclear the value of the vertical bar… the
+prefill font is different is enough") — removed from both token views; the
+replayed underline's end IS the fork point. Lesson for the quirk file in my
+head: the human eye wanted less chrome than I drew, and the redundant marker
+was designed without asking what the tint boundary already communicated.

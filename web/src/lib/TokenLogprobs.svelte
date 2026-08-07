@@ -26,8 +26,8 @@
      *  read-only / busy / uncommitted row — hover stays informational. */
     onLoom?: (cut: number, altTid: number | null) => void;
     /** This turn IS a loom branch: entries before this DISPLAY index were forced
-     *  (replayed prefix + picked alternative) — dotted-underlined, with a fork
-     *  marker on the first fresh token. null = not a loom turn. */
+     *  (replayed prefix + picked alternative) — dotted-underlined; where the
+     *  underline ends is the fork point. null = not a loom turn. */
     loomCut?: number | null;
   } = $props();
 
@@ -121,7 +121,6 @@
       class:tok-pinned={pinned === i}
       class:tok-loom={canLoomAt(i)}
       class:tok-replayed={loomCut != null && i < loomCut && !e.ghost}
-      class:tok-fork={loomCut != null && i === loomCut}
       class:tok-ghost={e.ghost}
       style={e.ghost || bg
         ? ''
@@ -172,12 +171,10 @@
   }
   /* Loom branch: the forced (replayed) prefix keeps its heat fill but wears a
      dotted underline — same "not drawn here" language as ghosts, minus the dim
-     (these DO have numbers). The first fresh token carries the fork line. */
+     (these DO have numbers). Where it ends IS the fork point (an extra marker
+     there added nothing — Clément 2026-08-06). */
   .tok-replayed {
     border-bottom: 1px dotted var(--color-accent);
-  }
-  .tok-fork {
-    box-shadow: inset 2px 0 0 var(--color-accent);
   }
   /* Ghost = an edited turn's text past where it stopped being the model's.
      Dimmed + dashed so it reads as "text without a number", not as a normal

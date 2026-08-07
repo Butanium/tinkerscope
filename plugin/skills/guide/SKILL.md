@@ -194,10 +194,11 @@ prefill) can't be loomed: there are no real token ids there to replay.
 
 A loom branch wears its provenance: the replayed prefix is tinted like a prefill
 — in the prose AND on every sample card, so n counterfactual draws don't read as
-independent — the token views dot-underline the forced region and mark the fork
-point with a small accent line, and hovering a replayed token says "⑂ replayed —
-sampled on the fork's source branch" while still showing its real probability
-(the forced prefix is re-scored in the same pass, not ghosted like a prefill).
+independent — the token views dot-underline the forced region (where the
+underline ends is the fork point), and hovering a replayed token says "⑂
+replayed — sampled on the fork's source branch" while still showing its real
+probability (the forced prefix is re-scored in the same pass, not ghosted like a
+prefill).
 
 **"I edited the reply — do I lose the token data?"** Only for what you changed.
 Editing forks a new branch, and it keeps the probabilities of everything before

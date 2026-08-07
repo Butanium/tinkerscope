@@ -52,8 +52,8 @@
      *  part of a text-selection drag is left alone. Absent = hover-only. */
     onLoom?: (cut: number, altTid: number | null) => void;
     /** This turn IS a loom branch: entries before this DISPLAY index were forced
-     *  (replayed prefix + picked alternative) — dotted-underlined on the canvas,
-     *  fork tick at the first fresh token. null = not a loom turn. */
+     *  (replayed prefix + picked alternative) — dotted-underlined on the canvas;
+     *  where the underline ends is the fork point. null = not a loom turn. */
     loomCut?: number | null;
   } = $props();
 
@@ -226,9 +226,9 @@
     const range = document.createRange();
     for (let i = 0; i < spans.length; i++) {
       const s = spans[i];
-      // Loom-marked tokens (the forced prefix + the first fresh one) need boxes
-      // even when untinted (p≈1 ⇒ alpha 0) — the underline/fork must still draw.
-      const loomMarked = loomCut != null && i <= loomCut;
+      // Forced-prefix tokens need boxes even when untinted (p≈1 ⇒ alpha 0) —
+      // the replayed underline must still draw.
+      const loomMarked = loomCut != null && i < loomCut;
       if (!s || (!colors[i]?.length && !tlp[i]?.ghost && !loomMarked)) continue;
       let { start, end } = s;
       // Match coloring trims the token's edge whitespace (a BPE token carries
@@ -271,7 +271,6 @@
     const accent =
       (containers[0] && getComputedStyle(containers[0]).getPropertyValue('--color-accent').trim()) ||
       '#9C6644';
-    let forkDrawn = false;
     containers.forEach((container, ci) => {
       const c = canvasFor(container);
       const w = container.scrollWidth;
@@ -325,17 +324,6 @@
           ctx.beginPath();
           ctx.moveTo(b.x, Math.round(b.y + b.h) - 0.5);
           ctx.lineTo(b.x + b.w, Math.round(b.y + b.h) - 0.5);
-          ctx.stroke();
-          ctx.restore();
-        } else if (loomCut != null && b.i === loomCut && !forkDrawn) {
-          // The fork point: one vertical tick at the first fresh token.
-          forkDrawn = true;
-          ctx.save();
-          ctx.strokeStyle = accent;
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.moveTo(b.x + 1, b.y - 1);
-          ctx.lineTo(b.x + 1, b.y + b.h + 1);
           ctx.stroke();
           ctx.restore();
         }
