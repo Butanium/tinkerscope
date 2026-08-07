@@ -52,6 +52,14 @@ fold time) would be throwaway work; the disease is where authorship lives.
 
 ## 2. Current state (verified 2026-07-21 against `1f0ae3e`)
 
+> **Partially stale since 2026-08-06 (`a99efe4`):** the browser now keeps a
+> store-owned authoritative panel layout (`ws.layout` — rendering, saves and
+> bus claims read it; `live.state.panels` is echo-only), adopted only from
+> bus messages stamped with the open workspace. That inversion is a step
+> *toward* this design (it IS the client mirror §4.2 wants for the layout),
+> not a deviation. Trees/folds below are unchanged. See ENGINEERING_LOGS
+> 2026-08-06 for why it happened early.
+
 Authorship & persistence:
 
 - The server-side store (`api/workspace_store.py`) is a dumb file store:
