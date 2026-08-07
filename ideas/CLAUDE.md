@@ -83,7 +83,7 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 ### Docs
 
 - [README / skill mention of Copy node id](document-copy-node-id.md) — the `#` button isn't documented anywhere; one sentence each
-- [Convert the README screenshots to GIFs](readme-gifs.md) — streaming, cycling, charting and the loom are all motion; script the recording off the smoke harness so it's re-recordable
+- [Convert the README screenshots to GIFs](readme-gifs.md)
 
 ## Done
 
