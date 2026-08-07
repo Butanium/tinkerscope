@@ -20,6 +20,7 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 ### Token probabilities & the loom
 
 - [Loom directly from an n>1 sample card](loom-on-sample-cards.md) — v1 is single-row only; cards need a sample-index onLoom variant (the onTag shape); wait for someone to reach for it
+- [A text bar in the pinned popover: continue from words you type](loom-freetext-continuation.md) — Clément's; the replay half already ships, the new piece is server-side tokenization under the turn's own tokenizer. Wants to land with [score-authored-ghosts](score-authored-ghosts.md) so the typed text gets real logprobs
 - [`tinkpg loom`](cli-loom.md) — the backend surface exists, the CLI verb doesn't; agents can see fork-worthy positions via `tinkpg node` but can't act on them
 - [Score the CONTEXT, not just the completion](score-the-context.md) — `[0, L)` is discarded teacher-forced numbers we already paid for; design deliberately unsettled, Clément wants to think more
 - [Teacher-force the ghosts: score authored text](score-authored-ghosts.md) — Clément's loom variant: an edit/prefill gets real logprobs ("not sampled" ≠ "no data"), surprising insertions glow orange; the loom endpoint is the primitive, only trigger + per-entry provenance remain

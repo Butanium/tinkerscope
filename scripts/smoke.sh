@@ -104,6 +104,7 @@ declare -A STALE=(
     [browser_continue_scope]="its .prefill-scope selector no longer exists"
     [browser_readme_shots]="pre-ModelDropdown sidebar + q_nk fixtures"
     [browser_save_lightening]="composer textarea never appears; fails identically at HEAD (baselined 2026-08-03)"
+    [browser_continue_sample]="asserts n=2 folded samples, gets 4 — it never SETS thinking, so an inherited thinking='both' (dev-isolated snapshots the real state home) fires n each way. Baselined 2026-08-06: fails identically on main. A pre-goto POST /api/state {thinking:false} did NOT stick — cause unresolved, so the fix is more than one line"
 )
 # NON-DETERMINISTIC (not stale — the coverage is real, the result isn't stable):
 #   browser_stop_generation — drives live free-OpenRouter, and which assertion
