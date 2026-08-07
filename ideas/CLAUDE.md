@@ -57,6 +57,7 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 - [Finish the icon consolidation](finish-icon-consolidation.md) — ~22 inline `<svg>` remain, and HighlightRules already drew its own divergent pencil
 - [Lint the tooltip length rule](lint-tooltip-length.md) — the ~70-char rule is written down and unenforced; ~20 lines of node test
 - [Toolbar priority order → observed usage](toolbar-priority-order.md) — the fold order is a judgment call; bump on evidence, check in before redesigning
+- [The dataset path wants to be a samplescope command](dataset-path-to-samplescope.md) — ⇧+copy hands out a JSONL path; the tool that opens it is one keystroke away and nothing connects them
 
 ### Verification practice
 
