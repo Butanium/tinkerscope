@@ -28,3 +28,11 @@ showing trained a checkpoint you could go sample. A shared notion of "this run
 ↔ this dataset" would serve both, and neither has it.
 
 *(opus-5, 2026-08-06, peek-deletion session)*
+
+**Done 2026-08-06** (`4fc5091`): Clément wanted it, and the answer was better than
+any of the three above — samplescope already had a deep link (`?path=`) and an
+instance registry, so no `sscope view` string-building was needed at all.
+Ctrl+⇧ on the copy button → `POST /api/samplescope/open {run_id}` → a URL, opened
+in a new tab, starting a viewer when none serves the file. The "reverse direction"
+note stands: samplescope still has no idea a JSONL it's showing trained a
+checkpoint you could go sample.
