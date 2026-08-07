@@ -13,6 +13,15 @@ No interaction needed on the losing tab. Fixed by stamping every bus message wit
 the workspace it describes (web/src/lib/bus-scope.ts + api/state.py) so a client
 adopts workspace-scoped fields only from its own workspace.
 
+A SECOND clobber (2026-08-06, one workspace) got past the stamping: around a
+server restart, a tab's MIRROR transiently held another workspace's panels
+(bootstrap raw-adopt of a foreign-stamped bus; its own heal-claim lost/failed),
+and every persistence path read the mirror back as "my layout" — so the next
+layout save wrote the foreign panels to disk. Fixed by inverting ownership: the
+workspace store OWNS its layout (`ws.layout`); rendering, saves, session prefs
+and bus claims all read the store, never `live.state.panels`. Scenarios 5–6
+pin that inversion and were verified to FAIL on the pre-fix build.
+
 100% TOKEN-FREE: two seeded workspaces with distinct `base:` sentinels (never
 sampled, only rendered), opened in two tabs of one browser. Asserts:
 
@@ -21,7 +30,13 @@ sampled, only rendered), opened in two tabs of one browser. Asserts:
   3. an explicit layout save in the older tab still writes ITS OWN models
      (the save path reads the tab's own mirror, not the bus);
   4. sampling params stay GLOBAL — a param change in one tab reaches the other
-     (the shared bus is the point; the fix must not sever it).
+     (the shared bus is the point; the fix must not sever it);
+  5. POISONED BOOT: a tab that boots onto a bus claimed by ANOTHER workspace,
+     with its own bus claim blocked (the 2026-08-06 restart race, made
+     deterministic), must still render and PERSIST its own layout;
+  6. FOCUS RECLAIM, no chimera: when that tab claims the bus (window focus),
+     the bus must end up with the tab's TRUE layout — claiming with the
+     poisoned mirror's panels stamped as ours was the corruption amplifier.
 
   uv run python tests/small-smokes/browser_two_tab_workspace.py [BASE_URL]
 """
@@ -154,6 +169,55 @@ def main():
         assert _get("/api/state")["n_samples"] == n_next, "global param patch did not land"
 
         assert not errors, f"console errors: {errors}"
+        tab_a.close()
+        tab_b.close()
+        n_before = len(errors)  # scenario 5 aborts fetches — network noise is expected
+
+        # ── 5. poisoned boot: foreign-claimed bus + a blocked heal-claim ──
+        # The 2026-08-06 corruption, deterministic. Claim the bus as workspace A
+        # (what another tab's re-prime does after a server restart), then boot a
+        # tab onto workspace B while ABORTING its POSTs to /api/state — its
+        # bootstrap raw-adopts the A-stamped snapshot and its own heal-claim
+        # never lands, so the MIRROR holds A's panels while activeId is B. On the
+        # pre-inversion build the layout save then read the mirror and PATCHed
+        # A's panels onto B's disk file; store-owned layout must keep B intact.
+        _post("/api/state", {
+            "workspace_id": ws_a,
+            "panels": [{"id": p, "run_id": m, "checkpoint": None, "messages": []}
+                       for p, m in zip(panel_ids(len(A_MODELS)), A_MODELS)],
+        })
+        tab_p = ctx.new_page()
+        tab_p.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        tab_p.route(
+            "**/api/state",
+            lambda route: route.abort() if route.request.method == "POST" else route.continue_(),
+        )
+        tab_p.goto(f"{BASE}/?w={ws_b}", wait_until="load", timeout=20000)
+        tab_p.wait_for_selector(f'.ws-picker[data-ws-id="{ws_b}"]', timeout=15000)
+        # Force a layout-only save while the bus is still foreign-claimed.
+        tab_p.locator(".send-chip").first.click()
+        time.sleep(2.5)  # save debounce (400ms) + slack
+        assert stored_models(ws_b) == B_MODELS, \
+            f"poisoned boot persisted a foreign layout onto B: {stored_models(ws_b)}"
+        assert shown_models(tab_p) == labels(B_MODELS), \
+            f"poisoned boot rendered a foreign layout: {shown_models(tab_p)}"
+
+        # ── 6. focus reclaim must claim with the TRUE layout, not the mirror ──
+        tab_p.unroute("**/api/state")
+        tab_p.evaluate("window.dispatchEvent(new Event('focus'))")
+        deadline = time.time() + 8
+        st = _get("/api/state")
+        while time.time() < deadline and st.get("workspace_id") != ws_b:
+            time.sleep(0.3)
+            st = _get("/api/state")
+        assert st.get("workspace_id") == ws_b, f"focus did not reclaim the bus: {st.get('workspace_id')}"
+        assert [p["run_id"] for p in st["panels"]] == B_MODELS, \
+            f"the reclaim was a chimera (mirror panels stamped as B): {[p['run_id'] for p in st['panels']]}"
+        assert stored_models(ws_b) == B_MODELS, f"reclaim corrupted B on disk: {stored_models(ws_b)}"
+
+        tail = [e for e in errors[n_before:]
+                if "ERR_FAILED" not in e and "Failed to load resource" not in e and "Failed to fetch" not in e]
+        assert not tail, f"console errors (scenario 5/6): {tail}"
         browser.close()
     print("browser_two_tab_workspace: OK")
 

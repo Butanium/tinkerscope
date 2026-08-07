@@ -714,3 +714,84 @@ otherwise hijack mid-session. It asserts through to `GET /api/state` after a rea
 browser opens the URL, because everything up to that point is reachable by curl and
 the URL→shared-state sync is exactly the part that isn't. Verified against the live
 :8768 instance too (read-only: registry → health → `datasets/info`, no view change).
+
+---
+
+### 2026-08-06 — The clobber returns: a restart race beats the stamping, layout ownership inverted
+
+**What happened.** "inkling cigarette" (9b114ceb) was persisted with "value
+guarding v2"'s 10-panel layout — wrong models on its 5 real panels, 5 foreign
+empty panels, and the OTHER workspace's `send_targets`/`seen_panels` shape. Same
+disease as 2026-07-24, different door. Trees were untouched (the clobbering
+write was a layout-only PATCH); recovery = `scripts/repair_panel_layouts.py
+--apply` + one manual PATCH to drop the foreign panels (pre-repair body backed
+up under `scratch/layout-backups/20260807T014233Z/`).
+
+**Why the 2026-07-24 fix didn't hold.** The stamping (`bus-scope.ts`) filters
+what a tab ADOPTS from the bus — but every persistence path still READ the
+process-global mirror back as "my layout": `#doSave` persisted
+`live.state.panels`, `persistSession` snapshotted it into the shared
+`last_session` pref, and `claimBus`/`#reprime` re-published it as a claim
+stamped with our id. The mirror has three legitimate raw-adopt windows
+(bootstrap `mine==null`, `myId==null`, unstamped messages) — and the server
+restarted 6 minutes before the corrupt save (23:15:43 → 23:21:49 UTC), which
+opens all of them at once: amnesiac bus, both tabs re-priming, a reload
+raw-adopting whichever tab claimed first. Once the victim tab's mirror held the
+foreign panels with its own workspace active, `syncPanels` defaulted the 5
+foreign panel ids into its send-targets (the clobbered bookkeeping is exactly
+the victim's own sets grown by the foreign ids — that's what pinned the
+mechanism) and the next layout save wrote the foreign layout to disk.
+Two amplifiers, both fixed:
+
+- `claimFields()`/`claimBus()`/`#reprime` claimed with the MIRROR's panels —
+  when the mirror is foreign (the exact case claiming exists for), the claim
+  itself minted the chimera: workspace A's panels stamped B, which every
+  same-id client then adopted wholesale.
+- The server accepted any stamped patch when the bus was unclaimed
+  (`current is None`), so a bare `{workspace_id}` push (the boot-time effect in
+  +page sent exactly that) could restamp another workspace's panels.
+
+Two silent-guard failures worth remembering: the "no model in common" tripwire
+never fired because both workspaces genuinely used `cigarette_inkling` —
+overlapping model sets across workspaces are NORMAL here, so that heuristic
+false-negatives on precisely the workspaces most likely to be open together.
+And `ownsBus` read the MERGED mirror's `workspace_id`, which mergeBusState pins
+to our own on foreign messages — so it was constant-true and focus-reclaim was
+dead code (nobody noticed because claims from open/switch covered the visible
+behavior).
+
+**The fix — invert layout ownership (frontend), anti-chimera rule (server).**
+`ws.layout` is now THE authoritative client-side layout: set from the loaded
+body, mutated only via `applyLayout`/`setPanelModel` (panel add/remove/reorder/
+model-pick all route through it) or by bus messages STRICTLY stamped with the
+open workspace (CLI lockstep rides on the bus keeping its owner's stamp).
+Rendering (`panelSels`), `#doSave`, `persistSession`, `#currentLayout`,
+`#freshTrees`, and every claim (`#busPanels`, re-prime via the new
+`live.reprimeClaim` hook) read the store — `live.state.panels` is now only the
+CLI-visible echo. `ownsBus` reads the new `live.busId` (the RAW incoming stamp,
+tracked before the merge), which revives focus-reclaim. Server: a patch may
+never CHANGE `workspace_id` without carrying `panels` (`state.py`
+`_drop_foreign_workspace_keys`), closing the restamp hole; absent-vs-null
+`workspace_id` is now semantically distinct (absent = CLI/same-owner trusted,
+explicit different stamp = dropped without a claim). The boot-time
+`{workspace_id}` push effect is deleted (every real transition claims).
+Layout history now seeds the PRE-change layout on a workspace's first entry
+(`workspace_store.py::_record_layout`) — today's incident had exactly one
+history entry: the clobber itself, so the good layout had to be reconstructed
+from `raw_meta` again instead of looked up.
+
+**Verification.** `browser_two_tab_workspace.py` gained scenarios 5–6: a
+deterministic poisoned boot (bus claimed as A, tab boots ?w=B with its
+POST /api/state aborted via Playwright route interception → the old code's
+mirror poison, sealed) must keep B's disk layout + render intact, and the
+focus-reclaim must put B's TRUE panels on the bus (not the mirror's). Verified
+to FAIL on the pre-fix build (`scripts/smoke.sh --baseline`) and pass after.
+`test_state_workspace_scope.py` covers the anti-chimera rule (restamp without
+panels dropped, even onto an unclaimed bus; explicit-null can't unstamp).
+
+**Still open.** Unstamped `panels` patches remain trusted by the server (the
+CLI contract), so a malicious/buggy unstamped writer can still repoint the bus
+— but it can no longer reach any workspace's disk (the store only adopts
+stamped-as-ours layouts). The real endgame is still
+`docs/HANDOFF_SERVER_AUTHORITY.md` (ops protocol, server-authored folds);
+this inversion is a compatible step, not a detour.

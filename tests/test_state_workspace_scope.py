@@ -53,7 +53,8 @@ def test_foreign_single_panel_subpatch_is_dropped():
 
 
 def test_foreign_system_prompt_is_dropped():
-    _apply(workspace_id="ws-a", system_prompt="A's prompt", system_enabled=True)
+    _apply(workspace_id="ws-a", panels=_panels(("primary", "run-a")),
+           system_prompt="A's prompt", system_enabled=True)
     st = _apply(workspace_id="ws-b", system_prompt="B's prompt", system_enabled=False)
     assert st.system_prompt == "A's prompt"
     assert st.system_enabled is True
@@ -85,11 +86,32 @@ def test_unstamped_patch_is_treated_as_same_owner():
     assert [p.run_id for p in st.panels] == ["cli-picked"]
 
 
-def test_stamped_patch_applies_when_no_workspace_is_on_the_bus_yet():
-    """Fresh process: the first browser to speak owns it."""
-    st = _apply(workspace_id="ws-a", system_prompt="hello")
-    assert st.workspace_id == "ws-a"
+def test_restamp_requires_a_claim_even_on_an_unclaimed_bus():
+    """The anti-chimera rule. Until 2026-08-06 a stamped patch was accepted
+    whenever the bus was unclaimed — so right after a server restart a booting
+    tab could restamp whatever panels the bus happened to hold with ITS OWN
+    workspace id, and every client scoped to that id then adopted (and
+    persisted) another workspace's layout as its own. `workspace_id` may only
+    move together with the `panels` that belong to it."""
+    _apply(panels=_panels(("primary", "run-a")))  # unclaimed bus, non-trivial panels
+    st = _apply(workspace_id="ws-b", system_prompt="hello")
+    assert st.workspace_id is None, "no claim → the stamp must not move"
+    assert st.system_prompt is None, "workspace keys must not land either"
+    assert [p.run_id for p in st.panels] == ["run-a"]
+    # The first browser to speak still owns the bus — by claiming.
+    st = _apply(workspace_id="ws-b", panels=_panels(("primary", "run-b")), system_prompt="hello")
+    assert st.workspace_id == "ws-b"
     assert st.system_prompt == "hello"
+
+
+def test_explicit_null_stamp_cannot_unstamp_the_bus():
+    """`{workspace_id: null}` without panels (a booting tab's id-push once sent
+    this) must not strip the owner's stamp — that would re-open the restamp hole
+    one patch later."""
+    _apply(workspace_id="ws-a", panels=_panels(("primary", "run-a")))
+    st = _apply(workspace_id=None, panel_messages={"primary": [{"role": "user", "content": "x"}]})
+    assert st.workspace_id == "ws-a"
+    assert st.panels[0].messages == []
 
 
 def test_own_incremental_write_applies():

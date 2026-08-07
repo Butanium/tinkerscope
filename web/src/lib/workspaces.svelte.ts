@@ -72,6 +72,17 @@ class ConversationsStore {
    *  $state.raw — plain immutable objects, replaced wholesale per commit; never
    *  mutate a tree/node in place (nothing would react, nothing would save). */
   trees = $state.raw<Record<string, ConvTree>>({ primary: emptyTree() });
+  /** THE authoritative client-side panel layout of the OPEN workspace (model per
+   *  panel, in display order). Set on load/create, mutated ONLY by explicit user
+   *  actions (`applyLayout`/`setPanelModel`, called from +page's panel lifecycle)
+   *  or by a bus message STAMPED with this workspace (live-drive lockstep —
+   *  `#adoptLayout`, wired in init). Rendering, persistence and bus claims all
+   *  read THIS — never `live.state.panels`: the mirror follows a process-global
+   *  bus that can transiently describe ANOTHER tab's workspace (bootstrap adopt,
+   *  restart re-prime races), and reading it back at save time is how two
+   *  cross-tab layout clobbers reached disk (ENGINEERING_LOGS 2026-07-24 +
+   *  2026-08-06). $state.raw like `trees`: replaced wholesale, never mutated. */
+  layout = $state.raw<PanelLayout[]>([{ id: 'primary', run_id: null, checkpoint: null }]);
   /** Transient hint shown when the terminal/another tab branched the workspace. */
   externalNotice = $state<string | null>(null);
 
@@ -198,24 +209,29 @@ class ConversationsStore {
   }
 
   /** True when the bus currently describes OUR workspace. A tab that isn't the
-   *  owner still renders and saves its own workspace (the bus filter guarantees
-   *  that) — it just isn't the one `tinkpg` is pointed at, and its incremental
-   *  workspace writes are dropped server-side until it claims. */
+   *  owner still renders and saves its own workspace (layout + trees are store-
+   *  owned) — it just isn't the one `tinkpg` is pointed at, and its incremental
+   *  workspace writes are dropped server-side until it claims. Decided on
+   *  `live.busId` — the RAW bus stamp — not the mirror's `workspace_id`, which
+   *  mergeBusState pins to our own id and so can never report a lost bus
+   *  (that read made this constant-true and focus-reclaim dead code). */
   get ownsBus(): boolean {
-    const stamp = live.state?.workspace_id;
-    return stamp == null || stamp === this.activeId;
+    return live.busId === this.activeId;
   }
 
-  /** This workspace's full picture for the bus: layout + per-panel active-path
-   *  echo + thread system. A patch carrying this is a CLAIM — after it, the bus
-   *  coherently describes us (see bus-scope.ts on why a partial write from a
-   *  non-owner would leave the bus a chimera: another workspace's models stamped
-   *  with our id, which is what the CLI would then fire at). */
+  /** This workspace's full picture for the bus: OUR layout + per-panel
+   *  active-path echo + thread system. A patch carrying this is a CLAIM — after
+   *  it, the bus coherently describes us (see bus-scope.ts on why a partial
+   *  write from a non-owner would leave the bus a chimera). Built from the
+   *  store-owned `layout`, never from `live.state.panels`: claiming with the
+   *  mirror's panels was itself a chimera generator — a transiently-foreign
+   *  mirror got re-published stamped with OUR id, which every same-id client
+   *  then adopted as its own. */
   #busPanels(): StatePatch['panels'] {
-    return (live.state?.panels ?? []).map((p) => ({
+    return this.layout.map((p) => ({
       id: p.id,
-      run_id: p.run_id,
-      checkpoint: p.checkpoint,
+      run_id: p.run_id ?? null,
+      checkpoint: p.checkpoint ?? null,
       messages: activeMessages(this.treeFor(p.id)),
       thread_system_prompt: this.#threadSystem(p.id)
     }));
@@ -251,6 +267,76 @@ class ConversationsStore {
     live.adopt(next);
   }
 
+  // ── layout mutation (the single entry for panel add/remove/reorder/model) ──
+  /** Claims currently on the wire from applyLayout. While >0, incoming bus
+   *  panel lists are NOT adopted into `layout`: they describe a state our own
+   *  in-flight full-replace is about to overwrite server-side anyway, and
+   *  adopting a stale echo mid-burst would briefly revert a rapid second edit. */
+  #layoutClaimsInFlight = 0;
+
+  /** Replace the open workspace's panel layout. Updates the authoritative copy
+   *  (rendering follows synchronously), schedules persistence, and re-CLAIMS
+   *  the bus with the new panel list + tree echoes — so after any layout edit
+   *  the bus coherently describes THIS tab, whoever held it before. */
+  applyLayout(next: PanelLayout[]): void {
+    this.layout = next.map((p) => ({
+      id: p.id,
+      run_id: p.run_id ?? null,
+      checkpoint: p.checkpoint ?? null
+    }));
+    this.#markLayout();
+    this.#layoutClaimsInFlight++;
+    api
+      .setState(this.#ownPatch({ panels: this.#busPanels() }))
+      .then((n) => live.adopt(n))
+      .catch(() => {})
+      .finally(() => {
+        this.#layoutClaimsInFlight--;
+      });
+  }
+
+  /** Point one panel at a model (the sidebar picker / CLI-independent path). */
+  setPanelModel(panel: Panel, run_id: string | null, checkpoint: string | null): void {
+    this.applyLayout(
+      this.layout.map((p) => (p.id === panel ? { ...p, run_id, checkpoint } : p))
+    );
+  }
+
+  /** A server state stamped with OUR workspace carried a panel list — the CLI
+   *  (or another tab on the same workspace) drove the layout. Adopt it as ours
+   *  and persist, keeping live-drive lockstep. Content-compare first: our own
+   *  claims echo back through here, and marking dirt on an echo would loop
+   *  save → broadcast → save. */
+  #adoptLayout(panels: { id: string; run_id: string | null; checkpoint: string | null }[]): void {
+    if (!this.activeId || this.#layoutClaimsInFlight > 0) return;
+    if (!panels.length) return; // a bus with no panels describes nothing — never adopt emptiness
+    const next: PanelLayout[] = panels.map((p) => ({
+      id: p.id,
+      run_id: p.run_id ?? null,
+      checkpoint: p.checkpoint ?? null
+    }));
+    const same =
+      next.length === this.layout.length &&
+      next.every((p, i) => {
+        const c = this.layout[i];
+        return c.id === p.id && (c.run_id ?? null) === p.run_id && (c.checkpoint ?? null) === p.checkpoint;
+      });
+    if (same) return;
+    this.layout = next;
+    this.#markLayout();
+  }
+
+  /** The store's half of a bus re-prime (state.svelte.ts `reprimeClaim`): the
+   *  open workspace's true claim, or null when none is open. */
+  #reprimeClaim(): StatePatch | null {
+    if (!this.activeId) return null;
+    return this.#ownPatch({
+      panels: this.#busPanels(),
+      system_prompt: live.state?.system_prompt ?? null,
+      system_enabled: live.state?.system_enabled ?? null
+    });
+  }
+
   /** The active THREAD's system prompt for a panel (its selected root node's) —
    *  travels with every echo so a mid-thread CLI send inherits the right prompt. */
   #threadSystem(pid: string): string | null {
@@ -261,15 +347,14 @@ class ConversationsStore {
   }
 
   #mirror(): void {
-    // Echo each LIVE panel's active path into PlaygroundState (one patch, messages
-    // only — never clobbers per-panel run_id/checkpoint). Restricted to panels in the
-    // live list: a tree that outlived its panel (a removed/replaced panel whose tree
-    // lingers in `this.trees`) must NOT echo, or it would re-register the panel
-    // server-side as a run_id=null phantom on every send. (The backend also refuses to
-    // auto-create from a message patch now — this is the matching client-side guard,
-    // and it also avoids the wasted POST.) Fall back to echoing all when the live list
-    // is empty (not loaded yet) so initial bootstrap still mirrors.
-    const liveIds = new Set((live.state?.panels ?? []).map((p) => p.id));
+    // Echo each OPEN panel's active path into PlaygroundState (one patch, messages
+    // only — never clobbers per-panel run_id/checkpoint). Restricted to panels in
+    // OUR layout: a tree that outlived its panel (a removed/replaced panel whose
+    // tree lingers in `this.trees`) must NOT echo, or it would re-register the panel
+    // server-side as a run_id=null phantom on every send. (The backend also refuses
+    // to auto-create from a message patch now — this is the matching client-side
+    // guard, and it also avoids the wasted POST.)
+    const liveIds = new Set(this.layout.map((p) => p.id));
     const panel_messages: Record<string, Msg[]> = {};
     const panel_thread_system: Record<string, string | null> = {};
     for (const [pid, tree] of Object.entries(this.trees)) {
@@ -377,21 +462,24 @@ class ConversationsStore {
   }
 
   /** The panel layout (model selection per panel) currently shown — what a new
-   *  workspace inherits. Always at least a blank primary. */
+   *  workspace inherits. With a workspace open that's OUR layout; before any is
+   *  open (the fresh-install draft) it's the session-restored bus panels.
+   *  Always at least a blank primary. */
   #currentLayout(): PanelLayout[] {
-    const layout = (live.state?.panels ?? []).map((p) => ({
+    if (this.activeId) return this.layout.map((p) => ({ ...p }));
+    const restored = (live.state?.panels ?? []).map((p) => ({
       id: p.id,
       run_id: p.run_id,
       checkpoint: p.checkpoint
     }));
-    return layout.length ? layout : [{ id: 'primary', run_id: null, checkpoint: null }];
+    return restored.length ? restored : [{ id: 'primary', run_id: null, checkpoint: null }];
   }
 
   /** Reset every open panel's tree to empty (fresh thread, same panel layout).
    *  `mark` schedules the emptiness for persistence (dirty new ids + dropped
    *  stale ids); pass false ONLY for an unsaved draft, which must stay unsaved. */
   #freshTrees(mark: boolean): Promise<void> {
-    const ids = (live.state?.panels ?? []).map((p) => p.id);
+    const ids = this.layout.map((p) => p.id);
     if (!ids.length) ids.push('primary'); // no panels known yet → the default first slot
     const prev = Object.keys(this.trees);
     this.trees = Object.fromEntries(ids.map((id) => [id, emptyTree()]));
@@ -486,16 +574,20 @@ class ConversationsStore {
     this.#droppedTrees = new Set();
     this.#layoutDirty = false;
     this.#pendingId = null;
-    // Workspace-level fields are read at FIRE time: system_prompt + the panel
-    // layout mirror server state (which lands a beat after a patchState), and
-    // flush-on-switch guarantees live.state still belongs to `id` here.
+    // Workspace-level fields are read at FIRE time; flush-on-switch guarantees
+    // they still belong to `id` here. `panels` comes from the STORE-OWNED
+    // layout — never from live.state, whose panels follow a process-global bus
+    // that can transiently describe another tab's workspace (reading it here is
+    // exactly how two cross-tab layout clobbers reached disk). system_prompt
+    // stays a mirror read: mergeBusState protects it per-workspace, and the
+    // +page patch flush (#preSwitch) settles it before any transition.
     const fields = {
       system_prompt: live.state?.system_prompt ?? null,
       system_enabled: live.state?.system_enabled ?? null,
-      panels: (live.state?.panels ?? []).map((ps) => ({
-        id: ps.id,
-        run_id: ps.run_id,
-        checkpoint: ps.checkpoint
+      panels: this.layout.map((p) => ({
+        id: p.id,
+        run_id: p.run_id ?? null,
+        checkpoint: p.checkpoint ?? null
       })),
       reduced_panels: [...this.reducedPanels],
       send_targets: [...this.sendTargets],
@@ -686,6 +778,11 @@ class ConversationsStore {
     this.#loadFailed = false;
     this.#fullTreeSaveNeeded = false; // a draft is never legacy-shaped
     nodeBlobs.reset(draft.id);
+    this.layout = layout.map((p) => ({
+      id: p.id,
+      run_id: p.run_id ?? null,
+      checkpoint: p.checkpoint ?? null
+    }));
     this.reducedPanels = new Set();
     this.sendTargets = new Set(ids);
     this.#seenPanels = new Set(ids);
@@ -827,38 +924,35 @@ class ConversationsStore {
       this.trees = map;
     }
     this.#applyPanelUi(conv);
+    // The STORE-OWNED layout: the workspace's stored panels, or — for a
+    // layout-less legacy body — whatever layout was already shown (kept, as
+    // before; its first save then bakes it in).
+    if (layout) {
+      this.layout = layout.map((p) => ({
+        id: p.id,
+        run_id: p.run_id ?? null,
+        checkpoint: p.checkpoint ?? null
+      }));
+    }
     // system_prompt + the panel LAYOUT travel with the workspace (each conv =
-    // one experiment). Optimistically assign the returned state so the immediately-
-    // following #afterLoad mirrors against the FRESH panel list rather than the
-    // previous workspace's.
+    // one experiment). This patch is a full CLAIM — panels + our stamp — in
+    // BOTH branches: it re-points the bus at this workspace, and the empty
+    // `messages` reset every echo so #afterLoad (whose contract is "echoes are
+    // cleared before it runs") can't reconcile a previous workspace's turns
+    // into the fresh trees. The response is adopted so #afterLoad mirrors
+    // against the fresh panel list rather than the previous workspace's.
     const patch: StatePatch = {
       system_prompt: conv.system_prompt ?? null,
       // Explicit derive for flag-less legacy bodies (text present ⇒ enabled), so
       // the bus mirror is always a real bool once a workspace is open.
-      system_enabled: conv.system_enabled ?? (conv.system_prompt ?? '').trim().length > 0
-    };
-    if (layout) {
-      patch.panels = layout.map((p) => ({
+      system_enabled: conv.system_enabled ?? (conv.system_prompt ?? '').trim().length > 0,
+      panels: this.layout.map((p) => ({
         id: p.id,
         run_id: p.run_id ?? null,
         checkpoint: p.checkpoint ?? null,
         messages: []
-      }));
-    } else {
-      // Layout-less workspace (legacy {tree,compare_tree} / bare API create):
-      // the shown panels are KEPT, but their transcript echoes belong to the
-      // PREVIOUS workspace — clear them in this same patch, exactly like the
-      // layout branch's `messages: []` does. Without this, #afterLoad (whose
-      // contract is "echoes are cleared before it runs") reconciles the foreign
-      // echoes into this workspace's trees, and the graft persists on the
-      // next save.
-      patch.panel_messages = Object.fromEntries(
-        (live.state?.panels ?? []).map((p) => [p.id, []])
-      );
-      patch.panel_thread_system = Object.fromEntries(
-        (live.state?.panels ?? []).map((p) => [p.id, null])
-      );
-    }
+      }))
+    };
     const next = await api.setState(this.#ownPatch(patch)).catch(() => null);
     live.adopt(next);
   }
@@ -902,6 +996,20 @@ class ConversationsStore {
       if (own?.error(panel, data)) return; // our chat: token released, bucket shows the error
       if (data?.client_token) this.endToken(data.client_token);
     };
+    // Layout lockstep: a state stamped as OURS drives the store-owned layout
+    // (CLI `tinkpg open`, another tab on the same workspace). Strictly stamped —
+    // see live.onOwnPanels' docstring for why unstamped states are excluded.
+    live.onOwnPanels = (panels) =>
+      this.#adoptLayout(
+        (panels ?? []).map((p) => ({
+          id: p.id,
+          run_id: p.run_id ?? null,
+          checkpoint: p.checkpoint ?? null
+        }))
+      );
+    // Bus re-prime after a server restart claims with OUR true layout, not the
+    // mirror's panels (state.svelte.ts #reprime).
+    live.reprimeClaim = () => this.#reprimeClaim();
   }
 
   #onExternalDone(
@@ -955,7 +1063,10 @@ class ConversationsStore {
    *  CLI/other-tab workspace switch must not graft foreign turns). */
   reconcileOnReconnect(): void {
     if (!this.activeId) return;
-    const serverConv = live.state?.workspace_id;
+    // live.busId, not the mirror's workspace_id (which mergeBusState pins to
+    // ours): when the reconnect snapshot says the bus belongs to ANOTHER
+    // workspace, our echo view predates the drop and has nothing to recover.
+    const serverConv = live.busId;
     const sameConv = serverConv == null || serverConv === this.activeId;
     if (sameConv && !live.anyRunning) {
       let changed = false;

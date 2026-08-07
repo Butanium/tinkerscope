@@ -42,6 +42,14 @@ class LiveStore {
    *  `workspaces.activeId` by the workspace store — the one input the bus
    *  filter needs, injected rather than imported (workspaces imports us). */
   workspaceId: string | null = null;
+  /** The RAW bus ownership stamp — whose workspace the server bus currently
+   *  describes. Distinct from `state.workspace_id`: mergeBusState pins the
+   *  MIRROR's stamp to our own on foreign messages (the mirror is "my
+   *  workspace's coherent picture"), so the mirror can never report that we
+   *  LOST the bus — which silently made `ownsBus` constant-true and focus-
+   *  reclaim dead code. This field tracks every incoming message's own stamp;
+   *  it is what `ws.ownsBus` (and so claim-on-write / focus-reclaim) decide on. */
+  busId = $state<string | null>(null);
   /** true while the SSE stream is believed alive: any event (the server
    *  heartbeats every 15s) marks it up; a socket error or 35s of silence marks
    *  it DOWN. It must DEGRADE, never latch: the topbar dot is a claim about
@@ -77,6 +85,22 @@ class LiveStore {
    *  missed during the gap + release stale busy tokens. Not fired on incremental
    *  `patch` events. */
   onSnapshot: (() => void) | null = null;
+  /** Fires when a server-sent state STAMPED WITH OUR OPEN WORKSPACE carries a
+   *  panel list — the CLI (or another tab of the same workspace) drove the
+   *  layout. The workspace store adopts it into its authoritative `layout`
+   *  (live-drive lockstep). STRICT stamp match on purpose: unstamped states
+   *  (a pre-claim boot, a session-restore seed) must NOT reach the layout —
+   *  trusting them is how a restart race once persisted another workspace's
+   *  panels (ENGINEERING_LOGS 2026-08-06). A CLI drive still lands here: the
+   *  CLI's unstamped `panels` patch keeps the bus's owner stamp, so the
+   *  resulting broadcast is stamped with the owner tab's workspace. */
+  onOwnPanels: ((panels: PlaygroundState['panels']) => void) | null = null;
+  /** Assigned by the workspace store: the open workspace's TRUE bus claim
+   *  (layout from the store + tree echoes + system prompt). #reprime uses it
+   *  instead of replaying the mirror's panels — re-priming from the mirror
+   *  could re-publish a poisoned mirror as a claim. null = no workspace open
+   *  (params-only reprime). */
+  reprimeClaim: (() => Partial<PlaygroundState> | null) | null = null;
 
   #stop: (() => void) | null = null;
 
@@ -86,7 +110,13 @@ class LiveStore {
    *  owns the bus right now; assigning it raw is exactly the cross-workspace
    *  clobber. Everything funnels through mergeBusState instead. */
   adopt(next: PlaygroundState | null | undefined): void {
-    if (next) this.state = mergeBusState(this.state, next, this.workspaceId);
+    if (!next) return;
+    this.busId = next.workspace_id ?? null;
+    this.state = mergeBusState(this.state, next, this.workspaceId);
+    // Layout lockstep: only a state stamped as OURS may drive the store's
+    // authoritative layout (see onOwnPanels for why unstamped is excluded).
+    if (next.workspace_id != null && next.workspace_id === this.workspaceId)
+      this.onOwnPanels?.(next.panels ?? []);
   }
 
   /** Open the global SSE state stream once. Idempotent. */
@@ -138,16 +168,16 @@ class LiveStore {
     return Object.values(this.panels).some((p) => p?.running);
   }
 
-  /** Restore a wiped server bus from this tab's mirror: full panel list
-   *  (selections + transcript echoes), open workspace, sampling params. */
+  /** Restore a wiped server bus: sampling params from this tab's mirror, and —
+   *  when a workspace is open — the workspace's TRUE claim from the store
+   *  (`reprimeClaim`: layout + echoes + system prompt). Never `prev.panels`:
+   *  the mirror is a bus follower, and replaying it as a claim would launder a
+   *  transiently-foreign mirror into "this is workspace X's layout". */
   #reprime(prev: PlaygroundState): void {
+    const claim = this.reprimeClaim?.() ?? null;
     api
       .setState({
-        workspace_id: prev.workspace_id,
-        panels: prev.panels,
-        system_prompt: prev.system_prompt,
-        // explicit — the flag-less shim would re-enable a muted prompt
-        system_enabled: prev.system_enabled ?? null,
+        ...(claim ?? {}),
         temperature: prev.temperature,
         max_tokens: prev.max_tokens,
         n_samples: prev.n_samples,
@@ -178,6 +208,7 @@ class LiveStore {
             prev != null &&
             next.workspace_id == null &&
             (prev.workspace_id != null || next.chat_id < prev.chat_id);
+          if (wiped) this.busId = next.workspace_id ?? null; // adopt() is skipped — track the (un)claim anyway
           if (wiped && !next.running) this.#reprime(prev);
           else if (!wiped) this.adopt(next);
         }

@@ -172,23 +172,33 @@ class StateBus:
         setattr(panel, key, value)
 
     def _drop_foreign_workspace_keys(self, patch: dict[str, Any]) -> dict[str, Any]:
-        """The bus describes exactly ONE workspace at a time. A patch stamped with a
-        DIFFERENT workspace than the one on the bus may only be applied if it carries
-        the full picture (`panels`) — i.e. it CLAIMS the bus. An incremental write from
-        a non-owner (a second browser tab's transcript echo, a stale client) would
-        otherwise graft onto the current workspace's panel list and leave the bus a
-        chimera: one workspace's models stamped with another's id, which is exactly
-        what `tinkpg send` would then fire at. Such a patch keeps only its GLOBAL
-        fields (sampling params).
+        """The bus describes exactly ONE workspace at a time — `workspace_id` and
+        `panels` must always belong together (no chimeras). Two rules enforce it:
 
-        Unstamped patches are treated as same-owner: that's the CLI (`tinkpg open`)
-        and any pre-scoping client, and it's what keeps terminal-drives-browser
-        working. See web/src/lib/bus-scope.ts for the browser half."""
-        stamp = patch.get("workspace_id")
-        if stamp is None or "panels" in patch:
+        1. Anti-graft: a patch stamped with a DIFFERENT workspace than the one on
+           the bus may only apply workspace-scoped keys if it carries the full
+           picture (`panels`) — i.e. it CLAIMS the bus. An incremental write from
+           a non-owner (a second browser tab's transcript echo, a stale client)
+           would otherwise graft onto the current workspace's panel list. Such a
+           patch keeps only its GLOBAL fields (sampling params).
+        2. Anti-chimera: a patch may never CHANGE `workspace_id` without bringing
+           the panels that belong to it. Before 2026-08-06 a stamped patch was
+           accepted whenever the bus was unclaimed (`current is None`), which let
+           a booting tab restamp another workspace's panels with its own id right
+           after a server restart — the browser then adopted the chimera as its
+           own and persisted it (the second cross-tab layout clobber; the first
+           is in the module docstring). Restamping now REQUIRES a claim.
+
+        A patch with NO `workspace_id` key at all is treated as same-owner:
+        that's the CLI (`tinkpg open`) and any pre-scoping client, and it's what
+        keeps terminal-drives-browser working. (`exclude_unset` in routes/state.py
+        preserves the absent-vs-null distinction this relies on.)
+        See web/src/lib/bus-scope.ts for the browser half."""
+        if "panels" in patch:
             return patch
-        current = self.state.workspace_id
-        if current is None or stamp == current:
+        if "workspace_id" not in patch:
+            return patch
+        if patch["workspace_id"] == self.state.workspace_id:
             return patch
         return {k: v for k, v in patch.items() if k not in self._WORKSPACE_KEYS}
 

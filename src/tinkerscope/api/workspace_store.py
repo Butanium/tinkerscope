@@ -398,6 +398,12 @@ def _record_layout(cid: str, prev: Any, new: Any) -> None:
     try:
         f = _layouts_file(cid)
         line = json.dumps({"ts": _now(), "panels": new}, separators=(",", ":"))
+        # First entry ever for this workspace: seed the PRE-change layout too.
+        # The history records `new` per change, so without this the layout a
+        # workspace held before its first post-feature change is unrecoverable —
+        # which on 2026-08-06 was exactly the layout a clobber destroyed.
+        if isinstance(prev, list) and not (f.exists() and f.stat().st_size):
+            f.write_text(json.dumps({"ts": _now(), "panels": prev}, separators=(",", ":")) + "\n")
         # A crash mid-append leaves a line with no trailing newline; appending
         # straight onto it would GLUE the next entry to the torn one and lose both.
         heal = ""

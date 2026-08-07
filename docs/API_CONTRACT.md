@@ -400,18 +400,34 @@ load-bearing:
 | **global** | `temperature`, `max_tokens`, `n_samples`, `thinking`, `top_p`, `chat_id`, `running`, `last_event*` | one knob for every panel and every client — the point of a shared bus |
 
 The bus holds exactly **one workspace's** worth of the first group at a time,
-identified by `workspace_id`. Two rules keep that honest:
+identified by `workspace_id`. Three rules keep that honest:
 
-1. **Server** (`api/state.py::_drop_foreign_workspace_keys`): a patch stamped with
-   a `workspace_id` different from the bus's current one may only apply
-   workspace-scoped keys if it also carries `panels` — i.e. it CLAIMS the bus.
-   An incremental write from a non-owner keeps only its global fields. A patch with
-   NO stamp is treated as same-owner (that's the CLI, and any pre-scoping client).
-2. **Client** (`web/src/lib/bus-scope.ts::mergeBusState`): a client adopts
-   workspace-scoped fields only from messages stamped with its own workspace;
-   otherwise it keeps its own and takes the globals. It re-claims the bus on
-   workspace open/switch/create and on window focus — so *the tab you last
-   looked at is the one the terminal drives*.
+1. **Server, anti-graft** (`api/state.py::_drop_foreign_workspace_keys`): a patch
+   stamped with a `workspace_id` different from the bus's current one may only
+   apply workspace-scoped keys if it also carries `panels` — i.e. it CLAIMS the
+   bus. An incremental write from a non-owner keeps only its global fields. A
+   patch with NO `workspace_id` key at all is treated as same-owner (that's the
+   CLI, and any pre-scoping client); an explicit `workspace_id: null` is NOT the
+   same as an absent key (routes/state.py uses `exclude_unset`).
+2. **Server, anti-chimera** (same function, since 2026-08-06): a patch may never
+   CHANGE `workspace_id` — including onto an unclaimed bus — without carrying
+   `panels`. The stamp and the panels only ever move together, so the bus can
+   never say "workspace B" over another workspace's panel list.
+3. **Client** (`web/src/lib/bus-scope.ts::mergeBusState`): a client adopts
+   workspace-scoped fields into its render mirror only from messages stamped
+   with its own workspace; otherwise it keeps its own and takes the globals. It
+   re-claims the bus on workspace open/switch/create and on window focus — so
+   *the tab you last looked at is the one the terminal drives*.
+
+**Layout ownership (since 2026-08-06).** The browser's authoritative copy of the
+open workspace's panel layout is the workspace store's `ws.layout` — set from
+the loaded body, mutated only by explicit panel edits or by bus messages
+STAMPED with that workspace. Rendering, workspace saves, the `last_session`
+pref, and every bus claim (open/switch/focus/re-prime) read `ws.layout`;
+`live.state.panels` is only the CLI-visible echo. The mirror can transiently
+hold another workspace's panels (bootstrap adopt of a foreign-claimed bus,
+restart re-prime races) — with ownership inverted, that can no longer reach
+disk or be re-published as a claim.
 
 `/api/chat` carries `workspace_id` too (browser sends its own; CLI omits it and
 inherits the bus's), and the `chat_start`/`chat_done`/`chat_error` broadcasts are
@@ -422,9 +438,13 @@ describe another workspace by the time a chat ends.
 other with no user action: tab A opens workspace X → pushes X's layout onto the bus
 → tab B mirrors it → B's `syncPanels` sees X's panel ids as new, calls `save()` →
 B's workspace is persisted on disk with X's models. Four workspaces on the author's
-instance were corrupted this way before it was diagnosed (2026-07-24). Tests:
-`tests/test_state_workspace_scope.py`, `web/src/lib/bus-scope.test.ts`, smoke
-`tests/small-smokes/browser_two_tab_workspace.py`.
+instance were corrupted this way before it was diagnosed (2026-07-24); a restart
+race that poisoned one tab's mirror corrupted a fifth on 2026-08-06 (the layout
+ownership inversion + the anti-chimera rule close that class — full story in
+`ENGINEERING_LOGS.md`). Tests: `tests/test_state_workspace_scope.py`,
+`web/src/lib/bus-scope.test.ts`, smoke
+`tests/small-smokes/browser_two_tab_workspace.py` (scenarios 5–6 pin the
+inversion and were verified to fail on the pre-fix build).
 
 ### /api/state/events SSE (the browser subscribes ONCE on load)
 Event names = the message's `type`:

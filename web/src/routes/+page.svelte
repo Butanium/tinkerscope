@@ -75,7 +75,7 @@
     Run,
     Health,
     PlaygroundState,
-    PanelState,
+    PanelLayout,
     StatePatch,
     ChatMessage,
     Panel,
@@ -169,11 +169,15 @@
   };
   let s = $derived<PlaygroundState>(live.state ?? DEFAULTS);
 
-  // The N panels in display order, projected from the shared panels[] array. Each
-  // has a STABLE id (never an array index) so reorder/remove can't rebind a tree.
-  // PanelSel is shared (in $lib/types) — the catalog + branch-ops stores use it too.
+  // The N panels in display order, projected from the STORE-OWNED layout
+  // (ws.layout) — not the bus mirror, which follows a process-global bus that can
+  // transiently describe another tab's workspace. The mirror's `panels` remain
+  // the CLI-visible echo; rendering and persistence read the store (a CLI drive
+  // still lands here via the stamped-adopt in ws.init). Each panel has a STABLE
+  // id (never an array index) so reorder/remove can't rebind a tree. PanelSel is
+  // shared (in $lib/types) — the catalog + branch-ops stores use it too.
   let panelSels = $derived<PanelSel[]>(
-    (s.panels ?? []).map((ps) => ({ panel: ps.id, run_id: ps.run_id, checkpoint: ps.checkpoint }))
+    ws.layout.map((p) => ({ panel: p.id, run_id: p.run_id, checkpoint: p.checkpoint }))
   );
   let isComparing = $derived(panelSels.length > 1);
 
@@ -260,12 +264,13 @@
     else patchTimer = setTimeout(() => void flushPatchState(), 200);
   }
 
-  // Push the OPEN workspace's id onto the state bus whenever it changes, so the
-  // terminal (`tinkpg state`) can name exactly what's on screen instead of guessing
-  // by active-path match. No loop: nothing maps server state back to ws.activeId.
-  $effect(() => {
-    patchState({ workspace_id: ws.activeId ?? null }, true);
-  });
+  // NB: there is deliberately NO "push ws.activeId onto the bus" effect here.
+  // Every real transition (load/switch/create) already CLAIMS the bus with
+  // workspace_id + panels together (ws.#loadTrees / create), which is how
+  // `tinkpg state` learns what's on screen. A bare `{workspace_id}` push can
+  // never restamp the bus anyway (state.py's anti-chimera rule: the stamp only
+  // moves together with the panels it belongs to) — an earlier boot-time push of
+  // exactly that shape helped mint the 2026-08-06 layout clobber.
 
   // ── Per-panel selection edits ─────────────────────────────────────
   function defaultCheckpoint(runId: string): string | null {
@@ -281,12 +286,11 @@
     return (lastServable ?? r.checkpoints[r.checkpoints.length - 1]).name;
   }
   function setRun(panel: Panel, runId: string) {
-    patchState({ panel, run_id: runId, checkpoint: defaultCheckpoint(runId) }, true);
-    ws.save(); // the panel layout (models) is persisted with the workspace
+    // Layout mutation goes through the store (persist + bus claim in one).
+    ws.setPanelModel(panel, runId, defaultCheckpoint(runId));
   }
   function setCheckpoint(panel: Panel, ck: string) {
-    patchState({ panel, checkpoint: ck }, true);
-    ws.save();
+    ws.setPanelModel(panel, ws.layout.find((p) => p.id === panel)?.run_id ?? null, ck);
   }
 
   /** Drop a panel's live sample bucket (so a stale run can't show after remove). */
@@ -297,7 +301,7 @@
   // ── Panel lifecycle: add / remove / reduce / restore ──────────────
   /** Next stable panel id: reuse reserved 'compare' for slot 1, then p-2, p-3, … */
   function nextPanelId(): string {
-    const ids = new Set(s.panels.map((p) => p.id));
+    const ids = new Set(ws.layout.map((p) => p.id));
     if (!ids.has('compare')) return 'compare';
     let n = 2;
     while (ids.has('p-' + n)) n++;
@@ -313,7 +317,7 @@
     // sample can't overlay the fresh panel.
     dropPanelBucket(id);
     // Pick a model not already shown, preferring a sampleable run.
-    const used = new Set(s.panels.map((p) => p.run_id));
+    const used = new Set(ws.layout.map((p) => p.run_id));
     const other =
       modelCatalog.runs.find((r) => !used.has(r.id) && r.sampleable !== false) ??
       modelCatalog.runs.find((r) => !used.has(r.id)) ??
@@ -322,25 +326,18 @@
     // Default: seed the new panel's tree from the FIRST panel so it starts from the
     // same thread (compare a second model on the same workspace; 'primary' may
     // have been removed — first slot is the main thread). Shift: start it blank.
+    // Seed the TREE first: applyLayout's bus claim carries every panel's tree
+    // echo + thread system prompt, so the seeded thread registers in the same
+    // patch (no separate seedMsgs plumbing).
     if (blank) ws.freshTree(id);
     else ws.duplicateTo(panelSels[0]?.panel ?? 'primary', id);
-    const seedMsgs = activeMessages(ws.treeFor(id)) as ChatMessage[];
-    // The seeded thread's system prompt rides into the panel registration — the
-    // `panels` full-replace resets mirrors, and a duplicated probe thread must
-    // keep its prompt for CLI sends until the next tree commit re-mirrors.
-    const seedSys = activePath(ws.treeFor(id))[0]?.system_prompt ?? null;
-    const nextPanels = [
-      ...s.panels.map((p) => ({ ...p })),
-      { id, run_id: other?.id ?? null, checkpoint: ck, messages: seedMsgs, thread_system_prompt: seedSys }
-    ];
-    patchState({ panels: nextPanels }, true);
+    ws.applyLayout([...ws.layout, { id, run_id: other?.id ?? null, checkpoint: ck }]);
     // the new panel auto-joins sendTargets (active by default) via ws.syncPanels (the effect above)
   }
   function removePanel(panel: Panel) {
-    if (s.panels.length <= 1) return; // keep at least one panel (any id — 'primary' is not special)
+    if (ws.layout.length <= 1) return; // keep at least one panel (any id — 'primary' is not special)
     chat.stopGeneration(panel);
-    const nextPanels = s.panels.filter((p) => p.id !== panel).map((p) => ({ ...p }));
-    patchState({ panels: nextPanels }, true);
+    ws.applyLayout(ws.layout.filter((p) => p.id !== panel));
     ws.dropTree(panel);
     dropPanelBucket(panel);
     ws.dropPanelUi(panel);
@@ -356,9 +353,8 @@
   // the shared DragReorder ('x' = horizontal columns); the indicator hides at
   // no-op gaps.
   const panelDrag = new DragReorder('x');
-  function applyPanelReorder(next: PanelState[]) {
-    patchState({ panels: next.map((p) => ({ ...p })) }, true);
-    ws.save(); // persist the layout with the workspace (like setRun)
+  function applyPanelReorder(next: PanelLayout[]) {
+    ws.applyLayout(next); // persist + bus claim in one (like setRun)
   }
 
   // ── Param edits → shared state ────────────────────────────────────
@@ -436,8 +432,11 @@
     if (sessionSaveTimer) clearTimeout(sessionSaveTimer);
     sessionSaveTimer = setTimeout(() => {
       const json = JSON.stringify({
-        // the panel layout (model selection per panel), not the dead scalars
-        panels: s.panels.map((p) => ({ id: p.id, run_id: p.run_id, checkpoint: p.checkpoint })),
+        // The panel layout (model selection per panel) — from the STORE, not the
+        // bus mirror: this pref is shared by every tab, and snapshotting the
+        // mirror here once meant one tab's layout could travel to a fresh boot
+        // of another. ws.layout is always the layout of OUR open workspace.
+        panels: ws.layout.map((p) => ({ id: p.id, run_id: p.run_id, checkpoint: p.checkpoint })),
         temperature: s.temperature, max_tokens: s.max_tokens, n_samples: s.n_samples,
         thinking: s.thinking, top_p: s.top_p,
         top_k: topK, presence_penalty: presencePenalty, repetition_penalty: repetitionPenalty,
@@ -450,7 +449,7 @@
   }
   $effect(() => {
     // Touch every persisted field so the effect re-runs whenever any changes.
-    void s.panels;
+    void ws.layout;
     void s.temperature; void s.max_tokens; void s.n_samples; void s.thinking; void s.top_p;
     void topK; void presencePenalty; void repetitionPenalty;
     void prefillInput; void prefillOn; void showPrefill; void prefillScope;
@@ -736,7 +735,7 @@
     // panel with no model selected (a clean slate).
     const layout = e?.shiftKey
       ? [{ id: 'primary', run_id: null, checkpoint: null }]
-      : s.panels.map((p) => ({ id: p.id, run_id: p.run_id, checkpoint: p.checkpoint }));
+      : ws.layout.map((p) => ({ id: p.id, run_id: p.run_id, checkpoint: p.checkpoint }));
     // Mint the id and push ?c= BEFORE create — and AWAIT the navigation so
     // `page.url` is current. create() sets activeId then awaits an optimistic
     // setState, yielding to the reactive scheduler; if `page.url` still pointed at
@@ -2277,10 +2276,10 @@
           {#if ws.reducedPanels.has(p.panel)}
             <div
               class="chat-column reduced"
-              class:drop-left={panelDrag.showAt(s.panels, i)}
-              class:drop-right={i === panelSels.length - 1 && panelDrag.showAt(s.panels, panelSels.length)}
+              class:drop-left={panelDrag.showAt(ws.layout, i)}
+              class:drop-right={i === panelSels.length - 1 && panelDrag.showAt(ws.layout, panelSels.length)}
               ondragover={(e) => panelDrag.over(e, i)}
-              ondrop={(e) => panelDrag.drop(e, s.panels, applyPanelReorder)}
+              ondrop={(e) => panelDrag.drop(e, ws.layout, applyPanelReorder)}
               ondragend={() => panelDrag.end()}
               role="group"
             >
@@ -2296,10 +2295,10 @@
             class="chat-column"
             data-panel={p.panel}
             class:dragging={panelDrag.dragId === p.panel}
-            class:drop-left={panelDrag.showAt(s.panels, i)}
-            class:drop-right={i === panelSels.length - 1 && panelDrag.showAt(s.panels, panelSels.length)}
+            class:drop-left={panelDrag.showAt(ws.layout, i)}
+            class:drop-right={i === panelSels.length - 1 && panelDrag.showAt(ws.layout, panelSels.length)}
             ondragover={(e) => panelDrag.over(e, i)}
-            ondrop={(e) => panelDrag.drop(e, s.panels, applyPanelReorder)}
+            ondrop={(e) => panelDrag.drop(e, ws.layout, applyPanelReorder)}
             ondragend={() => panelDrag.end()}
             role="group"
           >

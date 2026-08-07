@@ -144,12 +144,24 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
   across the app:
   - `lib/state.svelte.ts` → `live` — mirrored shared `PlaygroundState` (selection/
     params) + per-panel **streamed sample buckets**, both driven by the
-    `/api/state/events` SSE. The render bus. `live.connected` drives the topbar
+    `/api/state/events` SSE. The render bus — but since 2026-08-06 its `panels`
+    are the CLI-visible ECHO only: the authoritative layout lives in
+    `ws.layout`, and NOTHING reads `live.state.panels` back for rendering or
+    persistence (that read is how two cross-tab layout clobbers reached disk).
+    `live.busId` tracks the RAW bus ownership stamp (the mirror's own
+    `workspace_id` is pinned to ours by mergeBusState, so it can't detect a
+    lost bus); `onOwnPanels`/`reprimeClaim` are the ws-store hooks for layout
+    lockstep + restart re-prime. `live.connected` drives the topbar
     dot and DEGRADES (EventSource onerror + a 35s heartbeat watchdog over the
     server's 15s pings) — it is the bus link to the tinkerscope backend, not a
     claim about the tinker upstream. Smoke: `browser_state_reprime.py` §4.
   - `lib/workspaces.svelte.ts` → `ws` — owner of the per-panel **branch
-    trees** + persistence + the external-fold reconcile. The workspace model.
+    trees**, the **panel layout** (`ws.layout` — THE authoritative model-per-
+    panel list; rendering, saves, session prefs and every bus claim read it,
+    never `live.state.panels`; mutations go through `applyLayout`/
+    `setPanelModel`, and only bus messages STAMPED with the open workspace may
+    drive it — see the 2026-08-06 clobber in `ENGINEERING_LOGS.md`),
+    + persistence + the external-fold reconcile. The workspace model.
     Storage v2 (`docs/STORAGE_V2.md`): `list` holds SUMMARIES only (bodies are
     fetched on open); `trees` is **`$state.raw`** (immutable refs — never mutate
     a node in place, nothing would react or save); saves accumulate dirty-panel /
