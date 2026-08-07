@@ -39,6 +39,7 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 - [Browserless bare `--node`](browserless-node-lookup.md) — fall back to an all-workspace search so node ids are self-contained references
 - [Isolate one sample by its own node id](isolate-sample-by-node-id.md) — `--this`, so the browser's Copy-node-id → terminal round-trip is one paste
 - [`chat`/`compare` thread-prompt authoring](chat-compare-thread-system.md) — ~2 lines each, deliberately deferred until a use case shows up
+- [Restore a deleted WORKSPACE](restore-a-deleted-workspace.md) — the soft delete sets it aside in `workspaces/.deleted/`, but only a manual directory move gets it back
 
 ### Models: discovery, availability, renderers
 
@@ -50,6 +51,7 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 
 ### UI affordances & consistency
 
+- [A "Deleted — Undo" toast](undo-toast.md) — the undo affordance is off in the sidebar exactly when you want it under the cursor
 - [Hunt the rest of the DOM-held UI state](dom-held-ui-state-sweep.md) — the tell is state a person SET that no store knows about, inside a re-derived `{#each}`
 - [Sweep for controls that follow-scroll hides](follow-scroll-hidden-controls.md) — affordances whose useful moment is exactly when their anchor is off-screen
 - [Finish the icon consolidation](finish-icon-consolidation.md) — ~22 inline `<svg>` remain, and HighlightRules already drew its own divergent pencil
@@ -75,6 +77,7 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 
 - [A send fired mid-fold is silently dropped](send-mid-fold-dropped.md) — no error, no user row, text left in the textarea; should queue or visibly refuse
 - [Token overlay: hovering a word sometimes yields no popover](token-hover-dead-spots.md) — suspect a null-mapped token or an inter-rect gap; uninvestigated
+- [`asTree()` silently swaps a malformed tree for an empty one](astree-silent-emptytree.md) — the blank panel then SAVES over the real tree; now journal-recoverable, but it should refuse loudly instead
 
 ### Docs
 
