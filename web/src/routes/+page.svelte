@@ -1136,8 +1136,8 @@
   }
 
   // "View all samples" (the row-toolbar eye): per panel, the USER-parent id of
-  // the one expanded turn — keyed on the PARENT so selecting a different sample
-  // inside the open view (which changes the active child) doesn't collapse it.
+  // the one expanded turn. Keyed on the PARENT (not the active child) so the
+  // view survives tree mutations that swap which sibling is active.
   // View-only session state: never persisted, cleared on workspace switch, and
   // dormant (expandTurnSamples no-ops) whenever the turn leaves the active path.
   let samplesOpen = $state<Partial<Record<Panel, string | null>>>({});
@@ -1149,6 +1149,13 @@
     }
     const parent = msg.nodeId ? ws.treeFor(panel).nodes[msg.nodeId]?.parent : null;
     if (parent) samplesOpen[panel] = parent;
+  }
+
+  // Picking a card is a DECISION: make it active and drop back to the normal
+  // thread. Harmless on the live bucket, whose rows never set samplesOpen.
+  function selectSample(panel: Panel, msg: ViewMessage, idx: number) {
+    branchOps.selectSample(panel, msg, idx);
+    samplesOpen[panel] = null;
   }
 
   // Follow streamed tokens: pin a panel to its bottom ONLY while its bucket is
@@ -2328,7 +2335,7 @@
                   onRegenerate={(allPanels, replace) => (allPanels ? branchOps.regenerateAll(p.panel, msg, replace) : branchOps.regenerate(p.panel, msg, replace))}
                   onContinue={(allPanels, thinkingOnly) => branchOps.continueMessage(p.panel, msg, allPanels, thinkingOnly)}
                   onDelete={(allPanels, allSiblings) => (allPanels ? branchOps.deleteMessageAll(p.panel, msg, allSiblings) : branchOps.deleteMessage(p.panel, msg, allSiblings))}
-                  onSelectSample={(idx) => branchOps.selectSample(p.panel, msg, idx)}
+                  onSelectSample={(idx) => selectSample(p.panel, msg, idx)}
                   onDiscardOthers={(idx) => branchOps.discardOtherSamples(p.panel, msg, idx)}
                   onContinueSample={(idx) => branchOps.continueSample(p.panel, msg, idx)}
                   onDeleteSample={(idx) => branchOps.deleteSample(p.panel, msg, idx)}

@@ -41,7 +41,7 @@
 
   /** Extra buttons that only exist on the cards of an n&gt;1 sample draw. */
   const SAMPLE_BUTTONS: ButtonDoc[] = [
-    { icon: 'use-sample', name: 'make active', what: 'collapse the draw to this sample (the rest stay ‹k/N› siblings)' },
+    { icon: 'use-sample', name: 'make active', what: 'pick this sample and drop back to the thread (the rest stay ‹k/N› siblings)' },
     { icon: 'continue', name: 'continue this sample', what: 'make it active, then extend it' },
     { icon: 'discard-others', name: 'discard others', what: 'keep this sample, delete its siblings' }
   ];
@@ -301,7 +301,8 @@ codex plugin add tinkerscope@tinkerscope</pre>
       <p class="help-note">
         The card view isn't gone once you collapse it: the <b>eye</b> in the row toolbar reopens ANY turn with
         sibling branches as the full card stack — every regen batch pooled, the active branch marked. Later
-        turns hide while it's open (a strip below the cards counts them and clicks back). When the samples mix
+        turns hide while it's open (a strip below the cards counts them and clicks back), and picking a card
+        with <b>make active</b> closes the view onto that branch. When the samples mix
         thinking and non-thinking draws, an <b>all / think / no think</b> filter appears at the turn's top
         right to narrow the cards — it's view-only and local to that turn.
       </p>

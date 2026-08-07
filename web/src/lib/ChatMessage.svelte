@@ -377,7 +377,7 @@
       data-testid="samples-view"
       data-tooltip={expandedView
         ? 'Back to the single branch — restores the turns below'
-        : `View all ${msg.sib?.count ?? 0} samples of this turn (hides later turns)`}
+        : `View all ${msg.sib?.count ?? 0} samples of this turn`}
       use:tip
       aria-label={expandedView ? 'Exit sample view' : 'View all samples'}
       onclick={() => onToggleSamplesView?.()}
@@ -459,7 +459,7 @@
         <!-- Raw leads the row (very left, never folds), like the single-row toolbar. -->
         <button class="btn-raw" class:active={rawSamples.has(idx)} onclick={() => toggleRawSample(idx)} data-tooltip="Raw model output, tags preserved" use:tip>Raw</button>
       {/if}
-      <button class="btn-use" class:active={msg.activeSampleIndex === idx} data-tooltip="Make this the active branch (others stay ‹k/N› siblings)" use:tip aria-label="Make active" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onSelectSample(idx)}>
+      <button class="btn-use" class:active={msg.activeSampleIndex === idx} data-tooltip="Make this the active branch" use:tip aria-label="Make active" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onSelectSample(idx)}>
         <Icon name="use-sample" />
       </button>
       {#if !readOnly}

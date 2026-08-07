@@ -94,7 +94,8 @@ them. Deleting prunes only that subtree. This is the core idea: you can resample
 the same turn twenty times and still read all twenty. To read them all AT ONCE,
 the row toolbar's **eye** reopens the turn as the full card stack — every regen
 batch pooled, the active branch marked, the turns below hidden until you exit
-(the strip under the cards, or the eye again, brings them back). When the
+(the strip under the cards, or the eye again, brings them back — and **make
+active** on a card exits onto that branch). When the
 siblings mix thinking and non-thinking draws, an `all / think / no think` filter
 appears at the turn's top right to narrow the cards.
 
@@ -356,8 +357,9 @@ answer to "which one is that"):
 | view all samples | eye | spread the turn's sibling branches out as cards (later turns hide while open) |
 | copy node id | `#` | the id `tinkpg --node` addresses |
 
-Sample cards (an n>1 draw) add: **make active** (circled check), **continue this
-sample** (`+`), **discard others** (a page with an ✕).
+Sample cards (an n>1 draw) add: **make active** (circled check — picks that
+branch and drops back to the thread), **continue this sample** (`+`), **discard
+others** (a page with an ✕).
 
 Hold a modifier, then click a row-toolbar button:
 

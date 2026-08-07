@@ -9,10 +9,10 @@
      marks the active branch, and shows the "2 later turns hidden" exit strip;
   3. the think / no-think filter (top-right, shown because the samples mix both
      modes) narrows the cards: think -> 2, no think -> 1, all -> 3;
-  4. selecting a different sample (btn-use) keeps the view OPEN (state is keyed
-     on the turn's parent, not the active node) and moves the active mark;
-  5. both exits work — the strip and the (now active) eye — restoring the rows
-     below; a reload comes back collapsed (view state is session-local).
+  4. selecting a sample (btn-use) makes it the active branch AND exits the card
+     view — picking is a decision, so it lands you back on the plain thread;
+  5. both other exits work — the strip and the (now active) eye — restoring the
+     rows below; a reload comes back collapsed (view state is session-local).
 
 No model calls.
 
@@ -125,27 +125,33 @@ def main():
         filt.get_by_role("button", name="all", exact=True).click()
         assert panel.locator(".sample-card").count() == 3, "'all' restores every card"
 
-        # -- 4. selecting another sample keeps the view open --
+        # -- 4. selecting a sample makes it active AND exits the card view --
         cards = panel.locator(".sample-card")
         for i in range(3):
             if "ANSWER-B" in cards.nth(i).inner_text():
                 cards.nth(i).locator(".btn-use").click()
                 break
         page.wait_for_function(
-            "document.querySelector('.sample-card.active-sample')?.innerText.includes('ANSWER-B')",
-            timeout=5000)
-        assert panel.locator(".sample-card").count() == 3, \
-            "picking an active branch must not collapse the sample view"
-        # back to A so the downstream turns return on exit
+            "document.querySelectorAll('.sample-card').length === 0", timeout=5000)
+        assert rows.count() == 2, \
+            f"picking a card must land on the plain thread [u0, a1b], got {rows.count()} rows"
+        assert "ANSWER-B" in rows.nth(1).inner_text(), \
+            "the picked sample must be the active branch after the view closes"
+
+        # back to A (via the eye again) so the downstream turns return
+        rows.nth(1).locator("[data-testid=samples-view]").click()
+        page.wait_for_selector(".sample-card", timeout=5000)
         for i in range(3):
             if "ANSWER-A" in cards.nth(i).inner_text():
                 cards.nth(i).locator(".btn-use").click()
                 break
-        page.wait_for_function(
-            "document.querySelector('.sample-card.active-sample')?.innerText.includes('ANSWER-A')",
-            timeout=5000)
+        page.wait_for_function("document.body.innerText.includes('ANSWER-3')", timeout=5000)
+        assert panel.locator(".sample-card").count() == 0, "picking A must also exit"
+        assert rows.count() == 4, "selecting back to A restores the downstream turns"
 
         # -- 5a. exit via the strip --
+        rows.nth(1).locator("[data-testid=samples-view]").click()
+        page.wait_for_selector(".sample-card", timeout=5000)
         panel.locator("[data-testid=hidden-below]").click()
         page.wait_for_function("document.body.innerText.includes('ANSWER-3')", timeout=5000)
         assert rows.count() == 4, "exit must restore the hidden rows"

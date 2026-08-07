@@ -519,3 +519,26 @@ frontend undo stack is for — the two layers are complementary, not redundant.
 index-faithful restore, blob survival, and the soft workspace delete. CLI verified
 end-to-end against an isolated instance: delete `a2` from a 3-sample fan → list →
 restore → `children == [a1, a2, a3]`, not appended.
+
+---
+
+### 2026-08-06 — Picking a sample card exits the card view
+
+The "view all samples" eye (`samplesOpen` in +page) was deliberately keyed on
+the turn's USER-parent so that selecting a different card *inside* the open view
+did not collapse it — the reasoning being that the view is for comparing, so
+changing the active child shouldn't tear it down. In use that turned out
+backwards: picking a card is the DECISION the view exists to support, and after
+making it you're stuck looking at cards with the turns below still hidden, one
+more click from the thread. So `make active` now closes the view onto the picked
+branch (`selectSample` wrapper in +page; `branchOps.selectSample` stays
+UI-agnostic and knows nothing about `samplesOpen`). The parent keying stays —
+it still makes the view survive tree mutations that swap the active sibling.
+
+Both card tooltips lost their parentheticals in the same pass ("(hides later
+turns)", "(others stay ‹k/N› siblings)") — Clément; the one-short-line tooltip
+rule is in CLAUDE.md and those were drifting into mechanism.
+
+`browser_samples_view.py` step 4 inverted with the behavior (it pinned
+"picking must NOT collapse"); verified failing at exactly that assertion on
+`--baseline main`.
