@@ -1058,3 +1058,37 @@ type would silently drop the counter. And the two Playwright smokes asserting th
 old contract had to be found by reading, since they aren't CI; `scripts/smoke.sh`
 is this repo's stated verification surface, so a red smoke is a future session's
 hour, not a warning.
+
+### 2026-08-10 — The CLI stops reissuing retired panel ids (and the argument for leaving it)
+
+The last hole in "a panel id is never reused within a workspace" was the CLI's own
+front door. `_panel_id(i)` named panels by POSITION, and `open`/`chat`/`compare`
+push a full `panels` replace onto the state bus which the browser adopts into
+whatever workspace is open. Fire `chat` at a workspace whose `p-1` was closed and a
+NEW column bound to a DIFFERENT model answers to `p-1`. Two things key on panel id
+now: a `<panel>:<node>` handle, and `restore_trash` — which would splice the retired
+column's branches into the new one, attributing one model's turns to another. That
+is the provenance failure the cli skill warns readers about, manufactured by the
+recovery code rather than found in the wild.
+
+I first shipped this as a *documented exception*, on the reasoning that
+`open`/`chat`/`compare` already replace the layout, so a destructive act was
+already expected. That reasoning is wrong and worth writing down because it is the
+kind that reads as sober: losing a layout is recoverable and announced, whereas
+silently reissuing the key a recovery mechanism trusts makes that mechanism return
+wrong data. Two different harms, and "already destructive" doesn't cover the second.
+The tell was in the same paragraph — it named the fix as one GET and then declined
+to do it. Clément called it: *"sounds like you're trying to convince yourself that
+something horrible is actually fine."*
+
+The fix is NOT simply "mint above the counter", which was my first attempt and
+regressed something real: minting fresh on every fire makes repeated `tinkpg chat`
+abandon a column per fire (each layout replace drops the previous tree to the
+journal) instead of reusing one. `_layout_panel_ids(n)` instead REUSES the ids
+already on screen and mints only for extra positions. A live id is by construction
+not retired, so reuse is both the safe answer and the one that preserves behavior.
+Fresh ids come from `max(panel_seq, every visible p-N)` — both bounds, since a
+counter some writer zeroed would otherwise hand back live ids — and the bump is
+PATCHed back so the claim survives with no browser listening. `compare` resolves
+its runs BEFORE minting, so a bad run argument doesn't burn panel numbers.
+`probe` keeps a literal `"p-1"`: it commits nothing, so it must mint nothing.

@@ -569,23 +569,60 @@ def cmd_checkpoints(run: str = typer.Argument(..., help="run id or unique substr
     print(f"\n{len(rows)} checkpoint(s)")
 
 
-def _panel_id(i: int) -> str:
-    """Panel id by display position for a layout this CLI is CREATING: p-1, p-2, …
+def _layout_panel_ids(n: int) -> list[str]:
+    """`n` panel ids for a layout this CLI is REPLACING (`open`/`chat`/`compare`).
 
-    There are no reserved names any more; 'primary'/'compare' remain valid ids (every
-    workspace saved before the change uses them) but are never minted.
+    Reuse the ids currently on screen, then mint fresh ones for any extra position.
 
-    ⚠️ KNOWN EXCEPTION to "a panel id is never reused within a workspace". These ids
-    are POSITIONAL, not drawn from the workspace's counter — and `open`/`chat`/
-    `compare` push them onto the state bus, where the browser adopts them into
-    whatever workspace is open. So firing one at a workspace that has closed `p-1`
-    hands `p-1` to a new column, and `restore_trash` (which trusts id identity) would
-    then splice the retired column's branches into it. Acceptable only because those
-    three commands ALREADY replace the whole layout — a documented destructive act —
-    and the layout they push is the one the human asked for. The clean fix is to mint
-    above the open workspace's `panel_seq` (one GET); until then this docstring, the
-    cli skill and API_CONTRACT are the warning."""
-    return f"p-{i + 1}"
+    Reuse is what keeps repeated `tinkpg chat` pointed at the SAME column instead of
+    abandoning one per fire, and a live id is by construction not retired. Minting
+    by POSITION (the old p-1, p-2, …) is what wasn't safe: fire `chat` at a workspace
+    whose p-1 was closed and a new column bound to a different model answers to
+    `p-1` — breaking both a `<panel>:<node>` handle and `restore_trash`, which keys
+    on panel id and would splice the retired column's branches into the new one,
+    attributing one model's turns to another.
+
+    Fresh ids come from the open workspace's own counter, exactly as the browser
+    mints: above `panel_seq` AND above every p-N still visible to it (trees / layout
+    / seen_panels — the last is how a CLOSED panel keeps its number claimed). Both
+    bounds matter; a counter some writer once zeroed would otherwise hand back live
+    ids. The bump is PATCHed back so the claim survives with no browser listening;
+    `panel_seq` merges monotonically server-side, so it can't lose a higher value."""
+    st = _get("/api/state")
+    live_ids = [p["id"] for p in (st.get("panels") or []) if isinstance(p, dict) and p.get("id")]
+    if len(live_ids) >= n:
+        return live_ids[:n]
+    cid = st.get("workspace_id")
+    base = 0
+    if cid:
+        c = next((x for x in _workspaces() if x.get("id") == cid), None)
+        if c is not None:
+            seq = c.get("panel_seq")
+            base = seq if isinstance(seq, int) and not isinstance(seq, bool) else 0
+            for pid in [*(c.get("trees") or {}),
+                        *[r.get("id") for r in (c.get("panels") or []) if isinstance(r, dict)],
+                        *(c.get("seen_panels") or [])]:
+                m = re.fullmatch(r"p-(\d+)", pid or "")
+                if m:
+                    base = max(base, int(m.group(1)))
+    for pid in live_ids:  # the bus can hold ids the workspace body doesn't know yet
+        m = re.fullmatch(r"p-(\d+)", pid or "")
+        if m:
+            base = max(base, int(m.group(1)))
+    fresh = [f"p-{base + 1 + i}" for i in range(n - len(live_ids))]
+    if cid:
+        _patch_workspace(cid, {"panel_seq": base + len(fresh)})
+    return [*live_ids, *fresh]
+
+
+def _patch_workspace(cid: str, fields: dict) -> None:
+    """Layout-only metadata PATCH (no tree bytes). Best-effort: recording a counter
+    bump must never be the reason a chat doesn't fire."""
+    try:
+        with _client() as c:
+            c.patch(f"/api/workspaces/{cid}", json=fields)
+    except httpx.TransportError:
+        pass
 
 
 def _panel_obj(panel_id: str, run_id: str, checkpoint: Optional[str]) -> dict:
@@ -600,7 +637,7 @@ def cmd_open(run: str = typer.Argument(..., help="run id or unique substring; op
     r = _resolve_run(run_arg)
     ckpt = _resolve_checkpoint(r, ckpt_arg)
     # Single mode = exactly one panel (replaces any multi-panel layout).
-    state = _post("/api/state", {"panels": [_panel_obj(_panel_id(0), r["id"], ckpt)]})
+    state = _post("/api/state", {"panels": [_panel_obj(_layout_panel_ids(1)[0], r["id"], ckpt)]})
     print(f"opened {r['id']}" + (f"@{ckpt}" if ckpt else ""))
     _print_json(state)
 
@@ -957,9 +994,10 @@ def cmd_chat(
     _guard_sampleable(r)
     # Mirror selection to the bus so the browser shows what's being sampled (single
     # mode = one panel).
-    _post("/api/state", {"panels": [_panel_obj(_panel_id(0), r["id"], ckpt)]})
+    pid = _layout_panel_ids(1)[0]
+    _post("/api/state", {"panels": [_panel_obj(pid, r["id"], ckpt)]})
     think: "bool | str | None" = "both" if thinking_both else thinking
-    body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, think, _resolve_sys(system, no_system), _panel_id(0), prefill)
+    body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, think, _resolve_sys(system, no_system), pid, prefill)
     if prefill:
         print(f"prefill: {prefill!r}")
     print(f"chat {r['id']}" + (f"@{ckpt}" if ckpt else "") + f"  n={n} temp={_fmt_param(temperature)}")
@@ -986,14 +1024,18 @@ def cmd_compare(
     all stream concurrently. `compare a b "prompt"` is the 2-run case."""
     system = _resolve_sys(system, no_system)
     catalog = _models()
-    # Resolve every run (A, B, then each --run) to (run, checkpoint, panel_id).
-    specs: list[tuple[dict, Optional[str], str]] = []
-    for i, run_arg in enumerate([run_a, run_b, *run]):
+    # Resolve every run (A, B, then each --run) to (run, checkpoint, panel_id). Runs
+    # are resolved BEFORE minting so an unresolvable arg doesn't burn panel numbers.
+    resolved: list[tuple[dict, Optional[str]]] = []
+    for run_arg in [run_a, run_b, *run]:
         arg, ckpt_arg = _split_run_arg(run_arg)
         r = _resolve_run(arg, catalog)
         ckpt = _resolve_checkpoint(r, ckpt_arg)
         _guard_sampleable(r)
-        specs.append((r, ckpt, _panel_id(i)))
+        resolved.append((r, ckpt))
+    specs: list[tuple[dict, Optional[str], str]] = [
+        (r, ckpt, pid) for (r, ckpt), pid in zip(resolved, _layout_panel_ids(len(resolved)))
+    ]
 
     # One /api/state replace sets the whole panel layout at once.
     _post("/api/state", {"panels": [_panel_obj(pid, r["id"], ckpt) for (r, ckpt, pid) in specs]})
@@ -1734,7 +1776,8 @@ def cmd_probe(
     run_arg, at_ckpt = _split_run_arg(run)
     body: dict = {
         "messages": ancestry,
-        "panel": _panel_id(0),  # required by the schema; never written to (commit=false)
+        "panel": "p-1",  # required by the schema; never written to (commit=false), so a
+                         # literal here deliberately mints nothing
         "broadcast": False,
         "commit": False,
         **_call_params(n, temperature, max_tokens, thinking, _resolve_sys(system, no_system)),

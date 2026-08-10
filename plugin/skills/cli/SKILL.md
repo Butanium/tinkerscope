@@ -209,10 +209,12 @@ Panel ids (`p-1`, `p-2`, …) are minted monotonically per workspace and NEVER
 reused, so `<panel>:<node>` stays valid — closing a column doesn't free its id for
 a different model. Workspaces saved before that change also carry the old reserved
 names `primary` / `compare`; those remain valid ids, they're just never minted now.
-⚠️ One exception: `open`/`chat`/`compare` name panels by POSITION (`p-1`, `p-2`, …)
-because they REPLACE the layout — so firing one at a workspace that already retired
-`p-1` reissues that id. A `<panel>:<node>` handle copied before such a fire can then
-point at a different model's column; re-copy it after.
+`open`/`chat`/`compare` REPLACE the layout, but they reuse the ids already on
+screen (and mint any extra above the workspace's counter) — so a handle copied
+before such a fire still names the same column. What those commands do change is
+which MODEL that column is bound to, so a handle stays a valid address while
+ceasing to describe the model that produced the turn; re-read provenance from
+`raw_meta` rather than the panel label.
 
 Vocabulary: the saved container (panels + branch trees) = a **workspace**; a
 branch-from-start first message starts a **thread**; a **conversation** is one

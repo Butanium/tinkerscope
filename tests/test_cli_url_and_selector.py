@@ -213,3 +213,79 @@ def test_the_handle_fills_in_a_missing_panel_and_workspace(monkeypatch):
 
 def test_no_handle_leaves_the_flags_alone(monkeypatch):
     assert cli._aim_at_node(None, "p-2", "ws1") == (None, "p-2", "ws1")
+
+
+# ---------- layout panel ids (open/chat/compare) ----------
+# These commands REPLACE the layout, so the ids they name land in the open
+# workspace. Naming them by position reissued retired ids, which breaks both a
+# `<panel>:<node>` handle and `restore_trash` (it keys on panel id, so it would
+# splice a retired column's branches into a new column bound to another model).
+
+
+def _patch_layout(monkeypatch, *, live, ws=None):
+    """Stub the two reads `_layout_panel_ids` makes, and capture any PATCH."""
+    patched: list[dict] = []
+    monkeypatch.setattr(cli, "_base_url", lambda: BASE)
+    monkeypatch.setattr(cli, "_get", lambda path, **kw: {
+        "panels": [{"id": p} for p in live],
+        "workspace_id": (ws or {}).get("id"),
+    })
+    monkeypatch.setattr(cli, "_workspaces", lambda: [ws] if ws else [])
+    monkeypatch.setattr(cli, "_patch_workspace", lambda cid, fields: patched.append(fields))
+    return patched
+
+
+def test_a_single_panel_fire_reuses_the_live_column(monkeypatch):
+    """Repeated `tinkpg chat` must stay on ONE column — minting each time would
+    abandon (and journal) the previous tree on every fire."""
+    _patch_layout(monkeypatch, live=["p-7"], ws={"id": WID, "panel_seq": 7})
+    assert cli._layout_panel_ids(1) == ["p-7"]
+
+
+def test_a_reused_id_does_not_bump_the_counter(monkeypatch):
+    patched = _patch_layout(monkeypatch, live=["p-7"], ws={"id": WID, "panel_seq": 7})
+    cli._layout_panel_ids(1)
+    assert patched == [], "nothing was minted, so nothing to claim"
+
+
+def test_extra_positions_mint_above_the_workspace_counter(monkeypatch):
+    _patch_layout(monkeypatch, live=["p-7"], ws={"id": WID, "panel_seq": 7})
+    assert cli._layout_panel_ids(3) == ["p-7", "p-8", "p-9"]
+
+
+def test_minting_claims_the_numbers_it_used(monkeypatch):
+    patched = _patch_layout(monkeypatch, live=["p-7"], ws={"id": WID, "panel_seq": 7})
+    cli._layout_panel_ids(3)
+    assert patched == [{"panel_seq": 9}]
+
+
+def test_a_closed_panels_number_is_never_reissued(monkeypatch):
+    """THE case. p-9 was closed: absent from trees and layout, remembered only by
+    seen_panels. A positional minter handed it straight back."""
+    ws = {"id": WID, "panel_seq": 0,  # a writer that didn't know the field zeroed it
+          "trees": {"p-7": {}}, "panels": [{"id": "p-7"}],
+          "seen_panels": ["p-7", "p-8", "p-9"]}
+    _patch_layout(monkeypatch, live=["p-7"], ws=ws)
+    assert cli._layout_panel_ids(2) == ["p-7", "p-10"]
+
+
+def test_a_zeroed_counter_cannot_hand_back_a_visible_id(monkeypatch):
+    ws = {"id": WID, "panel_seq": 0, "trees": {"p-3": {}, "p-4": {}},
+          "panels": [{"id": "p-3"}, {"id": "p-4"}]}
+    _patch_layout(monkeypatch, live=[], ws=ws)
+    assert cli._layout_panel_ids(1) == ["p-5"]
+
+
+def test_legacy_reserved_names_are_reused_not_renamed(monkeypatch):
+    """A pre-monotonic workspace keeps 'primary'/'compare' — a layout fire must not
+    rename its live columns, and those names carry no number to mint above."""
+    ws = {"id": WID, "panel_seq": 0, "trees": {"primary": {}, "compare": {}},
+          "panels": [{"id": "primary"}, {"id": "compare"}], "seen_panels": ["primary", "compare"]}
+    _patch_layout(monkeypatch, live=["primary", "compare"], ws=ws)
+    assert cli._layout_panel_ids(3) == ["primary", "compare", "p-1"]
+
+
+def test_no_workspace_open_starts_at_p1(monkeypatch):
+    patched = _patch_layout(monkeypatch, live=[], ws=None)
+    assert cli._layout_panel_ids(2) == ["p-1", "p-2"]
+    assert patched == [], "no workspace to record the claim against"
