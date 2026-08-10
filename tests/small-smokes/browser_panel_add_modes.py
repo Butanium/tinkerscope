@@ -88,9 +88,12 @@ def main():
     print(f"Shift+add starts the panel blank:     {shift_blank}")
     print(f"state panels (id, #msgs):             {panels}")
     print("console/page errors:", errors or "none")
-    # primary(2) clone(2) blank(0); third panel id is 'p-2' (after reserved 'compare')
+    # seeded primary(2), clone(2), blank(0). The two ADDED panels are minted by the
+    # UI, and minting is monotonic with no reserved names now — so they are p-1, p-2
+    # rather than the old 'compare' then 'p-2'. ('primary' is the SEEDED id below; it
+    # is still a valid panel id, just never minted.)
     ok = (default_clone and shift_blank and not errors
-          and panels == [("primary", 2), ("compare", 2), ("p-2", 0)])
+          and panels == [("primary", 2), ("p-1", 2), ("p-2", 0)])
     print("PANEL ADD-MODES SMOKE:", "PASS" if ok else "FAIL")
     sys.exit(0 if ok else 1)
 

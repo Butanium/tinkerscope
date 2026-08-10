@@ -25,6 +25,10 @@ export type ConvFields = {
   reduced_panels: string[];
   send_targets: string[];
   seen_panels: string[];
+  /** Monotonic panel-id counter (see ./panel-id.ts). Listed because THIS type is the
+   *  documented save shape: a body built from ConvFields rather than spread would
+   *  otherwise drop the counter, and the server reads a missing one as 0. */
+  panel_seq: number;
 };
 
 export type SaveDirt = {

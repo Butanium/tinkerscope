@@ -365,6 +365,9 @@ just like a discovered run — same three artifacts.
 {
   "panels": [                       // one entry per open panel, in display order
     {"id": "p-1",                   // stable panel id, minted p-<n>, never reused
+                                    // within a workspace — EXCEPT via a `panels`
+                                    // replace (CLI open/chat/compare), which names
+                                    // panels by POSITION; see cli.py::_panel_id
      "run_id": null, "checkpoint": null,
      "messages": [{role,content}],  // this panel's active-path transcript ECHO (write-only;
                                     // the browser's branch tree is the read source)

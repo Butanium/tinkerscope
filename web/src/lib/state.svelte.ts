@@ -16,6 +16,7 @@
 //      client_token / workspace_id and are scoped by their consumers.
 
 import { api, sse } from './api';
+import { FIRST_PANEL_ID } from './panel-id';
 import { mergeBusState } from './bus-scope';
 import type { PlaygroundState, SampleData, Panel } from './types';
 
@@ -219,7 +220,7 @@ class LiveStore {
         this.adopt(data?.state as PlaygroundState | undefined);
         break;
       case 'chat_start': {
-        const panel = (data?.panel ?? 'primary') as Panel;
+        const panel = (data?.panel ?? FIRST_PANEL_ID) as Panel;
         this.panels[panel] = {
           chat_id: data.chat_id ?? null,
           label: data.label ?? '',
@@ -236,7 +237,7 @@ class LiveStore {
         // at sample_index so the panel fills token-by-token; the later
         // 'sample' event then finalizes the slot (parseSample replaces this
         // partial with the cleaned authoritative content).
-        const panel = (data?.panel ?? 'primary') as Panel;
+        const panel = (data?.panel ?? FIRST_PANEL_ID) as Panel;
         const cur = this.panels[panel] ?? emptyPanel();
         // Ignore stragglers from an older chat run.
         if (cur.chat_id != null && data.chat_id != null && data.chat_id !== cur.chat_id) break;
@@ -252,7 +253,7 @@ class LiveStore {
         break;
       }
       case 'sample': {
-        const panel = (data?.panel ?? 'primary') as Panel;
+        const panel = (data?.panel ?? FIRST_PANEL_ID) as Panel;
         const cur = this.panels[panel] ?? emptyPanel();
         // Ignore stragglers from an older chat run.
         if (cur.chat_id != null && data.chat_id != null && data.chat_id !== cur.chat_id) break;
@@ -262,7 +263,7 @@ class LiveStore {
         break;
       }
       case 'chat_done': {
-        const panel = (data?.panel ?? 'primary') as Panel;
+        const panel = (data?.panel ?? FIRST_PANEL_ID) as Panel;
         // Fire the fold hook FIRST, unconditionally — it must see every
         // chat_done even if the render bucket was clobbered by a foreign
         // chat_start (the straggler guard below only protects rendering).
@@ -273,7 +274,7 @@ class LiveStore {
         break;
       }
       case 'chat_error': {
-        const panel = (data?.panel ?? 'primary') as Panel;
+        const panel = (data?.panel ?? FIRST_PANEL_ID) as Panel;
         this.onChatError?.(panel, data);
         const cur = this.panels[panel] ?? emptyPanel();
         // chat_id may be null for PRE-START failures (unknown/unsampleable

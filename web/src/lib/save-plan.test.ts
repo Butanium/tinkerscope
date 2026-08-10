@@ -34,7 +34,8 @@ const FIELDS: ConvFields = {
   panels: [{ id: 'primary', run_id: 'r1', checkpoint: 'final' }],
   reduced_panels: [],
   send_targets: ['primary'],
-  seen_panels: ['primary']
+  seen_panels: ['primary'],
+  panel_seq: 3
 };
 const t1: ConvTree = appendUserTurn(emptyTree(), 'hello').tree;
 const t2: ConvTree = appendUserTurn(emptyTree(), 'other').tree;
@@ -51,6 +52,9 @@ test('layout-only dirt → PATCH with the fields, no tree bytes', () => {
   if (p.kind !== 'patch') return;
   eq(p.body, FIELDS);
   ok(!('trees' in p.body), 'a PATCH body must not carry trees');
+  // panel_seq rides every save shape. The server reads a MISSING one as 0, so a
+  // planner that dropped it would silently retire the never-reused id guarantee.
+  eq(p.body.panel_seq, 3);
 });
 
 test('dirty panel → PUT with ONLY that panel tree', () => {
@@ -64,6 +68,7 @@ test('dirty panel → PUT with ONLY that panel tree', () => {
   ok(p.body.trees.compare === t1, 'the tree ships by REF (no copy)');
   eq(p.body.dropped_trees, []);
   eq(p.body.system_prompt, 'sp', 'layout fields ride along on a PUT');
+  eq(p.body.panel_seq, 3, 'including the panel-id counter');
 });
 
 test('dropped panel alone → PUT with empty upsert + the drop', () => {

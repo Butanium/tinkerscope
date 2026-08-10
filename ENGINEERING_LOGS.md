@@ -1008,3 +1008,53 @@ panel keeps its tree (`reducePanel` only touches `reducedPanels`) — only
 Test fallout was all contract, no bugs: 10 tests asserted `'primary'` as the
 DEFAULT panel id. Tests that merely USE `'primary'` as a label still pass
 untouched, which is the point of keeping it valid.
+
+### 2026-08-10 — Review of the panel-id change: two ways the guarantee didn't hold
+
+A Fable instance reviewed the branch above and found the headline claim ("a panel
+id is never reused within a workspace") false in two places, both in the new code.
+Recording them because each is a case of a *safety property* that looked verified
+while resting on something else.
+
+**The rebuild condition was too narrow.** `restore_trash` gated the column rebuild
+on `panel not in trees`. But the tree and the layout row can drift: a stale tab —
+the normal condition, since tinkpg live-drives an OPEN browser — ships its whole
+pre-restore `panels` list, wiping the row, while the partial tree upsert leaves the
+tree standing. A lost row is not journaled (`_record_trash` diffs trees only). So
+after a clobber, re-running restore saw the nodes already present, returned
+`recreated_panel=False`, never re-added the row, and skipped even the reload
+warning (gated on `n > 0`) — a stored tree that no layout renders, with the manual
+re-add escape hatch removed by this very branch. Now keyed on tree and row
+separately, so restore is re-runnable. The nodes-restore case self-heals (a
+re-delete gets re-journaled); the panel case had no such loop.
+
+**`panel_seq` could be reset to 0 by any writer that didn't know about it.** Three
+of them: PUT /tree and POST create (both default `int = 0`, assigned outright) and
+pack apply (export ships the field, import dropped it). PATCH was already correct
+via `exclude_unset=True` — that asymmetry was the tell. Client-side
+`conv.panel_seq ?? highestPanelSeq(conv)` then took the stored 0 as authoritative,
+because 0 isn't nullish. The invariant survived anyway, via `seen_panels` — but
+"correct only through the second mechanism" is not a guarantee, and the two fail
+TOGETHER: an old tab both prunes seen-on-close and omits the counter. Fixed by
+making the field's semantics match its meaning rather than adding a null check:
+`panel_seq` merges as `max(stored, incoming)` (monotone), `seen_panels` as an
+append-only union (an id is never legitimately un-seen now that it's a ledger).
+A writer that doesn't know about either field can no longer lose it.
+
+Also from the same review: the `restore into an unbound panel` fallback is
+unkeepable as written — `#loadTrees`' phantom filter drops `run_id == null` panels
+on load, so the column would vanish before the human saw it. Surfaced as
+`unbound_panel` and said out loud in the CLI instead of touching that filter,
+which guards a resurrection bug. And a genuine hole left OPEN: `cli._panel_id` is
+POSITIONAL, so `open`/`chat`/`compare` can reissue a retired `p-1` into whatever
+workspace is on the bus. Documented in three places (its docstring, API_CONTRACT,
+the cli skill) rather than fixed; the fix is to mint above the open workspace's
+counter, one GET.
+
+Two process notes worth keeping. The `ConvFields` "nit" (add `panel_seq` to the
+documented save shape) was a live bug: adding the field failed the typecheck on
+save-plan.test.ts's fixture, which is the argument for it — a body built from that
+type would silently drop the counter. And the two Playwright smokes asserting the
+old contract had to be found by reading, since they aren't CI; `scripts/smoke.sh`
+is this repo's stated verification surface, so a red smoke is a future session's
+hour, not a warning.

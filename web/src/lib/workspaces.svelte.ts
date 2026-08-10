@@ -112,14 +112,8 @@ class ConversationsStore {
    *  restart restores the EXACT deselected/folded state rather than re-defaulting
    *  every panel ON. Not rendered ⇒ plain (non-reactive) field. */
   #seenPanels = new Set<string>();
-  /** Monotonic panel-id counter, persisted per workspace. Panel ids used to be
-   *  minted by gap-filling ('compare' first, then the lowest free p-N), so closing
-   *  a column and adding one recycled its id onto a DIFFERENT model — which made
-   *  `panel:node` handles silently re-point, and made a workspace's history
-   *  unquotable. Now every mint is a fresh number and no id is ever reused within
-   *  a workspace. Reserved names are gone: nothing mints 'primary'/'compare' any
-   *  more, but they stay valid ids forever (every workspace saved before this, plus
-   *  the legacy {tree, compare_tree} migration, uses them). */
+  /** Monotonic panel-id counter, persisted per workspace. Rationale + the mint/seed
+   *  rules live in ./panel-id.ts. */
   #panelSeq = 0;
 
   /** Next never-before-used panel id for this workspace. */
@@ -482,7 +476,10 @@ class ConversationsStore {
     this.reducedPanels = new Set(conv.reduced_panels ?? []);
     this.sendTargets = new Set(conv.send_targets ?? []);
     this.#seenPanels = new Set(conv.seen_panels ?? []);
-    this.#panelSeq = conv.panel_seq ?? highestPanelSeq(conv);
+    // max(), not ??: a stored 0 is what a writer that omits the field leaves behind
+    // (and 0 isn't nullish, so ?? would take it as authoritative). Seeding from the
+    // ids actually present can only ever be too LOW, never too high.
+    this.#panelSeq = Math.max(conv.panel_seq ?? 0, highestPanelSeq(conv));
   }
 
   /** The panel layout (model selection per panel) currently shown — what a new

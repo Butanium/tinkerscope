@@ -316,3 +316,111 @@ def test_a_pre_layout_entry_restores_into_an_unbound_panel(client):
     body = _body(client, cid)
     assert set(body["trees"]["p-2"]["nodes"]) == {"u", "a0", "a1"}
     assert {"id": "p-2", "run_id": None, "checkpoint": None} in body["panels"]
+
+
+def _drop_p2(client, cid, *, seen=("primary", "p-2")):
+    """Close panel p-2 the way the browser does: tree dropped, row gone from layout."""
+    r = client.put(f"/api/workspaces/{cid}/tree", json={
+        "trees": {"primary": _fan(1)}, "dropped_trees": ["p-2"],
+        "system_prompt": None, "system_enabled": False,
+        "panels": [{"id": "primary", "run_id": "run-a", "checkpoint": "final"}],
+        "reduced_panels": [], "send_targets": [], "seen_panels": list(seen),
+    })
+    assert r.status_code == 200, r.text
+
+
+def test_a_stale_tab_can_wipe_the_restored_row_and_restore_still_fixes_it(client):
+    """The zombie-column case. A stale tab ships its whole (pre-restore) `panels`
+    list, so its next save deletes the layout row while the partial tree upsert
+    leaves the TREE standing — and a lost row is never journaled. Keyed on the tree
+    alone, restore saw "nodes already present" and never re-added the row, leaving a
+    stored tree that no layout renders and no manual re-add could reach."""
+    cid = _create(client, trees={"primary": _fan(1), "p-2": _fan(2)})
+    _drop_p2(client, cid)
+    entry = next(x for x in _trash(client, cid) if x["panel"] == "p-2")
+    assert _restore(client, cid, entry["id"])["recreated_panel"] is True
+
+    # A stale tab saves: same trees it still knows about, layout WITHOUT p-2.
+    client.put(f"/api/workspaces/{cid}/tree", json={
+        "trees": {"primary": _fan(1)}, "dropped_trees": [],
+        "system_prompt": None, "system_enabled": False,
+        "panels": [{"id": "primary", "run_id": "run-a", "checkpoint": "final"}],
+        "reduced_panels": [], "send_targets": [], "seen_panels": ["primary", "p-2"],
+    })
+    body = _body(client, cid)
+    assert "p-2" in body["trees"], "the partial upsert must not drop an untouched tree"
+    assert not any(r["id"] == "p-2" for r in body["panels"]), "precondition: the row is gone"
+
+    out = _restore(client, cid, entry["id"])
+    assert out["ok"] and out["recreated_panel"] is True, \
+        "restore must be re-runnable after a row-only clobber"
+    assert out["restored"] == [], "the nodes were already back; only the row was missing"
+    body = _body(client, cid)
+    assert {"id": "p-2", "run_id": "run-b", "checkpoint": "final"} in body["panels"]
+
+
+def test_a_writer_that_omits_panel_seq_cannot_reset_it(client):
+    """`panel_seq` is monotone. It used to be assigned outright, so any writer that
+    didn't send it (an old tab, a script, pack apply) zeroed the counter — after
+    which the never-reused guarantee rested entirely on seen_panels."""
+    cid = _create(client, trees={"primary": _fan(1)})
+    client.patch(f"/api/workspaces/{cid}", json={"panel_seq": 7})
+    assert _body(client, cid)["panel_seq"] == 7
+
+    client.put(f"/api/workspaces/{cid}/tree", json={
+        "trees": {"primary": _fan(1)}, "dropped_trees": [],
+        "system_prompt": None, "system_enabled": False,
+        "panels": [{"id": "primary", "run_id": "run-a", "checkpoint": "final"}],
+        "reduced_panels": [], "send_targets": [], "seen_panels": ["primary"],
+    })  # no panel_seq → defaults to 0
+    assert _body(client, cid)["panel_seq"] == 7, "a write may only RAISE the counter"
+
+    client.put(f"/api/workspaces/{cid}/tree", json={
+        "trees": {"primary": _fan(1)}, "dropped_trees": [], "panel_seq": 9,
+        "system_prompt": None, "system_enabled": False,
+        "panels": [{"id": "primary", "run_id": "run-a", "checkpoint": "final"}],
+        "reduced_panels": [], "send_targets": [], "seen_panels": ["primary"],
+    })
+    assert _body(client, cid)["panel_seq"] == 9, "a higher counter still lands"
+
+
+def test_seen_panels_is_a_union_so_a_short_writer_cannot_shrink_the_ledger(client):
+    """seen_panels stops a closed panel's id being re-minted, and an id is never
+    legitimately un-seen — so replace-wholesale was the wrong semantic."""
+    cid = _create(client, trees={"primary": _fan(1), "p-2": _fan(2)})
+    _drop_p2(client, cid, seen=("primary", "p-2"))
+    assert _body(client, cid)["seen_panels"] == ["primary", "p-2"]
+
+    client.put(f"/api/workspaces/{cid}/tree", json={
+        "trees": {"primary": _fan(1)}, "dropped_trees": [],
+        "system_prompt": None, "system_enabled": False,
+        "panels": [{"id": "primary", "run_id": "run-a", "checkpoint": "final"}],
+        "reduced_panels": [], "send_targets": [], "seen_panels": ["primary"],
+    })
+    assert _body(client, cid)["seen_panels"] == ["primary", "p-2"], \
+        "p-2 must stay in the ledger — losing it frees its number for a new column"
+
+
+def test_an_unbound_restore_says_so(client):
+    """A pre-layout-journaling entry restores with no model bound, and the browser
+    drops unbound panels on load — so the CLI has to say so rather than promise a
+    re-bind the human never gets to make."""
+    cid = _create(client, trees={"primary": _fan(1), "p-2": _fan(2)})
+    _drop_p2(client, cid)
+    f = store._trash_file(cid)
+    lines = []
+    for raw in f.read_text().splitlines():
+        e = json.loads(raw)
+        e.pop("layout", None)
+        lines.append(json.dumps(e))
+    f.write_text("\n".join(lines) + "\n")
+    entry = next(x for x in _trash(client, cid) if x["panel"] == "p-2")
+    out = _restore(client, cid, entry["id"])
+    assert out["ok"] and out["unbound_panel"] is True
+
+
+def test_a_bound_restore_is_not_flagged_unbound(client):
+    cid = _create(client, trees={"primary": _fan(1), "p-2": _fan(2)})
+    _drop_p2(client, cid)
+    entry = next(x for x in _trash(client, cid) if x["panel"] == "p-2")
+    assert _restore(client, cid, entry["id"])["unbound_panel"] is False

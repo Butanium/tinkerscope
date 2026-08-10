@@ -196,7 +196,7 @@ tinkpg ws [<id|name>]                  # browse saved workspaces / read one
 tinkpg samples [<id|name>]             # the full n-sample fan-out at a fork
 tinkpg grep "<text>"                   # search every branch of every workspace
 tinkpg threads                         # index root threads across workspaces
-tinkpg node <id>                       # look up a node id → record + logprobs
+tinkpg node <handle>                   # look up <panel>:<node> → record + logprobs
 tinkpg trash list / restore <handle>   # recover a deleted branch
 tinkpg send "prompt"                   # fire a new thread at the current panels
 tinkpg continue "follow-up"            # add a turn to the current threads
@@ -207,6 +207,7 @@ tinkpg open <run>[@<checkpoint>]       # switch the browser to this model, live
 tinkpg chat <run> "prompt" --n 50      # one-shot: select + sample + stream
 tinkpg compare <runA> <runB> "..."     # one-shot: two panels + a first turn
 tinkpg params / state / refresh        # sampling params / shared state / rescan
+tinkpg url [<id|name>]                 # this server's URL, or a link that opens a workspace
 ```
 
 Param flags on a fire are per-call — they never clobber your browser sidebar.

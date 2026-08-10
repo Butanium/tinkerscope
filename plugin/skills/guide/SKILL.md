@@ -383,7 +383,7 @@ answer to "which one is that"):
 | copy conversation | the same, with text lines | the whole thread as markdown |
 | send to panel | two crossing arrows | copy this branch's context into another panel |
 | view all samples | eye | spread the turn's sibling branches out as cards (later turns hide while open) |
-| copy node id | `#` | the id `tinkpg --node` addresses |
+| copy node handle | `#` | `<panel>:<node>` — what `tinkpg --node` addresses |
 
 Sample cards (an n>1 draw) add: **make active** (circled check — picks that
 branch and drops back to the thread), **continue this sample** (`+`), **discard

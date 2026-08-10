@@ -8,7 +8,7 @@ that the columns sit at their 280px min-width, then checks the fold behavior:
      clipped lines, a chevron toggle appears, nothing overflows horizontally
      and nothing below the first button line is visible;
   2. expanding reveals the tail BELOW as real tool buttons (1+ extra lines) —
-     among them "Copy node id", whose click puts the row's EXACT tree-node id
+     among them "Copy node handle", whose click puts the row's `<panel>:<node>`
      on the clipboard (the CLI's `--node` addressing currency; the clipboard is
      monkeypatched so the assert is deterministic and headless-safe) — and the
      send-branch-to-panel popover still opens/closes;
@@ -137,7 +137,7 @@ def main():
         assert s["folded"], f"fold is the default: {s}"
         assert s["beyond"], f"a narrow row must have wrapped (hidden) buttons: {s}"
         assert s["wrapH"] < 2 * s["rowH"], f"folded wrap must clip to one button line: {s}"
-        assert "Copy node id" in s["beyond"], f"copy-node-id folds first (lowest priority): {s}"
+        assert "Copy node handle" in s["beyond"], f"copy-node-handle folds first (lowest priority): {s}"
         assert s["line1"][0] == "Raw", f"Raw leads the row and never folds: {s}"
         for name in ("Regenerate", "Continue this message", "Edit"):
             assert asst_row.get_by_role("button", name=name, exact=True).count() == 1
@@ -152,10 +152,13 @@ def main():
         bad = page.evaluate(OVERFLOW_PROBE)
         assert not bad, f"horizontal overflow while expanded: {bad}"
 
-        # copy node id → the exact tree-node id lands on the clipboard
+        # copy node handle → `<panel>:<node>` lands on the clipboard. The panel part is
+        # what makes the handle unambiguous: a tree cloned into another panel keeps its
+        # node ids, so a bare id names the same turn in several columns.
         asst_row.locator("[data-testid=copy-node-id]").click()
         copied = page.evaluate("() => window.__copied")
-        assert copied == "Pa1", f"copied reference should be the bare node id 'Pa1', got {copied!r}"
+        assert copied == "primary:Pa1", \
+            f"copied handle should be '<panel>:<node>' = 'primary:Pa1' (this smoke seeds a 'primary' panel), got {copied!r}"
 
         # send-branch-to-panel popover (ActionMenu) still works from the fold
         asst_row.locator("[data-testid=send-to]").click()

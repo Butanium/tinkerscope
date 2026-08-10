@@ -43,13 +43,11 @@ def _get(path):
 
 
 def panel_ids(n):
-    # Mirrors +page nextPanelId(): 'primary', 'compare', then p-2, p-3, …
-    ids = ["primary", "compare"]
-    k = 2
-    while len(ids) < n:
-        ids.append(f"p-{k}")
-        k += 1
-    return ids[:n]
+    # Mirrors the minter (web/src/lib/panel-id.ts): monotonic p-1, p-2, … with no
+    # reserved names. These ids are SEEDED by this smoke rather than minted by the
+    # UI, so any valid ids would do — matching the real scheme just keeps the
+    # fixture honest.
+    return [f"p-{k + 1}" for k in range(n)]
 
 
 def empty_tree():

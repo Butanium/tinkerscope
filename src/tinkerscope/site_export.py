@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import pack as packmod
+from .api.state import DEFAULT_PANEL_ID
 
 MANIFEST_VERSION = 1
 
@@ -162,7 +163,7 @@ def _state_json(pack: packmod.Pack, workspace_id: str | None) -> dict:
         for p in session.get("panels") or []
     ]
     return {
-        "panels": panels or [{"id": "p-1", "run_id": None, "checkpoint": None, "messages": [], "thread_system_prompt": None}],
+        "panels": panels or [{"id": DEFAULT_PANEL_ID, "run_id": None, "checkpoint": None, "messages": [], "thread_system_prompt": None}],
         "workspace_id": workspace_id,
         "system_prompt": None,
         "system_enabled": None,

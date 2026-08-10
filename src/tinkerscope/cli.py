@@ -572,9 +572,19 @@ def cmd_checkpoints(run: str = typer.Argument(..., help="run id or unique substr
 def _panel_id(i: int) -> str:
     """Panel id by display position for a layout this CLI is CREATING: p-1, p-2, …
 
-    Panel ids are minted monotonically and never reused (`ws.mintPanelId`), so there
-    are no reserved names any more. 'primary'/'compare' remain valid ids — every
-    workspace saved before the change uses them — they're just never minted."""
+    There are no reserved names any more; 'primary'/'compare' remain valid ids (every
+    workspace saved before the change uses them) but are never minted.
+
+    ⚠️ KNOWN EXCEPTION to "a panel id is never reused within a workspace". These ids
+    are POSITIONAL, not drawn from the workspace's counter — and `open`/`chat`/
+    `compare` push them onto the state bus, where the browser adopts them into
+    whatever workspace is open. So firing one at a workspace that has closed `p-1`
+    hands `p-1` to a new column, and `restore_trash` (which trusts id identity) would
+    then splice the retired column's branches into it. Acceptable only because those
+    three commands ALREADY replace the whole layout — a documented destructive act —
+    and the layout they push is the one the human asked for. The clean fix is to mint
+    above the open workspace's `panel_seq` (one GET); until then this docstring, the
+    cli skill and API_CONTRACT are the warning."""
     return f"p-{i + 1}"
 
 
@@ -2012,14 +2022,18 @@ def _split_node_handle(handle: str) -> tuple[Optional[str], Optional[str], str]:
     Anything with more parts is a typo, not a deeper address — say so rather than
     guessing which piece is the id."""
     parts = handle.split(":")
+    if len(parts) > 3:
+        _die(f"can't read {handle!r} as a node handle — expected <node>, <panel>:<node>, or <ws>:<panel>:<node>")
+    # An EMPTY part is a truncated paste, and each one fails confusingly on its own:
+    # a blank node id turns into "ambiguous — N matches" + a 20-row dump, a blank
+    # panel into zero hits that never mention a filter was applied.
+    if any(not x for x in parts):
+        _die(f"{handle!r} has an empty part — truncated paste? expected <node>, <panel>:<node>, or <ws>:<panel>:<node>")
     if len(parts) == 1:
         return None, None, parts[0]
     if len(parts) == 2:
         return None, parts[0], parts[1]
-    if len(parts) == 3:
-        return parts[0], parts[1], parts[2]
-    _die(f"can't read {handle!r} as a node handle — expected <node>, <panel>:<node>, or <ws>:<panel>:<node>")
-    raise AssertionError  # unreachable
+    return parts[0], parts[1], parts[2]
 
 
 def _aim_at_node(
@@ -2031,6 +2045,11 @@ def _aim_at_node(
     if handle is None:
         return None, panel, selector
     ws_part, panel_part, node = _split_node_handle(handle)
+    # Panel: a flag that disagrees is a coherent cross-panel aim, so it just wins.
+    # Workspace: a disagreement is almost certainly a stale paste, so it errors —
+    # same rule as `_one_selector`, and for the same reason.
+    if ws_part is not None and selector is not None and ws_part != selector:
+        _die(f"handle names workspace {ws_part!r} but --ws says {selector!r} — pass one")
     return node, panel or panel_part, selector or ws_part
 
 
@@ -2732,7 +2751,11 @@ def cmd_node(
     if exact:
         hits = exact
     if not hits:
+        # Name the panel filter when one is active: a handle whose panel part is stale
+        # reads as "no such node" while the node is sitting in a different column.
         _die(f"no node matching {node_id!r} in {len(convs)} workspace(s)"
+             + (f" (restricted to panel {want_panel} by the handle — drop that part to search every panel)"
+                if want_panel else "")
              + ("" if conv else " — `tinkpg ws` lists them; --ws to scope"))
     if len({h[2].get("id") for h in hits}) > 1:
         listing = "\n".join(
@@ -2884,15 +2907,23 @@ def cmd_trash(
     if not out.get("ok"):
         _die(out.get("error") or "restore failed")
     n = len(out.get("restored") or [])
+    rebuilt = bool(out.get("recreated_panel"))
     where = f"panel {out.get('panel')}"
-    if out.get("recreated_panel"):
+    if rebuilt:
         where += " (re-added: the whole column had been closed)"
     print(f"restored {n} node(s) into {where} of {targets[0].get('name')!r}")
-    if n == 0:
+    if n == 0 and not rebuilt:
         print("(already present — nothing to do)")
     else:
+        # Warn on a rebuilt column even at n==0: the nodes can already be back while
+        # the LAYOUT ROW was wiped by a stale tab's save, and that tab will wipe it
+        # again on its next write.
         print("⚠ reload any open browser tab on this workspace before editing it,")
         print("  or its next save will re-delete what was just restored.")
+    if out.get("unbound_panel"):
+        print("⚠ this entry predates layout journaling, so the column came back with NO")
+        print("  model bound — and the browser drops unbound panels on load. Bind a model")
+        print("  to it in the same session, or restore again after adding the panel.")
 
 
 @app.command("refresh")

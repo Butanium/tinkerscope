@@ -648,8 +648,10 @@ def _find_entry(cid: str, handle: str) -> dict | None:
 def restore_trash(cid: str, handle: str) -> dict:
     """`POST /{id}/trash/restore` — splice a journaled subtree back in.
 
-    Returns {ok, restored, panel, recreated_panel, entry} or {ok: False, error}.
-    `recreated_panel` = this restore re-added a whole column (tree + layout row).
+    Returns {ok, restored, panel, recreated_panel, unbound_panel, entry} or
+    {ok: False, error}. `recreated_panel` = this restore re-added a whole column
+    (tree and/or its layout row, checked separately — they drift); `unbound_panel` =
+    the entry predated layout journaling, so the column came back with no model.
     Idempotent-ish: a
     node already present is left alone, so a double restore is a no-op rather than
     a duplicate. Blobs need no work — they were never deleted (write-once)."""
@@ -667,8 +669,19 @@ def restore_trash(cid: str, handle: str) -> dict:
         # restoring one has to re-add the column — otherwise the only route back was
         # "re-add a panel that happens to mint the same id by hand", which stopped
         # being reachable at all once panel ids became monotonic.
-        recreated_panel = panel not in trees
-        if recreated_panel:
+        #
+        # The two halves are checked SEPARATELY because they can drift apart: a stale
+        # tab's next save ships its whole (pre-restore) `panels` list and wipes the
+        # row, while the partial tree upsert leaves the tree standing — and losing a
+        # row is not journaled (_record_trash diffs trees only). Gating on the tree
+        # alone made that state terminal: nodes already present ⇒ nothing to restore
+        # ⇒ row never re-added ⇒ a stored tree no layout renders, with the manual
+        # escape hatch gone. Keyed on the row too, restore stays re-runnable.
+        layout_rows = [r for r in (conv.get("panels") or []) if isinstance(r, dict)]
+        needs_tree = panel not in trees
+        needs_row = not any(r.get("id") == panel for r in layout_rows)
+        recreated_panel = needs_tree or needs_row
+        if needs_tree:
             trees[panel] = {"nodes": {}, "rootChildren": [], "selected": {}}
         tree = json.loads(json.dumps(trees[panel]))  # deep copy: never mutate the cached body
         nodes = tree.setdefault("nodes", {})
@@ -697,7 +710,7 @@ def restore_trash(cid: str, handle: str) -> dict:
         conv["trees"] = trees
         conv.pop("tree", None)
         conv.pop("compare_tree", None)
-        if recreated_panel:
+        if needs_row:
             # The journaled layout row carries the model the column was bound to;
             # entries predating that fall back to an unbound panel the human re-binds.
             layout = entry.get("layout")
@@ -708,6 +721,11 @@ def restore_trash(cid: str, handle: str) -> dict:
         _persist(conv)
     return {"ok": True, "restored": restored, "panel": panel,
             "recreated_panel": recreated_panel,
+            # A pre-layout-journaling entry restores UNBOUND, and the browser's
+            # phantom-panel filter drops run_id==null panels on load — so the column
+            # would vanish before the human saw it. Surfaced so the CLI can say so
+            # rather than promise a re-bind that never gets the chance.
+            "unbound_panel": bool(needs_row and not isinstance(entry.get("layout"), dict)),
             "entry": {k: v for k, v in entry.items() if k != "nodes"}}
 
 
@@ -819,6 +837,9 @@ def upsert(
         existing = _load_body(cid)
         if existing is not None:  # upsert: keep original created_at
             entry["created_at"] = existing.get("created_at", now)
+            # Monotone/union fields survive a writer that doesn't send them.
+            entry["panel_seq"] = _merge_panel_seq(existing.get("panel_seq"), panel_seq)
+            entry["seen_panels"] = _merge_seen_panels(existing.get("seen_panels"), seen_panels)
         light, blobs = split_workspace(entry)
         _write_blobs(cid, blobs)
         _persist(light)
@@ -871,8 +892,8 @@ def save_tree(
         conv["panels"] = panels
         conv["reduced_panels"] = reduced_panels
         conv["send_targets"] = send_targets
-        conv["seen_panels"] = seen_panels
-        conv["panel_seq"] = panel_seq
+        conv["seen_panels"] = _merge_seen_panels(conv.get("seen_panels"), seen_panels)
+        conv["panel_seq"] = _merge_panel_seq(conv.get("panel_seq"), panel_seq)
         conv["updated_at"] = _now()
         # self-heal a migrated legacy {tree, compare_tree} entry on its first save
         # (its trees are now folded into `trees` above, so dropping the keys is safe).
@@ -881,6 +902,38 @@ def save_tree(
         _write_blobs(cid, blobs)
         _persist(conv)
     return True
+
+
+def _merge_panel_seq(stored: Any, incoming: Any) -> int:
+    """`panel_seq` is MONOTONE, so a write may only raise it.
+
+    A plain assignment let any writer that omits the field reset the counter to 0 —
+    an older browser tab, a script, a pack apply (which exports the field but didn't
+    import it). Because ids are also checked against everything the workspace has
+    seen, that degraded rather than broke, but "correct only via the second
+    mechanism" is not a guarantee. max() makes the field self-healing instead:
+    a writer that doesn't know about it can no longer lose it."""
+    s = stored if isinstance(stored, int) and not isinstance(stored, bool) else 0
+    i = incoming if isinstance(incoming, int) and not isinstance(incoming, bool) else 0
+    return max(s, i)
+
+
+def _merge_seen_panels(stored: Any, incoming: Any) -> list[str]:
+    """`seen_panels` is a UNION, not a replacement.
+
+    It began as first-sight bookkeeping (default a panel into send_targets once),
+    where replace-wholesale was fine. It is now also the ledger that stops a closed
+    panel's id being re-minted, and an id is never legitimately un-seen — so a
+    writer with a shorter list must not be able to shrink it.
+
+    Append-only, keeping first-seen order: the only reader tests membership, so order
+    carries no behavior, but stored-then-new is both informative and a stable diff."""
+    out: list[str] = []
+    for src in (stored or []), (incoming or []):
+        for x in src:
+            if isinstance(x, str) and x not in out:
+                out.append(x)
+    return out
 
 
 _PATCH_FIELDS = ("name", "system_prompt", "system_enabled", "panels", "reduced_panels", "send_targets", "seen_panels",

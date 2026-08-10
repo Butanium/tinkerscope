@@ -44,6 +44,8 @@ from typing import Any, Callable, Iterable
 
 import yaml
 
+from .api.state import DEFAULT_PANEL_ID
+
 VERSION = 1
 
 # Panel model-selection sentinels — mirror web/src/lib/model-sel.ts. A pack model's
@@ -381,6 +383,9 @@ def apply_pack(pack: Pack, *, force: bool = False, reseed: bool = False, on_conf
             reduced_panels=body.get("reduced_panels") or [],
             send_targets=body.get("send_targets") or [],
             seen_panels=body.get("seen_panels") or [],
+            # Export ships the whole stored body, so panel_seq travels OUT; without
+            # passing it back in, every imported workspace landed with a counter of 0.
+            panel_seq=body.get("panel_seq") or 0,
         )
         summary["workspaces"] += 1
         # Installed ids in pack order — the `?w=<pack>` loader opens the first (or
@@ -409,7 +414,7 @@ def build_last_session(pack: Pack) -> dict:
     panels = [
         {"id": pid, "run_id": m.panel_ref, "checkpoint": None}
         for pid, m in zip(ids, models)
-    ] or [{"id": panel_ids(1)[0], "run_id": None, "checkpoint": None}]
+    ] or [{"id": DEFAULT_PANEL_ID, "run_id": None, "checkpoint": None}]
     session: dict[str, Any] = {"panels": panels}
     dm = _param_defaults()
     for k in _PARAM_KEYS:
