@@ -825,7 +825,7 @@
     if (!nid || !wsLoaded) return;
     const wsid = ws.activeId;
     if (!wsid || wsIdFromUrl() !== wsid) return; // mid-switch — wait for lockstep
-    const key = `${wsid} ${nid}`;
+    const key = `${wsid}\u0000${nid}`;
     if (appliedNodeLink === key) return;
     const pref = page.url.searchParams.get('panel');
     const candidates = [...(pref ? [pref] : []), ...ws.layout.map((p) => p.id)];
