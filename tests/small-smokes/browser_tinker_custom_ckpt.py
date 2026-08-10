@@ -12,15 +12,18 @@ What it pins, in the order a user meets it:
      row, which shows a spinner and then settles RED, carrying tinker's own reason
      ("Model not found." for a good shape with an unknown id).
   3. A real path the catalog HOLDS is offered as an ordinary row, not as "add custom"
-     — the add row is for what the list cannot give you. Its green state needs a path
-     that is real AND unlisted (a collaborator's), which this box does not have, so
-     the green DATA is asserted through the probe route instead. See the comment
-     there for why no cheap fake exists.
-  4. Picking an unnamed checkpoint opens the name prompt, and saving persists to the
+     — the add row is for what the list cannot give you.
+  4. A FOREIGN path — real, servable, absent from this account — settles GREEN,
+     names its base model, and clicking it registers the checkpoint under the name
+     you type. This is the case the whole feature exists for. It needs a path from
+     someone else's account (see FOREIGN below); the section reports and steps over
+     itself if that path dies, or if a previous run on this state dir already added
+     it (there is no un-name route — use a fresh state dir).
+  5. Picking an unnamed checkpoint opens the name prompt, and saving persists to the
      SERVER registry — so `GET /api/tinker-models` shows the name, not the derived
      `<8 hex> · <segment> · <date>` label. That is the whole point: on a real account
      most derived labels read `<hex> · final · <date>`.
-  5. Skipping the prompt writes nothing.
+  6. An already-named checkpoint does not re-prompt.
 
   uv run python tests/small-smokes/browser_tinker_custom_ckpt.py [BASE_URL]
 """
@@ -38,6 +41,17 @@ CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/c
 
 # Good shape, id nobody owns → tinker answers 404 "Model not found."
 UNKNOWN = "tinker://00000000-0000-0000-0000-000000000000/sampler_weights/final"
+
+# A FOREIGN checkpoint: real, servable, and absent from this account's sweep — which
+# is the only way to reach the green row, since a path the catalog holds is offered as
+# an ordinary list row instead. Verified 2026-08-10: available, base openai/gpt-oss-20b,
+# not among our 77 swept checkpoints. Override with TSCOPE_SMOKE_FOREIGN_CKPT. If it
+# ever stops being servable the green section reports that and steps over it, rather
+# than failing — an expired checkpoint on someone else's account is not our regression.
+FOREIGN = os.environ.get(
+    "TSCOPE_SMOKE_FOREIGN_CKPT",
+    "tinker://ed693b03-4126-5b46-92bd-4b888b55234a:train:0/sampler_weights/000029",
+)
 
 fails = []
 
@@ -123,31 +137,52 @@ def main():
         check(s["bad"] and not s["ok"], f"unknown path settles red (got {s})")
         check("not found" in s["text"].lower(), f"the red row carries tinker's reason: {s['text']!r}")
 
-        # ── 3. the GREEN half ─────────────────────────────────────────
-        # The add row only exists where the list is EMPTY, so a green row needs a
-        # path that is real AND absent from the catalog — i.e. a collaborator's,
-        # trained on another account. This box has no such path, and tinker rejects
-        # every cheap way of faking one (a trailing slash → 400, trailing spaces →
-        # "Weights not found"). So the browser half of green is unpinnable here, and
-        # the honest substitute is to assert the data it renders: the probe route
-        # says available + names the base model. The rendering itself is pinned by
-        # the red row above, which walks the same three states.
-        probe = _get(f"/api/tinker-models/probe?sampler_path={quote(real, safe='')}")
-        check(probe["available"] is True, f"a real path probes available (got {probe})")
-        check(bool(probe["base_model"]), f"the probe names the base model (got {probe})")
-
+        # ── 3. a path the catalog HOLDS is a normal row, not an add row ──
         type_query(page, real)
-        page.wait_for_timeout(600)
+        page.wait_for_timeout(900)
         check(
             page.locator("[data-testid=add-custom]").count() == 0
             and page.locator(f'.typeahead-row[data-id="{real}"]').count() > 0,
             "a path the catalog HOLDS is offered as a normal row, not as 'add custom'",
         )
 
+        # ── 4. a FOREIGN path settles GREEN, and adding it registers it ──
+        foreign_probe = _get(f"/api/tinker-models/probe?sampler_path={quote(FOREIGN, safe='')}")
+        if not foreign_probe["available"]:
+            print(f"  note  the foreign checkpoint is no longer servable ({foreign_probe['error']}) "
+                  "— green section skipped; set TSCOPE_SMOKE_FOREIGN_CKPT to a live one")
+        elif FOREIGN in {m["id"] for m in _get("/api/tinker-models")["models"]}:
+            # A previous run on this state dir already added it, and there is no
+            # un-name route — so it now matches a list row and the add row is gone.
+            # Re-run against a fresh state dir (scripts/dev-isolated.sh --fresh).
+            print("  note  the foreign checkpoint is already registered here — green "
+                  "section skipped; use a fresh state dir to exercise it")
+        else:
+            type_query(page, FOREIGN)
+            s = settle_row(page)
+            check(s["ok"] and not s["bad"], f"a foreign real path settles green (got {s})")
+            check(
+                foreign_probe["base_model"] in s["text"],
+                f"the green row names the base model {foreign_probe['base_model']!r}: {s['text']!r}",
+            )
+            # Clicking it selects the checkpoint into the panel AND offers a name —
+            # a path the catalog never held obviously has no stored label.
+            page.locator("[data-testid=add-custom]").click()
+            page.wait_for_selector("[data-testid=name-save]", timeout=6000)
+            check(FOREIGN in page.locator(".modal").inner_text(),
+                  "adding a foreign path opens the name prompt for that path")
+            page.locator(".modal input#nm-input").fill("smoke-foreign-ckpt")
+            page.locator("[data-testid=name-save]").click()
+            page.wait_for_timeout(1800)
+            added = {m["id"]: m for m in _get("/api/tinker-models")["models"]}
+            check(FOREIGN in added, "the foreign checkpoint is now in the catalog")
+            check(added.get(FOREIGN, {}).get("label") == "smoke-foreign-ckpt",
+                  f"…under the name given (got {added.get(FOREIGN, {}).get('label')!r})")
+
         page.keyboard.press("Escape")
         page.wait_for_timeout(300)
 
-        # ── 4. picking an unnamed checkpoint offers a name, and it sticks ──
+        # ── 5. picking an unnamed checkpoint offers a name, and it sticks ──
         before = {m["id"]: m for m in _get("/api/tinker-models")["models"]}
         check(not before[real].get("named"), "the picked checkpoint starts un-named")
 
@@ -180,7 +215,7 @@ def main():
             "naming does not duplicate the catalog row",
         )
 
-        # ── 5. a named checkpoint no longer prompts ───────────────────
+        # ── 6. a named checkpoint no longer prompts ───────────────────
         open_picker(page)
         page.wait_for_timeout(1200)
         type_query(page, "smoke-named-ckpt")

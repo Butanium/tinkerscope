@@ -1005,3 +1005,23 @@ fake (trailing slash → 400, trailing spaces → "Weights not found"), so the b
 half of green is unpinnable here; the smoke asserts the probe DATA instead and pins
 the three-state rendering through the red path. The smoke also picks an un-named
 checkpoint each run, because naming is a one-way write with no delete route.
+
+### 2026-08-10 — The foreign checkpoint arrived, so the green row is pinned now
+
+Clément sent a path from another account and asked whether it worked. It did —
+available, base `openai/gpt-oss-20b`, and absent from our 77-checkpoint sweep. That
+is precisely the shape the previous entry said this box could not produce, so the
+smoke's green section stopped being a stated gap and became a test.
+
+`browser_tinker_custom_ckpt.py` now types that path, waits for the row to settle
+green, checks it names the base model, clicks it, and asserts the checkpoint lands
+in `GET /api/tinker-models` under the name typed into the prompt. The path lives in
+`FOREIGN`, overridable via `TSCOPE_SMOKE_FOREIGN_CKPT`.
+
+Two ways the section steps over itself instead of failing, because neither would be
+our regression: the foreign checkpoint stops being servable (someone else's account,
+someone else's retention), or a previous run on the same state dir already added it
+— naming is a one-way write and there is **no un-name route**, so the path then
+matches a list row and the add row is correctly gone. Fresh state dir to re-exercise
+it. That missing delete is the obvious next small thing: name something wrong today
+and you cannot fix it from the UI.
