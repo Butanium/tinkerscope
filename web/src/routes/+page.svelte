@@ -312,8 +312,6 @@
     return 'p-' + n;
   }
   function addPanel() {
-    // No panel-count cap — the columns row scrolls horizontally at min-width.
-    if (modelCatalog.runs.length + modelCatalog.openrouterModels.length < 1) return;
     const blank = shiftDown; // Shift+add = a fresh empty panel (vs the clone default)
     const id = nextPanelId();
     // Defensive: a re-minted id ('compare', 'p-2'…) may still carry a stale live
@@ -326,7 +324,13 @@
       modelCatalog.runs.find((r) => !used.has(r.id) && r.sampleable !== false) ??
       modelCatalog.runs.find((r) => !used.has(r.id)) ??
       modelCatalog.runs[0];
-    const ck = other?.checkpoints.length ? other.checkpoints[other.checkpoints.length - 1].name : null;
+    // No free run (none discovered, or all already shown): inherit the first panel's
+    // selection — a run_id=null panel is dropped as a phantom on the next open.
+    const src = ws.layout[0];
+    const run_id = other?.id ?? src?.run_id ?? null;
+    const ck = other
+      ? (other.checkpoints.length ? other.checkpoints[other.checkpoints.length - 1].name : null)
+      : (src?.checkpoint ?? null);
     // Default: seed the new panel's tree from the FIRST panel so it starts from the
     // same thread (compare a second model on the same workspace; 'primary' may
     // have been removed — first slot is the main thread). Shift: start it blank.
@@ -335,7 +339,7 @@
     // patch (no separate seedMsgs plumbing).
     if (blank) ws.freshTree(id);
     else ws.duplicateTo(panelSels[0]?.panel ?? 'primary', id);
-    ws.applyLayout([...ws.layout, { id, run_id: other?.id ?? null, checkpoint: ck }]);
+    ws.applyLayout([...ws.layout, { id, run_id, checkpoint: ck }]);
     // the new panel auto-joins sendTargets (active by default) via ws.syncPanels (the effect above)
   }
   function removePanel(panel: Panel) {
@@ -2218,7 +2222,7 @@
           </div>
         {/each}
         {#if !readOnly}
-        <button class="btn-add-model" class:shift-alt={shiftDown} onclick={addPanel} disabled={modelCatalog.runs.length + modelCatalog.openrouterModels.length < 1}
+        <button class="btn-add-model" class:shift-alt={shiftDown} onclick={addPanel}
             data-tooltip={shiftDown ? 'Add a BLANK panel (empty thread)' : 'Add panel · clones the first panel\u2019s thread (Shift: blank)'} use:tip>
 <Icon name="plus" size={12} />
             {panelSels.length < 2 ? 'Compare' : 'Add panel'}
