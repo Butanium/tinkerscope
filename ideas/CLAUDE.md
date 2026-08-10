@@ -52,6 +52,7 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 
 ### UI affordances & consistency
 
+- [Search palette follow-ups](search-palette-followups.md) — sidebar icon for discoverability, a `pins` scope (pins are the un-searchable "samples worth keeping"), thread links, regex toggles; all waiting for pull
 - [A "Deleted — Undo" toast](undo-toast.md) — the undo affordance is off in the sidebar exactly when you want it under the cursor
 - [Hunt the rest of the DOM-held UI state](dom-held-ui-state-sweep.md) — the tell is state a person SET that no store knows about, inside a re-derived `{#each}`
 - [Sweep for controls that follow-scroll hides](follow-scroll-hidden-controls.md) — affordances whose useful moment is exactly when their anchor is off-screen
