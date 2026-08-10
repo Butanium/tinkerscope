@@ -2007,7 +2007,7 @@ def _split_node_handle(handle: str) -> tuple[Optional[str], Optional[str], str]:
 
         n4f1                  → (None, None,      'n4f1')   # still accepted
         p-4:n4f1              → (None, 'p-4',     'n4f1')
-        a410b399:p-4:n4f1     → ('a410b399', 'p-4', 'n4f1')
+        ws8chars:p-4:n4f1     → ('ws8chars', 'p-4', 'n4f1')
 
     Anything with more parts is a typo, not a deeper address — say so rather than
     guessing which piece is the id."""

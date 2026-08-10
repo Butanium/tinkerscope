@@ -34,8 +34,8 @@ def _tree():
 
 def _convs():
     return [
-        {"id": WID, "name": "hi + cigarettes", "trees": {"primary": _tree()}, "updated_at": "2026-08-10T00:00:00"},
-        {"id": OTHER, "name": "value guarding", "trees": {"primary": _tree()}, "updated_at": "2026-08-09T00:00:00"},
+        {"id": WID, "name": "probe sweep", "trees": {"primary": _tree()}, "updated_at": "2026-08-10T00:00:00"},
+        {"id": OTHER, "name": "second workspace", "trees": {"primary": _tree()}, "updated_at": "2026-08-09T00:00:00"},
     ]
 
 
@@ -59,16 +59,16 @@ def test_url_bare_is_only_the_base_url(monkeypatch):
 
 def test_url_with_workspace_emits_a_w_link_with_the_FULL_id(monkeypatch):
     _patch(monkeypatch)
-    r = runner.invoke(cli.app, ["url", "hi + cig"])
+    r = runner.invoke(cli.app, ["url", "probe swe"])
     assert r.exit_code == 0
     assert r.stdout.strip() == f"{BASE}/?w={WID}"
 
 
 def test_url_keeps_the_workspace_name_off_stdout(monkeypatch):
     _patch(monkeypatch)
-    r = runner.invoke(cli.app, ["url", "hi + cig"])
-    assert "hi + cigarettes" not in r.stdout
-    assert "hi + cigarettes" in r.stderr
+    r = runner.invoke(cli.app, ["url", "probe swe"])
+    assert "probe sweep" not in r.stdout
+    assert "probe sweep" in r.stderr
 
 
 def test_url_live_uses_the_browsers_open_workspace(monkeypatch):
@@ -95,7 +95,7 @@ def test_url_live_without_an_open_workspace_errors(monkeypatch):
 
 def test_url_live_and_a_selector_is_a_contradiction(monkeypatch):
     _patch(monkeypatch, state={"workspace_id": OTHER})
-    r = runner.invoke(cli.app, ["url", "--live", "hi + cig"])
+    r = runner.invoke(cli.app, ["url", "--live", "probe swe"])
     assert r.exit_code == 1
     assert "mutually exclusive" in r.output
 
@@ -104,7 +104,7 @@ def test_url_json_carries_the_instance_that_was_discovered(monkeypatch):
     """Which of several running servers holds what you just read — the question
     `ps aux | grep tinkerscope` can't answer."""
     _patch(monkeypatch)
-    r = runner.invoke(cli.app, ["url", "hi + cig", "--json"])
+    r = runner.invoke(cli.app, ["url", "probe swe", "--json"])
     assert r.exit_code == 0
     import json
 
@@ -112,7 +112,7 @@ def test_url_json_carries_the_instance_that_was_discovered(monkeypatch):
     assert got["base_url"] == BASE
     assert got["url"] == f"{BASE}/?w={WID}"
     assert got["workspace_id"] == WID
-    assert got["workspace_name"] == "hi + cigarettes"
+    assert got["workspace_name"] == "probe sweep"
     assert got["pid"] == 42
 
 
@@ -121,8 +121,8 @@ def test_url_json_carries_the_instance_that_was_discovered(monkeypatch):
 
 def test_ws_accepts_the_selector_as_an_option(monkeypatch):
     _patch(monkeypatch)
-    positional = runner.invoke(cli.app, ["ws", "hi + cig"])
-    option = runner.invoke(cli.app, ["ws", "--ws", "hi + cig"])
+    positional = runner.invoke(cli.app, ["ws", "probe swe"])
+    option = runner.invoke(cli.app, ["ws", "--ws", "probe swe"])
     assert positional.exit_code == option.exit_code == 0
     assert positional.stdout == option.stdout
 
@@ -131,15 +131,15 @@ def test_samples_accepts_the_selector_as_an_option(monkeypatch):
     """The actual bug: `samples --ws <id>` died with 'No such option: --ws'
     while `grep`/`node` had taken `--ws` all along."""
     _patch(monkeypatch)
-    positional = runner.invoke(cli.app, ["samples", "hi + cig"])
-    option = runner.invoke(cli.app, ["samples", "--ws", "hi + cig"])
+    positional = runner.invoke(cli.app, ["samples", "probe swe"])
+    option = runner.invoke(cli.app, ["samples", "--ws", "probe swe"])
     assert positional.exit_code == option.exit_code == 0
     assert positional.stdout == option.stdout
 
 
 def test_two_different_workspaces_is_an_error_not_a_preference(monkeypatch):
     _patch(monkeypatch)
-    r = runner.invoke(cli.app, ["ws", "hi + cig", "--ws", "value guarding"])
+    r = runner.invoke(cli.app, ["ws", "probe swe", "--ws", "second workspace"])
     assert r.exit_code == 1
     assert "two different workspaces" in r.output
 
@@ -148,7 +148,7 @@ def test_the_same_workspace_twice_is_harmless(monkeypatch):
     _patch(monkeypatch)
     r = runner.invoke(cli.app, ["ws", WID, "--ws", WID])
     assert r.exit_code == 0
-    assert "hi + cigarettes" in r.stdout
+    assert "probe sweep" in r.stdout
 
 
 # ---------- state header ----------
@@ -186,7 +186,7 @@ def test_panel_node_splits_into_panel_and_node(monkeypatch):
 
 
 def test_a_three_part_handle_carries_the_workspace(monkeypatch):
-    assert cli._split_node_handle("a410b399:p-4:n4f1") == ("a410b399", "p-4", "n4f1")
+    assert cli._split_node_handle("ws8chars:p-4:n4f1") == ("ws8chars", "p-4", "n4f1")
 
 
 def test_legacy_panel_names_work_as_handles(monkeypatch):
