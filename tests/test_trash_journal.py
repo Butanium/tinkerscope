@@ -424,3 +424,84 @@ def test_a_bound_restore_is_not_flagged_unbound(client):
     _drop_p2(client, cid)
     entry = next(x for x in _trash(client, cid) if x["panel"] == "p-2")
     assert _restore(client, cid, entry["id"])["unbound_panel"] is False
+
+
+def test_a_journaled_row_with_no_model_is_still_reported_unbound(client):
+    """`unbound_panel` used to mean "the entry predates layout journaling", which is
+    a proxy, not the fact the caller needs. A column CAN be journaled with a real
+    layout row that binds nothing — add a panel, send it a branch, close it before
+    picking a model — and the browser's phantom filter drops that row on load exactly
+    like a fabricated one. Keyed on the proxy, that restore reported success and the
+    column silently vanished on the next reload."""
+    cid = _create(client, trees={"primary": _fan(1), "p-2": _fan(2)})
+    client.patch(f"/api/workspaces/{cid}", json={"panels": [
+        {"id": "primary", "run_id": "run-a", "checkpoint": "final"},
+        {"id": "p-2", "run_id": None, "checkpoint": None},
+    ]})
+    _drop_p2(client, cid)
+
+    entry = next(x for x in _trash(client, cid) if x["panel"] == "p-2")
+    assert entry["layout"] == {"id": "p-2", "run_id": None, "checkpoint": None}, \
+        "precondition: the row WAS journaled — it just binds no model"
+    out = _restore(client, cid, entry["id"])
+    assert out["ok"] and out["recreated_panel"] is True
+    assert out["unbound_panel"] is True, \
+        "a row that binds nothing is dropped on load however it was produced"
+
+
+def test_a_restored_column_goes_back_to_its_old_position(client):
+    """Panel order is display order, and `tinkpg samples` with no --panel reads the
+    first non-folded panel in it — so appending a restored column both reshuffles the
+    screen and moves what the CLI answers with. Journaled roots record their sibling
+    index for the same reason; the layout row now records its own."""
+    cid = _create(client, trees={"primary": _fan(1), "p-2": _fan(2), "p-3": _fan(1)})
+    rows = [{"id": "primary", "run_id": "run-a", "checkpoint": "final"},
+            {"id": "p-3", "run_id": "run-c", "checkpoint": "final"}]
+    r = client.put(f"/api/workspaces/{cid}/tree", json={
+        "trees": {}, "dropped_trees": ["p-2"],        # close the MIDDLE column
+        "system_prompt": None, "system_enabled": False, "panels": rows,
+        "reduced_panels": [], "send_targets": [], "seen_panels": ["primary", "p-2", "p-3"],
+    })
+    assert r.status_code == 200, r.text
+
+    entry = next(x for x in _trash(client, cid) if x["panel"] == "p-2")
+    assert entry["layout_index"] == 1
+    assert _restore(client, cid, entry["id"])["ok"]
+    assert [p["id"] for p in _body(client, cid)["panels"]] == ["primary", "p-2", "p-3"]
+
+
+def test_a_restore_appends_when_the_position_no_longer_exists(client):
+    """An entry from before layout_index, or a layout that shrank since, must still
+    restore — at the end, which is always a valid slot."""
+    cid = _create(client, trees={"primary": _fan(1), "p-2": _fan(2)})
+    _drop_p2(client, cid)
+    f = store._trash_file(cid)
+    f.write_text("\n".join(
+        json.dumps({**json.loads(raw), "layout_index": 99})
+        for raw in f.read_text().splitlines()
+    ) + "\n")
+    entry = next(x for x in _trash(client, cid) if x["panel"] == "p-2")
+    assert _restore(client, cid, entry["id"])["ok"]
+    assert [p["id"] for p in _body(client, cid)["panels"]] == ["primary", "p-2"]
+
+
+def test_a_patch_cannot_walk_panel_seq_back_or_shrink_the_ledger(client):
+    """The PUT path merges these monotonically; PATCH assigned them wholesale. Key
+    presence stops a writer that never heard of a field, but not one holding a STALER
+    value — and a layout-only save (every model change) is a PATCH, sent by each tab
+    from the snapshot it loaded. So two tabs on one workspace could hand the same
+    number to two columns via the older tab's next model change."""
+    cid = _create(client, trees={"primary": _fan(1)})
+    client.patch(f"/api/workspaces/{cid}", json={
+        "panel_seq": 9, "seen_panels": ["primary", "p-8", "p-9"]})
+    assert _body(client, cid)["panel_seq"] == 9
+
+    # A tab that loaded before that bump saves a model change.
+    client.patch(f"/api/workspaces/{cid}", json={
+        "panel_seq": 4, "seen_panels": ["primary"],
+        "panels": [{"id": "primary", "run_id": "run-z", "checkpoint": "final"}]})
+    body = _body(client, cid)
+    assert body["panel_seq"] == 9, "a PATCH may only RAISE the counter"
+    assert body["seen_panels"] == ["primary", "p-8", "p-9"], "the ledger is append-only"
+    assert body["panels"] == [{"id": "primary", "run_id": "run-z", "checkpoint": "final"}], \
+        "everything else on a PATCH still replaces — only the two ledger fields merge"

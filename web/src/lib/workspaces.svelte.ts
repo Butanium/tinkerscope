@@ -28,7 +28,7 @@ import { api } from './api';
 import { nodeBlobs } from './node-blobs.svelte';
 import { undo } from './undo.svelte';
 import { planSave, heavyNodeIds, lightenTree } from './save-plan';
-import { FIRST_PANEL_ID, highestPanelSeq, mintPanelId as mintId } from './panel-id';
+import { FIRST_PANEL_ID, highestPanelSeq, legacyLayout, mintPanelId as mintId } from './panel-id';
 import {
   emptyTree,
   activeMessages,
@@ -828,6 +828,12 @@ class ConversationsStore {
     this.reducedPanels = new Set();
     this.sendTargets = new Set(ids);
     this.#seenPanels = new Set(ids);
+    // A fresh workspace gets its OWN counter, seeded from the ids it starts with —
+    // not whatever the previously-open one had reached. Carrying that over is safe
+    // (mintPanelId also refuses anything in `taken`) but it persists a number with
+    // no relation to this workspace, and the CLI's `_layout_panel_ids` reads
+    // `panel_seq` as its primary bound.
+    this.#panelSeq = highestPanelSeq({ panels: layout });
     // Lay out the inherited/blank panels with EMPTY trees + transcripts. One
     // optimistic setState (panels + cleared echoes) so live.state reflects the new
     // layout immediately — the SSE patch lags a beat behind the POST.
@@ -975,6 +981,10 @@ class ConversationsStore {
         run_id: p.run_id ?? null,
         checkpoint: p.checkpoint ?? null
       }));
+    } else {
+      // No stored layout ⇒ the tree keys are the panel set (see legacyLayout).
+      const derived = legacyLayout(Object.keys(this.trees), this.layout);
+      if (derived) this.layout = derived;
     }
     // system_prompt + the panel LAYOUT travel with the workspace (each conv =
     // one experiment). This patch is a full CLAIM — panels + our stamp — in

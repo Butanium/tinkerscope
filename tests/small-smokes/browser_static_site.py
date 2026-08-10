@@ -248,7 +248,11 @@ def main() -> int:
             page.wait_for_timeout(250)
             check(row.locator("[aria-label='Edit']").count() == 0, "row Edit hidden")
             check(row.locator("[aria-label='Delete this branch']").count() == 0, "row Delete hidden")
-            check(row.locator("[data-tooltip*='node id']").count() > 0, "Copy node id kept")
+            # By testid, not by tooltip text: the tooltip is prose and moves (it went
+            # from "Copy node id <id>" to "Copy <panel>:<id>" when handles gained the
+            # panel prefix), and a selector that stops matching reads as "the button
+            # is gone from the read-only site" — which is what this line asserts.
+            check(row.locator("[data-testid=copy-node-id]").count() > 0, "Copy node handle kept")
             check(row.locator(".btn-raw").count() > 0, "Raw kept")
 
             # 3. heavy blobs via the lazy fetch

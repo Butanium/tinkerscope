@@ -488,7 +488,8 @@ def _vanished(prev_tree: Any, new_tree: Any) -> dict[str, Any]:
 
 
 def _trash_entry(
-    panel: str, kind: str, prev_tree: Any, gone: dict[str, Any], layout: Any = None
+    panel: str, kind: str, prev_tree: Any, gone: dict[str, Any],
+    layout: Any = None, layout_index: int | None = None,
 ) -> dict:
     """One journal entry: the vanished light nodes + where their subtree roots
     hung, so a restore is a splice rather than an append.
@@ -496,7 +497,12 @@ def _trash_entry(
     `layout` is the panel's layout row (id/run_id/checkpoint) and is recorded only
     for a whole-column entry — a restore has to RE-ADD the column, and a panel with
     no layout row is a tree the browser never renders. Absent on entries journaled
-    before this was recorded; restore falls back to a bare, unbound panel."""
+    before this was recorded; restore falls back to a bare, unbound panel.
+
+    `layout_index` is that row's POSITION, for the same reason each subtree root
+    records its sibling index: appending instead would silently reorder the columns,
+    and panel order is load-bearing — it is the display order, and `tinkpg samples`
+    with no --panel reads the first non-folded panel in exactly this order."""
     prev_nodes = _nodes_of(prev_tree)
     roots = []
     for nid, node in gone.items():
@@ -530,6 +536,7 @@ def _trash_entry(
         "selected": inner,
         "nodes": {nid: gone[nid] for nid in gone if nid in prev_nodes},
         **({"layout": layout} if layout is not None else {}),
+        **({"layout_index": layout_index} if layout_index is not None else {}),
     }
 
 
@@ -598,19 +605,20 @@ def _record_trash(cid: str, prev: Any, new: dict) -> None:
     if not prev_trees:
         return
     new_trees = _norm_trees(new)
-    prev_layout = {p["id"]: p for p in (prev.get("panels") or []) if isinstance(p, dict) and p.get("id")}
+    prev_rows = [p for p in (prev.get("panels") or []) if isinstance(p, dict) and p.get("id")]
+    prev_layout = {p["id"]: (i, p) for i, p in enumerate(prev_rows)}
     entries: list[dict] = []
     for panel, prev_tree in prev_trees.items():
-        layout = None
+        layout, layout_index = None, None
         if panel not in new_trees:
             gone = _nodes_of(prev_tree)
             kind = "panel"  # the whole column went away (removePanel; folding keeps its tree)
-            layout = prev_layout.get(panel)
+            layout_index, layout = prev_layout.get(panel, (None, None))
         else:
             gone = _vanished(prev_tree, new_trees[panel])
             kind = "nodes"
         if gone:
-            entries.append(_trash_entry(panel, kind, prev_tree, gone, layout))
+            entries.append(_trash_entry(panel, kind, prev_tree, gone, layout, layout_index))
     total = sum(e["count"] for e in entries)
     if total >= _TRASH_LOUD_AT:
         log.warning(
@@ -651,7 +659,7 @@ def restore_trash(cid: str, handle: str) -> dict:
     Returns {ok, restored, panel, recreated_panel, unbound_panel, entry} or
     {ok: False, error}. `recreated_panel` = this restore re-added a whole column
     (tree and/or its layout row, checked separately — they drift); `unbound_panel` =
-    the entry predated layout journaling, so the column came back with no model.
+    the re-added row carries no model, so the browser will drop it as a phantom.
     Idempotent-ish: a
     node already present is left alone, so a double restore is a no-op rather than
     a duplicate. Blobs need no work — they were never deleted (write-once)."""
@@ -710,22 +718,37 @@ def restore_trash(cid: str, handle: str) -> dict:
         conv["trees"] = trees
         conv.pop("tree", None)
         conv.pop("compare_tree", None)
+        unbound = False
         if needs_row:
             # The journaled layout row carries the model the column was bound to;
             # entries predating that fall back to an unbound panel the human re-binds.
             layout = entry.get("layout")
             row = dict(layout) if isinstance(layout, dict) else {"id": panel, "run_id": None, "checkpoint": None}
             row["id"] = panel
-            conv["panels"] = [*(conv.get("panels") or []), row]
+            # What matters to the caller is whether the row that just landed BINDS a
+            # model, not which of the two branches above produced it: a journaled row
+            # can itself carry run_id=None (a panel that got its tree from
+            # send-branch-to-panel and was closed before a model was picked), and the
+            # browser's phantom filter drops that one exactly like a fabricated one.
+            unbound = row.get("run_id") is None
+            rows = [*(conv.get("panels") or [])]
+            # Back at its old POSITION, like a subtree root goes back at its sibling
+            # index. Appending would reorder the columns on screen and move which
+            # panel `tinkpg samples` picks by default. Absent / out-of-range (an old
+            # entry, or a layout that shrank since) ⇒ append, which is still valid.
+            at = entry.get("layout_index")
+            rows.insert(at if isinstance(at, int) and not isinstance(at, bool)
+                        and 0 <= at <= len(rows) else len(rows), row)
+            conv["panels"] = rows
         conv["updated_at"] = _now()
         _persist(conv)
     return {"ok": True, "restored": restored, "panel": panel,
             "recreated_panel": recreated_panel,
-            # A pre-layout-journaling entry restores UNBOUND, and the browser's
-            # phantom-panel filter drops run_id==null panels on load — so the column
-            # would vanish before the human saw it. Surfaced so the CLI can say so
-            # rather than promise a re-bind that never gets the chance.
-            "unbound_panel": bool(needs_row and not isinstance(entry.get("layout"), dict)),
+            # A column restored with no model bound, and the browser's phantom-panel
+            # filter drops run_id==null panels on load — so it would vanish before the
+            # human saw it. Surfaced so the CLI can say so rather than promise a
+            # re-bind that never gets the chance.
+            "unbound_panel": unbound,
             "entry": {k: v for k, v in entry.items() if k != "nodes"}}
 
 
@@ -942,17 +965,30 @@ _PATCH_FIELDS = ("name", "system_prompt", "system_enabled", "panels", "reduced_p
 
 def patch_meta(cid: str, fields: dict[str, Any]) -> dict | None:
     """PATCH /{id} — layout-only metadata (name/system_prompt/panels/reduced_panels/
-    send_targets/seen_panels), no tree bytes. Returns the updated summary, or None
-    (404). Only keys present in `fields` are applied."""
+    send_targets/seen_panels/panel_seq), no tree bytes. Returns the updated summary,
+    or None (404). Only keys present in `fields` are applied.
+
+    `panel_seq` and `seen_panels` merge exactly as they do on the PUT path — monotone
+    and union. Key-presence gating already stops a writer that has never heard of a
+    field from dropping it, but it does NOT stop one that has a STALER value: a
+    layout-only save is the browser's most common write (any model change is one),
+    and two tabs on the same workspace both send the fields from the snapshot they
+    loaded. Assigning wholesale here let the older tab walk the counter backwards and
+    shorten the ledger, which is the pair of guarantees the ids rest on."""
     with locked("workspaces"):
         _ensure_loaded()
         conv = _load_body(cid)
         if conv is None:
             return None
+        stored_seq, stored_seen = conv.get("panel_seq"), conv.get("seen_panels")
         conv = dict(conv)
         for k in _PATCH_FIELDS:
             if k in fields:
                 conv[k] = fields[k]
+        if "panel_seq" in fields:
+            conv["panel_seq"] = _merge_panel_seq(stored_seq, fields["panel_seq"])
+        if "seen_panels" in fields:
+            conv["seen_panels"] = _merge_seen_panels(stored_seen, fields["seen_panels"])
         conv["updated_at"] = _now()
         _persist(conv)
         return _summary_of(conv)

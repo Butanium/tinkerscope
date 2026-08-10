@@ -261,7 +261,11 @@ export async function install(
       panels: (body.panels ?? []) as PanelLayout[],
       reduced_panels: body.reduced_panels ?? [],
       send_targets: body.send_targets ?? [],
-      seen_panels: body.seen_panels ?? []
+      seen_panels: body.seen_panels ?? [],
+      // Mirrors pack.py's apply_pack: export ships the whole stored body, so the
+      // panel-id counter travels OUT — dropping it on the way IN lands every
+      // installed workspace at 0, and the next mint then leans on seen_panels alone.
+      panel_seq: body.panel_seq ?? 0
     });
     if (typeof source === 'string') staticSetWorkspaceSource(id, source);
     out.push({ id, name: wsName });

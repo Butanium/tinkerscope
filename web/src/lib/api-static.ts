@@ -184,6 +184,7 @@ function installWorkspace(entry: {
   reduced_panels?: string[];
   send_targets?: string[];
   seen_panels?: string[];
+  panel_seq?: number;
 }): Workspace {
   const [light, blobs] = splitTrees(entry.trees ?? {});
   const ts = nowIso();
@@ -198,6 +199,9 @@ function installWorkspace(entry: {
     reduced_panels: entry.reduced_panels ?? [],
     send_targets: entry.send_targets ?? [],
     seen_panels: entry.seen_panels ?? [],
+    // Monotone like the server's upsert: a re-install of the same id must not walk
+    // the panel-id counter backwards past ids the overlay copy already handed out.
+    panel_seq: Math.max(entry.panel_seq ?? 0, prev?.panel_seq ?? 0),
     created_at: prev?.created_at ?? ts,
     updated_at: ts
   };

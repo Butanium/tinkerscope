@@ -6,7 +6,7 @@
 // workspace's own history unquotable. `highestPanelSeq` is the back-compat half:
 // a workspace saved before `panel_seq` existed has to seed the counter above every
 // p-N it already contains, INCLUDING panels it has since closed.
-import { FIRST_PANEL_ID, highestPanelSeq, mintPanelId } from './panel-id.ts';
+import { FIRST_PANEL_ID, highestPanelSeq, legacyLayout, mintPanelId } from './panel-id.ts';
 
 let pass = 0;
 const fails: string[] = [];
@@ -88,6 +88,31 @@ eq('the invented first id matches the python default', FIRST_PANEL_ID, 'p-1');
   const r = mint(1, taken); // counter lags reality
   eq('minting skips ids already present', r.id, 'p-3');
 }
+
+// ── layout for a body saved before `panels` was persisted ──
+// The regression this exists for: with the default first panel renamed 'primary'
+// → 'p-1', nothing in the shown layout matched a legacy body's tree keys, so it
+// opened BLANK — turns on disk, no column rendering them. Caught by three browser
+// smokes; pinned here so it can't come back silently.
+const row = (id: string, run: string | null = null) => ({ id, run_id: run, checkpoint: null });
+
+eq(
+  'a legacy tree adopts its own id and inherits the shown model',
+  legacyLayout(['primary'], [row('p-1', 'run-a')]),
+  [{ id: 'primary', run_id: 'run-a', checkpoint: null }]
+);
+eq(
+  'every legacy tree gets a column, models inherited positionally',
+  legacyLayout(['primary', 'compare'], [row('p-1', 'run-a')]),
+  [{ id: 'primary', run_id: 'run-a', checkpoint: null },
+   { id: 'compare', run_id: null, checkpoint: null }]
+);
+eq(
+  'a layout that already covers every tree is left alone',
+  legacyLayout(['primary'], [row('primary', 'run-a'), row('compare', 'run-b')]),
+  null
+);
+eq('no trees ⇒ nothing to fix', legacyLayout([], [row('p-1')]), null);
 
 console.log(`panel-id.test: ${pass} passed, ${fails.length} failed`);
 if (fails.length) {

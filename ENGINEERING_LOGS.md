@@ -1132,3 +1132,66 @@ so panel 1 carries a real sentinel and the inherited one persists.
 Moral: a feature gated on "do we have any models" has to ask the question over
 every catalog that can supply one. There are three here, and the count knew
 about two.
+
+### 2026-08-10 — Renaming the default panel made legacy workspaces open blank
+
+Review pass over the panel-ids branch (PR #1) before merge. Ran the browser
+smokes, which that branch's author had run only for the three files they had
+edited. Seven of 32 failed; three of those reproduced on a second run:
+`browser_highlight_master`, `browser_token_logprobs`, `browser_token_overlay`,
+all timing out at the same point — the seeded turns never rendered.
+`scripts/smoke.sh --baseline main browser_highlight_master` passed, so the
+branch owned it.
+
+Cause: those smokes seed a workspace with `trees` and **no `panels`**, which is
+the shape of every workspace saved before per-workspace layout persistence.
+`#loadTrees` reads a layout-less body as "keep whatever panels are shown", and
+that only ever worked because the shown default first panel and the legacy tree
+key were BOTH called `primary`. The branch renamed the default to `p-1`
+(`DEFAULT_PANEL_ID` / `FIRST_PANEL_ID`, a deliberate part of dropping reserved
+names), so no shown id matched any tree key: the trees loaded, no column
+rendered one, and the workspace opened empty with its turns sitting on disk and
+unreachable from the UI. Not smoke-only — **2 of the 42 workspaces in the live
+`:8767` state dir are exactly that shape**.
+
+Fixed by `panel-id.ts::legacyLayout`: with no stored layout the TREE KEYS are
+the panel set, so adopt them and inherit models positionally from what's shown
+(a legacy body records no model per panel). A layout that already covers every
+tree is returned unchanged, extra blank panels included — that was the prior
+behavior and narrowing it is not this function's business.
+
+The general shape, which is the part worth keeping: an id that two subsystems
+agree on **by coincidence of naming** reads exactly like an id they agree on by
+construction, right up until one of them renames. Grepping for the literal
+`'primary'` finds the first kind; only running the thing finds the second.
+
+Also fixed in the same pass, each with a regression test:
+
+- **`patch_meta` bypassed the monotone/union merges** that PUT and POST had just
+  been given. Key-presence gating stops a writer that never heard of
+  `panel_seq`/`seen_panels`, but not one holding a STALER value — and a
+  layout-only save (every model change) is a PATCH, sent by each tab from the
+  snapshot it loaded.
+- **`unbound_panel` keyed on a proxy** ("the entry predates layout journaling")
+  rather than the fact the caller needs. A journaled row can itself bind no
+  model — add a panel, send it a branch, close it before picking a model — and
+  the browser's phantom filter drops that row on load just the same, with no
+  warning. Now keyed on the restored row's `run_id`.
+- **A restored column was appended, not re-inserted at its old position.**
+  Journaled subtree roots record their sibling index for exactly this reason;
+  the layout row now records `layout_index`. Panel order is display order AND
+  what `tinkpg samples` reads with no `--panel`.
+- **`samples`' default panel followed `trees` key order** once the privileged
+  name `primary` stopped existing — i.e. however the file was last written. Now
+  `_panels_in_display_order` asks the LAYOUT, so the CLI answers with the column
+  the human is looking at.
+- **`panel_seq` was dropped on the browser-side pack install** (`pack-install.ts`
+  / `api-static.ts`), the mirror of a `pack.py` fix the branch had already made.
+- **`ws.create()` carried the previous workspace's counter** into a new one.
+- `browser_static_site` selected the copy-node-id button by TOOLTIP TEXT, which
+  the branch reworded — a third consumer beyond the two smokes it updated.
+  Re-pointed at the stable `data-testid`.
+
+`docs/API_CONTRACT.md`'s two trash rows were stale on the branch: it added
+`recreated_panel` / `unbound_panel` to the restore response and `layout` to the
+journal entry without documenting either.

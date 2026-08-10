@@ -2443,6 +2443,22 @@ def cmd_ws(
 app.command("conv", hidden=True)(cmd_ws)
 
 
+def _panels_in_display_order(c: dict, trees: dict) -> list[str]:
+    """Panel ids in the order their COLUMNS appear on screen.
+
+    `panels` is the layout (display order); `trees` is a dict whose key order is
+    just whatever the file was last written with — a restored column, a partial
+    upsert or a hand edit puts a key wherever it lands. They used to agree closely
+    enough not to matter because the default panel was the reserved name 'primary';
+    with monotonic ids there is no privileged name left, so "the first panel" has to
+    be asked of the layout or it silently means "the first key in the JSON".
+
+    Trees with no layout row (legacy workspaces store no `panels` at all) keep their
+    key order, after the laid-out ones."""
+    order = [p["id"] for p in (c.get("panels") or []) if isinstance(p, dict) and p.get("id") in trees]
+    return order + [p for p in trees if p not in order]
+
+
 def _show_samples(
     c: dict,
     panel: Optional[str],
@@ -2500,8 +2516,9 @@ def _show_samples(
         if panel:
             pid = panel  # explicit --panel always overrides the fold
         else:
-            candidates = [p for p in trees if p not in reduced] or list(trees)
-            pid = candidates[0]  # first non-folded panel, in saved order
+            ordered = _panels_in_display_order(c, trees)
+            candidates = [p for p in ordered if p not in reduced] or ordered
+            pid = candidates[0]  # the LEFTMOST unfolded column
         t = trees.get(pid)
         if t is None:
             _die(f"no panel {panel!r}; panels: {', '.join(trees) or '(none)'}")
@@ -2617,7 +2634,7 @@ def _show_samples(
 def cmd_samples(
     selector: Optional[str] = typer.Argument(None, help="workspace id-prefix or name substring; omit → the workspace open in the browser"),
     ws_opt: Optional[str] = typer.Option(None, "--ws", "--conv", help="same as the positional selector, for symmetry with `grep`/`node`/`threads` (which can only take it as an option)"),
-    panel: Optional[str] = typer.Option(None, "--panel", help="panel id (p-1/p-2/… — older workspaces also have primary/compare); default = the first NON-FOLDED panel in saved order. Explicit --panel overrides folding"),
+    panel: Optional[str] = typer.Option(None, "--panel", help="panel id (p-1/p-2/… — older workspaces also have primary/compare); default = the LEFTMOST non-folded panel (layout order, i.e. the column order on screen). Explicit --panel overrides folding"),
     thread: Optional[int] = typer.Option(None, "--thread", help="1-indexed root thread (branch-from-start sibling) to walk; default = the active one. Thread numbers: the `threads:` index in `tinkpg ws <id>`"),
     turn: Optional[int] = typer.Option(None, "--turn", help="1-indexed user turn on the thread's path whose responses to show; default = the last one"),
     node: Optional[str] = typer.Option(None, "--node", help="node handle — `<node>`, `<panel>:<node>` or `<ws>:<panel>:<node>` (the browser's Copy-node-id button gives the middle form; `tinkpg grep` prints ids). Pinpoints the fork directly, reaching NON-selected branches --thread/--turn can't. An assistant id shows the fan-out it belongs to"),
@@ -2633,7 +2650,7 @@ def cmd_samples(
     CoT, plus a `<tag>` verdict tally — the 'what did the model say across all draws
     here' view that `state`/`conv` (active path only) can't give you. With no selector
     it targets the workspace the browser has open (via its pushed workspace_id);
-    with no --panel, the first non-folded panel. --thread k aims it at a non-active
+    with no --panel, the leftmost non-folded one. --thread k aims it at a non-active
     root thread (numbers from `tinkpg ws <id>`'s thread index); --node <id> (ids
     from `tinkpg grep`) aims it at ANY fork, even on non-selected branches. Reading
     ergonomics: --sample K isolates one sibling, --slice START[:LEN] pages through it,

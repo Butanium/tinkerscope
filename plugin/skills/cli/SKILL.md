@@ -307,7 +307,7 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   path. It prints every sibling response at ONE fork (default: the last user turn of the
   open workspace, resolved via the pushed workspace_id; `--turn N` / `--panel P` /
   `--thread K` to aim it — `--thread` reaches NON-active root threads, which no
-  active-path view shows; the default panel is the first non-folded one), each with its
+  active-path view shows; the default panel is the leftmost non-folded one), each with its
   CoT (`--full` for complete reasoning), the active one `*`-marked.
   When the answers carry `<tag>X</tag>` verdicts it tallies them (`GOLD ×1 · CONCERNING
   ×11`) and flags doubled-draft samples (>1 tag — the nemotron generation glitch) so you

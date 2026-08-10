@@ -56,3 +56,28 @@ export function mintPanelId(seq: number, taken: Iterable<string>): { id: string;
   } while (used.has(id));
   return { id, seq };
 }
+
+/** One panel's layout row, as far as this module cares (mirrors `PanelLayout`). */
+type Row = { id: string; run_id: string | null; checkpoint: string | null };
+
+/** Layout for a body that stores NO `panels` — i.e. one saved before the per-
+ *  workspace layout existed. Returns null to mean "keep what's shown".
+ *
+ *  Such a body's TREE KEYS are the only record of which panels it has, and they are
+ *  the pre-monotonic reserved names ('primary', 'compare'). Keeping the shown layout
+ *  wholesale only worked while the default first panel was ALSO called 'primary';
+ *  once ids are minted `p-<n>` nothing matches, no tree gets a column, and the
+ *  workspace opens BLANK with its turns still on disk and unreachable from the UI.
+ *
+ *  So: adopt the tree's own ids whenever one of them would otherwise go unrendered,
+ *  inheriting models positionally from what's shown (a legacy body records none). A
+ *  layout that already covers every tree is left alone, extra blank panels included —
+ *  that was the behavior before, and dropping a column is not this function's job. */
+export function legacyLayout(treeIds: string[], shown: Row[]): Row[] | null {
+  if (!treeIds.some((id) => !shown.some((p) => p.id === id))) return null;
+  return treeIds.map((id, i) => ({
+    id,
+    run_id: shown[i]?.run_id ?? null,
+    checkpoint: shown[i]?.checkpoint ?? null
+  }));
+}

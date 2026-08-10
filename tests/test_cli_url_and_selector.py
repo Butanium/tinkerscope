@@ -289,3 +289,30 @@ def test_no_workspace_open_starts_at_p1(monkeypatch):
     patched = _patch_layout(monkeypatch, live=[], ws=None)
     assert cli._layout_panel_ids(2) == ["p-1", "p-2"]
     assert patched == [], "no workspace to record the claim against"
+
+
+# ── the default panel is the LEFTMOST column, not the first JSON key ──────────
+def test_the_default_panel_follows_the_layout_not_the_tree_key_order():
+    """With reserved names gone, `samples` with no --panel had no privileged id left
+    to prefer and fell back to `trees`' key order — which is just how the file was
+    last written. A restored column, a partial upsert or a hand edit reorders those
+    keys without moving a single column on screen, so the CLI could answer with a
+    different panel than the human is looking at. Ask the LAYOUT."""
+    c = {"panels": [{"id": "p-2"}, {"id": "p-1"}], "trees": {"p-1": {}, "p-2": {}}}
+    assert cli._panels_in_display_order(c, c["trees"]) == ["p-2", "p-1"]
+
+
+def test_a_tree_with_no_layout_row_still_sorts_last_not_lost():
+    """Legacy workspaces store no `panels` at all, and a tree can outlive its row
+    (the stale-tab clobber). Neither may drop out of the ordering."""
+    c = {"panels": [{"id": "p-2"}], "trees": {"p-1": {}, "p-2": {}, "p-3": {}}}
+    assert cli._panels_in_display_order(c, c["trees"]) == ["p-2", "p-1", "p-3"]
+    legacy = {"trees": {"primary": {}, "compare": {}}}
+    assert cli._panels_in_display_order(legacy, legacy["trees"]) == ["primary", "compare"]
+
+
+def test_a_layout_row_for_a_dropped_tree_is_not_offered():
+    """`panels` can name a panel whose tree was dropped; returning it would make the
+    caller index `trees` with a missing key."""
+    c = {"panels": [{"id": "gone"}, {"id": "p-1"}], "trees": {"p-1": {}}}
+    assert cli._panels_in_display_order(c, c["trees"]) == ["p-1"]

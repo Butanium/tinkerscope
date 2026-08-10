@@ -311,9 +311,10 @@
   function addPanel() {
     const blank = shiftDown; // Shift+add = a fresh empty panel (vs the clone default)
     const id = nextPanelId();
-    // Defensive: a re-minted id ('compare', 'p-2'…) may still carry a stale live
-    // sample bucket from a prior panel with the same id — drop it so a straggler
-    // sample can't overlay the fresh panel.
+    // Belt-and-braces: ids are monotonic now, so a fresh one can no longer collide
+    // with a prior panel's stale live bucket. The bus is a process-wide singleton
+    // shared with the CLI and other tabs, though, so clearing the slot costs nothing
+    // and keeps this independent of who else can write a bucket.
     dropPanelBucket(id);
     // Pick a model not already shown, preferring a sampleable run.
     const used = new Set(ws.layout.map((p) => p.run_id));
@@ -335,7 +336,7 @@
     // echo + thread system prompt, so the seeded thread registers in the same
     // patch (no separate seedMsgs plumbing).
     if (blank) ws.freshTree(id);
-    else ws.duplicateTo(panelSels[0]?.panel ?? 'primary', id);
+    else ws.duplicateTo(panelSels[0]?.panel ?? FIRST_PANEL_ID, id);
     ws.applyLayout([...ws.layout, { id, run_id, checkpoint: ck }]);
     // the new panel auto-joins sendTargets (active by default) via ws.syncPanels (the effect above)
   }
