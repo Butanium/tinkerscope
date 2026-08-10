@@ -59,7 +59,14 @@ export type TinkerModel = {
    *  whether the composer shows its thinking control for a base pick. Absent on
    *  checkpoints (base/renderer unknown) and legacy responses ⇒ assume true. */
   supports_thinking?: boolean;
+  /** A human label is stored for this ref (pack-shipped or user-given). Absent ⇒ the
+   *  label is derived (`934cea31 · final · 2026-07-27`), which identifies nothing —
+   *  so picking it offers the rename prompt. */
+  named?: boolean;
+  pack?: boolean;
 };
+
+export type TinkerProbe = { available: boolean; base_model: string | null; error: string | null };
 
 /** Response shape for the two typeahead-catalog endpoints. */
 export type TinkerModelsResponse = { available: boolean; error: string | null; models: TinkerModel[] };

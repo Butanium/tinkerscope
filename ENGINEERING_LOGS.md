@@ -946,3 +946,62 @@ so panel 1 carries a real sentinel and the inherited one persists.
 Moral: a feature gated on "do we have any models" has to ask the question over
 every catalog that can supply one. There are three here, and the count knew
 about two.
+
+### 2026-08-10 — Add a checkpoint nobody here has heard of, and give it a name
+
+Clément: a checkpoint a collaborator sends you is on THEIR account, so it is in no
+local list — not a discovered run, not your sweep. Until now the only ways in were
+a share pack and the CLI. His shape for it: the picker's search box IS the entry
+point, and "No matches" becomes an add row that says whether the path is real.
+
+**Can we even check a path?** Yes, with your own key — there is no unauthenticated
+tinker endpoint. `resolve_base_model` already did it (create a sampling client, call
+`get_base_model_async`), but it collapses every failure to `None`, and the picker
+needs the REASON. Hence `probe_sampler_path` + `_tinker_detail`, which pulls the
+server's own `detail` out of the exception. Measured against the real API:
+
+| case | result | time |
+|---|---|---|
+| real path | `openai/gpt-oss-120b` | 269 ms median warm (801 ms first call in a process) |
+| valid shape, unknown id | 404 `Model not found.` | 228 ms |
+| malformed | 400, and the message names the expected form | 198 ms |
+| same path again | cached | 0 ms |
+
+Two error codes, two different sentences for the user. Errors cost the same as a
+success, so a typo does not make you wait.
+
+**The derived label is not a name.** I claimed account-sweep checkpoints "already
+carry a derived label" so they could skip the prompt. Clément asked what the label
+looks like; printing ten real ones killed my own argument — seven read
+`<8 hex> · final · <date>`, differing only in hex. The label exists and identifies
+nothing. So the prompt fires for ANY checkpoint the registry has no name for, which
+was Clément's initial preference; the mismatch cost one message to surface.
+
+Names go SERVER-side into `pack_models_store` (his call over the browser-local ◇/◆
+recents): survives a restart, visible in every tab and to `tinkpg`, and travels in
+`pack export`. That forced a merge-order change in `GET /api/tinker-models` — a
+registry entry used to be appended only when its id was ABSENT from the sweep, so a
+name for a swept checkpoint was silently dropped. A stored label now OVERRIDES the
+derived one (still one row per id) and sets `named:true`, which is what the UI reads
+to decide whether to offer the prompt.
+
+**The bug the smoke found.** First draft of `browser_tinker_custom_ckpt.py` PASTED
+the path and passed; the real smoke TYPES it, and the save POST then left the browser
+and never came back. Cause: the probe ran in a bare `$effect` on the query, so typing
+a 90-char path fired a live tinker call per PREFIX — ~55 of them, serialized behind
+the sampler client lock, exhausting the browser's ~6 connections per origin. Every
+later request queued behind the pile, including the save. Debounced 350 ms. Worth
+keeping in mind generally: an `$effect` on a text query that calls a REMOTE service
+is a per-keystroke fan-out unless you debounce it, and the symptom shows up in an
+UNRELATED request that merely happens to be next in line.
+
+Also fixed: `pickTinkerModel` routed any id absent from the catalog into its BASE
+branch, so a pasted path would have been stored under `base:` and sampled as a base
+model name. It now treats a `tinker://` id as a checkpoint.
+
+Smoke caveat, stated rather than papered over: the green row needs a path that is
+real AND unlisted — a foreign one. This box has none, and tinker rejects every cheap
+fake (trailing slash → 400, trailing spaces → "Weights not found"), so the browser
+half of green is unpinnable here; the smoke asserts the probe DATA instead and pins
+the three-state rendering through the red path. The smoke also picks an un-named
+checkpoint each run, because naming is a one-way write with no delete route.

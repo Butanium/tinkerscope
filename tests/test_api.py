@@ -920,3 +920,96 @@ def test_write_json_survives_concurrent_writers(tmp_path):
     assert not errors, f"concurrent write_json raised: {errors!r}"
     assert isinstance(read_json(target, None), dict), "file must be readable JSON at the end"
     assert not list(tmp_path.glob("*.tmp")), "temp files must not be left behind"
+
+
+# --------------------------------------------------------------------------- #
+# Naming a checkpoint: POST /api/tinker-models/name persists a human label into the
+# same registry share packs use, and GET /api/tinker-models applies it OVER the
+# derived one. The derived label (`<8 hex> · <segment> · <date>`) is a label but not
+# a name — on a real account most read `<hex> · final · <date>` — so the override
+# direction is the whole feature, not a detail.
+# --------------------------------------------------------------------------- #
+SWEEP_CKPT = "tinker://fake:train:0/sampler_weights/final"
+
+
+def test_name_tinker_model_overrides_the_derived_label(client):
+    before = {m["id"]: m for m in client.get("/api/tinker-models").json()["models"]}
+    assert SWEEP_CKPT in before, "conftest's stubbed sweep should list this checkpoint"
+    assert before[SWEEP_CKPT]["label"] != "my nice name"
+    assert not before[SWEEP_CKPT].get("named"), "an un-named sweep entry must not claim a name"
+
+    r = client.post(
+        "/api/tinker-models/name",
+        json={"kind": "ckpt", "ref": SWEEP_CKPT, "label": "  my nice name  "},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "ok"
+    assert r.json()["label"] == "my nice name", "the label is stored stripped"
+
+    after = {m["id"]: m for m in client.get("/api/tinker-models").json()["models"]}
+    assert after[SWEEP_CKPT]["label"] == "my nice name"
+    assert after[SWEEP_CKPT]["named"] is True
+    # Overriding must not duplicate the entry — one id, one row.
+    ids = [m["id"] for m in client.get("/api/tinker-models").json()["models"]]
+    assert ids.count(SWEEP_CKPT) == 1
+
+
+def test_name_tinker_model_adds_a_checkpoint_the_sweep_never_listed(client):
+    foreign = "tinker://someone-elses-uuid:train:0/sampler_weights/step-40"
+    assert foreign not in {m["id"] for m in client.get("/api/tinker-models").json()["models"]}
+
+    client.post("/api/tinker-models/name", json={"kind": "ckpt", "ref": foreign, "label": "theirs"})
+
+    models = {m["id"]: m for m in client.get("/api/tinker-models").json()["models"]}
+    assert models[foreign]["label"] == "theirs"
+    assert models[foreign]["kind"] == "checkpoint"
+    assert models[foreign]["sampler_path"] == foreign
+    assert models[foreign]["named"] is True
+
+
+def test_name_tinker_model_rejects_an_empty_label(client):
+    r = client.post("/api/tinker-models/name", json={"kind": "ckpt", "ref": SWEEP_CKPT, "label": "   "})
+    assert r.status_code == 200
+    assert r.json()["status"] == "error"
+    # And nothing was written: the derived label still stands.
+    models = {m["id"]: m for m in client.get("/api/tinker-models").json()["models"]}
+    assert not models[SWEEP_CKPT].get("named")
+
+
+def test_probe_route_reports_a_bad_path_without_raising(client, monkeypatch):
+    """The probe answers {available, base_model, error} — the picker's red state needs
+    tinker's REASON, which resolve_base_model throws away. No network here: the SDK
+    call is stubbed, the route's contract is what's under test."""
+    from tinkerscope.api import tinker_sampler
+
+    async def fake(self, sampler_path):
+        if sampler_path == SWEEP_CKPT:
+            return {"available": True, "base_model": SUPPORTED_BASE, "error": None}
+        return {"available": False, "base_model": None, "error": "Model not found."}
+
+    monkeypatch.setattr(tinker_sampler.SamplerManager, "probe_sampler_path", fake)
+
+    ok = client.get("/api/tinker-models/probe", params={"sampler_path": SWEEP_CKPT}).json()
+    assert ok == {"available": True, "base_model": SUPPORTED_BASE, "error": None}
+
+    bad = client.get("/api/tinker-models/probe", params={"sampler_path": "tinker://nope"}).json()
+    assert bad["available"] is False
+    assert bad["error"] == "Model not found."
+
+
+def test_tinker_detail_extracts_the_server_message():
+    """`_tinker_detail` must survive both shapes: an exception carrying the parsed
+    body, and one that only stringifies as `Error code: N - {'detail': '…'}`."""
+    from tinkerscope.api.tinker_sampler import _tinker_detail
+
+    class WithBody(Exception):
+        body = {"detail": "Model not found."}
+
+    assert _tinker_detail(WithBody()) == "Model not found."
+
+    strung = Exception(
+        "Error code: 400 - {'detail': \"model_path 'tinker://x' is not a valid tinker path.\"}"
+    )
+    assert _tinker_detail(strung) == "model_path 'tinker://x' is not a valid tinker path."
+
+    assert _tinker_detail(Exception("connection reset")) == "connection reset"

@@ -7,9 +7,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 from .. import discovery, pack_models_store
-from ..tinker_sampler import supports_thinking
+from ..tinker_sampler import get_sampler, supports_thinking
 
 router = APIRouter(prefix="/api", tags=["models"])
 
@@ -87,19 +88,55 @@ def tinker_models(refresh: bool = False) -> dict:
     else:  # sweep unreachable: keep base models, note why
         error = error or f"checkpoint list unavailable: {srv.get('error')}"
 
-    # Pack-injected models (share pack applied to this state dir): explicit sampler
-    # paths / base models a collaborator has no local run dir for and the account sweep
-    # won't list. Appended unconditionally (they don't depend on caps / the sweep), so
-    # a shared checkpoint is addable even offline or on a different account. Deduped by
-    # id so a pack model that IS in the account sweep isn't listed twice.
-    seen = {m["id"] for m in models}
+    # Registry models (share pack applied to this state dir, or a checkpoint the user
+    # named here): explicit sampler paths / base models the account sweep won't list
+    # (trained on someone else's account), plus user labels for ones it DOES list.
+    # A stored label OVERRIDES the derived one — `934cea31 · final · 2026-07-27` is a
+    # label but not a name, and the whole point of naming a checkpoint is to stop
+    # reading hex. Entries with no sweep counterpart are appended.
+    by_id = {m["id"]: m for m in models}
     for e in pack_models_store.tinker_model_entries():
-        if e["id"] not in seen:
+        if e["id"] in by_id:
+            by_id[e["id"]]["label"] = e["label"]
+            by_id[e["id"]]["named"] = True
+        else:
+            e["named"] = True
             models.append(e)
-            seen.add(e["id"])
+            by_id[e["id"]] = e
 
     return {
         "available": caps.get("available", False),
         "error": error,
         "models": models,
     }
+
+
+@router.get("/tinker-models/probe")
+async def probe_tinker_model(sampler_path: str) -> dict:
+    """Does tinker serve this sampler path? `{available, base_model, error}`.
+
+    Backs the picker's "add a custom checkpoint" row: a path a collaborator sent you
+    is in NO local list (not a discovered run, not your account sweep), so the only
+    way to tell a good path from a typo is to ask tinker. ~270 ms warm."""
+    return await get_sampler().probe_sampler_path(sampler_path)
+
+
+class TinkerModelName(BaseModel):
+    kind: str  # 'ckpt' | 'base'
+    ref: str  # sampler_path | base_model
+    label: str
+
+
+@router.post("/tinker-models/name")
+def name_tinker_model(body: TinkerModelName) -> dict:
+    """Give a checkpoint / base model a human name, persisted for this state dir.
+
+    Writes the same registry share packs use, so a named checkpoint survives a
+    restart, shows in every tab, is visible to `tinkpg`, and travels in
+    `pack export` — unlike the browser-local ◇/◆ recents, which are per-tab."""
+    label = body.label.strip()
+    if not label:
+        return {"status": "error", "error": "label must not be empty"}
+    kind = body.kind if body.kind in ("ckpt", "base") else "ckpt"
+    pack_models_store.upsert([{"label": label, "kind": kind, "ref": body.ref}])
+    return {"status": "ok", "label": label, "kind": kind, "ref": body.ref}

@@ -609,8 +609,27 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     glyph — style it via `:global(svg)` (see `.theme-toggle.refreshing`).
   - `lib/ChartModal.svelte`, `lib/TagModal.svelte`,
     `lib/SlideshowModal.svelte`, `lib/OrManagerModal.svelte`,
-    `lib/TinkerPickerModal.svelte` — the five workspace modals. Each owns its body
+    `lib/TinkerPickerModal.svelte`, `lib/NameModelModal.svelte` — the workspace
+    modals. Each owns its body
     + specific styles; the parent passes data in and gets results via callbacks.
+    **TinkerPickerModal's search box is also an ENTRY POINT**: a collaborator's
+    checkpoint is in no local list, so a query that looks like a sampler path
+    (`lib/tinker-path.ts`, scheme prefix only — tinker owns shape validation and its
+    400 carries the expected form) replaces Typeahead's "No matches" with an
+    add-custom row, via Typeahead's `emptyAction` snippet + `onquery` props. The row
+    calls `GET /api/tinker-models/probe` → spinner ‹ green (+ base model) ‹ red (+
+    tinker's own `detail`). ⚠️ That probe is **debounced 350 ms** — an un-debounced
+    effect fires one live tinker call per PREFIX while a path is typed (~55 for a
+    real one), which exhausts the browser's ~6 connections and queues every later
+    request behind them (that's what broke the save POST; `ENGINEERING_LOGS.md`
+    2026-08-10). `NameModelModal` then offers a name for any checkpoint the registry
+    has no label for (`named` flag on the catalog entry) — the derived
+    `<8 hex> · <segment> · <date>` is a label, not a name, and on a real account most
+    read `<hex> · final · <date>`. The name goes SERVER-side via
+    `POST /api/tinker-models/name` into `pack_models_store`, so it survives a restart,
+    reaches `tinkpg`, and travels in `pack export`; the ◇/◆ localStorage recents are
+    updated too but are per-browser. Smoke:
+    `tests/small-smokes/browser_tinker_custom_ckpt.py` (token-free, needs the API key).
     ChartModal is the smart one: it receives per-panel per-turn samples
     (reactive; live-updates mid-stream) and owns mode toggle / turn picker
     (defaults to the LATEST turn) / match-scope (incl. `split` = a

@@ -5,6 +5,7 @@ import type {
   Run,
   OpenRouterModel,
   TinkerModelsResponse,
+  TinkerProbe,
   OpenRouterAvailableResponse,
   Health,
   PlaygroundState,
@@ -39,6 +40,13 @@ const httpApi = {
   // Typeahead catalog sources (not the saved quick-list).
   tinkerModels: (refresh = false) =>
     j<TinkerModelsResponse>(`/api/tinker-models${refresh ? '?refresh=1' : ''}`),
+  probeTinkerModel: (sampler_path: string) =>
+    j<TinkerProbe>(`/api/tinker-models/probe?sampler_path=${encodeURIComponent(sampler_path)}`),
+  nameTinkerModel: (kind: 'ckpt' | 'base', ref: string, label: string) =>
+    j<{ status: string; label?: string; error?: string }>('/api/tinker-models/name', {
+      method: 'POST',
+      body: JSON.stringify({ kind, ref, label })
+    }),
   openrouterAvailable: (refresh = false) =>
     j<OpenRouterAvailableResponse>(
       `/api/openrouter-models/available${refresh ? '?refresh' : ''}`

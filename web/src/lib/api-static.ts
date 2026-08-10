@@ -255,6 +255,17 @@ const impl: ApiClient = {
     error: 'static site — no OpenRouter catalog',
     models: []
   }),
+  // A published site has no tinker credentials and cannot reach the API from a
+  // browser (no CORS headers), so the probe reports unavailable rather than
+  // pretending. The picker that would call it is hidden in read-only mode anyway.
+  probeTinkerModel: async () => ({
+    available: false,
+    base_model: null,
+    error: 'read-only site: cannot reach tinker'
+  }),
+  nameTinkerModel: async () => {
+    throw new Error('read-only site: cannot name models');
+  },
   addOpenrouterModel: async () => {
     throw new Error('read-only site: cannot add models');
   },
