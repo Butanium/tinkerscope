@@ -1195,3 +1195,28 @@ Also fixed in the same pass, each with a regression test:
 `docs/API_CONTRACT.md`'s two trash rows were stale on the branch: it added
 `recreated_panel` / `unbound_panel` to the restore response and `layout` to the
 journal entry without documenting either.
+
+Two follow-ons from the same review pass, neither caused by the branch:
+
+- **The `?node=` double-reveal guard was dead.** Its two sites built the key
+  independently and with DIFFERENT separators — a NUL byte in the apply-once
+  effect, a plain space in `openSearchResult`'s pre-mark — so the pre-mark never
+  matched and a palette pick revealed twice, the exact thing the comment says it
+  prevents. Both now call one `nodeLinkKey`; the separator is a space (ids are
+  `[A-Za-z0-9_-]`, and it keeps the file greppable). Pre-existing on main;
+  flagged by the previous session and deliberately left out of its PR.
+  WARNING: while making that edit the **`Edit` tool wrote a literal NUL where a
+  space was typed** — it swaps between `\uXXXX` escapes and the characters they
+  denote — re-introducing the byte `fd39382` had just removed. Caught by a byte
+  count, not by eye. After editing this file, count the NUL bytes in it with
+  python rather than trusting a visual diff.
+
+- **`browser_kbnav` inherited its model from the human's live browser.** It
+  seeded its panel with `run_id` copied from the state bus, and
+  `dev-isolated.sh` snapshots the real state dir — so when the `:8767` session
+  had nothing selected, the seeded panel was unbound, `#loadTrees` dropped it as
+  a phantom, and the composer stayed disabled. The smoke then failed 30 s later
+  on a click that looks unrelated to models at all. It passed in one sweep and
+  failed in the next with no code change between, and `--baseline main` failed
+  identically. Now falls back to any discovered run. The general form: a smoke
+  that reads seed data from the bus is reading someone else's session.

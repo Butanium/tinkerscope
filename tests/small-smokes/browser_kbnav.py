@@ -86,13 +86,33 @@ def click_row(page, index):
         "(i) => document.querySelector(`.messages .message[data-row='${i}']`).click()", index)
 
 
+def _seed_model() -> tuple[str, str | None]:
+    """A run to bind the seeded panel to. Nothing is ever sampled from it — the
+    binding just has to be non-null: `#loadTrees` drops run_id==null panels as
+    phantoms, and an unbound panel leaves the composer DISABLED ("Select a model to
+    chat"), which fails this smoke 30 s later at a click that looks unrelated.
+
+    Taking it from the state bus alone (what this did) inherits whatever model the
+    HUMAN's live browser last selected — dev-isolated snapshots the real state dir —
+    so the smoke passed or failed depending on someone else's session, and did so
+    identically on main. Fall back to any discovered run."""
+    p0 = _get("/api/state")["panels"][0]
+    if p0.get("run_id"):
+        return p0["run_id"], p0.get("checkpoint")
+    runs = _get("/api/models")
+    if not runs:
+        raise SystemExit("kbnav smoke: no run on the bus and none discovered — "
+                         "point the instance at a scan root with run dirs")
+    ckpts = runs[0].get("checkpoints") or []
+    return runs[0]["id"], (ckpts[-1]["name"] if ckpts else None)
+
+
 def main():
-    primary = _get("/api/state")["panels"][0]
+    run_id, checkpoint = _seed_model()
     conv = _post("/api/workspaces", {
         "name": "kbnav smoke",
         "trees": {"primary": seed_tree()},
-        "panels": [{"id": "primary", "run_id": primary.get("run_id"),
-                    "checkpoint": primary.get("checkpoint")}],
+        "panels": [{"id": "primary", "run_id": run_id, "checkpoint": checkpoint}],
     })
 
     with sync_playwright() as p:

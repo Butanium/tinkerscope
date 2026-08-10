@@ -822,12 +822,19 @@
   // `panel` disambiguates duplicated node ids (duplicateTo copies trees); when
   // absent (or wrong) the first layout panel holding the node wins.
   let appliedNodeLink = $state<string | null>(null);
+  /** The guard's key. ONE function because it has two call sites — the effect below
+   *  and `openSearchResult`'s pre-mark — and each used to build it itself with a
+   *  DIFFERENT separator (a NUL byte here, a plain space there), so the pre-mark
+   *  never matched and a palette pick double-revealed: the exact thing it exists to
+   *  stop. A space is safe as the separator: workspace and node ids are [A-Za-z0-9_-]
+   *  (and it keeps this file greppable — see ENGINEERING_LOGS 2026-08-10). */
+  const nodeLinkKey = (wsid: string, nid: string) => `${wsid} ${nid}`;
   $effect(() => {
     const nid = page.url.searchParams.get('node');
     if (!nid || !wsLoaded) return;
     const wsid = ws.activeId;
     if (!wsid || wsIdFromUrl() !== wsid) return; // mid-switch — wait for lockstep
-    const key = `${wsid}\u0000${nid}`;
+    const key = nodeLinkKey(wsid, nid);
     if (appliedNodeLink === key) return;
     const pref = page.url.searchParams.get('panel');
     const candidates = [...(pref ? [pref] : []), ...ws.layout.map((p) => p.id)];
@@ -1375,7 +1382,7 @@
       if (!ok) return; // switch blocked (running/busy) or the node is gone
     }
     // Pre-mark the deep-link guard so writing ?node= below can't double-reveal.
-    appliedNodeLink = `${hit.workspace_id} ${hit.node_id}`;
+    appliedNodeLink = nodeLinkKey(hit.workspace_id, hit.node_id);
     await revealNodeIn(hit.panel, hit.node_id, hit.field);
     setNodeUrl(hit.panel, hit.node_id); // the address bar becomes the shareable link
   }
