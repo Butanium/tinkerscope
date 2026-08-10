@@ -736,7 +736,14 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     `selectPathTo` + kbFocus + `panelScroll.reveal`, with `reveal.svelte.ts`
     (self-clearing beacon) driving the row flash and the thinking-fold LATCH in
     ChatMessage (latched, not reactive — a reactive `open` would slam the fold
-    shut when the beacon clears). Smoke:
+    shut when the beacon clears). **Scope chips** under the input narrow the
+    search (`scopes=` sent SERVER-side so counts/truncation stay honest; `model`
+    off by default; persisted as the DISABLED set so future scopes default on).
+    **Deep links**: a jump writes `?node=<id>&panel=<p>` into the URL
+    (`setNodeUrl`), and an incoming `?w=…&node=…` reveals that node via the
+    apply-once effect in +page's URL-sync section (`appliedNodeLink` — so
+    cycling away later never yanks back; `setWsUrl` drops the params when `w`
+    changes). `tinkpg grep --link` / `node --link` print these URLs. Smoke:
     `tests/small-smokes/browser_search_palette.py` (seeded, token-free).
   - `lib/HighlightRules.svelte` — the highlight-rules editor UI, and the header
     that carries the master Off/On (`highlightsOn`) next to `+ new`. While it's

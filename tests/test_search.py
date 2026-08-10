@@ -146,6 +146,27 @@ def test_no_match_shape(client):
     }
 
 
+def test_scopes_param_filters_hit_kinds(client):
+    _seed(client, name="Paris fan club",
+          panels=[{"id": "primary", "run_id": "paris_run", "checkpoint": "final"}])
+    # "Paris" lives in: replies (a1+a2), ws name, model id. Scope it down:
+    only_replies = _hits(client, "Paris", scopes="reply")
+    assert only_replies["total"] == 2 and only_replies["workspace_hits"] == []
+    only_name = _hits(client, "Paris", scopes="name")
+    assert only_name["total"] == 0
+    assert [h["field"] for h in only_name["workspace_hits"]] == ["name"]
+    # thinking + thread-system scopes address their fields
+    assert _hits(client, "EUROPEAN", scopes="thinking")["total"] == 1
+    assert _hits(client, "EUROPEAN", scopes="reply,user,system")["total"] == 0
+    assert _hits(client, "GEOGRAPHER", scopes="system")["total"] == 1
+    # user scope
+    assert _hits(client, "capital of France", scopes="user")["total"] == 1
+    assert _hits(client, "capital of France", scopes="reply")["total"] == 0
+    # unknown scope is a 422, not a silent no-filter
+    r = client.get("/api/search", params={"q": "x", "scopes": "reply,bogus"})
+    assert r.status_code == 422
+
+
 def test_workspace_totals_are_uncapped(client):
     _seed(client, name="A")
     _seed(client, name="B")

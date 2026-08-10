@@ -95,6 +95,23 @@ test('workspace-level hits (name/model/system) are separate from node hits', () 
   eq([sys.workspace_hits[0].field, sys.total], ['system', 0]);
 });
 
+test('scopes filter hit kinds (mirrors test_scopes_param_filters_hit_kinds)', () => {
+  const bodies = [
+    ws('w1', 'Paris fan club', '2026-01-01', {
+      panels: [{ id: 'primary', run_id: 'paris_run', checkpoint: 'final' }]
+    })
+  ];
+  const replies = searchWorkspaces(bodies, 'Paris', { scopes: ['reply'] });
+  eq([replies.total, replies.workspace_hits.length], [2, 0]);
+  const nameOnly = searchWorkspaces(bodies, 'Paris', { scopes: ['name'] });
+  eq([nameOnly.total, nameOnly.workspace_hits.map((h) => h.field)], [0, ['name']]);
+  eq(searchWorkspaces(bodies, 'EUROPEAN', { scopes: ['thinking'] }).total, 1);
+  eq(searchWorkspaces(bodies, 'EUROPEAN', { scopes: ['reply', 'user', 'system'] }).total, 0);
+  eq(searchWorkspaces(bodies, 'GEOGRAPHER', { scopes: ['system'] }).total, 1);
+  eq(searchWorkspaces(bodies, 'capital of France', { scopes: ['user'] }).total, 1);
+  eq(searchWorkspaces(bodies, 'capital of France', { scopes: ['reply'] }).total, 0);
+});
+
 test('newest-touched workspace first; ws scope; maxHits caps hits not totals', () => {
   const bodies = [ws('older', 'A', '2026-01-01'), ws('newer', 'B', '2026-02-01')];
   const out = searchWorkspaces(bodies, 'Paris');

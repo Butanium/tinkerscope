@@ -351,10 +351,15 @@ Anywhere:
 was in" tool: it searches every branch of every saved workspace — including
 samples that aren't currently the visible one (tagged *hidden branch*), and a
 turn where several samples match collapses to one "k of N samples" row.
-Workspace-name matches sit at the top as a quick switcher. Picking a match opens
-its workspace, flips the ‹k/N› cyclers so the matched branch becomes visible,
-flashes the row, and opens the thinking fold when the match was in the CoT. The
-same engine drives `tinkpg grep` on the CLI side.
+Workspace-name matches sit at the top as a quick switcher. The chip row under
+the search box narrows what's searched (replies / user msgs / thinking / system
+/ names / models — model-id matches start OFF; the choice persists). Picking a
+match opens its workspace, flips the ‹k/N› cyclers so the matched branch becomes
+visible, flashes the row, and opens the thinking fold when the match was in the
+CoT. After a jump the address bar reads `?w=<id>&node=<id>` — that URL is a
+shareable DEEP LINK that reopens the browser at that exact sample (`tinkpg grep
+--link` prints the same URLs from the terminal). The same engine drives `tinkpg
+grep` on the CLI side.
 
 Inside a text box `Ctrl`/`⌘`+`Z` stays the browser's normal text undo — the
 workspace undo deliberately doesn't steal it. The stack holds the last 50 ops,

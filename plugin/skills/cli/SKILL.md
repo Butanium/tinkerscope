@@ -117,7 +117,7 @@ tinkpg ws <id|name> [--panel P] [--full] [--tree] [--include-folded] [--thread K
 tinkpg threads [--min-turns N] [--ws W] [--model SUB] [--grep TXT] [--json]  # cross-workspace index of EVERY root thread + its deepest-branch turn count
 tinkpg probe <run>[@ckpt] "<prompt>" [--n N] [--ancestry-file F] [--json]  # sample ANY model off-workspace: nothing broadcast, nothing committed
 tinkpg samples [conv] [--panel P] [--thread K|--node ID] [--turn N] [--sample K] [--slice S[:L]] [--full] [--first-token]  # ALL n-sample siblings at one fork + <tag> tally; --sample/--slice = read ONE sample in PIECES; --first-token = the model's P(first generated token) at this fork
-tinkpg grep "<text>" [--ws WS] [--regex] [-i]     # search EVERY branch of all workspaces: content + thinking + system prompts (server-side; = the browser's Ctrl+K)
+tinkpg grep "<text>" [--ws WS] [--regex] [-i] [--link]  # search EVERY branch of all workspaces: content + thinking + system prompts (server-side; = the browser's Ctrl+K); --link appends a ?w=…&node=… deep-link URL per hit that opens the browser AT the match
 tinkpg node <id> [--ws WS] [--logprobs] [--meta] [--raw] [--full] [--json]  # reverse lookup: locate a bare node id (no ws/panel needed), dump its record + blobs
 tinkpg trash list [--workspace W] [--json]          # what's recoverable: every save that made nodes disappear, newest first
 tinkpg trash restore <handle> --workspace W         # splice a deleted branch back at its original sibling index
@@ -268,7 +268,10 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   node id to `samples --node <id>` to see the fan-out at that exact fork — the
   ONLY route to n-sample views on non-selected branches (--thread/--turn walk
   selected paths). Use grep FIRST when the human says "somewhere in my
-  workspaces there's …".
+  workspaces there's …". **`--link` (also on `tinkpg node`) appends a
+  `?w=<id>&panel=<p>&node=<n>` deep-link URL per hit** — hand the human that
+  instead of a location table: clicking it opens their browser at the exact
+  sample, cyclers flipped, row flashed (works on hidden branches).
 - `tinkpg node <id>` is the FIND primitive for a NODE ID: when you hold a bare id
   (the human pasted one from the browser's Copy-node-id button, or `grep`/`samples
   --json` printed it) it locates the workspace · panel · thread with no other

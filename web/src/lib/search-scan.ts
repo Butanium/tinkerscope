@@ -72,13 +72,23 @@ function snippetParts(
   return { before, match_display: mid, after };
 }
 
+/** Which scope a node hit belongs to (mirrors `_unit_scope` in api/search.py). */
+function hitScope(field: string, role: string): string {
+  if (field === 'reasoning') return 'thinking';
+  if (field === 'system_prompt') return 'system';
+  return role === 'user' ? 'user' : role === 'system' ? 'system' : 'reply';
+}
+
 export function searchWorkspaces(
   bodies: Workspace[],
   q: string,
-  opts: { ws?: string; maxHits?: number; width?: number } = {}
+  opts: { ws?: string; maxHits?: number; width?: number; scopes?: string[] } = {}
 ): SearchResponse {
   const maxHits = opts.maxHits ?? 200;
   const width = opts.width ?? 160;
+  const on = new Set(
+    opts.scopes ?? ['reply', 'user', 'thinking', 'system', 'name', 'model']
+  );
   const needle = q.toLowerCase();
   const find = (text: string): number => text.toLowerCase().indexOf(needle);
 
@@ -108,12 +118,14 @@ export function searchWorkspaces(
       });
     };
 
-    wsHit('name', cname);
-    for (const p of body.panels || []) {
-      const v = [p.run_id, p.checkpoint].find((x) => x && find(String(x)) >= 0);
-      if (v) wsHit('model', String(v), p.id);
+    if (on.has('name')) wsHit('name', cname);
+    if (on.has('model')) {
+      for (const p of body.panels || []) {
+        const v = [p.run_id, p.checkpoint].find((x) => x && find(String(x)) >= 0);
+        if (v) wsHit('model', String(v), p.id);
+      }
     }
-    if (body.system_prompt) wsHit('system', body.system_prompt);
+    if (on.has('system') && body.system_prompt) wsHit('system', body.system_prompt);
 
     for (const [pid, tree] of Object.entries(body.trees || {})) {
       if (!tree || typeof tree !== 'object') continue;
@@ -132,6 +144,7 @@ export function searchWorkspaces(
         const sibIndex = Math.max(kids.indexOf(nid), 0);
         for (const [field, text] of fields) {
           if (!text) continue;
+          if (!on.has(hitScope(field, node.role))) continue;
           const i = find(text);
           if (i < 0) continue;
           total++;

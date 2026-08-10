@@ -16,6 +16,11 @@ palette end-to-end:
      samples").
   6. A workspace-NAME match shows in the pinned "workspaces" section and Enter
      switches to it.
+  7. Scope chips: `models` is OFF by default (a model-id match stays hidden
+     until its chip is clicked on), and turning `thinking` off hides a CoT hit.
+  8. Deep link: a palette jump WRITES `?node=` into the URL, and opening a
+     `?w=<id>&panel=<p>&node=<n>` URL cold reveals that node (flips the cycler
+     to an off-path sibling).
 
 No model calls.
 
@@ -82,7 +87,7 @@ def main():
         "panels": [{"id": "primary", "run_id": None, "checkpoint": None}]})["id"]
     ws_b = _post("/api/workspaces", {
         "name": "music box", "trees": {"primary": fan_tree()},
-        "panels": [{"id": "primary", "run_id": None, "checkpoint": None}]})["id"]
+        "panels": [{"id": "primary", "run_id": "NEEDLEMODEL_sft_run", "checkpoint": None}]})["id"]
 
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=str(CHROME))
@@ -116,10 +121,14 @@ def main():
         # the off-path sibling is now the panel's ACTIVE rendered turn
         expect(page.locator(".chat-column .messages").first).to_contain_text(
             "NEEDLE-OFFPATH", timeout=5000)
+        # ...and the address bar became a shareable deep link
+        page.wait_for_function("() => location.search.includes('node=a1')", timeout=3000)
 
-        # 3. the selection change persists across a reload (debounced save)
+        # 3. the selection change persists across a reload (debounced save).
+        # Navigate to a CLEAN ?w= URL — reloading with &node= still present would
+        # re-reveal client-side and pass even if the save had failed.
         time.sleep(1.3)
-        page.reload()
+        page.goto(f"{BASE}/?w={ws_a}")
         page.wait_for_selector(".ws-picker", timeout=15000)
         expect(page.locator(".chat-column .messages").first).to_contain_text(
             "NEEDLE-OFFPATH", timeout=8000)
@@ -154,6 +163,36 @@ def main():
         page.wait_for_function(
             "([want]) => document.querySelector('.ws-picker')?.dataset.wsId === want",
             arg=[ws_b], timeout=10000)
+
+        # 7. scope chips: models OFF by default; thinking chip hides CoT hits
+        open_palette()
+        page.keyboard.type("NEEDLEMODEL")
+        expect(page.locator(".palette-scope[data-scope=model].off")).to_have_count(1)
+        expect(page.locator("[data-testid=palette-ws-hit]")).to_have_count(0, timeout=5000)
+        page.locator(".palette-scope[data-scope=model]").click()  # include models
+        model_hit = page.locator("[data-testid=palette-ws-hit]")
+        expect(model_hit).to_have_count(1, timeout=5000)
+        expect(model_hit).to_contain_text("NEEDLEMODEL")
+        page.locator(".palette-scope[data-scope=model]").click()  # back off
+        expect(page.locator("[data-testid=palette-ws-hit]")).to_have_count(0, timeout=5000)
+        page.locator("[data-testid=palette-input]").fill("")
+        page.keyboard.type("zebra stripes")
+        expect(page.locator("[data-testid=palette-hit]")).to_have_count(1, timeout=5000)
+        page.locator(".palette-scope[data-scope=thinking]").click()  # exclude thinking
+        expect(page.locator("[data-testid=palette-hit]")).to_have_count(0, timeout=5000)
+        page.locator(".palette-scope[data-scope=thinking]").click()  # restore
+        expect(page.locator("[data-testid=palette-hit]")).to_have_count(1, timeout=5000)
+        page.keyboard.press("Escape")
+
+        # 8. cold deep link reveals an OFF-PATH node (scenario 4 left a2 active)
+        time.sleep(1.0)  # let scenario 4's selection flip finish saving
+        page.goto(f"{BASE}/?w={ws_a}&panel=primary&node=a1")
+        page.wait_for_selector(".ws-picker", timeout=15000)
+        flashed = page.locator(".message.reveal-flash")
+        expect(flashed).to_have_count(1, timeout=8000)
+        expect(flashed).to_contain_text("NEEDLE-OFFPATH")
+        expect(page.locator(".chat-column .messages").first).to_contain_text(
+            "NEEDLE-OFFPATH", timeout=5000)
 
         browser.close()
     print("browser_search_palette: OK")

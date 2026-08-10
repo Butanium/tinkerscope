@@ -794,8 +794,46 @@
     if (url.searchParams.get('w') === id) return Promise.resolve();
     url.searchParams.set('w', id);
     url.searchParams.delete('c');
+    // Deep-link params address a node IN the workspace being left — carrying
+    // them to another workspace would make the URL claim a jump it never did.
+    url.searchParams.delete('node');
+    url.searchParams.delete('panel');
     return goto(url, { replaceState: !push, keepFocus: true, noScroll: true });
   }
+
+  /** Write (or clear) the `?node=`/`?panel=` deep-link params: the address bar
+   *  after a palette jump IS the shareable link (`?w=<id>&node=<n>&panel=<p>`),
+   *  and what `tinkpg grep --link` prints. */
+  function setNodeUrl(panel: Panel | null, nodeId: string | null): void {
+    const url = new URL(page.url);
+    if (nodeId) url.searchParams.set('node', nodeId);
+    else url.searchParams.delete('node');
+    if (panel) url.searchParams.set('panel', panel);
+    else url.searchParams.delete('panel');
+    if (url.href !== new URL(page.url).href)
+      void goto(url, { replaceState: true, keepFocus: true, noScroll: true });
+  }
+
+  // ── `?node=` deep link: reveal one node once its workspace is open ────
+  // Applied ONCE per (workspace, node) — the guard means cycling away later
+  // never yanks you back, and switching workspaces drops the params (setWsUrl).
+  // `panel` disambiguates duplicated node ids (duplicateTo copies trees); when
+  // absent (or wrong) the first layout panel holding the node wins.
+  let appliedNodeLink = $state<string | null>(null);
+  $effect(() => {
+    const nid = page.url.searchParams.get('node');
+    if (!nid || !wsLoaded) return;
+    const wsid = ws.activeId;
+    if (!wsid || wsIdFromUrl() !== wsid) return; // mid-switch — wait for lockstep
+    const key = `${wsid} ${nid}`;
+    if (appliedNodeLink === key) return;
+    const pref = page.url.searchParams.get('panel');
+    const candidates = [...(pref ? [pref] : []), ...ws.layout.map((p) => p.id)];
+    const panel = candidates.find((p) => !!ws.treeFor(p).nodes[nid]);
+    if (!panel) return; // trees still loading (re-runs when they land) or a foreign link
+    appliedNodeLink = key;
+    void revealNodeIn(panel, nid);
+  });
   $effect(() => {
     const id = wsIdFromUrl();
     if (!id || id === ws.activeId) return;
@@ -1334,27 +1372,37 @@
       );
       if (!ok) return; // switch blocked (running/busy) or the node is gone
     }
-    if (ws.reducedPanels.has(hit.panel)) ws.restorePanel(hit.panel);
-    const t = ws.treeFor(hit.panel);
-    if (!t.nodes[hit.node_id]) return; // node deleted since the search ran
-    const next = selectPathTo(t, hit.node_id);
-    if (next !== t) ws.setTree(hit.panel, next);
-    await tick();
-    revealSearchRow(hit);
-    // The ?w= effect snapAlls to the bottom when ITS switch resolves, which can
-    // land after this reveal and yank the scroll — re-assert once it had its turn.
-    setTimeout(() => revealSearchRow(hit), 250);
+    // Pre-mark the deep-link guard so writing ?node= below can't double-reveal.
+    appliedNodeLink = `${hit.workspace_id} ${hit.node_id}`;
+    await revealNodeIn(hit.panel, hit.node_id, hit.field);
+    setNodeUrl(hit.panel, hit.node_id); // the address bar becomes the shareable link
   }
 
-  function revealSearchRow(hit: SearchHit) {
-    const pSel = panelSels.find((x) => x.panel === hit.panel);
+  /** Select-and-reveal one node (shared by the palette pick and the `?node=`
+   *  deep link): restore the panel if folded, put the node ON the active path,
+   *  focus + scroll its row, flash (+ open the fold on a thinking hit). */
+  async function revealNodeIn(panel: Panel, nodeId: string, field = 'content'): Promise<void> {
+    if (ws.reducedPanels.has(panel)) ws.restorePanel(panel);
+    const t = ws.treeFor(panel);
+    if (!t.nodes[nodeId]) return; // deleted since the link/search was minted
+    const next = selectPathTo(t, nodeId);
+    if (next !== t) ws.setTree(panel, next);
+    await tick();
+    revealSearchRow(panel, nodeId, field);
+    // The ?w= effect snapAlls to the bottom when ITS switch resolves, which can
+    // land after this reveal and yank the scroll — re-assert once it had its turn.
+    setTimeout(() => revealSearchRow(panel, nodeId, field), 250);
+  }
+
+  function revealSearchRow(panel: Panel, nodeId: string, field: string) {
+    const pSel = panelSels.find((x) => x.panel === panel);
     const view = pSel ? panelView(pSel) : [];
-    const idx = view.findIndex((m) => m.nodeId === hit.node_id);
+    const idx = view.findIndex((m) => m.nodeId === nodeId);
     if (idx < 0) return;
-    kbFocus = { panel: hit.panel, index: idx };
-    const el = kbRowEl(hit.panel, idx);
-    if (el) panelScroll.reveal(hit.panel, el);
-    reveal.show(hit.panel, hit.node_id, hit.field);
+    kbFocus = { panel, index: idx };
+    const el = kbRowEl(panel, idx);
+    if (el) panelScroll.reveal(panel, el);
+    reveal.show(panel, nodeId, field);
   }
 
   function openSearchWorkspace(wsId: string) {

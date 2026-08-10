@@ -27,11 +27,20 @@ def search(
     ws: str | None = Query(None, description="restrict to one workspace id"),
     max_hits: int = Query(200, ge=1, le=5000),
     width: int = Query(160, ge=40, le=2000),
+    scopes: str | None = Query(
+        None,
+        description="comma list of reply,user,thinking,system,name,model (omitted = all)"),
 ) -> dict:
+    scope_set = None
+    if scopes is not None:
+        scope_set = {s for s in scopes.split(",") if s}
+        bad = scope_set - engine.ALL_SCOPES
+        if bad:
+            raise HTTPException(status_code=422, detail=f"unknown scopes: {sorted(bad)}")
     try:
         return engine.search(
             q, regex=regex, case_sensitive=case, ws=ws,
-            max_hits=max_hits, width=width,
+            max_hits=max_hits, width=width, scopes=scope_set,
         )
     except re.error as e:
         raise HTTPException(status_code=400, detail=f"bad regex: {e}")

@@ -207,6 +207,19 @@ def compile_query(q: str, regex: bool, case_sensitive: bool) -> re.Pattern:
     return re.compile(q if regex else re.escape(q), flags)
 
 
+# Search SCOPES — what kind of text a hit lives in. `scopes=None` = all (the CLI
+# default); the palette sends its chip state (models off by default there).
+ALL_SCOPES = frozenset({"reply", "user", "thinking", "system", "name", "model"})
+
+
+def _unit_scope(u: Unit) -> str:
+    if u.field == "reasoning":
+        return "thinking"
+    if u.field == "system_prompt":
+        return "system"
+    return {"assistant": "reply", "user": "user", "system": "system"}.get(u.role, "reply")
+
+
 def search(
     q: str,
     *,
@@ -215,8 +228,10 @@ def search(
     ws: str | None = None,
     max_hits: int = 200,
     width: int = 160,
+    scopes: frozenset[str] | set[str] | None = None,
 ) -> dict[str, Any]:
     rx = compile_query(q, regex, case_sensitive)
+    on = ALL_SCOPES if scopes is None else set(scopes)
     summaries = store.list_summaries()
     if ws is not None:
         summaries = [s for s in summaries if s.get("id") == ws]
@@ -242,20 +257,25 @@ def search(
                     "updated_at": s.get("updated_at"),
                 })
 
-        ws_hit("name", cname)
-        for p in s.get("panels") or []:
-            for key in ("run_id", "checkpoint"):
-                v = p.get(key)
-                if v and rx.search(str(v)):
-                    ws_hit("model", str(v), panel=p.get("id"))
-                    break  # one model hit per panel is plenty
-        # global system prompt lives on the body, not the summary
-        body = store.get_body(cid)
-        gsp = (body or {}).get("system_prompt")
-        if gsp:
-            ws_hit("system", gsp)
+        if "name" in on:
+            ws_hit("name", cname)
+        if "model" in on:
+            for p in s.get("panels") or []:
+                for key in ("run_id", "checkpoint"):
+                    v = p.get(key)
+                    if v and rx.search(str(v)):
+                        ws_hit("model", str(v), panel=p.get("id"))
+                        break  # one model hit per panel is plenty
+        if "system" in on:
+            # global system prompt lives on the body, not the summary
+            body = store.get_body(cid)
+            gsp = (body or {}).get("system_prompt")
+            if gsp:
+                ws_hit("system", gsp)
 
         for u in _units_for(cid, s.get("updated_at") or ""):
+            if _unit_scope(u) not in on:
+                continue
             m = rx.search(u.text)
             if m is None:
                 continue

@@ -131,11 +131,17 @@ const httpApi = {
     j<{ status: string }>(`/api/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   // Cross-workspace text search (the Ctrl+K palette). Case-insensitive substring;
   // regex/case knobs exist on the endpoint but only `tinkpg grep` uses them.
-  search: (q: string, opts: { ws?: string; maxHits?: number; width?: number } = {}) => {
+  // `scopes` = which hit kinds to search (reply/user/thinking/system/name/model);
+  // omitted = all. Sent server-side so counts + truncation reflect the filter.
+  search: (
+    q: string,
+    opts: { ws?: string; maxHits?: number; width?: number; scopes?: string[] } = {}
+  ) => {
     const p = new URLSearchParams({ q });
     if (opts.ws) p.set('ws', opts.ws);
     if (opts.maxHits) p.set('max_hits', String(opts.maxHits));
     if (opts.width) p.set('width', String(opts.width));
+    if (opts.scopes) p.set('scopes', opts.scopes.join(','));
     return j<SearchResponse>(`/api/search?${p}`);
   },
   // Share packs installed at runtime (the `?w=<path-or-url>` link). Omitting

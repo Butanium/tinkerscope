@@ -337,7 +337,10 @@ const impl: ApiClient = {
   },
   getWorkspace: async (id: string) =>
     overlayBody(id) ?? (await bakedStrict<Workspace>(`workspaces/${encodeURIComponent(id)}.json`)),
-  search: async (q: string, opts: { ws?: string; maxHits?: number; width?: number } = {}) => {
+  search: async (
+    q: string,
+    opts: { ws?: string; maxHits?: number; width?: number; scopes?: string[] } = {}
+  ) => {
     // Client-side scan over every body (lib/search-scan.ts, the Python engine's
     // mirror). Bodies come through impl.listWorkspaces/getWorkspace so the
     // overlay wins per-workspace, and the baked-file fetches are memoized —

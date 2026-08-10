@@ -291,7 +291,10 @@ codex plugin add tinkerscope@tinkerscope</pre>
       <p class="help-note">
         <kbd>Enter</kbd> (or a click) jumps there: the workspace opens, every ‹k/N› cycler on the way
         flips so the matched branch becomes the visible one, the row flashes, and a thinking match
-        opens its fold. The same search is scriptable as <code>tinkpg grep</code>.
+        opens its fold. The chip row under the search box narrows what's searched (model-id matches
+        start off). After a jump the address bar carries <code>?w=…&amp;node=…</code> — copy it and the
+        link opens the browser AT that exact sample. The same search is scriptable as
+        <code>tinkpg grep</code> (<code>--link</code> prints those URLs).
       </p>
     </section>
 

@@ -885,3 +885,25 @@ sessions: **"open workspace X" has exactly one sanctioned entry — change the
 URL and let the effect drive; and anything that MUTATES a tree right after a
 switch must wait for the switch machinery to go quiet, because a straggler
 load assigns `trees` wholesale.**
+
+### 2026-08-10 — Palette round 2: scope chips, model-off default, node deep links
+
+Clément's follow-ups on the fresh Ctrl+K palette, plus a request relayed from
+another instance (links were workspace-granular; it wanted `?w=…&node=…` and
+`grep --link` so a hit line is a clickable answer). Shipped:
+
+- **Scope chips** (replies / user msgs / thinking / system / names / models)
+  under the palette input. Filtering is SERVER-side (`scopes=` on /api/search,
+  mirrored in search-scan.ts) rather than client-side so totals and the
+  max_hits cap reflect the filter — a client-side filter over a truncated
+  result set silently under-reports. `model` starts disabled (rarely what
+  you're hunting); persisted in localStorage as the DISABLED set, so a scope
+  added later defaults ON for existing users.
+- **Node deep links.** `?w=<id>&panel=<p>&node=<n>` reveals that node on open —
+  the palette's own jump-and-reveal machinery (`revealNodeIn`, shared), driven
+  by an apply-once-per-(ws,node) effect so cycling away later never yanks you
+  back. A palette jump now also WRITES the node into the URL, so the address
+  bar after a jump IS the shareable link; `setWsUrl` drops the params whenever
+  `w` changes (a stale node param would make the URL claim a jump into the
+  wrong workspace). `tinkpg grep --link` / `tinkpg node --link` print these
+  URLs per hit — "which panel has X" is now a URL you click, not a table.

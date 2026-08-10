@@ -2507,6 +2507,7 @@ def cmd_grep(
     width: int = typer.Option(160, "--width", help="snippet width around each match"),
     max_hits: int = typer.Option(200, "--max-hits", help="stop printing after this many hits (count continues)"),
     json_out: bool = typer.Option(False, "--json", help="hits as a JSON array (full match text, not a snippet) instead of human text — for scripts"),
+    link: bool = typer.Option(False, "--link", help="append a clickable deep link per hit (?w=…&node=… opens the browser AT the match)"),
 ) -> None:
     """Search EVERY branch of saved workspaces — message content, thinking
     (`reasoning`) and thread system prompts of all nodes, active or not; the view
@@ -2527,6 +2528,12 @@ def cmd_grep(
     if ws_id is not None:
         params["ws"] = ws_id
     out = _get("/api/search", params=params)
+    if link:
+        base = _base_url()
+        for h in out["hits"]:
+            h["link"] = f"{base}/?w={h['workspace_id']}&panel={h['panel']}&node={h['node_id']}"
+        for wh in out["workspace_hits"]:
+            wh["link"] = f"{base}/?w={wh['workspace_id']}"
     if json_out:
         print(json.dumps(out, default=str, ensure_ascii=False))
         return
@@ -2535,12 +2542,16 @@ def cmd_grep(
                  "model": f"panel {wh.get('panel')} model"}.get(wh["field"], wh["field"])
         print(f"{wh['workspace_name']} ({(wh['workspace_id'] or '')[:8]}) · {where}")
         print(f"   {wh['before']}{wh['match_display']}{wh['after']}")
+        if link:
+            print(f"   ↳ {wh['link']}")
     for h in out["hits"]:
         loc = (f"{h['workspace_name']} ({(h['workspace_id'] or '')[:8]}) · {h['panel']}"
                f" · thread {h['thread'] or '?'} · {h['role']} · {h['node_id']}")
         tag = {"reasoning": " [thinking]", "system_prompt": " [system]"}.get(h["field"], "")
         print(f"{loc}{tag}")
         print(f"   {h['before']}{h['match_display']}{h['after']}")
+        if link:
+            print(f"   ↳ {h['link']}")
     total = out["total"]
     if out["truncated"]:
         print(f"\n…{total - len(out['hits'])} more hit(s) not shown (--max-hits to raise)")
@@ -2562,6 +2573,7 @@ def cmd_node(
     raw: bool = typer.Option(False, "--raw", help="print the node's raw_text (tags preserved)"),
     full: bool = typer.Option(False, "--full", help="full content / thinking / prefill instead of one-line previews"),
     json_out: bool = typer.Option(False, "--json", help="the matches as one JSON object (blobs included when --logprobs/--meta; content never truncated) — for scripts"),
+    link: bool = typer.Option(False, "--link", help="append a clickable deep link (?w=…&node=… opens the browser AT this node)"),
 ) -> None:
     """Locate a NODE ID anywhere in the saved workspaces and dump its record —
     the reverse index `grep` (text → ids) can't give you. Takes the id with no
@@ -2614,6 +2626,7 @@ def cmd_node(
                 "workspace_id": c.get("id"), "workspace_name": c.get("name"),
                 "panel": pid, "run_id": lay.get("run_id"), "checkpoint": lay.get("checkpoint"),
                 "thread": thread_k, "sibling_index": sib_k, "n_siblings": len(sibs),
+                **({"link": f"{_base_url()}/?w={c.get('id')}&panel={pid}&node={nid}"} if link else {}),
                 "node": nd,
                 **({"token_logprobs": blobs.get("token_logprobs")} if logprobs else {}),
                 **({"raw_meta": blobs.get("raw_meta")} if meta else {}),
@@ -2630,6 +2643,8 @@ def cmd_node(
             loc += f"  ·  sibling {sib_k}/{len(sibs)}"
         loc += f"  ·  parent {nd.get('parent') or '(root)'}  ·  {len(nd.get('children') or [])} child(ren)"
         print(loc)
+        if link:
+            print(f"↳ {_base_url()}/?w={c.get('id')}&panel={pid}&node={nid}")
         facts = []
         if nd.get("finish_reason"):
             facts.append(f"finish: {nd['finish_reason']}")
