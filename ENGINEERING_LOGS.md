@@ -907,6 +907,7 @@ another instance (links were workspace-granular; it wanted `?w=…&node=…` and
   `w` changes (a stale node param would make the URL claim a jump into the
   wrong workspace). `tinkpg grep --link` / `tinkpg node --link` print these
   URLs per hit — "which panel has X" is now a URL you click, not a table.
+
 ### 2026-08-10 — `tinkpg url`: the CLI knew the server's address and never told anyone
 
 Clément asked "which panel has this node, and link me to it". `tinkpg grep`
@@ -1092,3 +1093,42 @@ counter some writer zeroed would otherwise hand back live ids — and the bump i
 PATCHed back so the claim survives with no browser listening. `compare` resolves
 its runs BEFORE minting, so a bad run argument doesn't burn panel numbers.
 `probe` keeps a literal `"p-1"`: it commits nothing, so it must mint nothing.
+
+### 2026-08-10 — The add-panel button was gated on the wrong two catalogs
+
+A collaborator on the PyPI build reported being unable to add a third panel;
+adding one OpenRouter model "unlocked" it. First theory (mine) was the old
+`MAX_PANELS = 6`, but that went in 2665af5 (2026-07-09) and every tag,
+including PyPI 1.0.0, contains the removal. The real gate was:
+
+    disabled={modelCatalog.runs.length + modelCatalog.openrouterModels.length < 1}
+
+— the same condition also early-returned inside `addPanel`. Those two lists are
+`GET /api/models` (**discovered run dirs** — a folder with `config.json` +
+`checkpoints.jsonl`) and `GET /api/openrouter-models`. Neither covers the ◆
+base models / ◇ loose checkpoints picked through the Tinker picker (localStorage
+recents) or **pack-injected models**, which ride a third list entirely
+(`/api/tinker-models` ← `pack_models_store.tinker_model_entries()`,
+`routes/models.py:96`). So a pack consumer with no local run dirs has both
+counted lists at zero, the button greyed forever, however many models they have
+actually wired up — and the "2" was just however many panels their pack had
+already set up. Adding an OpenRouter model takes the count to 1 and unlocks it.
+
+Gate deleted outright per Clément: adding a panel must not depend on what models
+happen to be available. The one thing that had to come with it is the seed —
+`addPanel` picked the new panel's model from `runs` only, so with no free run it
+minted `run_id: null`, and `#loadTrees` (`workspaces.svelte.ts:922`) drops
+null-run_id panels as phantoms on the next open. It now falls back to the FIRST
+panel's selection, which may be a `base:`/`ckpt:`/`openrouter:` sentinel — so the
+panel survives a reload in exactly the case that was broken.
+
+Verified against an isolated instance whose scan root has no run dirs and whose
+OpenRouter list is empty (`scripts/dev-isolated.sh --fresh /var/tmp/tscope-noruns`):
+button enabled at runs=0/openrouter=0, two successive adds land. With a TRULY
+empty catalog a reload still collapses to one panel — correct, that's the phantom
+heal doing its job when there is no model anywhere; the reported case has models,
+so panel 1 carries a real sentinel and the inherited one persists.
+
+Moral: a feature gated on "do we have any models" has to ask the question over
+every catalog that can supply one. There are three here, and the count knew
+about two.
