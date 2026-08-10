@@ -75,13 +75,12 @@ def _param_defaults() -> dict[str, Any]:
 
 # ── panel-id scheme (mirror +page.svelte nextPanelId) ────────────────────────────
 def panel_ids(n: int) -> list[str]:
-    """Stable ids for the first n panels: primary, compare, p-2, p-3, …"""
-    ids = ["primary", "compare"][: max(0, min(n, 2))]
-    i = 2
-    while len(ids) < n:
-        ids.append(f"p-{i}")
-        i += 1
-    return ids
+    """Ids for the first n panels of a layout this pack CREATES: p-1, p-2, …
+
+    Mirrors `ws.mintPanelId` — monotonic, no reserved names. A pack that carries
+    real workspaces keeps whatever ids they already have (including 'primary' /
+    'compare'); this only names panels a pack has to invent."""
+    return [f"p-{i + 1}" for i in range(max(0, n))]
 
 
 def _slug(s: str) -> str:
@@ -410,7 +409,7 @@ def build_last_session(pack: Pack) -> dict:
     panels = [
         {"id": pid, "run_id": m.panel_ref, "checkpoint": None}
         for pid, m in zip(ids, models)
-    ] or [{"id": "primary", "run_id": None, "checkpoint": None}]
+    ] or [{"id": panel_ids(1)[0], "run_id": None, "checkpoint": None}]
     session: dict[str, Any] = {"panels": panels}
     dm = _param_defaults()
     for k in _PARAM_KEYS:

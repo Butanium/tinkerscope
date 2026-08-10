@@ -570,8 +570,12 @@ def cmd_checkpoints(run: str = typer.Argument(..., help="run id or unique substr
 
 
 def _panel_id(i: int) -> str:
-    """Stable panel id by display position: primary, compare, then p-2, p-3, …"""
-    return "primary" if i == 0 else "compare" if i == 1 else f"p-{i}"
+    """Panel id by display position for a layout this CLI is CREATING: p-1, p-2, …
+
+    Panel ids are minted monotonically and never reused (`ws.mintPanelId`), so there
+    are no reserved names any more. 'primary'/'compare' remain valid ids — every
+    workspace saved before the change uses them — they're just never minted."""
+    return f"p-{i + 1}"
 
 
 def _panel_obj(panel_id: str, run_id: str, checkpoint: Optional[str]) -> dict:
@@ -585,8 +589,8 @@ def cmd_open(run: str = typer.Argument(..., help="run id or unique substring; op
     run_arg, ckpt_arg = _split_run_arg(run)
     r = _resolve_run(run_arg)
     ckpt = _resolve_checkpoint(r, ckpt_arg)
-    # Single mode = exactly one 'primary' panel (replaces any compare layout).
-    state = _post("/api/state", {"panels": [_panel_obj("primary", r["id"], ckpt)]})
+    # Single mode = exactly one panel (replaces any multi-panel layout).
+    state = _post("/api/state", {"panels": [_panel_obj(_panel_id(0), r["id"], ckpt)]})
     print(f"opened {r['id']}" + (f"@{ckpt}" if ckpt else ""))
     _print_json(state)
 
@@ -942,10 +946,10 @@ def cmd_chat(
     ckpt = _resolve_checkpoint(r, checkpoint or ckpt_arg)
     _guard_sampleable(r)
     # Mirror selection to the bus so the browser shows what's being sampled (single
-    # mode = one 'primary' panel).
-    _post("/api/state", {"panels": [_panel_obj("primary", r["id"], ckpt)]})
+    # mode = one panel).
+    _post("/api/state", {"panels": [_panel_obj(_panel_id(0), r["id"], ckpt)]})
     think: "bool | str | None" = "both" if thinking_both else thinking
-    body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, think, _resolve_sys(system, no_system), "primary", prefill)
+    body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, think, _resolve_sys(system, no_system), _panel_id(0), prefill)
     if prefill:
         print(f"prefill: {prefill!r}")
     print(f"chat {r['id']}" + (f"@{ckpt}" if ckpt else "") + f"  n={n} temp={_fmt_param(temperature)}")
@@ -1330,7 +1334,7 @@ def cmd_continue(
     panel: list[str] = typer.Option([], "--panel", help="target only these panel ids (repeatable); default = all unfolded panels"),
     thread: Optional[int] = typer.Option(None, "--thread", help="1-indexed root thread to continue (per panel); default = the panel's active thread"),
     turn: Optional[int] = typer.Option(None, "--turn", help="1-indexed user turn on the thread's path to loom from; default = the leaf"),
-    node: Optional[str] = typer.Option(None, "--node", help="target node id/prefix (from `tinkpg grep`); pinpoints the loom point in ONE panel's tree"),
+    node: Optional[str] = typer.Option(None, "--node", help="target node handle — `<node>`, `<panel>:<node>` or `<ws>:<panel>:<node>` (the browser's Copy-node-id button gives the middle form); pinpoints the loom point in ONE panel's tree"),
     conv: Optional[str] = typer.Option(None, "--ws", "--conv", help="workspace for --thread/--turn/--node targeting (id-prefix/name); default = the one open in the browser"),
     ancestry_file: Optional[str] = typer.Option(
         None, "--ancestry-file",
@@ -1378,6 +1382,13 @@ def cmd_continue(
         for m in fixed_ancestry:
             if not isinstance(m, dict) or m.get("role") not in ("user", "assistant", "system") or not isinstance(m.get("content"), str):
                 _die(f"bad ancestry entry (need role in user/assistant/system + string content): {m!r}")
+    # A `panel:node` handle (the browser's Copy-node-id button) carries the panel —
+    # and optionally the workspace — that a loom target needs to be unambiguous.
+    # Resolved BEFORE the workspace lookup below, which may consume `conv`.
+    if node is not None:
+        node, handle_panel, conv = _aim_at_node(node, None, conv)
+        if handle_panel and not panel:
+            panel = [handle_panel]
     st = _get("/api/state")
     if st.get("running") and not force:
         _die("a generation is in flight (running=yes) — wait for it, or pass --force")
@@ -1713,7 +1724,7 @@ def cmd_probe(
     run_arg, at_ckpt = _split_run_arg(run)
     body: dict = {
         "messages": ancestry,
-        "panel": "primary",   # required by the schema; never written to (commit=false)
+        "panel": _panel_id(0),  # required by the schema; never written to (commit=false)
         "broadcast": False,
         "commit": False,
         **_call_params(n, temperature, max_tokens, thinking, _resolve_sys(system, no_system)),
@@ -1809,7 +1820,8 @@ def cmd_url(
 
     stdout is ONLY the URL, so `open $(tinkpg url)` works; the resolved workspace
     name goes to stderr. With a selector (or --live) it emits a `?w=<id>` deep
-    link — note that lands on the workspace, not on a panel or turn."""
+    link, which opens the workspace but points at no particular turn — for that,
+    `grep --link` / `node --link` emit the `?w=…&panel=…&node=…` form."""
     base = _base_url()
     ws: Optional[dict] = None
     sel = _one_selector(selector, ws_opt)
@@ -1982,6 +1994,44 @@ def _resolve_workspace(sel: str, convs: Optional[list[dict]] = None) -> dict:
     listing = "\n".join(f"  - {m.get('id','')[:8]}  {m.get('name')}" for m in matches[:30])
     _die(f"ambiguous workspace {sel!r} — {len(matches)} candidates:\n{listing}")
     raise AssertionError  # unreachable
+
+
+def _split_node_handle(handle: str) -> tuple[Optional[str], Optional[str], str]:
+    """Parse a node handle into (workspace, panel, node).
+
+    The browser's Copy-node-id button hands out `<panel>:<node>` — a bare node id
+    is ambiguous whenever a tree was cloned across panels, and the panel is what
+    `continue`/`samples` need in order to loom into the right column. Colon is a
+    safe separator: no panel id (`p-1`, and the older `primary`/`compare`) and no
+    node id contains one.
+
+        n4f1                  → (None, None,      'n4f1')   # still accepted
+        p-4:n4f1              → (None, 'p-4',     'n4f1')
+        a410b399:p-4:n4f1     → ('a410b399', 'p-4', 'n4f1')
+
+    Anything with more parts is a typo, not a deeper address — say so rather than
+    guessing which piece is the id."""
+    parts = handle.split(":")
+    if len(parts) == 1:
+        return None, None, parts[0]
+    if len(parts) == 2:
+        return None, parts[0], parts[1]
+    if len(parts) == 3:
+        return parts[0], parts[1], parts[2]
+    _die(f"can't read {handle!r} as a node handle — expected <node>, <panel>:<node>, or <ws>:<panel>:<node>")
+    raise AssertionError  # unreachable
+
+
+def _aim_at_node(
+    handle: Optional[str], panel: Optional[str], selector: Optional[str]
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Apply a `panel:node` handle's parts as defaults for --panel / the workspace.
+    An explicit flag always wins (the handle is a convenience, not an override), so
+    `--node p-4:n1 --panel p-2` reads as a deliberate cross-panel aim."""
+    if handle is None:
+        return None, panel, selector
+    ws_part, panel_part, node = _split_node_handle(handle)
+    return node, panel or panel_part, selector or ws_part
 
 
 def _one_selector(positional: Optional[str], ws_opt: Optional[str]) -> Optional[str]:
@@ -2277,7 +2327,7 @@ def _show_workspace(
 def cmd_ws(
     selector: Optional[str] = typer.Argument(None, help="workspace id-prefix or name substring; omit to list all"),
     ws_opt: Optional[str] = typer.Option(None, "--ws", "--conv", help="same as the positional selector, for symmetry with `grep`/`node`/`threads` (which can only take it as an option)"),
-    panel: Optional[str] = typer.Option(None, "--panel", help="restrict to one panel id (primary/compare/p-2/…); overrides folding"),
+    panel: Optional[str] = typer.Option(None, "--panel", help="restrict to one panel id (p-1/p-2/… — older workspaces also have primary/compare); overrides folding"),
     full: bool = typer.Option(False, "--full", help="show the whole active path, not just first/last-2"),
     tree: bool = typer.Option(False, "--tree", help="show the full branch tree (all branches), `*` = active"),
     width: int = typer.Option(160, "--width", help="per-message truncation width"),
@@ -2389,7 +2439,7 @@ def _show_samples(
             pid = panel  # explicit --panel always overrides the fold
         else:
             candidates = [p for p in trees if p not in reduced] or list(trees)
-            pid = "primary" if "primary" in candidates else candidates[0]
+            pid = candidates[0]  # first non-folded panel, in saved order
         t = trees.get(pid)
         if t is None:
             _die(f"no panel {panel!r}; panels: {', '.join(trees) or '(none)'}")
@@ -2505,10 +2555,10 @@ def _show_samples(
 def cmd_samples(
     selector: Optional[str] = typer.Argument(None, help="workspace id-prefix or name substring; omit → the workspace open in the browser"),
     ws_opt: Optional[str] = typer.Option(None, "--ws", "--conv", help="same as the positional selector, for symmetry with `grep`/`node`/`threads` (which can only take it as an option)"),
-    panel: Optional[str] = typer.Option(None, "--panel", help="panel id (primary/compare/p-2/…); default = first NON-FOLDED panel (primary if eligible). Explicit --panel overrides folding"),
+    panel: Optional[str] = typer.Option(None, "--panel", help="panel id (p-1/p-2/… — older workspaces also have primary/compare); default = the first NON-FOLDED panel in saved order. Explicit --panel overrides folding"),
     thread: Optional[int] = typer.Option(None, "--thread", help="1-indexed root thread (branch-from-start sibling) to walk; default = the active one. Thread numbers: the `threads:` index in `tinkpg ws <id>`"),
     turn: Optional[int] = typer.Option(None, "--turn", help="1-indexed user turn on the thread's path whose responses to show; default = the last one"),
-    node: Optional[str] = typer.Option(None, "--node", help="node id (or unique prefix) from `tinkpg grep` — pinpoints the fork directly, reaching NON-selected branches --thread/--turn can't. An assistant id shows the fan-out it belongs to"),
+    node: Optional[str] = typer.Option(None, "--node", help="node handle — `<node>`, `<panel>:<node>` or `<ws>:<panel>:<node>` (the browser's Copy-node-id button gives the middle form; `tinkpg grep` prints ids). Pinpoints the fork directly, reaching NON-selected branches --thread/--turn can't. An assistant id shows the fan-out it belongs to"),
     full: bool = typer.Option(False, "--full", help="each sample's COMPLETE answer + full CoT (default: answer + one-line CoT preview)"),
     width: int = typer.Option(240, "--width", help="per-sample truncation width in the default (non --full) view"),
     sample: Optional[int] = typer.Option(None, "--sample", help="show ONLY sibling K (1-indexed) — read one sample at a time"),
@@ -2529,6 +2579,7 @@ def cmd_samples(
     --deepest resolves --turn against the thread's longest branch, so a fork below
     where the selection stops is reachable without hunting for its node id."""
     selector = _one_selector(selector, ws_opt)
+    node, panel, selector = _aim_at_node(node, panel, selector)
     convs = _workspaces()
     if selector is not None:
         c = _resolve_workspace(selector, convs)
@@ -2644,7 +2695,7 @@ def cmd_grep(
 
 @app.command("node")
 def cmd_node(
-    node_id: str = typer.Argument(..., help="node id or unique prefix (from the browser's Copy-node-id button, `tinkpg grep`, or `samples --json`)"),
+    node_id: str = typer.Argument(..., help="node handle: `<node>`, `<panel>:<node>` or `<ws>:<panel>:<node>` — the browser's Copy-node-id button gives the middle form; `grep`/`samples --json` print bare ids"),
     conv: Optional[str] = typer.Option(None, "--ws", "--conv", help="restrict the search to one workspace (id-prefix or name substring)"),
     logprobs: bool = typer.Option(False, "--logprobs", help="fetch + print the stored per-token logprob blob (index, token, lp, top-K alternatives)"),
     meta: bool = typer.Option(False, "--meta", help="fetch + print the stored raw_meta blob (the request & response record)"),
@@ -2663,6 +2714,7 @@ def cmd_node(
     blobs exist. --logprobs / --meta fetch those blobs (storage v2 keeps them out
     of the tree), --raw prints the raw stream text. Same id in several trees
     (a branch copied across panels/workspaces) prints one block per copy."""
+    node_id, want_panel, conv = _aim_at_node(node_id, None, conv)
     if conv is not None:
         target = _resolve_workspace(conv, _get("/api/workspaces"))
         convs = [_get(f"/api/workspaces/{target['id']}")]
@@ -2671,6 +2723,8 @@ def cmd_node(
     hits: list[tuple[dict, str, dict]] = []  # (workspace, panel, node)
     for c in convs:
         for pid, t in (c.get("trees") or {}).items():
+            if want_panel is not None and pid != want_panel:
+                continue
             for nid, nd in (t.get("nodes") or {}).items():
                 if nid == node_id or nid.startswith(node_id):
                     hits.append((c, pid, nd))
@@ -2830,7 +2884,10 @@ def cmd_trash(
     if not out.get("ok"):
         _die(out.get("error") or "restore failed")
     n = len(out.get("restored") or [])
-    print(f"restored {n} node(s) into panel {out.get('panel')} of {targets[0].get('name')!r}")
+    where = f"panel {out.get('panel')}"
+    if out.get("recreated_panel"):
+        where += " (re-added: the whole column had been closed)"
+    print(f"restored {n} node(s) into {where} of {targets[0].get('name')!r}")
     if n == 0:
         print("(already present — nothing to do)")
     else:

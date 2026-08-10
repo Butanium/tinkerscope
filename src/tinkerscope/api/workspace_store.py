@@ -487,9 +487,16 @@ def _vanished(prev_tree: Any, new_tree: Any) -> dict[str, Any]:
     return {nid: n for nid, n in _nodes_of(prev_tree).items() if nid not in new_ids}
 
 
-def _trash_entry(panel: str, kind: str, prev_tree: Any, gone: dict[str, Any]) -> dict:
+def _trash_entry(
+    panel: str, kind: str, prev_tree: Any, gone: dict[str, Any], layout: Any = None
+) -> dict:
     """One journal entry: the vanished light nodes + where their subtree roots
-    hung, so a restore is a splice rather than an append."""
+    hung, so a restore is a splice rather than an append.
+
+    `layout` is the panel's layout row (id/run_id/checkpoint) and is recorded only
+    for a whole-column entry — a restore has to RE-ADD the column, and a panel with
+    no layout row is a tree the browser never renders. Absent on entries journaled
+    before this was recorded; restore falls back to a bare, unbound panel."""
     prev_nodes = _nodes_of(prev_tree)
     roots = []
     for nid, node in gone.items():
@@ -522,6 +529,7 @@ def _trash_entry(panel: str, kind: str, prev_tree: Any, gone: dict[str, Any]) ->
         "roots": sorted(roots, key=lambda r: r["index"]),
         "selected": inner,
         "nodes": {nid: gone[nid] for nid in gone if nid in prev_nodes},
+        **({"layout": layout} if layout is not None else {}),
     }
 
 
@@ -590,16 +598,19 @@ def _record_trash(cid: str, prev: Any, new: dict) -> None:
     if not prev_trees:
         return
     new_trees = _norm_trees(new)
+    prev_layout = {p["id"]: p for p in (prev.get("panels") or []) if isinstance(p, dict) and p.get("id")}
     entries: list[dict] = []
     for panel, prev_tree in prev_trees.items():
+        layout = None
         if panel not in new_trees:
             gone = _nodes_of(prev_tree)
-            kind = "panel"  # the whole column went away (reduce/remove panel)
+            kind = "panel"  # the whole column went away (removePanel; folding keeps its tree)
+            layout = prev_layout.get(panel)
         else:
             gone = _vanished(prev_tree, new_trees[panel])
             kind = "nodes"
         if gone:
-            entries.append(_trash_entry(panel, kind, prev_tree, gone))
+            entries.append(_trash_entry(panel, kind, prev_tree, gone, layout))
     total = sum(e["count"] for e in entries)
     if total >= _TRASH_LOUD_AT:
         log.warning(
@@ -637,7 +648,9 @@ def _find_entry(cid: str, handle: str) -> dict | None:
 def restore_trash(cid: str, handle: str) -> dict:
     """`POST /{id}/trash/restore` — splice a journaled subtree back in.
 
-    Returns {ok, restored, panel, entry} or {ok: False, error}. Idempotent-ish: a
+    Returns {ok, restored, panel, recreated_panel, entry} or {ok: False, error}.
+    `recreated_panel` = this restore re-added a whole column (tree + layout row).
+    Idempotent-ish: a
     node already present is left alone, so a double restore is a no-op rather than
     a duplicate. Blobs need no work — they were never deleted (write-once)."""
     with locked("workspaces"):
@@ -650,10 +663,13 @@ def restore_trash(cid: str, handle: str) -> dict:
             return {"ok": False, "error": f"nothing in the trash matches {handle!r}"}
         panel = entry.get("panel")
         trees = dict(_norm_trees(conv))
-        if panel not in trees:
-            return {"ok": False, "error": (
-                f"panel {panel!r} is gone from this workspace — re-add a panel with that "
-                "id before restoring into it")}
+        # A whole-column delete removed the panel from BOTH trees and the layout, so
+        # restoring one has to re-add the column — otherwise the only route back was
+        # "re-add a panel that happens to mint the same id by hand", which stopped
+        # being reachable at all once panel ids became monotonic.
+        recreated_panel = panel not in trees
+        if recreated_panel:
+            trees[panel] = {"nodes": {}, "rootChildren": [], "selected": {}}
         tree = json.loads(json.dumps(trees[panel]))  # deep copy: never mutate the cached body
         nodes = tree.setdefault("nodes", {})
         restored = [nid for nid in entry.get("nodes") or {} if nid not in nodes]
@@ -681,9 +697,17 @@ def restore_trash(cid: str, handle: str) -> dict:
         conv["trees"] = trees
         conv.pop("tree", None)
         conv.pop("compare_tree", None)
+        if recreated_panel:
+            # The journaled layout row carries the model the column was bound to;
+            # entries predating that fall back to an unbound panel the human re-binds.
+            layout = entry.get("layout")
+            row = dict(layout) if isinstance(layout, dict) else {"id": panel, "run_id": None, "checkpoint": None}
+            row["id"] = panel
+            conv["panels"] = [*(conv.get("panels") or []), row]
         conv["updated_at"] = _now()
         _persist(conv)
     return {"ok": True, "restored": restored, "panel": panel,
+            "recreated_panel": recreated_panel,
             "entry": {k: v for k, v in entry.items() if k != "nodes"}}
 
 
@@ -770,6 +794,7 @@ def upsert(
     reduced_panels: list[str],
     send_targets: list[str],
     seen_panels: list[str],
+    panel_seq: int = 0,
 ) -> dict:
     """Create (or upsert by client-supplied id) a workspace. Returns the LIGHT
     body (trees included, blobs excluded) — same top-level shape as v1 create."""
@@ -787,6 +812,7 @@ def upsert(
             "reduced_panels": reduced_panels,
             "send_targets": send_targets,
             "seen_panels": seen_panels,
+            "panel_seq": panel_seq,
             "created_at": now,
             "updated_at": now,
         }
@@ -810,6 +836,7 @@ def save_tree(
     reduced_panels: list[str],
     send_targets: list[str],
     seen_panels: list[str],
+    panel_seq: int = 0,
 ) -> bool:
     """PUT /{id}/tree — PARTIAL upsert. `trees_partial` carries only dirty panels
     (merged over the stored trees); `dropped_trees` removes panels. Inline heavy
@@ -845,6 +872,7 @@ def save_tree(
         conv["reduced_panels"] = reduced_panels
         conv["send_targets"] = send_targets
         conv["seen_panels"] = seen_panels
+        conv["panel_seq"] = panel_seq
         conv["updated_at"] = _now()
         # self-heal a migrated legacy {tree, compare_tree} entry on its first save
         # (its trees are now folded into `trees` above, so dropping the keys is safe).
@@ -855,7 +883,8 @@ def save_tree(
     return True
 
 
-_PATCH_FIELDS = ("name", "system_prompt", "system_enabled", "panels", "reduced_panels", "send_targets", "seen_panels")
+_PATCH_FIELDS = ("name", "system_prompt", "system_enabled", "panels", "reduced_panels", "send_targets", "seen_panels",
+                 "panel_seq")
 
 
 def patch_meta(cid: str, fields: dict[str, Any]) -> dict | None:

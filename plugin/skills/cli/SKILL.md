@@ -119,7 +119,7 @@ tinkpg threads [--min-turns N] [--ws W] [--model SUB] [--grep TXT] [--json]  # c
 tinkpg probe <run>[@ckpt] "<prompt>" [--n N] [--ancestry-file F] [--json]  # sample ANY model off-workspace: nothing broadcast, nothing committed
 tinkpg samples [conv] [--panel P] [--thread K|--node ID] [--turn N] [--sample K] [--slice S[:L]] [--full] [--first-token]  # ALL n-sample siblings at one fork + <tag> tally; --sample/--slice = read ONE sample in PIECES; --first-token = the model's P(first generated token) at this fork
 tinkpg grep "<text>" [--ws WS] [--regex] [-i] [--link]  # search EVERY branch of all workspaces: content + thinking + system prompts (server-side; = the browser's Ctrl+K); --link appends a ?w=…&node=… deep-link URL per hit that opens the browser AT the match
-tinkpg node <id> [--ws WS] [--logprobs] [--meta] [--raw] [--full] [--json]  # reverse lookup: locate a bare node id (no ws/panel needed), dump its record + blobs
+tinkpg node <handle> [--ws WS] [--logprobs] [--meta] [--raw] [--full] [--json] [--link]  # reverse lookup: locate a bare node id (no ws/panel needed), dump its record + blobs
 tinkpg trash list [--workspace W] [--json]          # what's recoverable: every save that made nodes disappear, newest first
 tinkpg trash restore <handle> --workspace W         # splice a deleted branch back at its original sibling index
 tinkpg trash purge --workspace W                    # forget one workspace's journal
@@ -205,6 +205,11 @@ probe's prompt. `conv <id>`'s threads index prints each thread's `sys:` line;
 
 ## Reading state vs. workspaces (they are DIFFERENT stores)
 
+Panel ids (`p-1`, `p-2`, …) are minted monotonically per workspace and NEVER
+reused, so `<panel>:<node>` stays valid — closing a column doesn't free its id for
+a different model. Workspaces saved before that change also carry the old reserved
+names `primary` / `compare`; those remain valid ids, they're just never minted now.
+
 Vocabulary: the saved container (panels + branch trees) = a **workspace**; a
 branch-from-start first message starts a **thread**; a **conversation** is one
 dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
@@ -282,10 +287,15 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   short) plus which heavy blobs exist. `--logprobs` prints the stored per-token
   stream + top-K alts, `--meta` the request/response record, `--raw` the raw
   stream text. Reach for it BEFORE grepping state files or hand-parsing
-  workspace JSON — it replaces both. An id is unique per WORKSPACE, not per
+  workspace JSON — it replaces both.
+- **Node handles are `<panel>:<node>`.** An id is unique per WORKSPACE, not per
   panel — a tree cloned into another panel keeps its ids — so one id often names
-  the same turn in several panels and `node` prints them all; `continue --node` /
-  `samples --node` error and ask for `--panel`.
+  the same turn in several panels. The browser's Copy-node-id button therefore
+  hands out `p-4:nt03f1`, and every `--node` (plus `tinkpg node <handle>`) takes
+  `<node>`, `<panel>:<node>` or `<ws>:<panel>:<node>`; the parts fill in `--panel`
+  / the workspace, and an explicit flag wins. A BARE id still works — `node`
+  prints one block per copy, while `continue --node` / `samples --node` error and
+  ask for `--panel`.
 - `tinkpg samples` answers "what did the model say across ALL n draws at this fork?"
   — the one view `state`/`conv` can't give you, since they only walk the linear active
   path. It prints every sibling response at ONE fork (default: the last user turn of the
@@ -311,8 +321,8 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   `ps aux | grep tinkerscope` — with two instances running you'd have to guess
   which one holds the workspaces you just read, and `url --json` answers that
   (`pid`, `scan_roots`). A `?w=` link lands on the WORKSPACE, at whatever branch
-  is selected — there's no panel/thread/node anchor, so say which panel and
-  thread alongside the link.
+  is selected — to point at a TURN, use `grep --link` / `node --link`, which
+  append the `?w=…&panel=…&node=…` form that opens the browser AT the match.
 - **Workspace selector: positional or `--ws`, both work.** `ws`/`samples` take it
   positionally (the workspace is the subject) while `grep`/`node`/`threads` must
   use `--ws` (their positional is the pattern / node id). Since that's easy to

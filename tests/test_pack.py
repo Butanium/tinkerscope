@@ -83,7 +83,8 @@ def test_apply_fresh(backend):
     sess = json.loads(prefs["last_session"])
     assert sess["temperature"] == 0.5 and sess["n_samples"] == 8
     assert [p["run_id"] for p in sess["panels"]] == ["ckpt:" + GOOD_FINAL, "base:meta/Foo"]
-    assert [p["id"] for p in sess["panels"]] == ["primary", "compare"]
+    assert [p["id"] for p in sess["panels"]] == ["p-1", "p-2"], \
+        "a pack invents monotonic ids; there are no reserved panel names"
 
     # pack_models.json → ckpt + base (not openrouter)
     pm = {(m["kind"], m["ref"]) for m in pack_models_store.read()}

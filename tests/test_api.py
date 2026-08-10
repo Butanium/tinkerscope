@@ -5,6 +5,7 @@ and never hit /api/chat (which would cost remote tokens)."""
 from __future__ import annotations
 
 from conftest import SUPPORTED_BASE, UNSUPPORTED_BASE
+from tinkerscope.api.state import DEFAULT_PANEL_ID
 
 
 # --------------------------------------------------------------------------- #
@@ -65,9 +66,10 @@ def test_state_get_default_shape(client):
     state = client.get("/api/state").json()
     for key in ("panels", "temperature", "chat_id", "running"):
         assert key in state
-    # default = one 'primary' panel carrying its own selection + transcript echo
+    # default = one panel carrying its own selection + transcript echo. Its id is
+    # minted, not reserved (panel ids are monotonic p-<n> and never reused).
     p0 = state["panels"][0]
-    assert p0["id"] == "primary"
+    assert p0["id"] == DEFAULT_PANEL_ID
     for key in ("run_id", "checkpoint", "messages"):
         assert key in p0
 
@@ -77,14 +79,14 @@ def test_state_patch_round_trips(client):
     patched = client.post(
         "/api/state",
         json={
-            "panel": "primary",
+            "panel": DEFAULT_PANEL_ID,
             "run_id": "good_run",
             "checkpoint": "final",
             "messages": [{"role": "user", "content": "hello"}],
             "temperature": 0.3,
         },
     ).json()
-    p0 = next(p for p in patched["panels"] if p["id"] == "primary")
+    p0 = next(p for p in patched["panels"] if p["id"] == DEFAULT_PANEL_ID)
     assert p0["run_id"] == "good_run"
     assert p0["checkpoint"] == "final"
     assert p0["messages"][0]["content"] == "hello"
@@ -92,7 +94,7 @@ def test_state_patch_round_trips(client):
 
     # The change persists on the next GET (shared server-side state bus).
     again = client.get("/api/state").json()
-    p0b = next(p for p in again["panels"] if p["id"] == "primary")
+    p0b = next(p for p in again["panels"] if p["id"] == DEFAULT_PANEL_ID)
     assert p0b["run_id"] == "good_run"
     assert again["temperature"] == 0.3
 
@@ -387,7 +389,7 @@ def test_chat_openrouter_runs_gen_and_strips_reasoning(client, monkeypatch):
                 {"role": "assistant", "content": "a", "reasoning": "secret cot"},
                 {"role": "user", "content": "q2"},
             ],
-            "n_samples": 1, "panel": "primary", "broadcast": False,
+            "n_samples": 1, "panel": DEFAULT_PANEL_ID, "broadcast": False,
         },
     )
     # gen() must run to completion (the 'done' event) — a NameError in the body would
@@ -436,7 +438,7 @@ def test_chat_base_model_native_full_fidelity(client, monkeypatch):
             "base_model": SUPPORTED_BASE,
             "messages": [{"role": "user", "content": "q"}],
             "n_samples": 1, "thinking": False, "logprobs": True,
-            "panel": "primary", "broadcast": False,
+            "panel": DEFAULT_PANEL_ID, "broadcast": False,
         },
     )
     assert r.status_code == 200, r.text
@@ -491,7 +493,7 @@ def test_chat_loose_ckpt_resolves_base_and_renders_native(client, monkeypatch):
         json={
             "sampler_path": loose, "messages": [{"role": "user", "content": "q"}],
             "n_samples": 1, "thinking": False, "logprobs": True,
-            "panel": "primary", "broadcast": False,
+            "panel": DEFAULT_PANEL_ID, "broadcast": False,
         },
     )
     assert r.status_code == 200, r.text
@@ -621,7 +623,7 @@ def _req(chat_route, **over):
         openrouter_model="x/y",
         messages=[{"role": "user", "content": "q"}],
         n_samples=1,
-        panel="primary",
+        panel=DEFAULT_PANEL_ID,
         broadcast=True,
     )
     base.update(over)
@@ -655,7 +657,7 @@ async def test_chat_disconnect_commits_partial_and_fires_one_terminal(chat_mod, 
     assert len(terminals) == 1, terminals
     assert terminals[0]["type"] == "chat_done"
     assert terminals[0]["client_token"] == "ct-own"
-    prim = next(p for p in bus.state.panels if p.id == "primary")
+    prim = next(p for p in bus.state.panels if p.id == DEFAULT_PANEL_ID)
     assert prim.messages[-1] == {"role": "assistant", "content": "partial answer"}
 
 
@@ -700,7 +702,7 @@ async def test_chat_cancel_endpoint_zero_samples_is_error_terminal(chat_mod, mon
     assert len(terminals) == 1, terminals
     assert terminals[0]["type"] == "chat_error"
     assert terminals[0]["error"] == "cancelled"
-    prim = next(p for p in bus.state.panels if p.id == "primary")
+    prim = next(p for p in bus.state.panels if p.id == DEFAULT_PANEL_ID)
     assert prim.messages[-1]["role"] == "user"  # nothing committed
     assert (await chat_route.cancel_chat(999999))["status"] == "not_found"
 
@@ -724,7 +726,7 @@ async def test_chat_normal_completion_fires_exactly_one_terminal(chat_mod, monke
     assert bus.state.running is False
     terminals = [m for m in await _drain(sub) if m["type"] in ("chat_done", "chat_error")]
     assert len(terminals) == 1 and terminals[0]["type"] == "chat_done"
-    prim = next(p for p in bus.state.panels if p.id == "primary")
+    prim = next(p for p in bus.state.panels if p.id == DEFAULT_PANEL_ID)
     assert prim.messages[-1] == {"role": "assistant", "content": "done answer"}
 
 
@@ -751,7 +753,7 @@ async def test_chat_detached_returns_immediately_and_completes(chat_mod, monkeyp
     terminals = [m for m in await _drain(sub) if m["type"] in ("chat_done", "chat_error")]
     assert len(terminals) == 1 and terminals[0]["type"] == "chat_done"
     assert terminals[0]["client_token"] == "ct-det"
-    prim = next(p for p in bus.state.panels if p.id == "primary")
+    prim = next(p for p in bus.state.panels if p.id == DEFAULT_PANEL_ID)
     assert prim.messages[-1] == {"role": "assistant", "content": "detached answer"}
 
 
@@ -888,7 +890,7 @@ async def test_chat_cancel_mid_terminal_still_completes_terminal(chat_mod, monke
     terminals = [m for m in await _drain(sub) if m["type"] in ("chat_done", "chat_error")]
     assert len(terminals) == 1, terminals
     assert terminals[0]["type"] == "chat_done"
-    prim = next(p for p in bus.state.panels if p.id == "primary")
+    prim = next(p for p in bus.state.panels if p.id == DEFAULT_PANEL_ID)
     assert prim.messages[-1] == {"role": "assistant", "content": "answer"}
 
 

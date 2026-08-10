@@ -27,6 +27,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from ..state import DEFAULT_PANEL_ID
 from .. import workspace_store as store
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
@@ -57,6 +58,7 @@ class WorkspaceCreate(BaseModel):
     reduced_panels: list[str] = []
     send_targets: list[str] = []
     seen_panels: list[str] = []
+    panel_seq: int = 0
 
 
 class WorkspacePatch(BaseModel):
@@ -71,6 +73,7 @@ class WorkspacePatch(BaseModel):
     reduced_panels: list[str] | None = None
     send_targets: list[str] | None = None
     seen_panels: list[str] | None = None
+    panel_seq: int | None = None
 
 
 class TreeSave(BaseModel):
@@ -92,6 +95,9 @@ class TreeSave(BaseModel):
     reduced_panels: list[str] = []
     send_targets: list[str] = []
     seen_panels: list[str] = []
+    #   panel_seq      — monotonic panel-id counter; ids are p-<n> and never reused
+    #                    within a workspace, so a panel:node handle can't re-point.
+    panel_seq: int = 0
     # Per-workspace panel LAYOUT — see WorkspaceCreate.panels.
     panels: list[dict[str, Any]] = []
 
@@ -179,7 +185,7 @@ def create_workspace(req: WorkspaceCreate) -> dict:
         if req.compare_tree is not None:
             trees["compare"] = req.compare_tree
     if not trees:
-        trees = {"primary": {}}
+        trees = {DEFAULT_PANEL_ID: {}}
     return store.upsert(
         id=req.id,
         name=req.name,
@@ -190,6 +196,7 @@ def create_workspace(req: WorkspaceCreate) -> dict:
         reduced_panels=req.reduced_panels,
         send_targets=req.send_targets,
         seen_panels=req.seen_panels,
+        panel_seq=req.panel_seq,
     )
 
 
@@ -218,6 +225,7 @@ def save_workspace_tree(workspace_id: str, req: TreeSave) -> dict:
         reduced_panels=req.reduced_panels,
         send_targets=req.send_targets,
         seen_panels=req.seen_panels,
+        panel_seq=req.panel_seq,
     )
     if not ok:
         raise HTTPException(404, f"no workspace {workspace_id}")

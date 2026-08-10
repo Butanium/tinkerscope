@@ -954,3 +954,57 @@ ids, so one id routinely names the same turn in N panels — the docstring in
 An audit of the live store (39 workspaces, 313 shared ids) found 0 semantically
 divergent pairs, so the invariant the blob writer leans on holds; noting it here
 rather than in the skill, where the number would just be noise.
+
+### 2026-08-10 — Panel ids become monotonic; closing a column becomes recoverable
+
+Clément asked for the Copy-node-id button to hand out panel + node as one string.
+Pinning down the format turned up two things that had to be fixed first.
+
+**Why the panel belongs in the handle.** A bare node id is ambiguous: add-model's
+`duplicateTo` clones a panel's tree keeping its ids, so one id names the same turn
+in N panels (313 such ids across the live store, 0 divergent). `tinkpg node`
+prints every copy; the WRITE commands (`continue --node`, `samples --node`) refuse
+until you add `--panel` by hand. `<panel>:<node>` removes that step, and says
+"this column's turn" — bound to that model.
+
+**Why the ids weren't safe to embed.** `nextPanelId` minted by GAP-FILLING —
+reserved `'compare'` for slot 1, then the lowest free `p-N`. Close a column, add
+one, and its id came back attached to a different model. A `panel:node` handle
+would silently re-point; a quoted turn would become unquotable. Reserved names
+are gone (Clément: "drop compare and primary, just name it with ids, no need for
+weird special cases") and every mint is a fresh number from a persisted per-
+workspace `panel_seq`. `primary`/`compare` remain VALID ids forever — every
+workspace saved before this uses them, as does the legacy `{tree, compare_tree}`
+migration — they're simply never minted again. `DEFAULT_PANEL_ID` (state.py) and
+`FIRST_PANEL_ID` (panel-id.ts) are the one-per-side source of truth, and they must
+agree: a fresh bus and a fresh workspace have to name the same panel.
+
+Back-compat for a workspace with no `panel_seq`: `highestPanelSeq` seeds the
+counter from the highest `p-N` in trees + layout + **seen_panels**. That third
+one is load-bearing and is why `dropPanelUi` no longer prunes `seenPanels` — a
+CLOSED panel is absent from trees and layout, so without the ledger the seed
+could re-issue its number, which is the exact bug. Keeping a dead id costs
+nothing: its only reader gates first-sight `sendTargets` defaulting, and a
+monotonic id is never seen twice.
+
+**The regression that ordering revealed.** `restore_trash` refused when the
+panel was gone: *"re-add a panel with that id before restoring into it."* That
+worked ONLY because gap-filling could re-mint the id — monotonic ids would have
+turned a recoverable delete into an unrecoverable one. So restore now rebuilds
+the column itself, and `_record_trash` journals the panel's LAYOUT ROW alongside
+its nodes (a tree with no layout row is a column the browser never renders), so
+it comes back bound to the model it had. Entries written before that field
+restore into an unbound panel for the human to re-bind. Worth noting the journal
+half was already correct and tested — `test_dropping_a_panel_journals_its_whole
+_tree` — while the restore half had NO test and no live exercise (the only
+journal on this box holds 4 entries, all `kind: "nodes"`). Verified-looking
+safety net, untested recovery path.
+
+Closing a panel is a soft delete either way, with limits worth knowing: the
+journal expires at 90 days and is byte-capped at 32 MB oldest-first. Folding a
+panel keeps its tree (`reducePanel` only touches `reducedPanels`) — only
+`removePanel` drops one, so the comment claiming "reduce/remove" was wrong.
+
+Test fallout was all contract, no bugs: 10 tests asserted `'primary'` as the
+DEFAULT panel id. Tests that merely USE `'primary'` as a label still pass
+untouched, which is the point of keeping it valid.

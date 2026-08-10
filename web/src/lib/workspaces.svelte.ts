@@ -28,6 +28,7 @@ import { api } from './api';
 import { nodeBlobs } from './node-blobs.svelte';
 import { undo } from './undo.svelte';
 import { planSave, heavyNodeIds, lightenTree } from './save-plan';
+import { FIRST_PANEL_ID, highestPanelSeq, mintPanelId as mintId } from './panel-id';
 import {
   emptyTree,
   activeMessages,
@@ -66,12 +67,12 @@ class ConversationsStore {
   /** Workspace summaries (no trees) — the sidebar list. */
   list = $state<WorkspaceSummary[]>([]);
   activeId = $state<string | null>(null);
-  /** Per-panel branch trees keyed by stable panel id ('primary' always present).
+  /** Per-panel branch trees keyed by stable panel id (one panel always present).
    *  THE read source: +page reads treeFor(panel), computes a new tree via tree.ts,
    *  commits with setTree(panel,…). N-panel: any number of keys.
    *  $state.raw — plain immutable objects, replaced wholesale per commit; never
    *  mutate a tree/node in place (nothing would react, nothing would save). */
-  trees = $state.raw<Record<string, ConvTree>>({ primary: emptyTree() });
+  trees = $state.raw<Record<string, ConvTree>>({ [FIRST_PANEL_ID]: emptyTree() });
   /** THE authoritative client-side panel layout of the OPEN workspace (model per
    *  panel, in display order). Set on load/create, mutated ONLY by explicit user
    *  actions (`applyLayout`/`setPanelModel`, called from +page's panel lifecycle)
@@ -82,7 +83,7 @@ class ConversationsStore {
    *  restart re-prime races), and reading it back at save time is how two
    *  cross-tab layout clobbers reached disk (ENGINEERING_LOGS 2026-07-24 +
    *  2026-08-06). $state.raw like `trees`: replaced wholesale, never mutated. */
-  layout = $state.raw<PanelLayout[]>([{ id: 'primary', run_id: null, checkpoint: null }]);
+  layout = $state.raw<PanelLayout[]>([{ id: FIRST_PANEL_ID, run_id: null, checkpoint: null }]);
   /** Transient hint shown when the terminal/another tab branched the workspace. */
   externalNotice = $state<string | null>(null);
 
@@ -111,6 +112,23 @@ class ConversationsStore {
    *  restart restores the EXACT deselected/folded state rather than re-defaulting
    *  every panel ON. Not rendered ⇒ plain (non-reactive) field. */
   #seenPanels = new Set<string>();
+  /** Monotonic panel-id counter, persisted per workspace. Panel ids used to be
+   *  minted by gap-filling ('compare' first, then the lowest free p-N), so closing
+   *  a column and adding one recycled its id onto a DIFFERENT model — which made
+   *  `panel:node` handles silently re-point, and made a workspace's history
+   *  unquotable. Now every mint is a fresh number and no id is ever reused within
+   *  a workspace. Reserved names are gone: nothing mints 'primary'/'compare' any
+   *  more, but they stay valid ids forever (every workspace saved before this, plus
+   *  the legacy {tree, compare_tree} migration, uses them). */
+  #panelSeq = 0;
+
+  /** Next never-before-used panel id for this workspace. */
+  mintPanelId(): string {
+    const taken = new Set([...Object.keys(this.trees), ...this.layout.map((p) => p.id), ...this.#seenPanels]);
+    const { id, seq } = mintId(this.#panelSeq, taken);
+    this.#panelSeq = seq;
+    return id;
+  }
 
   /** Tokens of chats THIS browser fired — the chat store folds these from their
    *  bus bucket on chat_done (routed before the foreign path), so the external-fold
@@ -422,11 +440,16 @@ class ConversationsStore {
     this.sendTargets = new Set([...this.sendTargets, panel]);
     this.save();
   }
-  /** Forget a removed panel's UI bookkeeping (called from +page removePanel). */
+  /** Forget a removed panel's UI bookkeeping (called from +page removePanel).
+   *  `#seenPanels` is deliberately NOT pruned: it is the workspace's ledger of
+   *  every id it ever minted, which is what keeps a closed panel's number from
+   *  being handed to a new column (and what seeds `panel_seq` for a workspace
+   *  saved before that counter existed). Keeping a dead id costs nothing — its
+   *  only reader gates first-sight sendTargets defaulting, and a monotonic id is
+   *  never seen twice. The live-view sets DO get pruned. */
   dropPanelUi(panel: Panel): void {
     this.reducedPanels = new Set([...this.reducedPanels].filter((t) => t !== panel));
     this.sendTargets = new Set([...this.sendTargets].filter((t) => t !== panel));
-    this.#seenPanels.delete(panel);
     this.save();
   }
   /** Reconcile against the current panel list: default each NEWLY-seen panel into
@@ -459,12 +482,13 @@ class ConversationsStore {
     this.reducedPanels = new Set(conv.reduced_panels ?? []);
     this.sendTargets = new Set(conv.send_targets ?? []);
     this.#seenPanels = new Set(conv.seen_panels ?? []);
+    this.#panelSeq = conv.panel_seq ?? highestPanelSeq(conv);
   }
 
   /** The panel layout (model selection per panel) currently shown — what a new
    *  workspace inherits. With a workspace open that's OUR layout; before any is
    *  open (the fresh-install draft) it's the session-restored bus panels.
-   *  Always at least a blank primary. */
+   *  Always at least one blank panel. */
   #currentLayout(): PanelLayout[] {
     if (this.activeId) return this.layout.map((p) => ({ ...p }));
     const restored = (live.state?.panels ?? []).map((p) => ({
@@ -472,7 +496,7 @@ class ConversationsStore {
       run_id: p.run_id,
       checkpoint: p.checkpoint
     }));
-    return restored.length ? restored : [{ id: 'primary', run_id: null, checkpoint: null }];
+    return restored.length ? restored : [{ id: FIRST_PANEL_ID, run_id: null, checkpoint: null }];
   }
 
   /** Reset every open panel's tree to empty (fresh thread, same panel layout).
@@ -480,7 +504,7 @@ class ConversationsStore {
    *  stale ids); pass false ONLY for an unsaved draft, which must stay unsaved. */
   #freshTrees(mark: boolean): Promise<void> {
     const ids = this.layout.map((p) => p.id);
-    if (!ids.length) ids.push('primary'); // no panels known yet → the default first slot
+    if (!ids.length) ids.push(FIRST_PANEL_ID); // no panels known yet → the default first slot
     const prev = Object.keys(this.trees);
     this.trees = Object.fromEntries(ids.map((id) => [id, emptyTree()]));
     if (mark) {
@@ -591,7 +615,8 @@ class ConversationsStore {
       })),
       reduced_panels: [...this.reducedPanels],
       send_targets: [...this.sendTargets],
-      seen_panels: [...this.#seenPanels]
+      seen_panels: [...this.#seenPanels],
+      panel_seq: this.#panelSeq
     };
     // A pending save IS the first real change to an unsaved draft → materialize it
     // on the backend (create with the draft's id, FULL current trees) instead of a
@@ -881,7 +906,7 @@ class ConversationsStore {
       } catch (e: any) {
         // Deleted the open workspace but couldn't load the next: latch saves
         // off (an empty PUT would clobber the stored data) and say so.
-        this.trees = { primary: emptyTree() };
+        this.trees = { [FIRST_PANEL_ID]: emptyTree() };
         this.#loadFailed = true;
         this.#flashNotice(
           `Failed to load the next workspace (${e?.message ?? e}) — changes are NOT being saved; reload the page.`
@@ -933,7 +958,7 @@ class ConversationsStore {
       // tree is exactly what re-fed the phantom on every send.
       if (keep) for (const pid of Object.keys(map)) if (!keep.has(pid)) delete map[pid];
       // A workspace always loads with ≥1 tree (blank first slot = empty thread).
-      if (!Object.keys(map).length) map[layout?.[0]?.id ?? 'primary'] = emptyTree();
+      if (!Object.keys(map).length) map[layout?.[0]?.id ?? FIRST_PANEL_ID] = emptyTree();
       this.trees = map;
     } else {
       // Legacy shape → the first structural save must ship the full map (partial

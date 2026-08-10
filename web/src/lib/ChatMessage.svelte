@@ -48,6 +48,7 @@
     onStop,
     otherPanels = [],
     onSendToPanel,
+    panelId,
     rowIndex = -1,
     focused = false,
     onFocusRow
@@ -92,6 +93,9 @@
     // Other panels this branch can be copied into (compare). Empty → no picker.
     otherPanels?: { id: string; label: string }[];
     onSendToPanel?: (destPanel: string) => void;
+    /** This row's panel id — prefixed onto the copied node handle so it addresses
+     *  THIS column's turn (a cloned tree shares node ids across panels). */
+    panelId?: string;
     // Keyboard row navigation (workspace-level; see +page's "Keyboard row
     // navigation" section): this row's index in its panel's rendered view
     // (mirrored as data-row so +page can find the element to reveal), whether
@@ -617,18 +621,26 @@
   {/if}
 {/snippet}
 
-<!-- Copy this node's id — the CLI's addressing currency (`tinkpg samples/continue
-     --node <id>`); the tooltip shows the id itself + both consumers. -->
+<!-- Copy this node's handle — the CLI's addressing currency (`tinkpg
+     samples/continue/node --node <handle>`).
+
+     `<panel>:<node>`, not a bare node id: a tree cloned into another panel keeps
+     its node ids, so one id names the same turn in N panels — the write commands
+     (`continue --node`) then refuse until you add --panel by hand. The panel is
+     also what makes the handle mean "this column's turn", i.e. bound to THIS
+     model. Safe to join with a colon: no panel id or node id contains one, and
+     the CLI still accepts a bare id. -->
 {#snippet copyIdBtn(id: string | null | undefined)}
   {#if id}
+    {@const handle = panelId ? `${panelId}:${id}` : id}
     <button
       class="btn-act"
       class:copied={copiedId}
       data-testid="copy-node-id"
-      data-tooltip={copiedId ? 'Copied!' : `Copy node id ${id} — the tinkpg --node handle`}
+      data-tooltip={copiedId ? 'Copied!' : `Copy ${handle} — the tinkpg --node handle`}
       use:tip
-      aria-label="Copy node id"
-      onclick={() => { navigator.clipboard?.writeText(id); flashCopied('id'); }}
+      aria-label="Copy node handle"
+      onclick={() => { navigator.clipboard?.writeText(handle); flashCopied('id'); }}
     >
       {#if copiedId}<Icon name="check" />{:else}<Icon name="hash" />{/if}
     </button>

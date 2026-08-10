@@ -11,6 +11,7 @@
   import { live, emptyPanel } from '$lib/state.svelte';
   import { touchesWorkspace } from '$lib/bus-scope';
   import { workspaces as ws } from '$lib/workspaces.svelte';
+  import { FIRST_PANEL_ID } from '$lib/panel-id';
   import Message from '$lib/ChatMessage.svelte';
   import {
     OR_PREFIX, BASE_PREFIX, CKPT_PREFIX,
@@ -166,7 +167,7 @@
   // PlaygroundState) — the snapshot replaces DEFAULTS on connect, so a mismatch
   // makes the pre-snapshot flash look like a param reset.
   const DEFAULTS: PlaygroundState = {
-    panels: [{ id: 'primary', run_id: null, checkpoint: null, messages: [] }],
+    panels: [{ id: FIRST_PANEL_ID, run_id: null, checkpoint: null, messages: [] }],
     workspace_id: null,
     system_prompt: null, temperature: 1.0, max_tokens: 1024, n_samples: 1,
     thinking: false, top_p: null, chat_id: 0, running: false, last_event: null, last_event_ts: 0
@@ -303,13 +304,9 @@
   }
 
   // ── Panel lifecycle: add / remove / reduce / restore ──────────────
-  /** Next stable panel id: reuse reserved 'compare' for slot 1, then p-2, p-3, … */
+  /** Next panel id: monotonic per workspace, never reused (`ws.mintPanelId`). */
   function nextPanelId(): string {
-    const ids = new Set(ws.layout.map((p) => p.id));
-    if (!ids.has('compare')) return 'compare';
-    let n = 2;
-    while (ids.has('p-' + n)) n++;
-    return 'p-' + n;
+    return ws.mintPanelId();
   }
   function addPanel() {
     // No panel-count cap — the columns row scrolls horizontally at min-width.
@@ -2490,6 +2487,7 @@
                   onCopy={(all, withThinking) => branchOps.copyMessage(p.panel, msg, all, withThinking)}
                   otherPanels={panelSels.filter((x) => x.panel !== p.panel).map((x) => ({ id: x.panel, label: panelLabel(x) }))}
                   onSendToPanel={(dest) => branchOps.sendBranchToPanel(p.panel, msg, dest)}
+                  panelId={p.panel}
                   onCycle={(delta) => branchOps.cycleBranch(p.panel, msg, delta)}
                   onLoom={(cut, altTid) => branchOps.loomBranch(p.panel, msg, cut, altTid)}
                   onToggleSamplesView={() => toggleSamplesView(p.panel, msg)}

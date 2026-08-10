@@ -340,6 +340,10 @@ export type Workspace = {
   reduced_panels?: string[];
   send_targets?: string[];
   seen_panels?: string[];
+  /** Monotonic panel-id counter: panel ids are `p-<n>` and never reused within a
+   *  workspace, so a `panel:node` handle can't re-point onto a different model.
+   *  Absent on workspaces saved before it existed ⇒ seeded by `highestPanelSeq`. */
+  panel_seq?: number;
   created_at: string;
   updated_at: string;
 };

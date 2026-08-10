@@ -169,3 +169,47 @@ def test_state_no_link_still_gives_a_usable_link(monkeypatch):
     r = runner.invoke(cli.app, ["state", "--no-link"])
     assert r.exit_code == 0
     assert f"{BASE}/?w={WID}" in r.stdout
+
+
+# ---------- node handles (`<panel>:<node>`) ----------
+# The browser's Copy-node-id button emits `<panel>:<node>`, because a tree cloned
+# into another panel keeps its node ids — a bare id names the same turn in N panels,
+# and the write commands then refuse until you add --panel by hand.
+
+
+def test_a_bare_node_id_still_parses(monkeypatch):
+    assert cli._split_node_handle("n4f1") == (None, None, "n4f1")
+
+
+def test_panel_node_splits_into_panel_and_node(monkeypatch):
+    assert cli._split_node_handle("p-4:n4f1") == (None, "p-4", "n4f1")
+
+
+def test_a_three_part_handle_carries_the_workspace(monkeypatch):
+    assert cli._split_node_handle("a410b399:p-4:n4f1") == ("a410b399", "p-4", "n4f1")
+
+
+def test_legacy_panel_names_work_as_handles(monkeypatch):
+    """'primary'/'compare' are no longer minted but remain valid ids forever."""
+    assert cli._split_node_handle("primary:nt03f1") == (None, "primary", "nt03f1")
+
+
+def test_a_four_part_handle_is_an_error_not_a_guess(monkeypatch):
+    _patch(monkeypatch)
+    r = runner.invoke(cli.app, ["node", "a:b:c:d"])
+    assert r.exit_code == 1
+    assert "node handle" in r.output
+
+
+def test_an_explicit_panel_beats_the_handles_panel(monkeypatch):
+    """The handle is a convenience, not an override — `--node p-4:n1 --panel p-2`
+    reads as a deliberate cross-panel aim."""
+    assert cli._aim_at_node("p-4:n1", "p-2", None) == ("n1", "p-2", None)
+
+
+def test_the_handle_fills_in_a_missing_panel_and_workspace(monkeypatch):
+    assert cli._aim_at_node("ws1:p-4:n1", None, None) == ("n1", "p-4", "ws1")
+
+
+def test_no_handle_leaves_the_flags_alone(monkeypatch):
+    assert cli._aim_at_node(None, "p-2", "ws1") == (None, "p-2", "ws1")

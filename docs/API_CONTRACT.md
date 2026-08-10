@@ -127,9 +127,9 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
 | GET | `/api/workspaces/{id}` | — | one light `Workspace` body (trees incl., blobs excl.); 404 if unknown |
 | POST | `/api/workspaces/{id}/node-blobs` | `{nodes: string[]}` | `{nodeId: {token_logprobs?, raw_meta?}}` — heavy blobs for a batch of node ids (POST, not GET, because the list is long). Unknown / blob-less ids are OMITTED, not an error |
 | GET | `/api/workspaces/{id}/layout-history` | — | `[{ts, panels}]` oldest-first — one entry per panel-LAYOUT change (not per save). `[]` for an unknown workspace or one whose layout never changed (never 404 — same "absence is not an error" convention as node-blobs). Restoring is a normal PATCH of `panels`; `scripts/layout_history.py` is the front end |
-| POST | `/api/workspaces` | `{id?, name?, system_prompt?, system_enabled?, trees?, panels?, tree?, compare_tree?, reduced_panels?, send_targets?, seen_panels?}` | the saved light Workspace (`id`,`created_at`,`updated_at` added; inline heavy node fields stripped into blobs). 400 on a crafted (non-filename-safe) `id` |
-| PATCH | `/api/workspaces/{id}` | any subset of `{name, system_prompt, system_enabled, panels, reduced_panels, send_targets, seen_panels}` | the updated **WorkspaceSummary** (layout-only — NO tree bytes shipped either way); 404 if unknown |
-| PUT | `/api/workspaces/{id}/tree` | `{trees, dropped_trees?, system_prompt?, system_enabled?, panels?, reduced_panels?, send_targets?, seen_panels?}` | `{status, id}` (the hot save path). `trees` is a **partial upsert** (dirty panels only, merged over stored); `dropped_trees` removes panels; inline heavy node fields are stripped into write-once blobs. 404 if unknown |
+| POST | `/api/workspaces` | `{id?, name?, system_prompt?, system_enabled?, trees?, panels?, tree?, compare_tree?, reduced_panels?, send_targets?, seen_panels?, panel_seq?}` | the saved light Workspace (`id`,`created_at`,`updated_at` added; inline heavy node fields stripped into blobs). 400 on a crafted (non-filename-safe) `id` |
+| PATCH | `/api/workspaces/{id}` | any subset of `{name, system_prompt, system_enabled, panels, reduced_panels, send_targets, seen_panels, panel_seq}` | the updated **WorkspaceSummary** (layout-only — NO tree bytes shipped either way); 404 if unknown |
+| PUT | `/api/workspaces/{id}/tree` | `{trees, dropped_trees?, system_prompt?, system_enabled?, panels?, reduced_panels?, send_targets?, seen_panels?, panel_seq?}` | `{status, id}` (the hot save path). `trees` is a **partial upsert** (dirty panels only, merged over stored); `dropped_trees` removes panels; inline heavy node fields are stripped into write-once blobs. 404 if unknown |
 | DELETE | `/api/workspaces/{id}` | — | `{status}`. **Soft**: the light file, blobs dir, layout history and trash journal are MOVED to `workspaces/.deleted/<id>-<ts>/`, not unlinked (aged out after 90 days). The one deletion the trash journal can't cover is the workspace's own, since the journal lives inside it |
 | GET | `/api/workspaces/{id}/trash` | — | `[{id, ts, panel, kind, count, roots, selected}]` NEWEST-first — one entry per save that made nodes disappear. Node BODIES excluded (a listing is for choosing; bodies can be MBs). `roots` = the deleted subtree anchors `{id, parent, index, role, preview}`. `[]` for unknown / never-deleted (never 404, same convention as node-blobs) |
 | POST | `/api/workspaces/{id}/trash/restore` | `{handle}` | `{ok, restored, panel, entry}` — splices a journaled subtree back at its recorded sibling `index`. `handle` = an entry id, a subtree-root node id, or any node id inside an entry. Blobs need no work (write-once, never removed), so logprobs come back too. `{ok: false, error}` with **200** when nothing matches — that's an answer, not a transport failure |
@@ -146,13 +146,17 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
                                             // legacy bodies → readers derive from text presence
   "trees": {                                // per-panel LIGHT branch trees, keyed by stable panel id
     "primary": { "nodes": {…}, "rootChildren": [], "selected": {} },
-    "compare": { … }                        // present per open panel ('primary','compare','p-2',…)
+    "p-2": { … }                            // one per open panel; ids are minted p-<n> and NEVER
+                                            // reused (older workspaces also carry 'primary'/'compare')
   },
   "panels": [                               // per-workspace panel LAYOUT (which model per panel).
     {"id": "primary", "run_id": "…", "checkpoint": "final"},   // switching restores this set; a new
     {"id": "compare", "run_id": "…", "checkpoint": null}       // workspace inherits the current one's.
   ],                                        // [] on legacy convs ⇒ keep the currently-shown panels.
   "reduced_panels": [], "send_targets": [], "seen_panels": [], // per-workspace panel UI (opaque id lists)
+  "panel_seq": 3,                          // monotonic panel-id counter: ids are p-<n>, never reused
+                                           // within a workspace. Absent on pre-counter workspaces (the
+                                           // browser seeds it from the highest p-N it can see).
   // legacy shape, read-only: {tree, compare_tree} on un-migrated entries — folded into `trees` on first save
   "created_at": "iso", "updated_at": "iso"
 }
@@ -286,7 +290,7 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
                           // the re-rendered prompt is the one the prefix ids actually
                           // continued; null = normal selection (thinking toggle / run
                           // config / family recommendation).
-  "panel": "primary",     // "primary" | "compare" — which compare pane this is
+  "panel": "p-1",         // which panel this chat belongs to (opaque id)
   "broadcast": true,       // also mirror samples to the state bus (browser)
   "detached": false,       // fire-and-forget: the POST returns immediately ({"status":
                            // "started"}) and the generation runs server-side, streaming
@@ -360,7 +364,7 @@ just like a discovered run — same three artifacts.
 ```jsonc
 {
   "panels": [                       // one entry per open panel, in display order
-    {"id": "primary",               // stable panel id ('primary','compare','p-2',…)
+    {"id": "p-1",                   // stable panel id, minted p-<n>, never reused
      "run_id": null, "checkpoint": null,
      "messages": [{role,content}],  // this panel's active-path transcript ECHO (write-only;
                                     // the browser's branch tree is the read source)

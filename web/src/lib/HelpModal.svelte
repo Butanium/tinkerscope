@@ -36,7 +36,7 @@
     { icon: 'copy-all', name: 'copy conversation', what: 'the whole thread as markdown' },
     { icon: 'send-to', name: 'send to panel', what: "copy this branch's context into another panel" },
     { icon: 'eye', name: 'view all samples', what: "spread a turn's sibling branches out as cards (later turns hide meanwhile)" },
-    { icon: 'hash', name: 'copy node id', what: 'the id the `tinkpg --node` flag addresses' }
+    { icon: 'hash', name: 'copy node handle', what: '`<panel>:<node>` — what the `tinkpg --node` flag addresses' }
   ];
 
   /** Extra buttons that only exist on the cards of an n&gt;1 sample draw. */

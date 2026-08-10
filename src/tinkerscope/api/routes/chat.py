@@ -53,7 +53,7 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from .. import discovery, openrouter, tinker_oai
-from ..state import BUS
+from ..state import DEFAULT_PANEL_ID, BUS
 from ..tinker_sampler import get_sampler, select_renderer_name
 from .models import ckpt_label
 
@@ -164,7 +164,7 @@ class ChatRequest(BaseModel):
     # the prefix tokens actually continued. None = select_renderer_name as usual.
     renderer_name: str | None = None
     # live-drive routing
-    panel: str = "primary"                  # "primary" | "compare"
+    panel: str = DEFAULT_PANEL_ID           # schema fallback; every client sends one
     # The workspace this chat belongs to. The browser always sends
     # its own; the CLI omits it and inherits the bus's current one. Stamped onto the
     # chat_done / chat_error broadcasts so a browser tab on ANOTHER workspace skips

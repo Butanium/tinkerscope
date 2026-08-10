@@ -7,6 +7,8 @@ in-memory summary cache). See `docs/STORAGE_V2.md` for the wire contract.
 """
 from __future__ import annotations
 
+from tinkerscope.api.state import DEFAULT_PANEL_ID
+
 # A node carrying the two heavy fields that storage v2 splits into a write-once blob.
 HEAVY_LOGPROBS = [{"t": "Hi", "tid": 5, "lp": -0.1, "top": [["Hi", 5, -0.1], ["Yo", 9, -2.0]]}]
 HEAVY_RAW_META = '{"request": {"prompt": "..."}, "response": {"tokens": 3}}'
@@ -74,7 +76,7 @@ def test_create_assigns_id_and_timestamps(client):
     conv = client.post("/api/workspaces", json={"name": "Probe A"}).json()
     assert conv["name"] == "Probe A"
     assert conv["id"] and conv["created_at"] and conv["updated_at"]
-    assert conv["trees"] == {"primary": {}}  # default = one empty primary tree
+    assert conv["trees"] == {DEFAULT_PANEL_ID: {}}  # default = one empty minted panel
     assert "tree" not in conv and "compare_tree" not in conv
     assert [c["id"] for c in client.get("/api/workspaces").json()] == [conv["id"]]
 

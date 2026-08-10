@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import pytest
 
+from tinkerscope.api.state import DEFAULT_PANEL_ID
+
 from tinkerscope.api.routes.chat import (
     ChatRequest,
     _committed_turn,
@@ -196,7 +198,7 @@ def test_chat_both_prefill_scope_routes_per_half(client, monkeypatch):
             "thinking": "both",
             "prefill_scope": "non_think",
             "n_samples": 1,
-            "panel": "primary",
+            "panel": DEFAULT_PANEL_ID,
             "broadcast": False,
         },
     )
@@ -229,7 +231,7 @@ def test_chat_deprecated_bool_still_strips_nonthinking_half(client, monkeypatch)
             "thinking": "both",
             "prefill_thinking_only": True,
             "n_samples": 1,
-            "panel": "primary",
+            "panel": DEFAULT_PANEL_ID,
             "broadcast": False,
         },
     )
@@ -258,7 +260,7 @@ def test_chat_think_scope_both_commits_unprefixed_turn(client, monkeypatch):
             "thinking": "both",
             "prefill_scope": "think",
             "n_samples": 1,
-            "panel": "primary",
+            "panel": DEFAULT_PANEL_ID,
             "broadcast": False,
         },
     )
@@ -266,6 +268,6 @@ def test_chat_think_scope_both_commits_unprefixed_turn(client, monkeypatch):
     # The committed panel transcript (via BUS.chat_end) must store the fresh
     # completion alone — NOT "PREFILLcont" — because sample 0's half dropped it.
     panels = {p["id"]: p for p in client.get("/api/state").json()["panels"]}
-    committed = panels["primary"]["messages"]
+    committed = panels[DEFAULT_PANEL_ID]["messages"]
     assert committed[-1] == {"role": "assistant", "content": "cont"}, committed
     assert committed[-1]["content"] != "PREFILLcont"

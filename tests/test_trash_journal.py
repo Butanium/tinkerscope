@@ -39,9 +39,15 @@ def _fan(n_samples: int = 3) -> dict:
 
 
 def _create(client, name="W", trees=None) -> str:
+    trees = trees or {"primary": _fan()}
     r = client.post("/api/workspaces", json={
-        "name": name, "trees": trees or {"primary": _fan()},
-        "panels": [{"id": "primary", "run_id": "run-a", "checkpoint": "final"}],
+        "name": name, "trees": trees,
+        # One layout row per tree, each bound to its own model — a whole-column
+        # delete has to journal that binding to be able to put the column back.
+        "panels": [
+            {"id": pid, "run_id": f"run-{chr(ord('a') + i)}", "checkpoint": "final"}
+            for i, pid in enumerate(trees)
+        ],
     })
     assert r.status_code == 200, r.text
     return r.json()["id"]
@@ -234,3 +240,79 @@ def test_set_aside_workspaces_are_not_listed_as_live_ones(client):
     client.delete(f"/api/workspaces/{cid}")
     store.reset_cache()
     assert [w["id"] for w in client.get("/api/workspaces").json()] == []
+
+
+# ── restoring a whole CLOSED column ──────────────────────────────────────────
+# Closing a panel removes its tree from the workspace AND its row from the layout.
+# Restore used to refuse ("re-add a panel with that id first"), which leaned on the
+# old gap-filling id minter to hand the same id back. Ids are monotonic now, so that
+# workaround is gone and restore has to rebuild the column itself.
+def test_closing_a_panel_journals_the_layout_row_too(client):
+    cid = _create(client, trees={"primary": _fan(1), "p-2": _fan(2)})
+    r = client.put(f"/api/workspaces/{cid}/tree", json={
+        "trees": {"primary": _fan(1)}, "dropped_trees": ["p-2"],
+        "system_prompt": None, "system_enabled": False,
+        "panels": [{"id": "primary", "run_id": "run-a", "checkpoint": "final"}],
+        "reduced_panels": [], "send_targets": [], "seen_panels": ["primary", "p-2"],
+    })
+    assert r.status_code == 200, r.text
+    e = next(x for x in _trash(client, cid) if x["panel"] == "p-2")
+    assert e["kind"] == "panel"
+    assert e["layout"] == {"id": "p-2", "run_id": "run-b", "checkpoint": "final"}, \
+        "without the layout row a restored tree is a column the browser never renders"
+
+
+def test_restoring_a_closed_panel_rebuilds_the_column(client):
+    cid = _create(client, trees={"primary": _fan(1), "p-2": _fan(2)})
+    client.put(f"/api/workspaces/{cid}/tree", json={
+        "trees": {"primary": _fan(1)}, "dropped_trees": ["p-2"],
+        "system_prompt": None, "system_enabled": False,
+        "panels": [{"id": "primary", "run_id": "run-a", "checkpoint": "final"}],
+        "reduced_panels": [], "send_targets": [], "seen_panels": ["primary", "p-2"],
+    })
+    entry = next(x for x in _trash(client, cid) if x["panel"] == "p-2")
+    out = _restore(client, cid, entry["id"])
+    assert out["ok"] and out["panel"] == "p-2"
+    assert out["recreated_panel"] is True
+    body = _body(client, cid)
+    assert set(body["trees"]["p-2"]["nodes"]) == {"u", "a0", "a1"}
+    assert body["trees"]["p-2"]["rootChildren"] == ["u"]
+    assert {"id": "p-2", "run_id": "run-b", "checkpoint": "final"} in body["panels"], \
+        "the column must come back BOUND to the model it had"
+
+
+def test_restoring_into_a_live_panel_does_not_claim_it_was_recreated(client):
+    cid = _create(client)
+    kept = _fan()
+    del kept["nodes"]["a1"]
+    kept["nodes"]["u"]["children"] = ["a0", "a2"]
+    _save(client, cid, {"primary": kept})
+    out = _restore(client, cid, "a1")
+    assert out["ok"] and out["recreated_panel"] is False
+
+
+def test_a_pre_layout_entry_restores_into_an_unbound_panel(client):
+    """Entries journaled before `layout` was recorded still have to restore — the
+    column comes back present but with no model, for the human to re-bind."""
+    cid = _create(client, trees={"primary": _fan(1), "p-2": _fan(2)})
+    client.put(f"/api/workspaces/{cid}/tree", json={
+        "trees": {"primary": _fan(1)}, "dropped_trees": ["p-2"],
+        "system_prompt": None, "system_enabled": False,
+        "panels": [{"id": "primary", "run_id": "run-a", "checkpoint": "final"}],
+        "reduced_panels": [], "send_targets": [], "seen_panels": ["primary", "p-2"],
+    })
+    # Strip `layout` from the journal, mimicking an entry written by the old code.
+    f = store._trash_file(cid)
+    lines = []
+    for raw in f.read_text().splitlines():
+        e = json.loads(raw)
+        e.pop("layout", None)
+        lines.append(json.dumps(e))
+    f.write_text("\n".join(lines) + "\n")
+
+    entry = next(x for x in _trash(client, cid) if x["panel"] == "p-2")
+    out = _restore(client, cid, entry["id"])
+    assert out["ok"] and out["recreated_panel"] is True
+    body = _body(client, cid)
+    assert set(body["trees"]["p-2"]["nodes"]) == {"u", "a0", "a1"}
+    assert {"id": "p-2", "run_id": None, "checkpoint": None} in body["panels"]

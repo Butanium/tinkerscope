@@ -162,7 +162,7 @@ def _state_json(pack: packmod.Pack, workspace_id: str | None) -> dict:
         for p in session.get("panels") or []
     ]
     return {
-        "panels": panels or [{"id": "primary", "run_id": None, "checkpoint": None, "messages": [], "thread_system_prompt": None}],
+        "panels": panels or [{"id": "p-1", "run_id": None, "checkpoint": None, "messages": [], "thread_system_prompt": None}],
         "workspace_id": workspace_id,
         "system_prompt": None,
         "system_enabled": None,

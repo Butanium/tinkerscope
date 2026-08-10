@@ -36,14 +36,21 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
+# The id a layout's FIRST panel gets when something has to invent one (a fresh bus,
+# an empty workspace create, a schema fallback). Panel ids are minted monotonically
+# per workspace and never reused — see `ws.mintPanelId`.
+DEFAULT_PANEL_ID = "p-1"
+
+
 @dataclass
 class PanelState:
     """One comparison panel: its model selection + its OWN active-path transcript
     echo. The echo is write-only (the browser's branch tree is the read source); it
     exists so the CLI and external-fold reconcile can see/replay each panel's path.
-    `id` is a stable string ('primary','compare','p-2',…), never an array index."""
+    `id` is a stable string ('p-1','p-2',… — and 'primary'/'compare' on workspaces
+    saved before ids became monotonic), never an array index."""
 
-    id: str = "primary"
+    id: str = DEFAULT_PANEL_ID
     run_id: str | None = None
     checkpoint: str | None = None         # checkpoint name, e.g. "final"
     messages: list[dict] = field(default_factory=list)   # [{role, content}]
@@ -58,9 +65,9 @@ class PanelState:
 class PlaygroundState:
     """What the user (and Claude, via the CLI) is currently looking at. Sampling
     params are GLOBAL (shared across all panels); only run/checkpoint/transcript are
-    per-panel, in `panels` (slot 0 = 'primary', always present)."""
+    per-panel, in `panels` (slot 0 always present)."""
 
-    panels: list[PanelState] = field(default_factory=lambda: [PanelState(id="primary")])
+    panels: list[PanelState] = field(default_factory=lambda: [PanelState(id=DEFAULT_PANEL_ID)])
     # Id of the saved workspace the browser currently has open (its `?c=`), pushed
     # so the CLI can name "what's on screen" exactly instead of guessing by path-match.
     # None when no workspace is open (or an older browser that doesn't push it).
