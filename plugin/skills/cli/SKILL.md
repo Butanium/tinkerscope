@@ -110,6 +110,7 @@ tinkpg compare <run_a>[@ckpt] <run_b>[@ckpt] "<prompt>" [opts]   # A→left pane
 tinkpg send "<prompt>" [opts] [--panel P ...]       # NEW THREAD at the CURRENT panels — layout untouched (the safe probe)
 tinkpg continue "<follow-up>" [opts] [--panel P] [--thread K] [--turn N] [--node ID] [--ancestry-file FILE]   # LOOM: add a turn to existing thread(s), OR to an explicit external transcript
 tinkpg battery <dir> [--n N] [--pause S] [--out DIR] [--panel P ...] [--no-first-token]   # fire a DIRECTORY of probe *.txt files as sequential sends (one probe = one thread)
+tinkpg url [ws] [--live] [--json]                   # the URL of the server you're driving — what to hand the human when they want a LINK
 tinkpg state [--full] [--width N] [--no-link] [--json] [--include-folded]   # DIGEST of on-screen panels (active path + matched saved conv)
 tinkpg params [--temperature T] [--max-tokens M] [--n N] [--thinking/--no-thinking|--thinking-both] [--top-p P] [--system S|--system-file F|--clear-system]   # show / SET the GLOBAL sampling params (browser sidebar updates live)
 tinkpg ws                                         # list saved WORKSPACES + branch metadata (alias: tinkpg conv)
@@ -302,6 +303,21 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   bus, so a CLI-triggered chat appears in the human's browser identically to one
   they typed. Best way to *show* them a checkpoint's behavior: `open` the run,
   fire a `chat`, tell them to watch — richer than pasting the sample.
+- **`tinkpg url` when they ask for a link.** Every command auto-discovers the
+  running instance, so you can read a whole workspace without ever learning the
+  URL — and then have nothing to hand over. `url` prints it (bare on stdout, so
+  `open $(tinkpg url)` works); `url <ws>` or `url --live` prints a `?w=<id>` link
+  that OPENS that workspace. `state`'s header carries both too. Don't reach for
+  `ps aux | grep tinkerscope` — with two instances running you'd have to guess
+  which one holds the workspaces you just read, and `url --json` answers that
+  (`pid`, `scan_roots`). A `?w=` link lands on the WORKSPACE, at whatever branch
+  is selected — there's no panel/thread/node anchor, so say which panel and
+  thread alongside the link.
+- **Workspace selector: positional or `--ws`, both work.** `ws`/`samples` take it
+  positionally (the workspace is the subject) while `grep`/`node`/`threads` must
+  use `--ws` (their positional is the pattern / node id). Since that's easy to
+  get backwards mid-session, `ws`/`samples`/`url` accept `--ws` as well; passing
+  two *different* ones errors rather than picking.
 - **⚠️ `open`/`chat`/`compare` REPLACE the browser's panel layout.** They push a
   full `panels` list onto the shared bus, so the human's multi-panel workspace
   reshapes live (and mid-generation state can be lost). Before firing any of

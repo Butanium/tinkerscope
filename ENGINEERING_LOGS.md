@@ -907,3 +907,50 @@ another instance (links were workspace-granular; it wanted `?w=…&node=…` and
   `w` changes (a stale node param would make the URL claim a jump into the
   wrong workspace). `tinkpg grep --link` / `tinkpg node --link` print these
   URLs per hit — "which panel has X" is now a URL you click, not a table.
+### 2026-08-10 — `tinkpg url`: the CLI knew the server's address and never told anyone
+
+Clément asked "which panel has this node, and link me to it". `tinkpg grep`
+answered the first half in one command — workspace · panel · thread · node id,
+exactly the right locator. The second half took `ps aux | grep tinkerscope`,
+picking between two running instances by eye, and a `curl /api/workspaces` to
+confirm which one held the workspaces just read.
+
+That is absurd on inspection: `_base_url()` had already resolved and cached the
+answer before the grep ran. Discovery is *so* good at being invisible that the
+URL became unobtainable — every command uses it, no command prints it. The gap
+only shows up on the one task where the URL is the deliverable rather than
+plumbing, which is why weeks of use didn't surface it.
+
+`tinkpg url` prints it. Bare on stdout so `open $(tinkpg url)` works, with the
+resolved workspace name pushed to **stderr** — that split is the whole design,
+and `test_url_keeps_the_workspace_name_off_stdout` guards it. `url <ws>` /
+`url --live` emit a `?w=<full-id>` link; `url --json` adds the discovered `pid`
+and `scan_roots`, which is the "which of my two servers is this?" question
+`ps` can't answer. `state`'s header now carries the base URL, and its
+open-workspace block a ready-made link — including under `--no-link`, which
+skips the workspaces *fetch* (so the name is unresolved) but still has the
+pushed id, and is precisely when you want the link.
+
+Not built here: panel/node anchors in the URL. At the time `+page.svelte` read
+only `w`/`c`/`open`, so a `?w=` link landed on the workspace at whatever branch
+was selected. That gap was closed independently in the same session by the
+search-palette work above (`?w=…&panel=…&node=…`, plus `grep --link`), which
+`url` composes with rather than duplicates: `url` answers "where is the server",
+the palette links answer "where is the turn".
+
+Same session, same cause, second fix: `samples --ws <id>` died with
+`No such option: --ws` while `grep`/`node`/`threads` had taken `--ws` all along.
+The split is defensible — commands whose positional slot is already spent (a
+pattern, a node id) *must* use an option; `ws`/`samples` take the workspace
+positionally because it's the subject. Defensible and still wrong to trip over
+mid-session, so `ws`/`samples`/`url` now accept either. Two *different* values
+error (`_one_selector`) instead of silently preferring one: that's a typo, not a
+preference. The same value twice is fine.
+
+Skill doc: `node <id>`'s one-liner promised "locate a bare node id (no ws/panel
+needed)", which reads as a unique key. A tree cloned into another panel keeps its
+ids, so one id routinely names the same turn in N panels — the docstring in
+`workspace_store.py` had this right all along, only the skill blurb was loose.
+An audit of the live store (39 workspaces, 313 shared ids) found 0 semantically
+divergent pairs, so the invariant the blob writer leans on holds; noting it here
+rather than in the skill, where the number would just be noise.

@@ -1793,6 +1793,68 @@ def cmd_params(
     print(f"system: {sp}{muted}" if sp else "system: (none)")
 
 
+@app.command("url")
+def cmd_url(
+    selector: Optional[str] = typer.Argument(None, help="workspace id-prefix or name substring → a link that OPENS it (`?w=<id>`); omit → the server's base URL alone"),
+    ws_opt: Optional[str] = typer.Option(None, "--ws", "--conv", help="same as the positional selector"),
+    live: bool = typer.Option(False, "--live", help="link to the workspace the browser currently has open (from the state bus) instead of naming one"),
+    json_out: bool = typer.Option(False, "--json", help="url + resolved instance (pid, scan roots) + workspace id/name"),
+) -> None:
+    """Print the URL of the server this CLI is driving — the thing to hand the
+    human when they ask for a link.
+
+    Every other command auto-discovers the running instance and then keeps the URL
+    to itself, so 'give them a link' used to mean `ps aux | grep tinkerscope` and
+    guessing which of several instances holds the workspaces you just read.
+
+    stdout is ONLY the URL, so `open $(tinkpg url)` works; the resolved workspace
+    name goes to stderr. With a selector (or --live) it emits a `?w=<id>` deep
+    link — note that lands on the workspace, not on a panel or turn."""
+    base = _base_url()
+    ws: Optional[dict] = None
+    sel = _one_selector(selector, ws_opt)
+    if live and sel is not None:
+        _die("--live and a workspace selector are mutually exclusive: --live means 'whatever the browser has open'")
+    if live:
+        cid = _get("/api/state").get("workspace_id")
+        if not cid:
+            _die("no workspace open in the browser (state has no workspace_id) — name one, or omit --live for the base URL.")
+        ws = next((c for c in _workspaces() if c.get("id") == cid), None)
+        if ws is None:
+            # Unsaved draft: the id still opens in the browser, so the link is
+            # useful even though we can't name it.
+            ws = {"id": cid, "name": "(unsaved draft)"}
+    elif sel is not None:
+        ws = _resolve_workspace(sel)
+    url = f"{base}/?w={ws['id']}" if ws else base
+    if json_out:
+        payload: dict[str, Any] = {"base_url": base, "url": url}
+        if ws:
+            payload["workspace_id"] = ws["id"]
+            payload["workspace_name"] = ws.get("name")
+        payload.update(_instance_info())
+        _print_json(payload)
+        return
+    if ws:
+        print(f"{ws.get('name')}  ({ws['id'][:8]})", file=sys.stderr)
+    print(url)
+
+
+def _instance_info() -> dict:
+    """pid + scan roots of the discovered instance, for `url --json`. Empty when
+    the URL came from --base-url / $TINKERSCOPE_BASE_URL (nothing was discovered,
+    and the target may not even be local)."""
+    if _BASE_URL_OVERRIDE or os.environ.get("TINKERSCOPE_BASE_URL"):
+        return {"discovered": False}
+    from .instances import DiscoveryError, discover
+
+    try:
+        inst = discover(Path.cwd())
+    except DiscoveryError:
+        return {"discovered": False}
+    return {"discovered": True, "pid": inst.pid, "scan_roots": inst.scan_roots}
+
+
 @app.command("state")
 def cmd_state(
     full: bool = typer.Option(False, "--full", help="show every message per panel, not just first/last-2"),
@@ -1812,8 +1874,9 @@ def cmd_state(
     if json_out:
         print(json.dumps(st, indent=2, default=str, ensure_ascii=False))
         return
+    base = _base_url()
     print(
-        f"live playground   running={'yes' if st.get('running') else 'no'}   "
+        f"live playground   {base}   running={'yes' if st.get('running') else 'no'}   "
         f"temp={st.get('temperature')} max_tokens={st.get('max_tokens')} "
         f"n={st.get('n_samples')} thinking={'both' if st.get('thinking') == 'both' else 'yes' if st.get('thinking') else 'no'}"
     )
@@ -1838,6 +1901,7 @@ def cmd_state(
             print(f"open workspace: {conv_id[:8]} (unsaved draft / not in saved set)")
         else:
             print(f"open workspace: {conv_id[:8]}   (--no-link: name + folds not resolved)")
+        print(f"   link: {base}/?w={conv_id}")
     print(f"{len(panels)} panel(s):\n")
     skipped: list[str] = []
     for p in panels:
@@ -1918,6 +1982,16 @@ def _resolve_workspace(sel: str, convs: Optional[list[dict]] = None) -> dict:
     listing = "\n".join(f"  - {m.get('id','')[:8]}  {m.get('name')}" for m in matches[:30])
     _die(f"ambiguous workspace {sel!r} — {len(matches)} candidates:\n{listing}")
     raise AssertionError  # unreachable
+
+
+def _one_selector(positional: Optional[str], ws_opt: Optional[str]) -> Optional[str]:
+    """Accept a workspace either positionally or as --ws, so muscle memory from
+    `grep`/`node`/`threads` (option-only, their positional is taken) carries over
+    to `ws`/`samples` (positional). Both given and disagreeing is a typo, not a
+    preference — say so instead of silently picking one."""
+    if positional is not None and ws_opt is not None and positional != ws_opt:
+        _die(f"got two different workspaces: {positional!r} (positional) and {ws_opt!r} (--ws) — pass one")
+    return positional if positional is not None else ws_opt
 
 
 def _list_workspaces(convs: list[dict]) -> None:
@@ -2202,6 +2276,7 @@ def _show_workspace(
 @app.command("ws")
 def cmd_ws(
     selector: Optional[str] = typer.Argument(None, help="workspace id-prefix or name substring; omit to list all"),
+    ws_opt: Optional[str] = typer.Option(None, "--ws", "--conv", help="same as the positional selector, for symmetry with `grep`/`node`/`threads` (which can only take it as an option)"),
     panel: Optional[str] = typer.Option(None, "--panel", help="restrict to one panel id (primary/compare/p-2/…); overrides folding"),
     full: bool = typer.Option(False, "--full", help="show the whole active path, not just first/last-2"),
     tree: bool = typer.Option(False, "--tree", help="show the full branch tree (all branches), `*` = active"),
@@ -2231,6 +2306,7 @@ def cmd_ws(
     to read a conversation that the panel no longer points at. `tinkpg threads`
     finds them. --json exports the same transcript as structured data (for
     rendering a conversation in a report / artifact instead of reading it here)."""
+    selector = _one_selector(selector, ws_opt)
     convs = _workspaces()
     if selector is None:
         if json_out:
@@ -2428,6 +2504,7 @@ def _show_samples(
 @app.command("samples")
 def cmd_samples(
     selector: Optional[str] = typer.Argument(None, help="workspace id-prefix or name substring; omit → the workspace open in the browser"),
+    ws_opt: Optional[str] = typer.Option(None, "--ws", "--conv", help="same as the positional selector, for symmetry with `grep`/`node`/`threads` (which can only take it as an option)"),
     panel: Optional[str] = typer.Option(None, "--panel", help="panel id (primary/compare/p-2/…); default = first NON-FOLDED panel (primary if eligible). Explicit --panel overrides folding"),
     thread: Optional[int] = typer.Option(None, "--thread", help="1-indexed root thread (branch-from-start sibling) to walk; default = the active one. Thread numbers: the `threads:` index in `tinkpg ws <id>`"),
     turn: Optional[int] = typer.Option(None, "--turn", help="1-indexed user turn on the thread's path whose responses to show; default = the last one"),
@@ -2451,6 +2528,7 @@ def cmd_samples(
     --json for scripts (untruncated content, no need to regex human-formatted text).
     --deepest resolves --turn against the thread's longest branch, so a fork below
     where the selection stops is reachable without hunting for its node id."""
+    selector = _one_selector(selector, ws_opt)
     convs = _workspaces()
     if selector is not None:
         c = _resolve_workspace(selector, convs)
