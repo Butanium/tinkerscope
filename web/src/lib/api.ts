@@ -14,7 +14,8 @@ import type {
   WorkspaceSummary,
   NodeBlobs,
   HighlightRule,
-  PanelLayout
+  PanelLayout,
+  SearchResponse
 } from './types';
 import type { ConvTree } from './tree';
 import type { ConvFields } from './save-plan';
@@ -128,6 +129,15 @@ const httpApi = {
     }),
   deleteWorkspace: (id: string) =>
     j<{ status: string }>(`/api/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // Cross-workspace text search (the Ctrl+K palette). Case-insensitive substring;
+  // regex/case knobs exist on the endpoint but only `tinkpg grep` uses them.
+  search: (q: string, opts: { ws?: string; maxHits?: number; width?: number } = {}) => {
+    const p = new URLSearchParams({ q });
+    if (opts.ws) p.set('ws', opts.ws);
+    if (opts.maxHits) p.set('max_hits', String(opts.maxHits));
+    if (opts.width) p.set('width', String(opts.width));
+    return j<SearchResponse>(`/api/search?${p}`);
+  },
   // Share packs installed at runtime (the `?w=<path-or-url>` link). Omitting
   // `on_conflict` is a dry-run preview: which ids it would land on, which exist.
   // See api/routes/packs.py + lib/pack-install.ts.

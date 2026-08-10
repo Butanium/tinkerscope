@@ -137,6 +137,15 @@ Workspaces are named, persisted per project, and restored on restart. Every
 button has a tooltip, Shift/Ctrl unlock power variants, and the `?` modal (or
 your agent, via the guide skill) covers the rest.
 
+### Search everything (Ctrl+K)
+
+"I have a screenshot of a sample but no idea where I ran it": **Ctrl+K**
+searches every branch of every workspace — message text, thinking blocks,
+system prompts, workspace and model names — including samples that aren't the
+currently-visible sibling. Picking a match opens its workspace, flips the
+cyclers so the matched branch is the one on screen, and flashes the row. The
+same engine drives `tinkpg grep` for agents.
+
 ### Share packs
 
 Bundle checkpoints + params + workspaces into one portable YAML. Models are

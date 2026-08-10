@@ -2498,14 +2498,6 @@ def _thread_of(tree: dict, node_id: str) -> Optional[int]:
     return None
 
 
-def _snippet(text: str, pos: int, width: int) -> str:
-    """±width/2 chars around a match position, whitespace-collapsed."""
-    half = max(20, width // 2)
-    lo, hi = max(0, pos - half), min(len(text), pos + half)
-    s = " ".join(text[lo:hi].split())
-    return ("…" if lo > 0 else "") + s + ("…" if hi < len(text) else "")
-
-
 @app.command("grep")
 def cmd_grep(
     pattern: str = typer.Argument(..., help="text to find (fixed string; --regex for a regex)"),
@@ -2516,65 +2508,49 @@ def cmd_grep(
     max_hits: int = typer.Option(200, "--max-hits", help="stop printing after this many hits (count continues)"),
     json_out: bool = typer.Option(False, "--json", help="hits as a JSON array (full match text, not a snippet) instead of human text — for scripts"),
 ) -> None:
-    """Search EVERY branch of saved workspaces — message content AND thinking
-    (`reasoning`) of all nodes, active or not; the view `conv`/`samples` can't
-    give you (they walk selected paths). One line per hit: workspace · panel ·
-    thread k · role · node id (thinking-tagged when the hit is in CoT) + snippet.
-    Drill into a hit with `tinkpg samples <ws> --node <id>` (works on non-selected
-    branches too), `samples --panel P --thread k`, or `conv --tree`."""
-    flags = re.IGNORECASE if ignore_case else 0
-    rx = re.compile(pattern if regex else re.escape(pattern), flags)
+    """Search EVERY branch of saved workspaces — message content, thinking
+    (`reasoning`) and thread system prompts of all nodes, active or not; the view
+    `conv`/`samples` can't give you (they walk selected paths). One line per hit:
+    workspace · panel · thread k · role · node id (tagged when the hit is in CoT
+    or a system prompt) + snippet. Workspace-LEVEL matches (name / panel model id /
+    global system prompt) print first. Drill into a hit with `tinkpg samples <ws>
+    --node <id>` (works on non-selected branches too), `samples --panel P
+    --thread k`, or `conv --tree`.
+
+    Runs server-side (GET /api/search — the same engine as the browser's Ctrl+K
+    palette) instead of pulling every body over ?bodies=1 and scanning here."""
+    ws_id: Optional[str] = None
     if conv is not None:
-        # Scoped: resolve against SUMMARIES and fetch only that workspace's body.
-        # The ?bodies=1 all-workspaces fetch dominates grep's runtime (~0.2s for
-        # 18 light bodies today) and scales with the whole store; one body doesn't.
-        target = _resolve_workspace(conv, _get("/api/workspaces"))
-        convs = [_get(f"/api/workspaces/{target['id']}")]
-    else:
-        convs = _workspaces()
-    hits = 0
-    ws_counts: dict[str, int] = {}
-    json_hits: list[dict] = []
-    for c in convs:
-        cname = c.get("name") or "?"
-        for pid, t in (c.get("trees") or {}).items():
-            for nid, node in (t.get("nodes") or {}).items():
-                for field in ("content", "reasoning"):
-                    text = node.get(field)
-                    if not text:
-                        continue
-                    m = rx.search(text)
-                    if not m:
-                        continue
-                    hits += 1
-                    ws_counts[cname] = ws_counts.get(cname, 0) + 1
-                    if hits > max_hits:
-                        continue
-                    k = _thread_of(t, nid)
-                    if json_out:
-                        json_hits.append({
-                            "workspace_id": c.get("id"), "workspace_name": cname,
-                            "panel": pid, "thread": k, "role": node.get("role"),
-                            "node_id": nid, "field": field, "match": m.group(0),
-                        })
-                    else:
-                        loc = f"{cname} ({(c.get('id') or '')[:8]}) · {pid} · thread {k or '?'} · {node.get('role', '?')} · {nid}"
-                        tag = " [thinking]" if field == "reasoning" else ""
-                        print(f"{loc}{tag}")
-                        print(f"   {_snippet(text, m.start(), width)}")
+        ws_id = _resolve_workspace(conv, _get("/api/workspaces"))["id"]
+    params: dict = {"q": pattern, "regex": int(regex), "case": int(not ignore_case),
+                    "max_hits": max_hits, "width": width}
+    if ws_id is not None:
+        params["ws"] = ws_id
+    out = _get("/api/search", params=params)
     if json_out:
-        print(json.dumps({
-            "hits": json_hits, "total": hits, "truncated": hits > max_hits,
-            "workspaces_searched": len(convs), "workspaces_matched": len(ws_counts),
-        }, default=str, ensure_ascii=False))
+        print(json.dumps(out, default=str, ensure_ascii=False))
         return
-    if hits > max_hits:
-        print(f"\n…{hits - max_hits} more hit(s) not shown (--max-hits to raise)")
-    if not hits:
-        print(f"no matches for {pattern!r} across {len(convs)} workspace(s)")
-    else:
-        per_ws = " · ".join(f"{n}× {name}" for name, n in sorted(ws_counts.items(), key=lambda kv: -kv[1]))
-        print(f"\n{hits} hit(s) in {len(ws_counts)} workspace(s): {per_ws}")
+    for wh in out["workspace_hits"]:
+        where = {"name": "workspace name", "system": "workspace system prompt",
+                 "model": f"panel {wh.get('panel')} model"}.get(wh["field"], wh["field"])
+        print(f"{wh['workspace_name']} ({(wh['workspace_id'] or '')[:8]}) · {where}")
+        print(f"   {wh['before']}{wh['match_display']}{wh['after']}")
+    for h in out["hits"]:
+        loc = (f"{h['workspace_name']} ({(h['workspace_id'] or '')[:8]}) · {h['panel']}"
+               f" · thread {h['thread'] or '?'} · {h['role']} · {h['node_id']}")
+        tag = {"reasoning": " [thinking]", "system_prompt": " [system]"}.get(h["field"], "")
+        print(f"{loc}{tag}")
+        print(f"   {h['before']}{h['match_display']}{h['after']}")
+    total = out["total"]
+    if out["truncated"]:
+        print(f"\n…{total - len(out['hits'])} more hit(s) not shown (--max-hits to raise)")
+    if not total and not out["workspace_hits"]:
+        print(f"no matches for {pattern!r} across {out['workspaces_searched']} workspace(s)")
+    elif total:
+        per_ws = " · ".join(
+            f"{t['total']}× {t['workspace_name']}"
+            for t in sorted(out["workspace_totals"], key=lambda t: -t["total"]))
+        print(f"\n{total} hit(s) in {out['workspaces_matched']} workspace(s): {per_ws}")
 
 
 @app.command("node")

@@ -259,6 +259,54 @@ export type WorkspaceSummary = {
   panels?: PanelLayout[];
 };
 
+/** One node-level hit from GET /api/search (see `api/search.py`): the node's
+ *  full tree address (enough to jump-and-reveal it) + a display snippet as a
+ *  (before, match_display, after) triple — pre-collapsed server-side so the
+ *  palette can highlight the matched span without offset math. */
+export type SearchHit = {
+  workspace_id: string;
+  workspace_name: string;
+  panel: Panel;
+  node_id: string;
+  parent: string | null;
+  role: string;
+  field: 'content' | 'reasoning' | 'system_prompt';
+  thread: number | null;
+  on_active_path: boolean;
+  sib_index: number;
+  sib_count: number;
+  match: string;
+  before: string;
+  match_display: string;
+  after: string;
+};
+
+/** A workspace-LEVEL match (name / global system prompt / a panel's model id) —
+ *  the palette pins these above node hits. */
+export type SearchWorkspaceHit = {
+  workspace_id: string;
+  workspace_name: string;
+  field: 'name' | 'system' | 'model';
+  panel: Panel | null;
+  match: string;
+  before: string;
+  match_display: string;
+  after: string;
+  updated_at: string | null;
+};
+
+export type SearchResponse = {
+  query: string;
+  workspace_hits: SearchWorkspaceHit[];
+  hits: SearchHit[];
+  /** Per-workspace node-hit totals (UNCAPPED, unlike `hits`), in result order. */
+  workspace_totals: { workspace_id: string; workspace_name: string; total: number }[];
+  total: number;
+  truncated: boolean;
+  workspaces_searched: number;
+  workspaces_matched: number;
+};
+
 /** A tree node's heavy out-of-tree payload (storage v2): per-node write-once
  *  blobs, fetched in batch via `POST /api/workspaces/{id}/node-blobs` and
  *  cached in lib/node-blobs.svelte.ts. Light nodes carry `has_*` flags instead. */

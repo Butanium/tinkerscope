@@ -557,6 +557,34 @@ export function setSelected(t0: ConvTree, nodeId: string): ConvTree {
   return t;
 }
 
+/** Select the WHOLE ancestor chain so `nodeId` lands ON the active path (each
+ *  ancestor becomes its parent's selected child) — the search palette's
+ *  jump-and-reveal, where the target is usually a folded sibling several levels
+ *  deep. Returns the SAME ref when the node is already active (cheap no-op
+ *  detection for callers), and bails whole (no partial selection) on a broken
+ *  parent chain. */
+export function selectPathTo(t0: ConvTree, nodeId: string): ConvTree {
+  if (!t0.nodes[nodeId]) return t0;
+  const writes: Array<[string, string]> = [];
+  let cur: TreeNode | undefined = t0.nodes[nodeId];
+  const seen = new Set<string>();
+  while (cur && !seen.has(cur.id)) {
+    seen.add(cur.id);
+    const parentKey = cur.parent ?? ROOT;
+    if (parentKey !== ROOT && !t0.nodes[parentKey]) return t0; // orphaned chain
+    if (!childArray(t0, parentKey).includes(cur.id)) return t0; // corrupt link
+    if (selectedChildId(t0, parentKey) !== cur.id) writes.push([parentKey, cur.id]);
+    if (cur.parent === null) {
+      if (writes.length === 0) return t0;
+      const t = cloneTree(t0);
+      for (const [pk, id] of writes) t.selected[pk] = id;
+      return t;
+    }
+    cur = t0.nodes[cur.parent];
+  }
+  return t0; // orphaned chain or cycle — never half-select
+}
+
 /** Step the selection ±delta among `nodeId`'s siblings, WRAPPING around the ends
  *  (next past the last → first, prev before the first → last; 1-2-3-1-2-3…). */
 export function cycle(t0: ConvTree, nodeId: string, delta: number): ConvTree {

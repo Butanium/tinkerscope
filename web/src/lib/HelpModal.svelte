@@ -114,6 +114,10 @@
       group: 'Anywhere',
       rows: [
         {
+          keys: ['Ctrl / ⌘', 'K'],
+          what: 'Search across ALL workspaces — messages, thinking, system prompts, names; Enter jumps to the match'
+        },
+        {
           keys: ['Ctrl / ⌘', 'Z'],
           icon: 'undo',
           btn: 'undo',
@@ -272,6 +276,22 @@ codex plugin add tinkerscope@tinkerscope</pre>
         Delete is the exception that really does remove something. <Icon name="undo" /> in the sidebar
         icon row — or <kbd>Ctrl/⌘</kbd>+<kbd>Z</kbd> — puts back the last delete, discard-others or
         thread reset in this workspace, up to 50 of them, for as long as the tab stays open.
+      </p>
+    </section>
+
+    <section class="help-sec">
+      <h3>Find anything (Ctrl+K)</h3>
+      <p>
+        <kbd>Ctrl/⌘</kbd>+<kbd>K</kbd> searches every saved workspace at once — message text,
+        thinking blocks, thread system prompts, workspace names and model ids. Branches you can't
+        currently see are included: a match on a non-selected sample is tagged
+        <em>hidden branch</em>, and a turn where several samples match collapses to one
+        "k of N samples" row. Workspace-name matches sit at the top as a quick switcher.
+      </p>
+      <p class="help-note">
+        <kbd>Enter</kbd> (or a click) jumps there: the workspace opens, every ‹k/N› cycler on the way
+        flips so the matched branch becomes the visible one, the row flashes, and a thinking match
+        opens its fold. The same search is scriptable as <code>tinkpg grep</code>.
       </p>
     </section>
 

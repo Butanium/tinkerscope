@@ -117,6 +117,17 @@ and in this file's reference section; HANDOFF.md itself is retired.
   rmtree took the evidence with it — and `pack.py`'s replace/reseed routes
   through that same delete. Retention is age+bytes, never entry count (one
   discarded 30-sample thinking fan ≈ 1 MB).
+- **Cross-workspace search** (the Ctrl+K palette + `tinkpg grep`):
+  `src/tinkerscope/api/search.py` — module docstring. Cached linear scan over
+  the light trees (units cache keyed on each workspace's `updated_at` — sound
+  because the server is the store's sole writer), NOT an index; the wire shape
+  (`docs/API_CONTRACT.md` → `GET /api/search`) is deliberately index-agnostic.
+  Searches every branch: node `content` + assistant `reasoning` + thread
+  `system_prompt`, plus workspace-level name/model/global-system hits. Snippets
+  are a (before, match, after) TRIPLE, each part collapsed separately with the
+  boundary space re-added — clients highlight without offset math. The static
+  site runs the same semantics client-side via `web/src/lib/search-scan.ts`
+  (mirror discipline like node-split: tests on both sides, move them together).
 - **samplescope hand-off** (Ctrl+⇧ on a panel's copy button → the run's training
   data open in the local dataset viewer): `src/tinkerscope/api/routes/samplescope.py`
   — module docstring. Reads samplescope's own instance registry
@@ -274,7 +285,9 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
 - **Pure logic** — plain `.ts`, no Svelte/DOM, unit-testable (some have
   `*.test.ts`):
   - `lib/tree.ts` — all branch-tree ops (activePath, fold, regen, edit, delete,
-    cycle, siblings) + `threadStarts(trees)`, the cross-panel union of root
+    cycle, siblings, `selectPathTo` — the search palette's jump: select every
+    ancestor so a buried node lands ON the active path, whole-or-nothing on a
+    broken chain) + `threadStarts(trees)`, the cross-panel union of root
     THREADS (branch-from-start first messages, identity = trimmed content —
     threads are per-panel, so each entry records which panels have it). The
     single source of branching truth. **Has `tree.test.ts`.**
@@ -473,6 +486,13 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     split render fabricates a phantom line break), the token views dot-underline
     it (no separate fork tick — the tint boundary is the marker, per Clément).
     **Has `loom.test.ts`**; live smoke `tests/small-smokes/browser_loom_live.py`.
+  - `lib/search-scan.ts` — the STATIC transport's search engine: pure mirror of
+    `api/search.py` (same response shape, same semantics — every branch, first
+    match per (node, field), the snippet triple) so Ctrl+K works on a published
+    read-only site with no server. Case-insensitive substring only (regex/case
+    are CLI knobs). **Has `search-scan.test.ts`** with fixtures mirroring
+    `tests/test_search.py` — semantic drift between the engines fails whichever
+    side moved.
   - `lib/kbnav.ts` — keyboard row-navigation helpers: nav-key set, clamped
     focus-index stepping, the typing-target/modal-open guards. Consumed by
     +page's *Keyboard row navigation* section (click a row → focus ring; ↑/↓
@@ -703,6 +723,21 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     `data-ws-id` mirrors `ws.activeId` — the smokes' oracle, drive it with
     `tests/small-smokes/_ws_picker.py`). Both wear `.picker-dropdown-trigger`,
     so a smoke targeting one must scope by its wrapper.
+  - `lib/SearchPalette.svelte` — the **Ctrl+K cross-workspace search palette**:
+    debounced `api.search` → results grouped by workspace, workspace-level hits
+    (name/model/system) pinned on top, matching sibling fans collapsed to one
+    "k of N samples" row, ↑↓/Enter nav. Its overlay carries `.modal-overlay` ON
+    PURPOSE (kbnav's `anyModalOpen` is a DOM probe for that class) but styles its
+    own top-hung box. Picking a hit hands it to +page's `openSearchResult`
+    (section *Search palette*): the switch goes through **`setWsUrl`, never
+    `ws.switchTo` directly** — the `?w=` effect is the single direction of
+    control and switches right back if the URL is left stale (debugged live
+    2026-08-10: the jump silently reverted, no error anywhere). Then
+    `selectPathTo` + kbFocus + `panelScroll.reveal`, with `reveal.svelte.ts`
+    (self-clearing beacon) driving the row flash and the thinking-fold LATCH in
+    ChatMessage (latched, not reactive — a reactive `open` would slam the fold
+    shut when the beacon clears). Smoke:
+    `tests/small-smokes/browser_search_palette.py` (seeded, token-free).
   - `lib/HighlightRules.svelte` — the highlight-rules editor UI, and the header
     that carries the master Off/On (`highlightsOn`) next to `+ new`. While it's
     off the rules stay listed, dimmed (`.hr-root.master-off`) and still editable —

@@ -343,8 +343,18 @@ Anywhere:
 
 | Key | What |
 |---|---|
+| `Ctrl`/`⌘`+`K` | Search across ALL workspaces (messages, thinking, system prompts, names) — Enter jumps to the match |
 | `Ctrl`/`⌘`+`Z` | Undo the last delete / discard-others / thread reset in this workspace |
 | `Esc` (modal open) | Close the modal |
+
+`Ctrl+K` is the "I have a screenshot of a sample but no idea which workspace it
+was in" tool: it searches every branch of every saved workspace — including
+samples that aren't currently the visible one (tagged *hidden branch*), and a
+turn where several samples match collapses to one "k of N samples" row.
+Workspace-name matches sit at the top as a quick switcher. Picking a match opens
+its workspace, flips the ‹k/N› cyclers so the matched branch becomes visible,
+flashes the row, and opens the thinking fold when the match was in the CoT. The
+same engine drives `tinkpg grep` on the CLI side.
 
 Inside a text box `Ctrl`/`⌘`+`Z` stays the browser's normal text undo — the
 workspace undo deliberately doesn't steal it. The stack holds the last 50 ops,

@@ -88,6 +88,7 @@ DEFAULT=(
     browser_token_logprobs
     browser_token_overlay
     browser_highlight_master
+    browser_search_palette
     browser_sidebar_folds
     browser_pack_link
     # Own their whole world (build a state dir, export a site, serve it) and

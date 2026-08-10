@@ -18,6 +18,7 @@ import {
   deleteSubtree,
   deleteSiblings,
   setSelected,
+  selectPathTo,
   cycle,
   siblingInfo,
   siblingsOf,
@@ -634,6 +635,36 @@ test('treeFromMessages stamps the thread system on its minted root', () => {
   eq(activePath(t)[0].system_prompt, 'be terse');
   eq(threadStarts({ A: t }).length, 1);
   eq(threadStarts({ A: t })[0].system, 'be terse');
+});
+
+// ── selectPathTo (search palette jump-and-reveal) ────────────────────
+test('selectPathTo reveals a deep off-path node by selecting every ancestor', () => {
+  // two root threads; thread 1 holds a sample fan — select thread 2 first, then
+  // jump to a NON-selected sample of thread 1: both levels must flip.
+  const { tree: t1, nodeId: u1 } = appendUserTurn(emptyTree(), 'q1');
+  const { tree: t2, ids } = foldAssistant(t1, u1, [{ content: 's0' }, { content: 's1' }]);
+  const t3 = setSelected(t2, ids[1]); // s1 active within thread 1
+  const { tree: t4 } = appendUserTurn(t3, 'q2', true); // atRoot: a second thread
+  eq(activePath(t4)[0].content, 'q2'); // thread 2 is now the active root
+  const t5 = selectPathTo(t4, ids[0]); // jump to s0, buried in thread 1
+  eq(activeMessages(t5), [U('q1'), A('s0')]);
+  // untouched: t4's own selection (immutability probe)
+  eq(activePath(t4)[0].content, 'q2');
+});
+
+test('selectPathTo is a same-ref no-op when the node is already active', () => {
+  const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+  const { tree: t2, ids } = foldAssistant(t1, u, [{ content: 'a' }]);
+  eq(selectPathTo(t2, ids[0]) === t2, true, 'active target must return the same ref');
+  eq(selectPathTo(t2, 'no-such-node') === t2, true, 'unknown id must return the same ref');
+});
+
+test('selectPathTo bails whole on a broken parent chain (never half-selects)', () => {
+  const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+  const { tree: t2, ids } = foldAssistant(t1, u, [{ content: 'a' }, { content: 'b' }]);
+  const broken: ConvTree = structuredClone(t2);
+  broken.nodes[u].parent = 'gone'; // orphan the chain above the fan
+  eq(selectPathTo(broken, ids[1]) === broken, true, 'broken chain must be a no-op');
 });
 
 // ── summary ──────────────────────────────────────────────────────────

@@ -706,7 +706,27 @@ class ConversationsStore {
     return !!preferred;
   }
 
+  #inflightSwitch: { id: string; p: Promise<void> } | null = null;
+
+  /** COALESCE duplicate switches to the same id: the `?w=` effect re-fires on
+   *  dep changes mid-switch (busy/list flips), so one URL change used to spawn
+   *  TWO full switches — measured: every palette jump fetched the body twice,
+   *  and the second load's wholesale `trees` assignment clobbered any tree edit
+   *  made right after the first landed (the search palette's jump-and-reveal
+   *  lost its selection ~1-in-6; ENGINEERING_LOGS 2026-08-10). A switch to a
+   *  DIFFERENT id still goes through and supersedes via #switchSeq as before. */
   async switchTo(id: string): Promise<void> {
+    if (this.#inflightSwitch?.id === id) return this.#inflightSwitch.p;
+    const p = this.#doSwitchTo(id);
+    this.#inflightSwitch = { id, p };
+    try {
+      await p;
+    } finally {
+      if (this.#inflightSwitch?.p === p) this.#inflightSwitch = null;
+    }
+  }
+
+  async #doSwitchTo(id: string): Promise<void> {
     if (id === this.activeId) return;
     // Settle the pending state patch FIRST: flush() below reads live.state
     // (system_prompt, panel layout) when persisting the workspace we're leaving.

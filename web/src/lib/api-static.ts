@@ -20,6 +20,7 @@
 import type { ApiClient } from './api';
 import { dataUrl, readOverlay, writeOverlay, dropOverlay, overlayReady } from './static-mode';
 import { splitTrees } from './node-split';
+import { searchWorkspaces } from './search-scan';
 import type {
   Run,
   OpenRouterModel,
@@ -336,6 +337,17 @@ const impl: ApiClient = {
   },
   getWorkspace: async (id: string) =>
     overlayBody(id) ?? (await bakedStrict<Workspace>(`workspaces/${encodeURIComponent(id)}.json`)),
+  search: async (q: string, opts: { ws?: string; maxHits?: number; width?: number } = {}) => {
+    // Client-side scan over every body (lib/search-scan.ts, the Python engine's
+    // mirror). Bodies come through impl.listWorkspaces/getWorkspace so the
+    // overlay wins per-workspace, and the baked-file fetches are memoized —
+    // after the first search the corpus is warm.
+    const summaries = await impl.listWorkspaces();
+    const bodies = (
+      await Promise.all(summaries.map((s) => impl.getWorkspace(s.id).catch(() => null)))
+    ).filter((b): b is Workspace => b != null);
+    return searchWorkspaces(bodies, q, opts);
+  },
   fetchNodeBlobs: async (id: string, nodes: string[]) => {
     const local = readOverlay<Record<string, NodeBlobs>>(K.blobs(id), {});
     const out: Record<string, NodeBlobs> = {};

@@ -14,6 +14,7 @@
   import { tip } from '$lib/tooltip.svelte';
   import { logprobView } from '$lib/logprobs.svelte';
   import { thinkingView } from '$lib/thinking-view.svelte';
+  import { reveal } from '$lib/reveal.svelte';
   import { nodeBlobs } from '$lib/node-blobs.svelte';
   import ActionMenu from '$lib/ActionMenu.svelte';
   import Icon from '$lib/Icon.svelte';
@@ -228,6 +229,18 @@
   // it flips). In 'all' view each card's <details> keeps its own DOM state once
   // clicked; the default only re-applies when the preference changes.
   let reasoningOpen = $state<boolean | null>(null);
+
+  // Search-palette jump (lib/reveal.svelte.ts): flash this row when it's the
+  // revealed node; a reasoning hit LATCHES its thinking fold open (the beacon
+  // self-clears in ~2.6s, so a reactive `open` would slam the fold shut
+  // mid-read — reset with the rest of the per-node UI state below).
+  let revealOpen = $state(false);
+  let revealed = $derived(
+    reveal.target != null && msg.nodeId != null && reveal.target.nodeId === msg.nodeId
+  );
+  $effect(() => {
+    if (revealed && reveal.target?.field === 'reasoning') revealOpen = true;
+  });
   let visibleSampleIdxs = $derived(
     (msg.samples ?? []).map((s, i) => [s, i] as const).filter(([s]) => showSample(s)).map(([, i]) => i)
   );
@@ -337,6 +350,7 @@
     rawSamples = new Set();
     sampleCursor = 0;
     reasoningOpen = null;
+    revealOpen = false;
   });
 </script>
 
@@ -664,6 +678,7 @@
   <div
     class="message"
     class:kb-focused={focused}
+    class:reveal-flash={revealed}
     data-row={rowIndex}
     style="background: {roleColor(msg.role)};"
     onclick={onFocusRow}
@@ -699,7 +714,7 @@
       </button>
     {/if}
     {#if msg.role === 'assistant' && msg.reasoning && !isMultiSample && !tokView}
-      <details class="sample-reasoning-block reasoning-primary" open={thinkingView.open || isLastAssistant}>
+      <details class="sample-reasoning-block reasoning-primary" open={thinkingView.open || isLastAssistant || revealOpen}>
         <summary class="sample-reasoning-toggle">
           <span>Thinking</span>
           <svg class="thinking-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
@@ -927,6 +942,13 @@
      ←/→ cycle its branches, Esc clears). Softer than .active-sample's ring so
      it reads as "cursor here", not "selected". */
   .message.kb-focused { outline: 2px solid color-mix(in srgb, var(--color-accent) 55%, transparent); outline-offset: 1px; }
+  /* Search-palette jump: two soft pulses to pull the eye to the revealed row. */
+  .message.reveal-flash { animation: reveal-pulse 1.3s ease-out 2; }
+  @keyframes reveal-pulse {
+    0% { box-shadow: inset 0 0 0 200vmax transparent; }
+    25% { box-shadow: inset 0 0 0 200vmax var(--color-accent-bg); }
+    100% { box-shadow: inset 0 0 0 200vmax transparent; }
+  }
   .active-sample-tag { font-size: 0.62rem; color: var(--color-accent); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-left: var(--space-2); }
   .btn-use.active { background: var(--color-accent); border-color: var(--color-accent); color: white; }
   .edit-hint { font-size: 0.7rem; color: var(--color-text-muted); font-style: italic; margin-bottom: var(--space-1); line-height: 1.3; }

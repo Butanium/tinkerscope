@@ -117,7 +117,7 @@ tinkpg ws <id|name> [--panel P] [--full] [--tree] [--include-folded] [--thread K
 tinkpg threads [--min-turns N] [--ws W] [--model SUB] [--grep TXT] [--json]  # cross-workspace index of EVERY root thread + its deepest-branch turn count
 tinkpg probe <run>[@ckpt] "<prompt>" [--n N] [--ancestry-file F] [--json]  # sample ANY model off-workspace: nothing broadcast, nothing committed
 tinkpg samples [conv] [--panel P] [--thread K|--node ID] [--turn N] [--sample K] [--slice S[:L]] [--full] [--first-token]  # ALL n-sample siblings at one fork + <tag> tally; --sample/--slice = read ONE sample in PIECES; --first-token = the model's P(first generated token) at this fork
-tinkpg grep "<text>" [--ws WS] [--regex] [-i]     # search EVERY branch of all workspaces: content + thinking
+tinkpg grep "<text>" [--ws WS] [--regex] [-i]     # search EVERY branch of all workspaces: content + thinking + system prompts (server-side; = the browser's Ctrl+K)
 tinkpg node <id> [--ws WS] [--logprobs] [--meta] [--raw] [--full] [--json]  # reverse lookup: locate a bare node id (no ws/panel needed), dump its record + blobs
 tinkpg trash list [--workspace W] [--json]          # what's recoverable: every save that made nodes disappear, newest first
 tinkpg trash restore <handle> --workspace W         # splice a deleted branch back at its original sibling index
@@ -257,12 +257,17 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   its `⟨thinking⟩`/`⟨answer⟩` framing is display sugar). `--json` with no selector
   lists workspaces instead.
 - `tinkpg grep` is the FIND primitive for TEXT: it scans every node of every branch
-  (content AND `reasoning`/thinking) across all workspaces — the one command
-  that reaches text on non-selected branches without `--tree` dumps. Hits are
-  `workspace · panel · thread k · role · node id [thinking] + snippet`; feed a
-  hit's node id to `samples --node <id>` to see the fan-out at that exact fork —
-  the ONLY route to n-sample views on non-selected branches (--thread/--turn
-  walk selected paths). Use grep FIRST when the human says "somewhere in my
+  (content, `reasoning`/thinking, AND thread system prompts) across all
+  workspaces — the one command that reaches text on non-selected branches without
+  `--tree` dumps. Since 2026-08-10 it runs SERVER-SIDE (`GET /api/search`, the
+  same engine as the browser's Ctrl+K palette) instead of pulling every body over
+  the wire, and workspace-LEVEL matches (name / panel model id / global system
+  prompt) print before node hits. Hits are `workspace · panel · thread k · role ·
+  node id [thinking|system] + snippet`; `--json` hits also carry `parent`,
+  `on_active_path`, `sib_index`/`sib_count` and the snippet triple. Feed a hit's
+  node id to `samples --node <id>` to see the fan-out at that exact fork — the
+  ONLY route to n-sample views on non-selected branches (--thread/--turn walk
+  selected paths). Use grep FIRST when the human says "somewhere in my
   workspaces there's …".
 - `tinkpg node <id>` is the FIND primitive for a NODE ID: when you hold a bare id
   (the human pasted one from the browser's Copy-node-id button, or `grep`/`samples
@@ -273,7 +278,10 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   short) plus which heavy blobs exist. `--logprobs` prints the stored per-token
   stream + top-K alts, `--meta` the request/response record, `--raw` the raw
   stream text. Reach for it BEFORE grepping state files or hand-parsing
-  workspace JSON — it replaces both.
+  workspace JSON — it replaces both. An id is unique per WORKSPACE, not per
+  panel — a tree cloned into another panel keeps its ids — so one id often names
+  the same turn in several panels and `node` prints them all; `continue --node` /
+  `samples --node` error and ask for `--panel`.
 - `tinkpg samples` answers "what did the model say across ALL n draws at this fork?"
   — the one view `state`/`conv` can't give you, since they only walk the linear active
   path. It prints every sibling response at ONE fork (default: the last user turn of the

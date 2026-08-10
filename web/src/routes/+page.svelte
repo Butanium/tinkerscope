@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { api } from '$lib/api';
@@ -38,6 +38,9 @@
   import OrManagerModal from '$lib/OrManagerModal.svelte';
   import TinkerPickerModal from '$lib/TinkerPickerModal.svelte';
   import HelpModal from '$lib/HelpModal.svelte';
+  import SearchPalette from '$lib/SearchPalette.svelte';
+  import { reveal } from '$lib/reveal.svelte';
+  import { selectPathTo } from '$lib/tree';
   import Icon from '$lib/Icon.svelte';
   import PickerDropdown from '$lib/PickerDropdown.svelte';
   import SplitChip from '$lib/SplitChip.svelte';
@@ -81,7 +84,8 @@
     Panel,
     PanelSel,
     PrefillScope,
-    ViewMessage
+    ViewMessage,
+    SearchHit
   } from '$lib/types';
 
   // ── Theme ─────────────────────────────────────────────────────────
@@ -804,6 +808,13 @@
       void openPackSource(id);
       return;
     }
+    // Boot honors the URL itself (ws.load() opens the `?w=` workspace), so until
+    // it finishes this effect must stand down: a pre-boot switchTo DUPLICATES the
+    // boot's body load, and whichever straggles clobbers tree edits made right
+    // after the winner landed (the palette's jump-and-reveal lost its selection
+    // this way on a cold server — request-logged, ENGINEERING_LOGS 2026-08-10).
+    // The effect re-runs when `wsLoaded` flips and self-heals to the URL.
+    if (!wsLoaded) return;
     if (!ws.list.some((c) => c.id === id)) {
       // An id we don't have — but a published site can say where to GET it. Without
       // this the installer's own tidy `?w=<id>` rewrite would be unshareable: it
@@ -1275,6 +1286,82 @@
     }
   }
 
+  // ── Search palette (Ctrl+K): find text across ALL workspaces ──────
+  let showSearch = $state(false);
+
+  function onSearchKeydown(e: KeyboardEvent) {
+    if (e.key.toLowerCase() !== 'k' || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+    e.preventDefault(); // Ctrl+K is the browser's address-bar search
+    if (!showSearch && anyModalOpen()) return; // don't stack over another modal
+    showSearch = !showSearch;
+  }
+
+  /** Model label for a hit's panel, resolved through the workspace SUMMARY's
+   *  layout — hits usually point into workspaces that aren't open. */
+  function searchPanelLabel(wsId: string, panel: string | null): string {
+    const lay = ws.list.find((s) => s.id === wsId)?.panels?.find((p) => p.id === panel);
+    return lay ? modelCatalog.selectedModelLabel(lay) : '';
+  }
+
+  /** Poll a condition (50 ms cadence) until true or the timeout. */
+  function waitFor(cond: () => boolean, timeoutMs: number): Promise<boolean> {
+    return new Promise((res) => {
+      const t0 = performance.now();
+      const loop = () => {
+        if (cond()) return res(true);
+        if (performance.now() - t0 > timeoutMs) return res(false);
+        setTimeout(loop, 50);
+      };
+      loop();
+    });
+  }
+
+  /** Jump-and-reveal: open the workspace, put the hit's node ON the active path
+   *  (selectPathTo flips every ‹k/N› cycler down to it), focus + scroll its row,
+   *  and beacon it (reveal store → row flash; a thinking hit opens its fold).
+   *
+   *  The switch goes through the URL, NOT ws.switchTo: the `?w=` effect is the
+   *  single direction of control for existing workspaces, and a direct switchTo
+   *  leaves the URL stale — the effect then switches right back (debugged live:
+   *  the jump silently reverted with no error anywhere). */
+  async function openSearchResult(hit: SearchHit) {
+    showSearch = false;
+    if (ws.activeId !== hit.workspace_id) {
+      await setWsUrl(hit.workspace_id, true); // push — back returns to the old workspace
+      const ok = await waitFor(
+        () => ws.activeId === hit.workspace_id && !!ws.treeFor(hit.panel).nodes[hit.node_id],
+        8000
+      );
+      if (!ok) return; // switch blocked (running/busy) or the node is gone
+    }
+    if (ws.reducedPanels.has(hit.panel)) ws.restorePanel(hit.panel);
+    const t = ws.treeFor(hit.panel);
+    if (!t.nodes[hit.node_id]) return; // node deleted since the search ran
+    const next = selectPathTo(t, hit.node_id);
+    if (next !== t) ws.setTree(hit.panel, next);
+    await tick();
+    revealSearchRow(hit);
+    // The ?w= effect snapAlls to the bottom when ITS switch resolves, which can
+    // land after this reveal and yank the scroll — re-assert once it had its turn.
+    setTimeout(() => revealSearchRow(hit), 250);
+  }
+
+  function revealSearchRow(hit: SearchHit) {
+    const pSel = panelSels.find((x) => x.panel === hit.panel);
+    const view = pSel ? panelView(pSel) : [];
+    const idx = view.findIndex((m) => m.nodeId === hit.node_id);
+    if (idx < 0) return;
+    kbFocus = { panel: hit.panel, index: idx };
+    const el = kbRowEl(hit.panel, idx);
+    if (el) panelScroll.reveal(hit.panel, el);
+    reveal.show(hit.panel, hit.node_id, hit.field);
+  }
+
+  function openSearchWorkspace(wsId: string) {
+    showSearch = false;
+    if (ws.activeId !== wsId) void setWsUrl(wsId, true); // the ?w= effect switches + snaps
+  }
+
   // ── Prompt history (localStorage) ─────────────────────────────────
   const HISTORY_KEY = 'tinkerscope-prompt-history';
   let promptHistory = $state<string[]>([]);
@@ -1655,6 +1742,7 @@
     // Keyboard row navigation (see its section above for the guards).
     window.addEventListener('keydown', onNavKeydown);
     window.addEventListener('keydown', onUndoKeydown);
+    window.addEventListener('keydown', onSearchKeydown);
     // The bus describes ONE workspace at a time (bus-scope.ts), so make it the
     // one you're looking at: focusing a tab re-asserts its workspace, and
     // `tinkpg` follows. No-op when we already own it or a chat is streaming.
@@ -1711,7 +1799,10 @@
         const installing = isSource || (!!urlConvId && !honored && !!packLinkFor(urlConvId));
         if (urlConvId && !honored && !installing)
           flashWsNotice('That workspace was not found here — opened the most recent one instead.');
-        if (!installing) setWsUrl(ws.activeId, false);
+        // Normalize only while the URL still says what boot READ — a `?w=` pushed
+        // MID-boot (a palette jump on a cold page) must survive, not be
+        // un-navigated; the `?w=` effect (gated on wsLoaded) picks it up instead.
+        if (!installing && wsIdFromUrl() === urlConvId) setWsUrl(ws.activeId, false);
         void panelScroll.snapAll(); // trees just landed — open at the latest turn
       } catch (e: any) { backendError = `Failed to load workspaces: ${e?.message ?? e}`; }
       await loadPins();
@@ -1726,6 +1817,7 @@
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('keydown', onNavKeydown);
       window.removeEventListener('keydown', onUndoKeydown);
+      window.removeEventListener('keydown', onSearchKeydown);
     };
   });
 </script>
@@ -2558,6 +2650,16 @@
 <!-- Help Modal -->
 {#if showHelp}
   <HelpModal onclose={() => (showHelp = false)} />
+{/if}
+
+<!-- Search palette (Ctrl+K) -->
+{#if showSearch}
+  <SearchPalette
+    onPick={openSearchResult}
+    onPickWorkspace={openSearchWorkspace}
+    onclose={() => (showSearch = false)}
+    panelLabel={searchPanelLabel}
+  />
 {/if}
 
 <!-- Chart Modal -->

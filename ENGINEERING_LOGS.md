@@ -795,3 +795,93 @@ CLI contract), so a malicious/buggy unstamped writer can still repoint the bus
 stamped-as-ours layouts). The real endgame is still
 `docs/HANDOFF_SERVER_AUTHORITY.md` (ops protocol, server-authored folds);
 this inversion is a compatible step, not a detour.
+
+### 2026-08-10 — Ctrl+K cross-workspace search: server engine, palette, jump-and-reveal
+
+Clément's ask: "I have a screenshot of a sample but forgot which workspace /
+panel it was in" → a Ctrl+K palette searching everything. Scope settled up
+front via three questions: full text scope (content + thinking + user messages
+incl. thread system prompts) plus workspace-name matches pinned on top;
+jump-and-reveal on click; cached-scan backend (his corpus measured ~30 MB of
+light trees across 25 workspaces — the 1.1 GB of blobs are logprobs/raw_meta
+and never hold text, so FTS would be engineering for a corpus 100× bigger).
+
+**What shipped, and where the bodies are buried:**
+
+- `api/search.py` + `GET /api/search`: linear scan with a per-workspace units
+  cache keyed on `updated_at` (sound because this server is the store's sole
+  writer — the same consistency model `workspace_store`'s own caches assume).
+  The wire shape is index-agnostic on purpose; FTS can replace the internals
+  without touching a consumer. `tinkpg grep` was already 90% of the semantics,
+  CLIENT-side over a full `?bodies=1` fetch — it's now a thin client of the
+  endpoint (same output, plus system-prompt and workspace-level hits; its
+  `_snippet` helper died with the rewire).
+- Snippets travel as a (before, match, after) TRIPLE, each whitespace-collapsed
+  separately — collapsing had eaten the boundary space, so the first live
+  `tinkpg grep` printed "NEEDLE-OFFPATHthe forgotten…"; the parts now re-add a
+  single boundary space where the raw text had one. Pinned in both engines'
+  tests (the static site scans client-side via `lib/search-scan.ts`, a mirror
+  with fixture-twinned tests, node-split style).
+- **The jump silently reverted and nothing errored.** First implementation
+  called `ws.switchTo(id)` directly from the palette pick: the workspace
+  switched, then switched BACK — no console error, no rejection, no notice
+  (cost a debug loop with an unhandledrejection hook to even see the shape of
+  it). Cause: the `?w=` effect is the SINGLE direction of control for switching
+  between existing workspaces; a direct switchTo leaves the URL stale, the
+  effect re-runs on the activeId change it just observed, and dutifully
+  switches back to what the URL says. The dropdown knew this (`setWsUrl(id,
+  true)` and let the effect switch); the palette now does the same, then POLLS
+  for the switch to land before selecting the path. The rule generalizes:
+  **any new "open workspace X" affordance goes through `setWsUrl`, never
+  `switchTo`.**
+- Reveal mechanics: `tree.ts` grew `selectPathTo` (whole-ancestor-chain select,
+  same-ref no-op, whole-or-nothing on a broken chain); the row flash + thinking
+  -fold open ride a self-clearing `reveal.svelte.ts` beacon. The fold is
+  LATCHED open rather than bound reactively — the beacon clears after ~2.6 s
+  and a reactive `open` would slam the fold shut mid-read.
+- Palette keyboard: the input and its overlay both bound the same keydown
+  handler at first — bubbling fired everything twice (↑ moved two rows). One
+  binding, on the overlay; keys bubble up from the input.
+- Smoke `browser_search_palette.py` (seeded, token-free, in smoke.sh DEFAULT):
+  open/Esc, off-path jump + hidden-branch tag + flash + focus ring, reload
+  persistence of the flipped selection, thinking-fold open on a CoT hit, fan
+  collapse ("3 of 3 samples"), workspace-name switch. Its one failure during
+  development was a non-retrying `inner_text()` snapshot assert — replaced with
+  retrying `expect`s (the lesson: in an app whose state settles over ~300 ms of
+  effects, every content assert retries or it flakes).
+
+**Postscript, same day — the jump flaked 1-in-N: every URL-driven switch ran
+TWICE.** The smoke re-run showed the revealed selection reverting to the old
+sibling seconds after a successful jump (sticky, no error). Playwright request
+logging proved the mechanism: every palette jump fired `GET
+/api/workspaces/<id>` twice — the `?w=` effect re-fires on dep changes
+mid-switch (`ws.busy`, list timestamps), spawning a second full `switchTo`
+whose wholesale `trees` assignment clobbers any tree edit made right after the
+first switch landed. Only the palette noticed because only the palette mutates
+the tree immediately after a switch; the dropdown path has silently double-
+fetched every workspace open for who knows how long. Fix in the store, not the
+caller: `switchTo` now COALESCES same-id in-flight switches (returns the
+in-flight promise); different-id switches still supersede via `#switchSeq`.
+Measured before/after over 6 seeded trials: 2 fetches → 1, selection survival
+5/6 → 6/6.
+
+**Postscript 2 — the smoke still flaked on a COLD server: boot vs the `?w=`
+effect is a second duplicate-load path.** With switchTo coalesced the seeded
+6-trial harness went clean, but smoke.sh (fresh server every run) kept
+reverting. The probe's request log told the story: on a cold server the boot
+sequence reaches `ws.load()` late (~1.2s — it waits on the models fetch), so a
+palette jump fired before boot completes hits a window where BOTH `ws.load()`
+(which honors `?w=`) and the `?w=` effect (`switchTo`) open the workspace —
+two body fetches again, same clobber, different pair of racers. Two guards
+close it: (1) the effect stands down until `wsLoaded` — boot owns the URL
+during boot, and the effect re-runs when the flag flips; (2) boot's URL
+NORMALIZE (`setWsUrl(activeId)`) now only fires while the URL still says what
+boot captured at its start — otherwise it un-navigates a `?w=` pushed mid-boot
+(the jump wouldn't revert; it would silently never happen). Verified: probe
+shows one body fetch and the selection holding from t=1.0s; the real smoke
+passed 3/3 consecutive cold-server runs (was ~1-in-2 failing), and the
+workspace-URL / two-tab / pack-link smokes still pass. Moral for future
+sessions: **"open workspace X" has exactly one sanctioned entry — change the
+URL and let the effect drive; and anything that MUTATES a tree right after a
+switch must wait for the switch machinery to go quiet, because a straggler
+load assigns `trees` wholesale.**
