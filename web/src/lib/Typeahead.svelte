@@ -21,7 +21,9 @@
     loading = false,
     error = null,
     maxRows = 50,
-    onpick
+    onpick,
+    onquery,
+    emptyAction
   }: {
     items: Item[];
     placeholder?: string;
@@ -30,11 +32,23 @@
     error?: string | null;
     maxRows?: number;
     onpick: (item: Item) => void;
+    /** Fires on every query change, so a caller can act on what is being typed
+     *  (the tinker picker probes a pasted path). */
+    onquery?: (query: string) => void;
+    /** Owns the whole zero-match area, receiving the live query. A picker whose
+     *  search box is also a way IN (the tinker one: a pasted sampler path is in no
+     *  local list) uses it to offer the query as an addable model. Without it the
+     *  area stays the plain "No matches". */
+    emptyAction?: import('svelte').Snippet<[string]>;
   } = $props();
 
   let query = $state('');
   let active = $state(0);
   let inputEl: HTMLInputElement | undefined = $state();
+
+  $effect(() => {
+    onquery?.(query);
+  });
 
   function isMatch(it: Item, q: string): boolean {
     return (
@@ -137,7 +151,11 @@
   {:else}
     <div class="typeahead-list">
       {#if filtered.length === 0}
-        <div class="typeahead-empty">No matches</div>
+        {#if emptyAction}
+          {@render emptyAction(query)}
+        {:else}
+          <div class="typeahead-empty">No matches</div>
+        {/if}
       {:else}
         {#if fuzzyActive}
           <div class="typeahead-fuzzy-note">no exact matches — close matches:</div>

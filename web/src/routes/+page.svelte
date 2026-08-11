@@ -19,6 +19,7 @@
     isBaseSel, baseModelId,
     isCkptSel, samplerPathOf, runSamplerPath
   } from '$lib/model-sel';
+  import { looksLikeSamplerPath, shortPathLabel } from '$lib/tinker-path';
   import { thinkingView } from '$lib/thinking-view.svelte';
   import { chat, type ChatParams, type ChatModelField } from '$lib/chat.svelte';
   import { nodeBlobs } from '$lib/node-blobs.svelte';
@@ -38,6 +39,7 @@
   import SlideshowModal from '$lib/SlideshowModal.svelte';
   import OrManagerModal from '$lib/OrManagerModal.svelte';
   import TinkerPickerModal from '$lib/TinkerPickerModal.svelte';
+  import NameModelModal from '$lib/NameModelModal.svelte';
   import HelpModal from '$lib/HelpModal.svelte';
   import SearchPalette from '$lib/SearchPalette.svelte';
   import { reveal } from '$lib/reveal.svelte';
@@ -1550,21 +1552,58 @@
     if (!modelCatalog.tinkerCatalogLoaded) modelCatalog.loadTinkerCatalog();
   }
 
+  // The checkpoint awaiting a name, if picking one opened the prompt.
+  let namePrompt = $state<{ ref: string; derived: string; baseModel: string | null } | null>(null);
+
   // Pick a tinker model from the combined catalog. Look the picked item up by id
   // to recover its `kind`: a checkpoint selects via the ckpt: sentinel (sending
   // {sampler_path}); a base model via the base: sentinel (sending {base_model}).
   // Either way we remember it so it persists in the panel <select> across reloads.
+  // An id absent from the catalog is a CHECKPOINT if it carries the tinker scheme:
+  // the base branch is the fallback, and routing a path through it would store the
+  // path under base: and sample it as a base model name.
   function pickTinkerModel(item: { id: string; label: string }) {
     const m = modelCatalog.tinkerModels.find((t) => t.id === item.id);
-    if (m?.kind === 'checkpoint' && m.sampler_path) {
-      modelCatalog.rememberCheckpoint({ sampler_path: m.sampler_path, label: m.label || m.sampler_path });
-      setRun(tinkerAddPanel, CKPT_PREFIX + m.sampler_path);
+    const sp = m?.kind === 'checkpoint' ? m.sampler_path : looksLikeSamplerPath(item.id) ? item.id : null;
+    if (sp) {
+      modelCatalog.rememberCheckpoint({ sampler_path: sp, label: m?.label || item.label || sp });
+      setRun(tinkerAddPanel, CKPT_PREFIX + sp);
+      // No stored label ⇒ the visible one is derived and identifies nothing. Offer a
+      // name; the pick already landed, so declining costs the user nothing.
+      if (!m?.named) namePrompt = { ref: sp, derived: m?.label || shortPathLabel(sp), baseModel: null };
     } else {
       const bm = m?.base_model ?? item.id;
       modelCatalog.rememberBaseModel({ base_model: bm, label: item.label || bm });
       setRun(tinkerAddPanel, BASE_PREFIX + bm);
     }
     showTinkerPicker = false;
+  }
+
+  // A probed-available path the catalog didn't have: select it, then name it. The
+  // probe already confirmed tinker serves it, so the prompt can show the base model.
+  function addCustomTinkerCheckpoint(sampler_path: string, base_model: string | null) {
+    modelCatalog.rememberCheckpoint({ sampler_path, label: shortPathLabel(sampler_path) });
+    setRun(tinkerAddPanel, CKPT_PREFIX + sampler_path);
+    showTinkerPicker = false;
+    namePrompt = { ref: sampler_path, derived: shortPathLabel(sampler_path), baseModel: base_model };
+  }
+
+  async function saveModelName(label: string) {
+    const p = namePrompt;
+    namePrompt = null;
+    if (!p) return;
+    try {
+      await api.nameTinkerModel('ckpt', p.ref, label);
+    } catch (e: any) {
+      backendError = `Could not save the model name: ${e?.message ?? e}`;
+      return;
+    }
+    // Reflect it now in both places that render a label: the browser-local recents
+    // (the ◇ rows) and the server catalog the picker reads.
+    modelCatalog.rememberCheckpoint({ sampler_path: p.ref, label });
+    // No `refresh` — that forces the account sweep. The label is applied when the
+    // route merges the registry, so a plain re-fetch already shows the new name.
+    await modelCatalog.loadTinkerCatalog();
   }
 
   // ── Pins: saved samples worth keeping (the slideshow) ─────────────
@@ -2787,8 +2826,20 @@
     error={modelCatalog.tinkerCatalogError}
     keyMissing={!!health && !health.tinker_key}
     onpick={pickTinkerModel}
+    onaddcustom={addCustomTinkerCheckpoint}
     onrefresh={() => modelCatalog.loadTinkerCatalog(true)}
     onclose={() => (showTinkerPicker = false)}
+  />
+{/if}
+
+<!-- Name a checkpoint whose only label is derived -->
+{#if namePrompt}
+  <NameModelModal
+    ref={namePrompt.ref}
+    derived={namePrompt.derived}
+    baseModel={namePrompt.baseModel}
+    onsave={saveModelName}
+    onclose={() => (namePrompt = null)}
   />
 {/if}
 

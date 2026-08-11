@@ -49,6 +49,7 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 - [Continuous thinking-effort slider for tml models](tml-effort-slider.md) — tml_v0 has an `effort` dial in [0, 1); we map it to a binary {0.0, 0.9}
 - [Show the resolved base model on loose-ckpt panels](loose-ckpt-base-label.md) — `resolve_base_model`'s answer never reaches the label; plumbing only
 - [Gate the whole-conversation continue path by CAPABILITY](continue-gate-by-capability.md) — `renderer_name.startswith("tml")` is brittle; YAGNI until a 2nd such renderer
+- [Naming a checkpoint is a one-way write](unname-a-checkpoint.md) — no route removes a label, so a name you regret is unfixable from the UI; wants designing together with a rename affordance, and a pack-shipped name comes back with the pack
 
 ### UI affordances & consistency
 

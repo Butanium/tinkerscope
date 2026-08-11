@@ -93,6 +93,23 @@ instead; hold `Ctrl`+`Shift` and it *opens* that file in **samplescope** in a ne
 tab, starting the viewer if none is running. (samplescope's view is shared across
 its tabs, so this moves any you already have open.)
 
+**Adding a checkpoint nobody here has heard of.** Under a panel's picker, *+
+Tinker model* lists every base model and sampler checkpoint on your own account.
+A checkpoint a collaborator sends you is on *theirs*, so it is in no list — paste
+its `tinker://…` path into that same search box. Instead of "No matches" you get
+an **Add custom checkpoint** row that asks tinker whether the path is real: it
+spins for about a quarter second, then turns green with the base model it runs
+on, or red with tinker's own reason (a wrong path *shape* and an unknown
+*checkpoint* are different messages). Click the green row to use it.
+
+**Naming a checkpoint.** Pick a checkpoint that has no name and tinkerscope
+offers you one. This matters more than it sounds: a checkpoint with no name
+shows as `934cea31 · final · 2026-07-27`, and on a real account most of them read
+`<hex> · final · <date>` — the label exists but tells you nothing. A name you
+give is stored on the server, so it shows in every tab, survives a restart, is
+visible to the `tinkpg` CLI, and travels inside a share pack. Skipping is one
+click; the checkpoint is already selected either way.
+
 **Branch** — every regenerate, every edit, every one of your N samples becomes a
 *sibling* of the message it replaced, not a replacement. A row with siblings
 shows a `‹ k/N ›` cycler; click the arrows (or use ←/→ on a focused row) to walk

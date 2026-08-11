@@ -91,6 +91,9 @@ DEFAULT=(
     browser_search_palette
     browser_sidebar_folds
     browser_pack_link
+    # Token-free but NOT network-free: the probe asks tinker whether a path is real,
+    # which no local list can answer. Skips itself without TINKER_API_KEY.
+    browser_tinker_custom_ckpt
     # Own their whole world (build a state dir, export a site, serve it) and
     # ignore the base-url arg — they still belong here so they run under the lock.
     browser_static_site

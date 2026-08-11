@@ -416,6 +416,17 @@ async def _token_logprobs(
 # ---------------------------------------------------------------------------
 # Sampler manager: caches ServiceClient, sampling clients, renderers, tokenizers
 # ---------------------------------------------------------------------------
+def _tinker_detail(e: Exception) -> str:
+    """The human half of a tinker API error. Its exceptions carry the server's JSON
+    body (`{'detail': '…'}`) and stringify as "Error code: 404 - {'detail': '…'}";
+    the detail alone is what a person pasting a path needs to read."""
+    body = getattr(e, "body", None)
+    if isinstance(body, dict) and body.get("detail"):
+        return str(body["detail"])
+    m = re.search(r"\{'detail': (\"|')(.*)\1\}\s*$", str(e), re.S)
+    return m.group(2) if m else str(e)
+
+
 class SamplerManager:
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
@@ -474,6 +485,24 @@ class SamplerManager:
         async with self._lock:
             self._base_models[sampler_path] = bm
         return bm
+
+    async def probe_sampler_path(self, sampler_path: str) -> dict:
+        """Does tinker serve this sampler path, and against which base model?
+
+        `resolve_base_model` collapses every failure to None because its callers only
+        need "can I render locally". The picker needs the REASON to show it: tinker
+        answers 400 for a path whose shape is wrong and 404 for one it doesn't know,
+        and those are different messages to a person pasting a link. Returns
+        {available, base_model, error}; the error string is tinker's own `detail`
+        when it sends one."""
+        try:
+            client = await self._sampling_client(None, sampler_path)
+            bm = await client.get_base_model_async()
+        except Exception as e:
+            return {"available": False, "base_model": None, "error": _tinker_detail(e)}
+        async with self._lock:
+            self._base_models[sampler_path] = bm
+        return {"available": True, "base_model": bm, "error": None}
 
     def _tokenizer(self, base_model: str) -> Any:
         if base_model not in self._tokenizers:
