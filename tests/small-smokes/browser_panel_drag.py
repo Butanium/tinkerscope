@@ -210,6 +210,15 @@ def main() -> None:
             errors: list[str] = []
             page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
             page.on("pageerror", lambda e: errors.append(str(e)))
+            # Chromium's console text for a bad fetch is "Failed to load resource: the
+            # server responded with a status of 404 ()" — no URL, so the assertion
+            # names a COUNT and nothing else. Twice now that has sent a session hunting
+            # a 404 the backend never served (its access log had zero 4xx for the whole
+            # sweep). Record the responses themselves so the failure says WHAT.
+            bad: list[str] = []
+            page.on("response", lambda r: bad.append(f"{r.status} {r.url}") if r.status >= 400 else None)
+            page.on("requestfailed",
+                    lambda r: bad.append(f"failed {r.url} ({(r.failure or '')!s})"))
 
             page.goto(f"{BASE}/?w={conv_id}", wait_until="load", timeout=20000)
             page.wait_for_selector(".model-slot-select", timeout=15000)
@@ -326,6 +335,9 @@ def main() -> None:
             checks.append((f"no console errors ({len(errors)})", not errors))
             if errors:
                 print("CONSOLE ERRORS:", errors)
+                print("FAILED REQUESTS:", bad or "(none — so the console errors are NOT "
+                      "same-origin fetches; suspect the browser/environment, and check "
+                      "the instance's access log for 4xx before blaming the app)")
             browser.close()
     finally:
         api("DELETE", f"/api/workspaces/{conv_id}")
