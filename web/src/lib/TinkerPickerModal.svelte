@@ -32,7 +32,7 @@
     keyMissing: boolean;
     onpick: (item: { id: string; label: string }) => void;
     /** A probed-available custom sampler path the catalog did not contain. */
-    onaddcustom: (sampler_path: string, base_model: string | null) => void;
+    onaddcustom: (sampler_path: string) => void;
     onrefresh: () => void;
     onclose: () => void;
   } = $props();
@@ -114,7 +114,7 @@
               type="button"
               class="add-custom ok"
               data-testid="add-custom"
-              onclick={() => onaddcustom(path, p.base_model)}
+              onclick={() => onaddcustom(path)}
             >
               <span class="dot"></span>
               <span class="add-custom-text">

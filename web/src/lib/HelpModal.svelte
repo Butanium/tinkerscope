@@ -230,16 +230,8 @@ codex plugin add tinkerscope@tinkerscope</pre>
         touched them, which is how you tell two same-named workspaces apart.
       </p>
       <p class="help-note">
-        <b>A checkpoint that isn't in any list</b> — a collaborator's, trained on their account — goes in
-        through the same search box: <b>+ Tinker model</b>, then paste its <code>tinker://…</code> path.
-        Instead of “No matches” you get an <b>Add custom checkpoint</b> row that asks tinker whether the path
-        is real, and turns green with the base model it runs on, or red with tinker's own reason.
-      </p>
-      <p class="help-note">
-        <b>Name your checkpoints.</b> Pick one that has no name and tinkerscope offers you one. An unnamed
-        checkpoint reads <code>934cea31 · final · 2026-07-27</code>, and most of them differ only in the hex.
-        A name you give is stored on the server, so it shows in every tab, survives a restart, reaches the
-        <code>tinkpg</code> CLI, and travels inside a share pack. Skipping is one click.
+        Paste a <code>tinker://…</code> path into <b>+ Tinker model</b> to use a checkpoint from someone
+        else's account; tinkerscope checks it and offers to name it. Names are saved server-side.
       </p>
     </section>
 

@@ -1553,7 +1553,7 @@
   }
 
   // The checkpoint awaiting a name, if picking one opened the prompt.
-  let namePrompt = $state<{ ref: string; derived: string; baseModel: string | null } | null>(null);
+  let namePrompt = $state<string | null>(null);
 
   // Pick a tinker model from the combined catalog. Look the picked item up by id
   // to recover its `kind`: a checkpoint selects via the ckpt: sentinel (sending
@@ -1570,7 +1570,7 @@
       setRun(tinkerAddPanel, CKPT_PREFIX + sp);
       // No stored label ⇒ the visible one is derived and identifies nothing. Offer a
       // name; the pick already landed, so declining costs the user nothing.
-      if (!m?.named) namePrompt = { ref: sp, derived: m?.label || shortPathLabel(sp), baseModel: null };
+      if (!m?.named) namePrompt = sp;
     } else {
       const bm = m?.base_model ?? item.id;
       modelCatalog.rememberBaseModel({ base_model: bm, label: item.label || bm });
@@ -1579,13 +1579,12 @@
     showTinkerPicker = false;
   }
 
-  // A probed-available path the catalog didn't have: select it, then name it. The
-  // probe already confirmed tinker serves it, so the prompt can show the base model.
-  function addCustomTinkerCheckpoint(sampler_path: string, base_model: string | null) {
+  // A probed-available path the catalog didn't have: select it, then offer a name.
+  function addCustomTinkerCheckpoint(sampler_path: string) {
     modelCatalog.rememberCheckpoint({ sampler_path, label: shortPathLabel(sampler_path) });
     setRun(tinkerAddPanel, CKPT_PREFIX + sampler_path);
     showTinkerPicker = false;
-    namePrompt = { ref: sampler_path, derived: shortPathLabel(sampler_path), baseModel: base_model };
+    namePrompt = sampler_path;
   }
 
   async function saveModelName(label: string) {
@@ -1593,14 +1592,14 @@
     namePrompt = null;
     if (!p) return;
     try {
-      await api.nameTinkerModel('ckpt', p.ref, label);
+      await api.nameTinkerModel('ckpt', p, label);
     } catch (e: any) {
       backendError = `Could not save the model name: ${e?.message ?? e}`;
       return;
     }
     // Reflect it now in both places that render a label: the browser-local recents
     // (the ◇ rows) and the server catalog the picker reads.
-    modelCatalog.rememberCheckpoint({ sampler_path: p.ref, label });
+    modelCatalog.rememberCheckpoint({ sampler_path: p, label });
     // No `refresh` — that forces the account sweep. The label is applied when the
     // route merges the registry, so a plain re-fetch already shows the new name.
     await modelCatalog.loadTinkerCatalog();
@@ -2835,9 +2834,7 @@
 <!-- Name a checkpoint whose only label is derived -->
 {#if namePrompt}
   <NameModelModal
-    ref={namePrompt.ref}
-    derived={namePrompt.derived}
-    baseModel={namePrompt.baseModel}
+    ref={namePrompt}
     onsave={saveModelName}
     onclose={() => (namePrompt = null)}
   />
