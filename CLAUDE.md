@@ -62,13 +62,11 @@ and in this file's reference section; HANDOFF.md itself is retired.
   caveats go in the `?` modal instead. Full rule + the `use:tip`-over-`title`
   part: `lib/tooltip.svelte.ts` and the frontend map below.
 - **A dialog holds controls, not an explanation.** Same rule as tooltips, one level
-  up: name the thing, show the input, show the buttons. Why it matters, where the
-  value is stored, what the alternative would have been — none of that goes on
-  screen. It goes in the `?` modal, the guide skill, or `ENGINEERING_LOGS.md`. The
-  name-a-checkpoint dialog shipped with a four-line paragraph, a two-row metadata
-  block and a label above a placeholder'd input, and Clément's word for reading it
-  was "crazy" (2026-08-10, `bc3e40d`). A useful check before adding a sentence to a
-  dialog: is the user's next action any different because they read it? If not, cut.
+  up: name the thing, show the input, show the buttons. Why it matters and where the
+  value is stored go in the `?` modal, the guide skill, or `ENGINEERING_LOGS.md`.
+  Check before adding a sentence: is the user's next action any different because
+  they read it? If not, cut.
+- **Adding a scope/filter? Enumerate the INSTANCE-WIDE stores it must narrow.**
   Most state here is per-scan-root and global to it — pins, prefs (incl. the
   mirrored `chart_view`), highlights, the OpenRouter list, `pack_models` — and none
   of them knows about a workspace. So a feature that filters by workspace filters

@@ -1299,3 +1299,29 @@ someone else's retention), or a previous run on the same state dir already added
 matches a list row and the add row is correctly gone. Fresh state dir to re-exercise
 it. That missing delete is the obvious next small thing: name something wrong today
 and you cannot fix it from the UI.
+
+### 2026-08-10 — A dialog holds controls, not an explanation
+
+The name-a-checkpoint dialog shipped with a four-line paragraph on what a derived
+label is and where the name is stored, a two-row `path`/`base` metadata block, and a
+"Name" label above an input that already had a placeholder — to type a name into a
+box. Clément: "the string in the pop up is way too complicated, stop being so
+exhaustive with useless stuff in the UI this is making me crazy." Cut to the path,
+the input, Save, Skip (`bc3e40d`), and the same content in the `?` modal went from
+two paragraphs to one sentence.
+
+The repo already had this rule one level down — tooltips are ONE short line,
+mechanism goes in the `?` modal — and I did not generalise it upward on my own, so
+it is now written out for dialogs too. The mechanism behind the mistake is worth
+naming: everything about WHY naming a checkpoint matters was live in my context from
+having just built it, and I emitted it into the nearest surface rather than the right
+one. Log entries and guide prose are the right one. The check now in `CLAUDE.md`:
+**is the user's next action any different because they read this sentence?**
+
+Second correction in the same exchange, and the more mechanical one: the `CLAUDE.md`
+edit that added the new rule **overwrote** the headline of the next bullet
+(`- **Adding a scope/filter? …**`), orphaning its body under my rule. The `Edit` call
+had that line in `old_string` and dropped it from `new_string` — an insert written as
+a replacement. Fixed in the follow-up. When adding a list item, anchor on the END of
+the preceding item and re-emit nothing else; if a neighbouring bullet appears in
+`old_string`, it must appear verbatim in `new_string`.
