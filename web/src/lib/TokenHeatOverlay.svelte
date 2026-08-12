@@ -227,10 +227,13 @@
     const range = document.createRange();
     for (let i = 0; i < spans.length; i++) {
       const s = spans[i];
-      // Forced-prefix tokens need boxes even when untinted (p≈1 ⇒ alpha 0) —
-      // the replayed underline must still draw.
-      const loomMarked = loomCut != null && i < loomCut;
-      if (!s || (!colors[i]?.length && !tlp[i]?.ghost && !loomMarked)) continue;
+      // A box is where a token IS, not whether it's painted: it's also the hover
+      // hit-test. Untinted is common and invisible — `surprisalAlpha` rounds to 0
+      // for anything the model gave p > 93.5%, so gating boxes on a color made
+      // every confident word hover-dead while its neighbours worked (the "hover
+      // does nothing on some words" report, 2026-08-05). Only an UNALIGNED token
+      // is skipped now — it has no position to hover.
+      if (!s) continue;
       let { start, end } = s;
       // Match coloring trims the token's edge whitespace (a BPE token carries
       // its leading space; tinting it reads as highlighting the gap between
@@ -307,7 +310,7 @@
           ctx.restore();
           continue;
         }
-        const bands = colors[b.i];
+        const bands = colors[b.i] ?? [];
         const bh = bands.length ? b.h / bands.length : 0;
         for (let k = 0; k < bands.length; k++) {
           if (!bands[k]) continue;
