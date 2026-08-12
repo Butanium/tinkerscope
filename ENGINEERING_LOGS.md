@@ -1325,3 +1325,52 @@ had that line in `old_string` and dropped it from `new_string` — an insert wri
 a replacement. Fixed in the follow-up. When adding a list item, anchor on the END of
 the preceding item and re-emit nothing else; if a neighbouring bullet appears in
 `old_string`, it must appear verbatim in `new_string`.
+
+---
+
+### 2026-08-12 — `site export --logprobs`: a middle setting, and the instruction that was wrong
+
+Two static-site items off `docs/TODO.md`. The first arrived as "make stripping the
+default with a `--logprobs` opt-in, matching pack export"; Clément caught that this
+was wrong before I built it. `--no-logprobs` already existed, and the open ask was the
+opposite shape: keep the default, add a MIDDLE setting. The reason is worth recording
+because it is not obvious from the byte counts — **a published site is the author's
+curated view, and its chart page is most of why anyone publishes one.** Default-strip
+would silently break a republished first-token chart, which is precisely the artifact
+the export exists to carry. So: `--logprobs all|chart|last:N|none`, `all` unchanged as
+the default, `--no-logprobs` kept as an alias for `none`.
+
+`chart` keys on the mirrored per-workspace chart view (`lib/chart-view.ts` already
+writes it into prefs so an export can carry it) and keeps the sibling fan of the turn
+that view points at — exactly the nodes `ChartModal`'s first-token mode fetches. Three
+things it does deliberately:
+
+- **Fail safe.** A workspace with no recorded chart view keeps ALL its logprobs and
+  the export names it. Dropping is the irreversible direction, and "the author never
+  opened this workspace's chart" is not evidence that nobody will.
+- **Match the modal's own recovery.** A stored turn index that no panel has any more
+  resets to 'last' in the UI; the exporter does the same, instead of resolving to
+  nothing and publishing an empty chart.
+- **Never read what it drops.** The subset prunes `_blob_node_ids`, so a narrowed
+  export skips the I/O rather than reading blobs and filtering them.
+
+The risk in `chart` is that it re-implements, in Python, how the browser enumerates a
+workspace's turns — and unit tests can't catch a misreading of the frontend, because
+they encode the same reading. So `browser_static_logprob_trim.py` exports a real site
+whose saved view points at the FIRST of two turns and opens it: the chart must draw
+bars, and the other turn must explain itself. Verified by SABOTAGE (making the
+selection ignore the index and always keep the last turn) — the smoke fails with "0
+segment(s)", which is the whole point of writing it.
+
+That honest explanation needed a wire change: a trimmed site used to tell readers
+"first-token distributions need native tinker samples", which is false about turns
+that were captured and then published without them. The manifest now records the
+setting (`logprobs`), `static-mode` exposes `trimmedLogprobs`, and the chart names it.
+
+**Second item, same command:** `site_export` called `pack.export_pack` purely for the
+model list and threw away its prepared bodies — which deep-copy every body and fetch
+every `raw_meta` blob. Now `export_pack(skip_bodies=True)` gathers models from the
+panels alone (on a copy: the store memoizes bodies, so rewriting one in place would
+poison the cache for live readers). While there, the `--workspace` filter moved INTO
+`StateReader.workspace_bodies`: it ran in the caller's loop, so a curated `pack export
+--workspace X` was fetching every OTHER workspace's blobs before discarding them.

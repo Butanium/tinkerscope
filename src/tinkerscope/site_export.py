@@ -28,8 +28,22 @@ Three things make this more than a file copy:
    injects `window.__TSCOPE_STATIC__` — the synchronous marker that flips the
    frontend into read-only static mode.
 
-Unlike a share pack, `token_logprobs` are KEPT (that's the whole token-inspector +
-first-token-chart surface). They dominate the byte count; `--no-logprobs` drops them.
+Unlike a share pack, `token_logprobs` are KEPT by default (that's the whole
+token-inspector + first-token-chart surface, and a published site is a curated view
+whose chart page must still work). They also dominate the byte count — ~97% of it —
+so `--logprobs` can narrow WHICH turns keep them:
+
+    all (default)  every turn, as before
+    chart          only the turn each workspace's SAVED chart view points at, which
+                   is exactly what the first-token chart opens on. A workspace with
+                   no recorded view keeps everything (fail safe) and says so.
+    last:N         only the newest N assistant turns of each thread
+    none           nothing (what `--no-logprobs` has always meant)
+
+A narrowed export never READS the blobs it drops, and every node it drops loses its
+`has_token_logprobs` flag — a flag with no blob behind it hangs the token inspector
+on 'loading'. The manifest records which setting was used so the UI can tell a
+reader "this site was published without them" instead of blaming the sampler.
 """
 from __future__ import annotations
 
@@ -44,6 +58,36 @@ from . import pack as packmod
 from .api.state import DEFAULT_PANEL_ID
 
 MANIFEST_VERSION = 1
+
+#: `--logprobs` values. `all` is the DEFAULT and stays the default: a published site
+#: is the author's curated view, and the token inspector + first-token chart are most
+#: of why anyone publishes one — silently dropping them would break a republished
+#: chart page. The middle settings exist because logprobs are ~97% of the bytes
+#: (measured: 24 MB of workspaces vs 901 MB of blobs), which is the difference
+#: between a site a host will take and one it won't.
+LOGPROBS_ALL = "all"
+LOGPROBS_CHART = "chart"
+LOGPROBS_NONE = "none"
+_LAST_RE = re.compile(r"^last:(\d+)$")
+
+
+def parse_logprobs_mode(value: str) -> tuple[str, int]:
+    """`--logprobs` VALUE → `(mode, n)`; `n` is only meaningful for `last`.
+
+    all      every turn (default)
+    chart    only the turn each workspace's SAVED chart view points at
+    last:N   only the newest N assistant turns of each thread
+    none     no logprobs at all (what `--no-logprobs` has always meant)
+    """
+    v = (value or "").strip().lower()
+    if v in (LOGPROBS_ALL, LOGPROBS_CHART, LOGPROBS_NONE):
+        return v, 0
+    if m := _LAST_RE.match(v):
+        n = int(m.group(1))
+        if n < 1:
+            raise ValueError("--logprobs last:N needs N >= 1")
+        return "last", n
+    raise ValueError(f"--logprobs {value!r}: expected all | chart | last:N | none")
 
 
 def resolve_pack_links(specs: list[str]) -> dict[str, str]:
@@ -112,6 +156,15 @@ class SiteStats:
     #: by ~40× (measured: 24 MB of light bodies vs 901 MB of blobs across 25
     #: workspaces, one of them 665 MB alone) and static hosts have real size limits.
     per_workspace: dict[str, tuple[str, int]] = field(default_factory=dict)
+    #: `--logprobs` selection, so the caller can report what a middle setting did.
+    #: Counted in NODES rather than bytes: the dropped blobs are never serialized
+    #: (that's the point), so their size is not known without paying for it.
+    logprobs_mode: str = LOGPROBS_ALL
+    logprob_nodes_kept: int = 0
+    logprob_nodes_dropped: int = 0
+    #: Workspaces a subset setting could not narrow, which therefore kept ALL their
+    #: logprobs — named, because "kept everything" is the surprising outcome.
+    logprobs_unnarrowed: list[str] = field(default_factory=list)
 
     def heaviest(self, n: int = 5) -> list[tuple[str, int]]:
         """(name, bytes) for the n biggest, largest first."""
@@ -206,28 +259,168 @@ def _narrow_chart_view(raw: Any, exported_ids: set[str]) -> Any:
     return json.dumps(blob) if isinstance(raw, str) else blob
 
 
-def _blob_node_ids(body: dict) -> list[str]:
-    """Node ids in a light body advertising a heavy blob (either flag)."""
+def _blob_node_ids(body: dict, keep: set[str] | None = None) -> list[str]:
+    """Node ids in a light body advertising a heavy blob (either flag).
+
+    `keep` (the `--logprobs` subset) prunes the fetch itself: a node advertising ONLY
+    logprobs we're dropping needs no read at all, which is where a middle setting's
+    speed comes from — the blobs it excludes are never touched, not read and filtered.
+    """
     out: list[str] = []
     for tree in (body.get("trees") or {}).values():
         if not isinstance(tree, dict):
             continue
         for nid, node in (tree.get("nodes") or {}).items():
-            if isinstance(node, dict) and (node.get("has_token_logprobs") or node.get("has_raw_meta")):
+            if not isinstance(node, dict):
+                continue
+            if node.get("has_raw_meta"):
+                out.append(nid)
+            elif node.get("has_token_logprobs") and (keep is None or nid in keep):
                 out.append(nid)
     return out
 
 
-def _strip_logprob_flags(body: dict) -> None:
-    """Drop `has_token_logprobs` in place — for `--no-logprobs`, where the blobs
-    aren't written. A flag with no blob behind it would leave the token inspector
-    stuck on 'loading' forever."""
+def _logprob_flag_ids(body: dict) -> set[str]:
+    """Nodes advertising stored logprobs — the denominator for what a subset kept."""
+    return {
+        nid
+        for tree in (body.get("trees") or {}).values()
+        if isinstance(tree, dict)
+        for nid, node in (tree.get("nodes") or {}).items()
+        if isinstance(node, dict) and node.get("has_token_logprobs")
+    }
+
+
+def _strip_logprob_flags(body: dict, keep: set[str] | None) -> None:
+    """Drop `has_token_logprobs` in place on every node whose blob we are NOT
+    writing (`keep=None` keeps all, so this is a no-op). A flag with no blob behind
+    it would leave the token inspector stuck on 'loading' forever."""
+    if keep is None:
+        return
     for tree in (body.get("trees") or {}).values():
         if not isinstance(tree, dict):
             continue
-        for node in (tree.get("nodes") or {}).values():
-            if isinstance(node, dict):
+        for nid, node in (tree.get("nodes") or {}).items():
+            if isinstance(node, dict) and nid not in keep:
                 node.pop("has_token_logprobs", None)
+
+
+# ── which turns keep their logprobs (--logprobs chart | last:N) ───────────────
+# Selecting a SUBSET means answering "which nodes does the published page actually
+# read logprobs from", which is a question about the branch tree — so these mirror
+# `web/src/lib/tree.ts` (selected-child walk, siblings) and +page's
+# `buildChartSources`. The canonical Python copy of the walk lives in `cli.py`
+# (`_selected_child` / `_thread_path`); it is not importable without pulling the
+# whole CLI in, so this is a deliberate small second copy — fold the three together
+# if the tree helpers ever move to a shared module.
+_ROOT = "__root__"
+
+
+def _selected_child(tree: dict, parent_key: str) -> str | None:
+    kids = (
+        tree.get("rootChildren") or []
+        if parent_key == _ROOT
+        else ((tree.get("nodes") or {}).get(parent_key) or {}).get("children") or []
+    )
+    if not kids:
+        return None
+    sel = (tree.get("selected") or {}).get(parent_key)
+    return sel if (sel is not None and sel in kids) else kids[-1]
+
+
+def _path_from(tree: dict, root_id: str) -> list[dict]:
+    """`root_id` → leaf, following the selected child at each step."""
+    nodes = tree.get("nodes") or {}
+    node = nodes.get(root_id)
+    if node is None:
+        return []
+    path, seen, pk = [node], {root_id}, root_id
+    while (cid := _selected_child(tree, pk)) is not None and cid not in seen:
+        node = nodes.get(cid)
+        if node is None:
+            break
+        seen.add(cid)
+        path.append(node)
+        pk = cid
+    return path
+
+
+def _turn_samples(tree: dict, node: dict) -> list[str]:
+    """The chart's sample set for an assistant turn: ALL siblings of that node that
+    carry content or reasoning (mirrors buildChartSources + siblingsOf), i.e. every
+    node whose first token the first-token chart can read."""
+    nodes = tree.get("nodes") or {}
+    parent = node.get("parent")
+    sibs = (
+        (nodes.get(parent) or {}).get("children") or []
+        if parent
+        else tree.get("rootChildren") or []
+    )
+    return [
+        sid
+        for sid in sibs
+        if (n := nodes.get(sid))
+        and n.get("role") == "assistant"
+        and (n.get("content") or n.get("reasoning"))
+    ]
+
+
+def _turns_along(tree: dict, path: list[dict]) -> list[list[str]]:
+    """Assistant TURNS down one path, each as its full sample set. A turn with no
+    samples doesn't exist for the chart, so it isn't counted — the turn INDEX a
+    saved chart view holds is an index into exactly this list."""
+    out = []
+    for node in path:
+        if node.get("role") != "assistant":
+            continue
+        samples = _turn_samples(tree, node)
+        if samples:
+            out.append(samples)
+    return out
+
+
+def _chart_kept_nodes(body: dict, turn: str) -> set[str]:
+    """Nodes whose logprobs the saved chart view reads: the picked turn of EVERY
+    panel (the modal charts all of them, and 'last' means each panel's own last
+    turn). Folded panels included on purpose — "include folded panels" is a control
+    the reader still has, and a bar with no first-token data would be the author's
+    export silently deciding for them."""
+    per_tree = {
+        pid: _turns_along(tree, _path_from(tree, sel))
+        for pid, tree in (body.get("trees") or {}).items()
+        if isinstance(tree, dict) and (sel := _selected_child(tree, _ROOT))
+    }
+    idx = -1
+    if turn != "last":
+        try:
+            idx = int(turn)
+        except (TypeError, ValueError):
+            idx = -1
+        # The modal resets an index no panel has (`turnCount` is the max over
+        # panels) back to 'last' — match that rather than exporting nothing.
+        if idx >= max((len(t) for t in per_tree.values()), default=0):
+            idx = -1
+    keep: set[str] = set()
+    for turns in per_tree.values():
+        if not turns:
+            continue
+        picked = turns[-1] if idx < 0 else (turns[idx] if idx < len(turns) else None)
+        if picked:
+            keep.update(picked)
+    return keep
+
+
+def _last_n_kept_nodes(body: dict, n: int) -> set[str]:
+    """The newest `n` assistant turns of every THREAD (each root-level sibling is a
+    thread, so a branch-from-start conversation keeps its own tail)."""
+    keep: set[str] = set()
+    for tree in (body.get("trees") or {}).values():
+        if not isinstance(tree, dict):
+            continue
+        for root_id in tree.get("rootChildren") or []:
+            for samples in _turns_along(tree, _path_from(tree, root_id))[-n:]:
+                keep.update(samples)
+    return keep
 
 
 def export_site(
@@ -237,7 +430,7 @@ def export_site(
     title: str,
     description: str | None = None,
     workspace_names: list[str] | None = None,
-    include_logprobs: bool = True,
+    logprobs: str = LOGPROBS_ALL,
     include_pins: bool | None = None,
     default_workspace: str | None = None,
     pack_url: str | None = None,
@@ -254,13 +447,28 @@ def export_site(
     from .api.settings import SETTINGS
     from .api.store import read_json
 
-    stats = SiteStats()
+    lp_mode, lp_n = parse_logprobs_mode(logprobs)
+    stats = SiteStats(logprobs_mode=logprobs if lp_mode != "last" else f"last:{lp_n}")
     reader = packmod.StateReader()
     resolve = reader.make_resolver(warn)
+    # `chart` reads the mirrored per-workspace chart view (lib/chart-view.ts writes it
+    # into prefs so an export can carry it) — the same blob narrowed into the site
+    # below, read here for which TURN each workspace's chart points at.
+    chart_views: dict[str, dict] = {}
+    if lp_mode == LOGPROBS_CHART:
+        raw = (read_json(SETTINGS.prefs_path, {}) or {}).get("chart_view")
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except json.JSONDecodeError:
+                raw = None
+        if isinstance(raw, dict) and isinstance(raw.get("ws"), dict):
+            chart_views = {k: v for k, v in raw["ws"].items() if isinstance(v, dict)}
 
     # Models + default params/layout: the pack path, so model resolution and label
-    # preference stay single-sourced. Its prepared workspace bodies are discarded —
-    # we re-read the real ones below to keep the heavy blobs a pack strips.
+    # preference stay single-sourced. `skip_bodies` because we re-read the real bodies
+    # below (to keep the heavy blobs a pack strips) — preparing them here would
+    # deep-copy every body and fetch every raw_meta blob for a value we then drop.
     pack = packmod.export_pack(
         state_dir_reader=reader,
         name=title,
@@ -268,6 +476,7 @@ def export_site(
         models_from="all",
         workspaces=True,
         workspace_names=workspace_names,
+        skip_bodies=True,
         warn=warn,
     )
     stats.models = len(pack.models)
@@ -292,12 +501,44 @@ def export_site(
         packmod.rewrite_panels(body, resolve=resolve)
 
         before = stats.bytes_written
-        nids = _blob_node_ids(body)
+        # `keep is None` = every node keeps its logprobs (the `all` default).
+        keep: set[str] | None
+        if lp_mode == LOGPROBS_ALL:
+            keep = None
+        elif lp_mode == LOGPROBS_NONE:
+            keep = set()
+        elif lp_mode == "last":
+            keep = _last_n_kept_nodes(body, lp_n)
+        else:  # chart — fail SAFE: a workspace whose chart view we can't read keeps
+            # everything, because the alternative is silently publishing a first-token
+            # page with no data behind it.
+            view = chart_views.get(cid)
+            if view is None:
+                keep = None
+                stats.logprobs_unnarrowed.append(body.get("name") or cid)
+                warn(
+                    f"--logprobs chart: workspace {body.get('name') or cid!r} has no saved chart "
+                    "view (open its chart once to record one); kept all its logprobs"
+                )
+            else:
+                keep = _chart_kept_nodes(body, str(view.get("turn") or "last"))
+
+        # Counted from the FLAGS, not from what came back: a dropped node is never
+        # fetched, so the blob map can't see it.
+        flagged = _logprob_flag_ids(body)
+        kept_ids = flagged if keep is None else (flagged & keep)
+        stats.logprob_nodes_kept += len(kept_ids)
+        stats.logprob_nodes_dropped += len(flagged) - len(kept_ids)
+
+        nids = _blob_node_ids(body, keep)
         blobs = workspace_store.get_blobs(cid, nids) if nids else {}
-        if not include_logprobs:
-            _strip_logprob_flags(body)
+        _strip_logprob_flags(body, keep)
         for nid, blob in blobs.items():
-            payload = {k: v for k, v in blob.items() if include_logprobs or k != "token_logprobs"}
+            payload = {
+                k: v
+                for k, v in blob.items()
+                if (keep is None or nid in keep) or k != "token_logprobs"
+            }
             if not payload:
                 continue
             _write_json(data / "workspaces" / f"{cid}.blobs" / f"{nid}.json", payload, stats)
@@ -396,6 +637,11 @@ def export_site(
         # resolves the id here and installs the pack, instead of silently landing on
         # whatever workspace happened to be newest.
         "pack_links": pack_links or {},
+        # What `--logprobs` kept, so the UI can name the real reason a turn has no
+        # token data. Without it a trimmed site tells a reader "captured on native
+        # tinker sampling only" about turns that WERE captured and then published
+        # without them — true-sounding and wrong.
+        "logprobs": stats.logprobs_mode,
     }
     _write_json(data / "manifest.json", manifest, stats)
 

@@ -154,6 +154,7 @@
   } from './chart';
   import { displayToken, prob } from './token-logprob';
   import { searchStoredTokens, type TokenCandidate } from './token-search';
+  import { trimmedLogprobs } from './static-mode';
   import { highlightStore } from './highlights.svelte';
   import { nodeBlobs } from './node-blobs.svelte';
   import { workspaces as ws } from './workspaces.svelte';
@@ -601,7 +602,9 @@
           onclick={() => setMode('firsttoken')}
           data-tooltip={hasFirstToken
             ? "The model's probability distribution over the first generated token"
-            : 'Needs token logprobs — captured on native tinker sampling only'} use:tip>first token</button>
+            : trimmedLogprobs
+              ? 'This published site was exported without token logprobs'
+              : 'Needs token logprobs — captured on native tinker sampling only'} use:tip>first token</button>
       </div>
       {#if turnCount > 1}
         <select class="chart-turn" bind:value={turnSel} onchange={saveView} aria-label="Charted turn">
@@ -688,6 +691,18 @@
         <div class="backend-error">All panels with data are folded — enable “include folded panels” above to chart them.</div>
       {:else if mode === 'firsttoken' && ftLoading}
         <div class="chart-note">Fetching this turn's token logprobs…</div>
+      {:else if mode === 'firsttoken' && trimmedLogprobs}
+        <!-- On a TRIMMED site the sampler-side explanation below is false: these turns
+             were captured with logprobs and published without them. Naming the setting
+             also tells the reader which turn does have data. -->
+        <div class="backend-error">
+          No token logprobs on this turn — this site was published with
+          <code>--logprobs {trimmedLogprobs}</code>{trimmedLogprobs === 'chart'
+            ? ', so only the turn its chart opens on carries them.'
+            : trimmedLogprobs === 'none'
+              ? ', which drops them everywhere.'
+              : ', so only the newest turns carry them.'}
+        </div>
       {:else if mode === 'firsttoken'}
         <div class="backend-error">No token logprobs on this turn — first-token distributions need native tinker samples (OpenRouter and token-streamed single samples don't carry them).</div>
       {:else if mode === 'rules' && allRulesOff}

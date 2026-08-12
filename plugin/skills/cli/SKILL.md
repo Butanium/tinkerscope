@@ -61,7 +61,7 @@ applies (`"overwrite"` | `"new"`) — the HTTP route has no prompt, so prefer it
 you're scripting and the human has already agreed.
 
 **Publish a read-only copy — `tinkerscope site export <dir> [--dir <scan-root>]
-[--title T] [--workspace NAME] [--no-logprobs] [--open <ws-id>] [--pack-url URL]
+[--title T] [--workspace NAME] [--logprobs all|chart|last:N|none] [--open <ws-id>] [--pack-url URL]
 [--pack-link URL|PATH=URL]`.** Emits a static
 site (built SPA + baked JSON) that needs no backend and no API key — GitHub Pages, S3,
 `python3 -m http.server -d <dir>`. Visitors can read everything (workspaces, branches,
@@ -69,8 +69,12 @@ threads, the chart in all three modes, token probabilities, editable highlight r
 pins) and sample nothing. Same `--dir` gotcha as `pack export`. ⚠️ **Per-token
 logprobs are ~97% of a real store's bytes** (measured: 24 MB of workspaces vs 901 MB
 of blobs) — the command prints a per-workspace breakdown and warns past 100 MB; use
-`--workspace` to publish a subset, or `--no-logprobs` (costs the token inspector and
-the chart's *first token* mode). Unlike a share pack, a site export DOES carry
+`--workspace` to publish a subset, or narrow the logprobs themselves:
+`--logprobs chart` keeps only the turn each workspace's saved chart view opens on (so
+the published chart still works, and everything else loses the token inspector),
+`--logprobs last:N` the newest N turns per thread, `--logprobs none` nothing
+(`--no-logprobs` is an alias). A workspace with no saved chart view keeps all of its
+logprobs and the export says so. Unlike a share pack, a site export DOES carry
 logprobs by default, plus the chart's per-workspace view state. `--workspace` also
 drops saved PINS (they carry responses + a local `dataset_path` and have no workspace
 id to filter on — `--pins` forces them back) and narrows the chart-view state to the

@@ -156,8 +156,13 @@ def _site_command(argv: list[str]) -> None:
                          "instead of falling back to the newest one. Repeatable. Use PATH=URL when "
                          "the file is local and not yet uploaded (path read for the ids, URL fetched "
                          "by visitors). Implies --pack-url when given exactly once")
+    ex.add_argument("--logprobs", default=None, metavar="WHICH",
+                    help="which turns keep per-token logprobs: all (default) | chart (only the turn "
+                         "each workspace's saved chart view points at) | last:N (newest N turns per "
+                         "thread) | none. They are ~97%% of a site's bytes, and the token inspector + "
+                         "first-token chart are what they buy")
     ex.add_argument("--no-logprobs", action="store_true",
-                    help="drop per-token logprobs — much smaller, but disables the token inspector and the first-token chart")
+                    help="alias for --logprobs none")
     # Tri-state. Pins have no workspace id, so a --workspace filter can't scope them:
     # defaulting them ON would make a curated export ship saved samples (and their
     # local dataset paths) from the workspaces you filtered OUT.
@@ -194,6 +199,16 @@ def _site_command(argv: list[str]) -> None:
     if pack_url is None and len(args.pack_link or []) == 1 and pack_links:
         pack_url = next(iter(pack_links.values()))
 
+    # --no-logprobs predates --logprobs and stays an alias, so a scripted export keeps
+    # working. Passing both is a contradiction only when they disagree.
+    logprobs = args.logprobs or ("none" if args.no_logprobs else "all")
+    if args.no_logprobs and args.logprobs and args.logprobs != "none":
+        sys.exit(f"--no-logprobs contradicts --logprobs {args.logprobs} — pass one")
+    try:
+        site_export.parse_logprobs_mode(logprobs)
+    except ValueError as e:
+        sys.exit(str(e))
+
     warnings: list[str] = []
     stats = site_export.export_site(
         args.out.expanduser().resolve(),
@@ -201,7 +216,7 @@ def _site_command(argv: list[str]) -> None:
         title=args.title or dirs[0].name,
         description=args.description,
         workspace_names=args.workspace,
-        include_logprobs=not args.no_logprobs,
+        logprobs=logprobs,
         include_pins=args.pins,
         default_workspace=getattr(args, "open"),
         pack_url=pack_url,
@@ -227,6 +242,19 @@ def _site_command(argv: list[str]) -> None:
         print("  heaviest workspaces:")
         for name, b in stats.heaviest():
             print(f"    {b / 1e6:8.1f} MB  {name}")
+    # What a narrowed --logprobs actually did. Reported in NODES (turn-samples) because
+    # the dropped blobs are never read, so their bytes are unknown by construction —
+    # and reported at all because "the chart still works" is the thing being traded.
+    if stats.logprobs_mode != "all":
+        total = stats.logprob_nodes_kept + stats.logprob_nodes_dropped
+        print(
+            f"  logprobs ({stats.logprobs_mode}): kept {stats.logprob_nodes_kept} of {total} "
+            f"turn-sample(s) with stored logprobs"
+        )
+        if stats.logprobs_unnarrowed:
+            names = ", ".join(stats.logprobs_unnarrowed[:5])
+            more = f" (+{len(stats.logprobs_unnarrowed) - 5} more)" if len(stats.logprobs_unnarrowed) > 5 else ""
+            print(f"    kept ALL for {len(stats.logprobs_unnarrowed)} workspace(s) with no saved chart view: {names}{more}")
     # Pins are saved SAMPLES — they carry the question, the response, and the
     # dataset_path they came from. Naming that at export time beats a visitor
     # discovering it in a published data/pins.json.
@@ -239,8 +267,9 @@ def _site_command(argv: list[str]) -> None:
             f"  NOTE: {mb:.0f} MB is large for a static host (GitHub Pages soft-limits a\n"
             "        site at 1 GB and recommends staying under 100 MB). Nearly all of it\n"
             "        is per-token logprobs. Publish a subset with --workspace NAME\n"
-            "        (repeatable), or pass --no-logprobs (costs the token inspector and\n"
-            "        the first-token chart mode).",
+            "        (repeatable), or narrow them: --logprobs chart keeps the turn each\n"
+            "        workspace's chart opens on (so the chart page still works),\n"
+            "        --logprobs last:3 the newest turns, --logprobs none nothing.",
             file=sys.stderr,
         )
     print(f"  preview: python -m http.server -d {args.out} 8080")

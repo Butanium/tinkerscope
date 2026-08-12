@@ -482,10 +482,12 @@ the model pickers, and the sampling params. The top bar says **snapshot** instea
 
 Two things worth knowing before you publish. The chart's per-workspace view travels
 with the export, so whatever bucketing you set up is what a visitor sees first —
-worth arranging deliberately. And token probabilities are enormous: they're around
-97% of the exported bytes, so if the site is only meant to show *what* the models
-said, `--no-logprobs` makes it roughly 30× smaller (at the cost of the token
-inspector and the chart's "first token" mode).
+worth arranging deliberately — and `--logprobs chart` leans on exactly that, keeping
+token probabilities for the turn each chart opens on and dropping the rest. That
+matters because they're enormous: around 97% of the exported bytes. If the site is
+only meant to show *what* the models said, `--logprobs none` makes it roughly 30×
+smaller (at the cost of the token inspector and the chart's "first token" mode);
+`--logprobs last:3` keeps the tail of each thread inspectable.
 
 Two things a *reader* of the site gets. The **read-only badge is a button**: it opens a
 panel with the command to run tinkerscope locally against the same pack, so going

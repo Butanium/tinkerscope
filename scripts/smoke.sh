@@ -97,6 +97,7 @@ DEFAULT=(
     # Own their whole world (build a state dir, export a site, serve it) and
     # ignore the base-url arg — they still belong here so they run under the lock.
     browser_static_site
+    browser_static_logprob_trim
     browser_pack_big
     browser_open_locally
     browser_pack_link_map

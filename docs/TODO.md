@@ -446,12 +446,15 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
   `multi_prompt_tab` + `folder_manager_ui`). tinkerscope only has localStorage prompt
   history today.
 - [ ] **Markdown export** of a workspace / result set ("Save all").
-- [ ] **Static site: trim the blobs.** `site export` keeps `token_logprobs`, which is
-  ~97% of the bytes (24 MB of workspaces vs 901 MB of blobs on the real store). Today
-  the choice is all-or-nothing (`--no-logprobs`) plus `--workspace` selection, and the
-  command reports the per-workspace breakdown. A middle setting would help: keep
-  logprobs only for the turns a workspace's chart actually uses, or only the newest N
-  turns per thread. See `docs/STATIC_SITE.md` §Size.
+- [x] **Static site: trim the blobs.** (2026-08-12) `site export --logprobs
+  all|chart|last:N|none` — `chart` keeps only the turn each workspace's SAVED chart
+  view points at (a workspace with no recorded view keeps everything and says so),
+  `last:N` the newest N assistant turns per thread. Default stays `all`: a published
+  site is the author's curated view and default-strip would silently break a
+  republished chart page. `--no-logprobs` kept as an alias for `none`. The dropped
+  blobs are never READ, the manifest records the setting so the chart can name the
+  real reason a turn has no data, and the export reports turn-samples kept vs dropped.
+  See `docs/STATIC_SITE.md` §Size.
 - [ ] **Provenance chip on a link-installed workspace.** Now that a non-colliding pack
   installs on a static site WITHOUT a prompt (`0880b15`), nothing on screen says where a
   workspace came from — and the content is conversations that read as though the site
@@ -469,12 +472,12 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
   format, which is a wider blast radius than the pack path alone (`site_export` copies
   blobs verbatim, and the write-once store would then hold two precisions). Wants its
   own pass with a decision about whether to round at CAPTURE time instead.
-- [ ] **Static site: skip the discarded body prep in `site_export`.** It calls
-  `pack.export_pack` purely for the model list + defaults and throws away its prepared
-  workspace bodies — but that prep deep-copies every body AND fetches every
-  `raw_meta` blob, which on a ~900 MB store is real wasted I/O on a command that's
-  already the slow part. Wants a `skip_bodies` (or models-only) path through
-  `export_pack`. Found in review; not a correctness issue.
+- [x] **Static site: skip the discarded body prep in `site_export`.** (2026-08-12)
+  `export_pack(skip_bodies=True)` gathers the models a workspace's panels use without
+  preparing bodies — no deep copy, no `raw_meta` fetch. The `--workspace` filter also
+  moved INTO `StateReader.workspace_bodies`, which was fetching every excluded
+  workspace's blobs before the caller's loop dropped them. Found in review; not a
+  correctness issue.
 
 **Decided against** (2026-07-30, Clément): BYOK-OpenRouter sampling on a published
 static site. A site can't sample Tinker checkpoints at all — the oai endpoint sends no

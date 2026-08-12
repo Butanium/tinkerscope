@@ -47,11 +47,29 @@ Per-token logprobs are ~97% of a real store's bytes. Measured on a 25-workspace
 instance: **24 MB of light bodies, 901 MB of blobs**, one workspace accounting for
 665 MB alone. The exporter prints a per-workspace breakdown and warns past 100 MB.
 
-Three ways to stay small, in order of preference:
+Ways to stay small, in order of preference:
 
 - `--workspace NAME` (repeatable) — publish the two or three that make the point.
-- `--no-logprobs` — drops the token inspector and the chart's *first token* mode;
-  everything else survives. Typically a 30–40× reduction.
+- `--logprobs WHICH` — narrow *which turns* keep them, rather than all-or-nothing:
+
+  | value | keeps | costs |
+  |---|---|---|
+  | `all` (default) | every turn | nothing; the default does not change |
+  | `chart` | only the turn each workspace's **saved chart view** points at | the token inspector + first-token mode on every OTHER turn |
+  | `last:N` | only the newest N assistant turns of each thread | the same, on older turns |
+  | `none` | nothing (`--no-logprobs` is an alias) | the token inspector and first-token mode entirely |
+
+  `chart` is the one that keeps a published *chart page* working: the modal opens on
+  the turn the author left it on, which is exactly what this keeps. A workspace with
+  no recorded chart view keeps ALL its logprobs and the export says so — dropping is
+  the irreversible direction, so the fallback is the safe one. The report line counts
+  turn-samples kept vs dropped (nodes, not bytes: a dropped blob is never read, which
+  is where the speed comes from).
+
+  The setting is recorded in `data/manifest.json` as `logprobs`, and the chart uses it
+  to say *"this site was published with `--logprobs chart`"* instead of the live
+  instance's "needs native tinker sampling" — which would be false about turns that
+  were captured and then published without them.
 - `--no-pins`.
 
 ### What a filtered export deliberately does NOT publish

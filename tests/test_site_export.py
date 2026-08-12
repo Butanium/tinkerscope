@@ -183,3 +183,159 @@ def test_index_html_gets_relative_refs_and_the_manifest(seeded):
     assert "__TSCOPE_STATIC__" in html
     assert 'base: new URL(".", location.href)' in html
     assert (out / ".nojekyll").exists()
+
+
+# ── --logprobs: which turns keep their token logprobs ─────────────────────────
+
+
+@pytest.fixture
+def lp_site(backend, tmp_path):
+    """A workspace with THREE assistant turns, each a two-sample fan carrying stored
+    logprobs, plus a saved chart view pointing at the middle one. Returns
+    (export_fn, node ids by turn)."""
+    from tinkerscope.api import workspace_store
+    from tinkerscope.api.settings import SETTINGS
+    from tinkerscope.api.store import read_json, write_json
+
+    def assistant(nid, parent, kids):
+        return {
+            "id": nid, "role": "assistant", "content": f"answer {nid}", "parent": parent,
+            "children": kids, "token_logprobs": [{"t": nid, "tid": 1, "lp": -0.1}],
+        }
+
+    # u1 → (a1|a1b) → u2 → (a2|a2b) → u3 → (a3|a3b); the selected child at each fan
+    # is the FIRST, so the active path is u1,a1,u2,a2,u3,a3.
+    nodes = {
+        "u1": {"id": "u1", "role": "user", "content": "q1", "parent": None, "children": ["a1", "a1b"]},
+        "a1": assistant("a1", "u1", ["u2"]), "a1b": assistant("a1b", "u1", []),
+        "u2": {"id": "u2", "role": "user", "content": "q2", "parent": "a1", "children": ["a2", "a2b"]},
+        "a2": assistant("a2", "u2", ["u3"]), "a2b": assistant("a2b", "u2", []),
+        "u3": {"id": "u3", "role": "user", "content": "q3", "parent": "a2", "children": ["a3", "a3b"]},
+        "a3": assistant("a3", "u3", []), "a3b": assistant("a3b", "u3", []),
+    }
+    workspace_store.upsert(
+        id="ws-lp", name="lp one", system_prompt=None, system_enabled=None,
+        trees={"primary": {"nodes": nodes, "rootChildren": ["u1"],
+                           "selected": {"__root__": "u1", "u1": "a1", "a1": "u2", "u2": "a2",
+                                        "a2": "u3", "u3": "a3"}}},
+        panels=[{"id": "primary", "run_id": "openrouter:openrouter/free", "checkpoint": None}],
+        reduced_panels=[], send_targets=["primary"], seen_panels=["primary"],
+    )
+    prefs = read_json(SETTINGS.prefs_path, {}) or {}
+    prefs["chart_view"] = json.dumps({
+        "v": 1, "global": {"mode": "firsttoken", "scope": "response", "think": "all"},
+        "ws": {"ws-lp": {"turn": "1", "ts": 1}},  # the MIDDLE turn
+    })
+    write_json(SETTINGS.prefs_path, prefs)
+
+    web_dist = tmp_path / "dist"
+    web_dist.mkdir()
+    (web_dist / "index.html").write_text('<html><head><script>a = { base: "" };</script></head></html>')
+
+    def run(**kw):
+        out = tmp_path / f"site{len(list(tmp_path.glob('site*')))}"
+        stats = site_export.export_site(out, web_dist=web_dist, title="t", **kw)
+        return out, stats
+
+    return run
+
+
+def _lp_nodes(out) -> set[str]:
+    """Node ids whose published blob actually carries token_logprobs."""
+    d = out / "data" / "workspaces" / "ws-lp.blobs"
+    return {
+        f.stem for f in d.glob("*.json") if json.loads(f.read_text()).get("token_logprobs")
+    } if d.exists() else set()
+
+
+def _lp_flags(out) -> set[str]:
+    """Node ids still advertising logprobs in the published body — a flag with no
+    blob behind it hangs the token inspector on 'loading', so these must MATCH."""
+    body = _read(out, "workspaces/ws-lp.json")
+    return {
+        nid
+        for tree in body["trees"].values()
+        for nid, n in tree["nodes"].items()
+        if n.get("has_token_logprobs")
+    }
+
+
+def test_default_keeps_every_turns_logprobs(lp_site):
+    """The default must not change: a published site's chart page is most of why
+    anyone exports one."""
+    out, stats = lp_site()
+    assert _lp_nodes(out) == {"a1", "a1b", "a2", "a2b", "a3", "a3b"}
+    assert _lp_flags(out) == _lp_nodes(out)
+    assert stats.logprobs_mode == "all" and stats.logprob_nodes_dropped == 0
+
+
+def test_chart_keeps_only_the_charted_turns_samples(lp_site):
+    """`--logprobs chart` keeps the turn the saved view points at — BOTH samples of
+    it, since the chart buckets the whole sibling fan."""
+    out, stats = lp_site(logprobs="chart")
+    assert _lp_nodes(out) == {"a2", "a2b"}
+    assert _lp_flags(out) == {"a2", "a2b"}
+    assert (stats.logprob_nodes_kept, stats.logprob_nodes_dropped) == (2, 4)
+
+
+def test_chart_falls_back_to_last_when_the_index_is_out_of_range(lp_site):
+    """The modal resets a stale index to 'last' rather than charting nothing; the
+    export must agree, or it publishes a chart page with no data."""
+    from tinkerscope.api.settings import SETTINGS
+    from tinkerscope.api.store import read_json, write_json
+
+    prefs = read_json(SETTINGS.prefs_path, {}) or {}
+    prefs["chart_view"] = json.dumps({
+        "v": 1, "global": {"mode": "firsttoken", "scope": "response", "think": "all"},
+        "ws": {"ws-lp": {"turn": "9", "ts": 1}},
+    })
+    write_json(SETTINGS.prefs_path, prefs)
+    out, _ = lp_site(logprobs="chart")
+    assert _lp_nodes(out) == {"a3", "a3b"}
+
+
+def test_chart_keeps_everything_when_no_view_was_saved(lp_site):
+    """Fail SAFE: no recorded view means we cannot tell which turn the page opens on,
+    and dropping is the irreversible direction."""
+    from tinkerscope.api.settings import SETTINGS
+    from tinkerscope.api.store import read_json, write_json
+
+    prefs = read_json(SETTINGS.prefs_path, {}) or {}
+    prefs.pop("chart_view", None)
+    write_json(SETTINGS.prefs_path, prefs)
+    out, stats = lp_site(logprobs="chart")
+    assert _lp_nodes(out) == {"a1", "a1b", "a2", "a2b", "a3", "a3b"}
+    assert stats.logprobs_unnarrowed == ["lp one"] and stats.logprob_nodes_dropped == 0
+
+
+def test_last_n_keeps_the_newest_turns_of_the_thread(lp_site):
+    out, stats = lp_site(logprobs="last:2")
+    assert _lp_nodes(out) == {"a2", "a2b", "a3", "a3b"}
+    assert (stats.logprob_nodes_kept, stats.logprob_nodes_dropped) == (4, 2)
+
+
+def test_none_drops_every_logprob_and_its_flag(lp_site):
+    out, stats = lp_site(logprobs="none")
+    assert _lp_nodes(out) == set() and _lp_flags(out) == set()
+    assert stats.logprob_nodes_kept == 0
+
+
+def test_manifest_records_the_setting(lp_site):
+    """The UI can only name the real reason a turn has no token data if the site says
+    which setting produced it."""
+    out, _ = lp_site(logprobs="chart")
+    assert _read(out, "manifest.json")["logprobs"] == "chart"
+    out2, _ = lp_site()
+    assert _read(out2, "manifest.json")["logprobs"] == "all"
+
+
+@pytest.mark.parametrize("bad", ["", "sometimes", "last:0", "last:-1", "last:x", "chart:1"])
+def test_bad_logprobs_values_are_rejected(bad):
+    with pytest.raises(ValueError):
+        site_export.parse_logprobs_mode(bad)
+
+
+def test_logprobs_values_parse(lp_site):
+    assert site_export.parse_logprobs_mode("all") == ("all", 0)
+    assert site_export.parse_logprobs_mode("CHART") == ("chart", 0)
+    assert site_export.parse_logprobs_mode("last:3") == ("last", 3)

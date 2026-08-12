@@ -559,7 +559,8 @@ codex plugin add tinkerscope@tinkerscope</pre>
         composer, the edit/regenerate/delete buttons, the model pickers and the sampling params are simply not
         there, and the top bar says <i>snapshot</i> instead of <i>live</i>. The chart's per-workspace view
         travels with it, so what you set up is what a visitor sees. Token probabilities are ~97% of the exported
-        size — <code>--no-logprobs</code> makes it far smaller if you only need to show what the models said.
+        size — <code>--logprobs chart</code> keeps them only for the turn each chart opens on, and
+        <code>--logprobs none</code> drops them entirely if you only need to show what the models said.
       </p>
     </section>
 
