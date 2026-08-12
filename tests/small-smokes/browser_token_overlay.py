@@ -36,6 +36,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from _console import net_report, watch_net
+
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:5180"
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
 SHOT = "/tmp/tinkerscope_token_overlay.png"
@@ -148,6 +150,7 @@ def main() -> None:
             errors: list[str] = []
             page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
             page.on("pageerror", lambda e: errors.append(str(e)))
+            net = watch_net(page)
 
             page.goto(f"{BASE}/?w={conv_id}", wait_until="load", timeout=20000)
             page.wait_for_selector(".model-slot-select", timeout=15000)
@@ -374,7 +377,8 @@ def main() -> None:
                            and page.locator(".tok-heat-canvas").count() == 0))
             checks.append(("markdown is back", page.locator(".message-content strong").count() > 0))
 
-            checks.append(("no console errors", not errors))
+            checks.append((net_report(errors, net) if errors
+                           else "no console errors", not errors))
             if errors:
                 print("console errors:", errors[:5])
             browser.close()
