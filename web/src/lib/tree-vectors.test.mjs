@@ -47,20 +47,34 @@ try {
 let passed = 0;
 const fails = [];
 
-for (const f of files) {
-  const v = JSON.parse(readFileSync(join(VECTORS_DIR, f), 'utf8'));
+const vectors = files.map((f) => [f, JSON.parse(readFileSync(join(VECTORS_DIR, f), 'utf8'))]);
+// The recorded-broadcast contract (bea3dbc): every non-reject vector carries
+// `broadcast` — the ops as the server actually fans out — and reject vectors
+// carry NONE (a rejected batch fans out nothing). Enforced whenever the
+// fixture set is post-recording; a pre-recording set (none carry it) skips
+// the broadcast leg so the two branches stay independently green pre-merge.
+const recorded = vectors.some(([, v]) => Array.isArray(v.broadcast));
+if (!recorded) console.log('tree-vectors: no recorded broadcasts in this fixture set — replay leg skipped');
+
+for (const [f, v] of vectors) {
   const name = `${f}: ${v.name}`;
   try {
     // Routing (README "File shape"): tree-level ops apply to tree_before via
     // applyTreeOp; replace_tree in single-panel form goes through applyPanelOp
-    // on a one-key map (validation included); map-form vectors use trees_before.
+    // on a one-key map (validation included); map-form vectors use trees_before;
+    // BATCH vectors ({ops: [...]}) fold applyPanelOp over the map in order —
+    // each op gets its own claim scope, which is exactly what the batch-claim
+    // vector pins against the server's per-op selected_written.
     const run = () => {
+      if (Array.isArray(v.ops)) return v.ops.reduce((m, op) => applyPanelOp(m, op), v.trees_before);
       if (v.tree_before === undefined) return applyPanelOp(v.trees_before, v.op);
       if (v.op.op === 'replace_tree')
         return applyPanelOp({ [v.op.panel]: v.tree_before }, v.op)[v.op.panel];
       return applyTreeOp(v.tree_before, v.op);
     };
     if (v.rejects != null) {
+      if ('broadcast' in v)
+        throw new Error('a reject vector must carry NO broadcast — a rejected batch fans out nothing');
       let rejected = null;
       try {
         run();
@@ -75,6 +89,21 @@ for (const f of files) {
       const want = v.tree_before !== undefined ? v.tree_after : v.trees_after;
       if (canon(got) !== canon(want))
         throw new Error(`mismatch\n    want ${canon(want)}\n    got  ${canon(got)}`);
+      // Production-path parity: replay the RECORDED broadcast ONE OP AT A TIME
+      // (exactly what a mirror does with a bus echo) — it must also land on
+      // tree_after. This is the check that catches input-shape-vs-broadcast-
+      // shape drift (e.g. the broadcast that shipped nodes WITH children).
+      // `broadcast` is the only recorded field; the hand-authored tree_after
+      // is what polices it (see the fixtures' README — never record both).
+      if (recorded && !Array.isArray(v.broadcast))
+        throw new Error('non-reject vector missing its recorded broadcast (re-record: uv run scripts/record_tree_vectors.py)');
+      if (Array.isArray(v.broadcast)) {
+        const start = v.trees_before ?? { [v.op.panel]: v.tree_before };
+        const replayed = v.broadcast.reduce((m, op) => applyPanelOp(m, op), start);
+        const wantMap = v.trees_after ?? { [v.op.panel]: v.tree_after };
+        if (canon(replayed) !== canon(wantMap))
+          throw new Error(`broadcast replay mismatch\n    want ${canon(wantMap)}\n    got  ${canon(replayed)}`);
+      }
     }
     passed++;
   } catch (e) {

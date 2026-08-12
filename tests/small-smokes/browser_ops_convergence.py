@@ -28,6 +28,11 @@ really exercises the baseline), seeds two workspaces, and drives TWO pages:
      workspace, and B's own ops still apply cleanly afterwards.
   E. restart durability: everything above survives a server restart from the
      same state dir, and the rev continues monotonically for post-restart ops.
+  F. delete-under-an-open-tab: a workspace_deleted broadcast freezes the tab
+     LOUDLY (notice + op emission latched); when the id is re-created (the pack
+     replace shape — the rev line RESTARTS below the old one), the next event
+     for it takes the loadFailed-recovery refetch, adopts the reborn body, and
+     unlatches — ops flow again.
 
 ⚠️ KILLS AND RESTARTS ITS OWN SERVER (scenario E) — like browser_state_reprime,
 this smoke must never run concurrently with another (scripts/smoke.sh's lock
@@ -64,6 +69,11 @@ def _post(path, body):
     req = urllib.request.Request(
         f"{BASE}{path}", data=json.dumps(body).encode(),
         headers={"content-type": "application/json"}, method="POST")
+    return json.loads(urllib.request.urlopen(req, timeout=10).read() or b"{}")
+
+
+def _delete(path):
+    req = urllib.request.Request(f"{BASE}{path}", method="DELETE")
     return json.loads(urllib.request.urlopen(req, timeout=10).read() or b"{}")
 
 
@@ -332,6 +342,32 @@ def main():
             wait_until(page_a, lambda: body(w1["id"])["trees"]["primary"]["selected"]["P1-u2"] != before,
                        10, "post-restart op to land")
             assert body(w1["id"])["rev"] == post["rev"] + 1, "rev not monotonic across restart"
+
+            # ── F. delete-under-an-open-tab + reborn-id recovery ────────────
+            # B is on W2. Deleting W2 elsewhere must freeze B loudly…
+            _delete(f"/api/workspaces/{w2['id']}")
+            page_b.wait_for_function(
+                "document.querySelector('.external-notice')?.innerText.includes('DELETED')",
+                timeout=8000)
+            # …and a frozen tab must not persist: nudge a select locally, then
+            # confirm nothing reaches the (now recreated) store under that op.
+            reborn = _post("/api/workspaces", {
+                "id": w2["id"], "name": "reborn",
+                "trees": {"primary": fan_tree("R2-", n=2)},
+                "panels": [{"id": "primary", "run_id": FREE, "checkpoint": None}],
+                "seen_panels": ["primary"],
+            })
+            assert (reborn.get("rev") or 0) <= 1, f"reborn rev should restart: {reborn.get('rev')}"
+            # An op on the REBORN id (rev line restarted far below B's old one)
+            # is B's sign of life: loadFailed-recovery refetch → adopt → unlatch.
+            _post(f"/api/workspaces/{w2['id']}/ops", {"ops": [
+                {"op": "select", "panel": "primary", "parent_key": "R2-u2", "child_id": "R2-s1"}]})
+            page_b.wait_for_function(
+                "document.body.innerText.includes('R2- SIB-1')", timeout=10000)
+            # fully recovered: B's own ops flow against the reborn workspace…
+            click_js(page_b, cycle_next(pri))
+            wait_until(page_b, lambda: body(w2["id"])["trees"]["primary"]["selected"]["R2-u2"] == "R2-s0",
+                       8, "B's post-rebirth select to land")
 
             # C's aborted requests + E's downtime make network noise; only
             # NON-network console errors count.

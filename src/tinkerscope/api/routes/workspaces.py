@@ -296,7 +296,10 @@ async def delete_workspace(workspace_id: str) -> dict:
     A deletion is the one mutation with no `rev` to carry it: the workspace it
     would belong to is gone. So it rides its own named event rather than the ops
     stream — a tab holding this workspace open otherwise learns nothing, and its
-    next refetch 404s with no way to tell "deleted" from "server trouble"."""
+    next refetch 404s with no way to tell "deleted" from "server trouble".
+    (pack.py's direct store.delete() is deliberately NOT covered: its reseed
+    deletes are launch-flag-only, before any mirror attaches, and the runtime
+    /api/pack/apply path only upserts — settled 2026-08-12.)"""
     if not await run_in_threadpool(store.delete, workspace_id):
         raise HTTPException(404, f"no workspace {workspace_id}")
     await BUS.broadcast("workspace_deleted", {"workspace": workspace_id})

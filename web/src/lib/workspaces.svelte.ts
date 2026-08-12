@@ -165,8 +165,23 @@ class ConversationsStore {
   /** Meta (set_meta) debounce — layout toggles come in bursts; tree ops emit
    *  immediately (they're small and order-sensitive). */
   #metaTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Single-flight guard for the desync refetch. */
+  /** Single-flight guard for the desync refetch, plus the RE-ARM latch: an
+   *  event that would have triggered a refetch while one is in flight must not
+   *  be swallowed — the finished refetch may have adopted a body from BEFORE
+   *  that event (GET raced the write). */
   #refetching = false;
+  #refetchAgain = false;
+  /** Highest ops-event rev SEEN on the stream, per workspace — updated for
+   *  EVERY event, foreign ones included, nothing applied. The catch-up oracle
+   *  for the two adoption windows (a refetch racing new writes; the open/switch
+   *  gap between the body GET and #setActive, where destination events are
+   *  correctly filtered but would otherwise never be made up). */
+  #seenRevs = new Map<string, number>();
+  /** Own meta batches on the wire (see #flushMeta). */
+  #metaClaimsInFlight = 0;
+  /** The id remove() is deleting right now — its own workspace_deleted
+   *  broadcast must not latch the tab that asked for the delete. */
+  #selfDeleting: string | null = null;
   /** Guards a mid-session body-fetch failure (see remove()) AND a present-but-
    *  malformed stored tree (treeUnreadable): the store would be showing emptiness
    *  it did not author — emitting ops then would persist that emptiness over the
@@ -248,15 +263,17 @@ class ConversationsStore {
 
   /** THE op-emission gate: binds the batch to the ACTIVE workspace and drops it
    *  when there is nothing safe to bind to (no workspace, or the load-failed
-   *  latch — persisting would ship emptiness we did not author). */
-  #emit(ops: WorkspaceOp[]): void {
+   *  latch — persisting would ship emptiness we did not author). Returns
+   *  whether the batch was actually queued. */
+  #emit(ops: WorkspaceOp[]): boolean {
     const id = this.activeId;
-    if (!id) return;
+    if (!id) return false;
     if (this.#loadFailed) {
       console.warn('workspace failed to load — change NOT persisted');
-      return;
+      return false;
     }
     opsEmitter.emit(id, ops);
+    return true;
   }
 
   /** True when the bus currently describes OUR workspace. A tab that isn't the
@@ -580,7 +597,17 @@ class ConversationsStore {
       clearTimeout(this.#metaTimer);
       this.#metaTimer = null;
     } else return; // nothing pending
-    this.#emit([{ op: 'set_meta', fields: this.#fields() }]);
+    if (!this.#emit([{ op: 'set_meta', fields: this.#fields() }])) return;
+    // While our own meta write is on the wire, its echo carries the Sets as of
+    // EMIT time — applying that over a toggle made during the RTT would revert
+    // the toggle on screen and then persist the reversion (the next #fields()
+    // reads the reverted Sets). Count claims; #applyMetaEvent skips the two
+    // LWW Set fields while any are in flight — the #layoutClaimsInFlight
+    // pattern, for meta.
+    this.#metaClaimsInFlight++;
+    void opsEmitter.flush().finally(() => {
+      this.#metaClaimsInFlight--;
+    });
   }
 
   /** The workspace-level field set, read at EMIT time; flush-on-switch keeps it
@@ -638,21 +665,58 @@ class ConversationsStore {
   }
 
   #refetchBody(): void {
-    if (this.#refetching) return;
+    if (this.#refetching) {
+      this.#refetchAgain = true; // don't swallow the signal — go again after
+      return;
+    }
     this.#refetching = true;
     void (async () => {
       try {
-        // Let queued batches settle first — refetching UNDER a pending batch
-        // would briefly rewind the view to a body those ops haven't reached.
-        await opsEmitter.flush();
-        const id = this.activeId;
-        if (!id || id === this.#draftId) return;
-        const conv = await api.getWorkspace(id);
-        if (this.activeId !== id) return;
-        await this.#loadTrees(conv);
-        this.#afterLoad();
-      } catch (e) {
-        console.warn('workspace refetch failed', e);
+        for (let round = 0; round < 3; round++) {
+          this.#refetchAgain = false;
+          // Let queued batches settle first — refetching UNDER a pending batch
+          // would briefly rewind the view to a body those ops haven't reached.
+          await opsEmitter.flush();
+          const id = this.activeId;
+          if (!id || id === this.#draftId) return;
+          let conv: Workspace;
+          try {
+            conv = await api.getWorkspace(id);
+          } catch (e) {
+            // A tab that cannot re-read its workspace (deleted? server gone?)
+            // must not keep editing into the void: latch op emission off,
+            // loudly. A later successful load (switch back, recovery refetch)
+            // unlatches via #loadTrees.
+            if (this.activeId === id) {
+              this.#loadFailed = true;
+              this.#flashNotice(
+                'This workspace could not be re-read — changes are NOT being saved. Switch away and back, or reload.'
+              );
+            }
+            console.warn('workspace refetch failed', e);
+            return;
+          }
+          if (this.activeId !== id) return;
+          const lastAdopted = this.#rev;
+          await this.#loadTrees(conv);
+          this.#afterLoad();
+          // The GET may have raced newer writes: events seen on the stream
+          // above the adopted rev mean the body is already stale — go again.
+          // Unless the body rev did NOT move between rounds: then the seen-rev
+          // is from a PREVIOUS incarnation of this id (deleted + re-created —
+          // the rev line restarted) and chasing it would never converge; adopt
+          // the store's truth and let the stream correct us if we're wrong.
+          if ((this.#seenRevs.get(id) ?? 0) > this.#rev) {
+            if (round > 0 && this.#rev === lastAdopted) {
+              this.#seenRevs.set(id, this.#rev);
+              return;
+            }
+            this.#refetchAgain = true;
+          }
+          if (!this.#refetchAgain) return;
+        }
+        // Bounded: leave the next arriving event to re-trigger, but say so.
+        this.#flashNotice('Workspace is changing faster than it can be re-read — the view may lag briefly.');
       } finally {
         this.#refetching = false;
       }
@@ -858,7 +922,15 @@ class ConversationsStore {
     }
     // A draft only exists locally — skip the backend delete (it would 404).
     if (removingDraft) this.#draftId = null;
-    else await api.deleteWorkspace(id);
+    else {
+      // Our own delete's broadcast must not latch/notify THIS tab.
+      this.#selfDeleting = id;
+      try {
+        await api.deleteWorkspace(id);
+      } finally {
+        setTimeout(() => (this.#selfDeleting = null), 5000); // outlive the echo
+      }
+    }
     this.list = this.list.filter((c) => c.id !== id);
     if (this.activeId === id) {
       live.clearBuckets();
@@ -901,6 +973,12 @@ class ConversationsStore {
   async #loadTrees(conv: Workspace): Promise<void> {
     this.#loadFailed = false; // a body arrived — op emission is safe again…
     this.#rev = conv.rev ?? 0;
+    // Catch-up (the open/switch window): events for THIS workspace that arrived
+    // between the body GET and now were workspace-filtered while it wasn't
+    // active — if the stream has already shown a higher rev, the adopted body
+    // is stale (the tinkpg-send-finishing-as-you-open flow). The refetch loop
+    // owns convergence + the restarted-rev-line escape.
+    if ((this.#seenRevs.get(conv.id) ?? 0) > this.#rev) this.#refetchBody();
     // …unless a stored tree is PRESENT BUT MALFORMED: asTree renders it as an
     // empty panel, and persisting anything from this workspace would replace the
     // real (still-on-disk) data with that emptiness. Latch op emission off and
@@ -1047,6 +1125,26 @@ class ConversationsStore {
     live.reprimeClaim = () => this.#reprimeClaim();
     // The ops mirror: every accepted batch echoes here in rev order.
     live.onOps = (ev) => this.applyOpsEvent(ev as OpsEvent);
+    // Server-side deletes broadcast now — the client half of the review's
+    // "editing into the void" fix.
+    live.onWorkspaceDeleted = (id) => this.onWorkspaceDeleted(id);
+  }
+
+  /** A `workspace_deleted` broadcast: some other client (another tab, the CLI,
+   *  a pack replace) deleted a workspace. Drop it from the list; if it is OUR
+   *  open one, freeze the tab LOUDLY (content stays on screen, nothing
+   *  persists) rather than yanking the view — the minimal honest UX. Recovery:
+   *  any later event for the id (a re-create) triggers the loadFailed refetch
+   *  path, and a manual switch always works. */
+  onWorkspaceDeleted(id: string | null | undefined): void {
+    if (!id || id === this.#selfDeleting || id === this.#draftId) return;
+    this.#seenRevs.delete(id);
+    this.list = this.list.filter((c) => c.id !== id);
+    if (id !== this.activeId) return;
+    this.#loadFailed = true;
+    this.#flashNotice(
+      'This workspace was DELETED elsewhere — the view is frozen and changes are NOT being saved. Switch workspaces to continue.'
+    );
   }
 
   #onExternalDone(
@@ -1165,10 +1263,28 @@ class ConversationsStore {
    *  Application never re-emits (an echo must not echo) and never marks meta —
    *  it writes the reactive state directly. */
   applyOpsEvent(ev: OpsEvent | null | undefined): void {
-    if (!ev || ev.workspace !== this.activeId) return;
-    if (this.#loadFailed) return; // frozen view — refetch happens via reload, not echoes
-    if (typeof ev.rev !== 'number' || !Array.isArray(ev.ops)) return;
-    if (ev.rev <= this.#rev) return;
+    if (!ev || typeof ev.rev !== 'number' || typeof ev.workspace !== 'string') return;
+    // Track the highest rev seen per workspace BEFORE any filtering — the
+    // adoption paths (#loadTrees / a finishing refetch) use it to catch up on
+    // events that were correctly filtered or raced a GET.
+    if (ev.rev > (this.#seenRevs.get(ev.workspace) ?? 0)) this.#seenRevs.set(ev.workspace, ev.rev);
+    if (ev.workspace !== this.activeId) return;
+    if (this.#loadFailed) {
+      // A frozen tab getting an event for its workspace = a sign of life
+      // (e.g. deleted-then-recreated by a pack): try to recover, don't apply.
+      this.#refetchBody();
+      return;
+    }
+    if (!Array.isArray(ev.ops)) return;
+    if (ev.rev === this.#rev) return; // dup — already at this state
+    if (ev.rev < this.#rev) {
+      // BACKWARDS: the store's rev line restarted under us (workspace deleted
+      // and re-created — pack replace). The §2d rule: never drop these, the
+      // mirror is showing a corpse. A late-queued stale event costs one
+      // spurious refetch, which converges.
+      this.#refetchBody();
+      return;
+    }
     if (ev.rev !== this.#rev + 1) {
       this.#refetchBody();
       return;
@@ -1215,12 +1331,18 @@ class ConversationsStore {
     // Value-compare before assigning the Sets: an own echo carries what we
     // already hold, and a fresh Set ref for equal content re-renders every
     // reader (same class of churn the treeEq guard kills for replace echoes).
+    // And while OUR OWN meta write is on the wire, skip the two LWW Set fields
+    // entirely: its echo is a snapshot from BEFORE any toggle made during the
+    // RTT, and applying it would revert that toggle on screen — then persist
+    // the reversion when the toggle's own debounced #fields() fires.
     const setEq = (s: Set<string>, arr: string[]) =>
       s.size === arr.length && arr.every((x) => s.has(x));
-    if (Array.isArray(fields.reduced_panels) && !setEq(this.reducedPanels, fields.reduced_panels))
-      this.reducedPanels = new Set(fields.reduced_panels);
-    if (Array.isArray(fields.send_targets) && !setEq(this.sendTargets, fields.send_targets))
-      this.sendTargets = new Set(fields.send_targets);
+    if (this.#metaClaimsInFlight === 0) {
+      if (Array.isArray(fields.reduced_panels) && !setEq(this.reducedPanels, fields.reduced_panels))
+        this.reducedPanels = new Set(fields.reduced_panels);
+      if (Array.isArray(fields.send_targets) && !setEq(this.sendTargets, fields.send_targets))
+        this.sendTargets = new Set(fields.send_targets);
+    }
     if (Array.isArray(fields.seen_panels))
       for (const p of fields.seen_panels) this.#seenPanels.add(p);
     if (typeof fields.panel_seq === 'number')

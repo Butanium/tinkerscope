@@ -100,6 +100,8 @@ class LiveStore {
    *  The workspace store applies them in rev order — its filter, not ours: the
    *  event carries its own workspace stamp. */
   onOps: ((ev: unknown) => void) | null = null;
+  /** Fires on a `workspace_deleted` broadcast with the deleted id. */
+  onWorkspaceDeleted: ((id: string) => void) | null = null;
   /** Assigned by the workspace store: the open workspace's TRUE bus claim
    *  (layout from the store + tree echoes + system prompt). #reprime uses it
    *  instead of replaying the mirror's panels — re-priming from the mirror
@@ -225,6 +227,9 @@ class LiveStore {
         break;
       case 'ops':
         this.onOps?.(data);
+        break;
+      case 'workspace_deleted':
+        if (typeof data?.workspace === 'string') this.onWorkspaceDeleted?.(data.workspace);
         break;
       case 'chat_start': {
         const panel = (data?.panel ?? FIRST_PANEL_ID) as Panel;
