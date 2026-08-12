@@ -28,9 +28,15 @@ repo_root="$(git rev-parse --show-toplevel)"
 staged="$(git diff --cached --name-only --diff-filter=ACMR)"
 
 # ── 1) Raw NUL bytes in staged text sources ──────────────────────────────────
+# The script resolves against the WORKTREE's root first, but a worktree whose
+# branch predates the script would fail on a missing file — fall back to this
+# hook's own directory (core.hooksPath is absolute, so $0 lives in the main
+# checkout, which always has it). Bit the p1 worktrees on 2026-08-12.
+nul_script="$repo_root/.githooks/fix-nul-bytes.py"
+[ -f "$nul_script" ] || nul_script="$(cd "$(dirname "$0")" && pwd)/fix-nul-bytes.py"
 if [ -n "$staged" ]; then
 	if command -v python3 >/dev/null 2>&1; then
-		printf '%s\n' "$staged" | xargs -d '\n' -r python3 "$repo_root/.githooks/fix-nul-bytes.py"
+		printf '%s\n' "$staged" | xargs -d '\n' -r python3 "$nul_script"
 	else
 		# Don't hard-block a commit over a missing interpreter — say so instead.
 		echo "pre-commit: no python3 on PATH — skipping the NUL-byte check" >&2
