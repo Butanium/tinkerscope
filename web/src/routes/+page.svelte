@@ -43,7 +43,7 @@
   import HelpModal from '$lib/HelpModal.svelte';
   import SearchPalette from '$lib/SearchPalette.svelte';
   import { reveal } from '$lib/reveal.svelte';
-  import { selectPathTo } from '$lib/tree';
+  import { selectPathTo, selectedDiffOps, opNode } from '$lib/tree';
   import Icon from '$lib/Icon.svelte';
   import PickerDropdown from '$lib/PickerDropdown.svelte';
   import SplitChip from '$lib/SplitChip.svelte';
@@ -633,7 +633,9 @@
         branchFromRoot,
         branchFromRoot && threadSystemActive ? threadSystemInput.trim() : undefined
       );
-      ws.setTree(p.panel, tree);
+      ws.setTree(p.panel, tree, {
+        ops: [{ op: 'add_nodes', nodes: [opNode(tree, nodeId)], select: true }]
+      });
       const msgs = activeMessages(ws.treeFor(p.panel)) as ChatMessage[];
       chat.clearPanelBucket(p.panel);
       const { fireMsgs, prefill } = withPrefill(msgs);
@@ -655,7 +657,9 @@
     // branch-from-start is a main-composer-only affordance (locked decision).
     samplesOpen[panel] = null; // same reason as sendMessage: the reply lands below the hidden region
     const { tree, nodeId } = appendUserTurn(ws.treeFor(panel), text);
-    ws.setTree(panel, tree);
+    ws.setTree(panel, tree, {
+      ops: [{ op: 'add_nodes', nodes: [opNode(tree, nodeId)], select: true }]
+    });
     const msgs = activeMessages(ws.treeFor(panel)) as ChatMessage[];
     chat.clearPanelBucket(panel);
     const { fireMsgs, prefill } = withPrefill(msgs);
@@ -1397,7 +1401,7 @@
     const t = ws.treeFor(panel);
     if (!t.nodes[nodeId]) return; // deleted since the link/search was minted
     const next = selectPathTo(t, nodeId);
-    if (next !== t) ws.setTree(panel, next);
+    if (next !== t) ws.setTree(panel, next, { ops: selectedDiffOps(t, next) });
     await tick();
     revealSearchRow(panel, nodeId, field);
     // The ?w= effect snapAlls to the bottom when ITS switch resolves, which can

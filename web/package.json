@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
-    "test": "bash -c 'set -e; for t in src/lib/*.test.ts; do node \"$t\"; done'"
+    "test": "bash -c 'set -e; for t in src/lib/*.test.ts src/lib/*.test.mjs; do node \"$t\"; done'"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.0",

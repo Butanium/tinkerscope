@@ -36,9 +36,10 @@ import type {
   WorkspaceSummary,
   NodeBlobs,
   HighlightRule,
-  PanelLayout
+  PanelLayout,
+  WorkspaceOp
 } from './types';
-import type { ConvTree } from './tree';
+import { applyPanelOp, type ConvTree } from './tree';
 
 // ── baked reads ──────────────────────────────────────────────────────────────
 /** Fetch a baked file; a 404 yields `fallback` (the file is optional). */
@@ -407,6 +408,43 @@ const impl: ApiClient = {
     const existing = readOverlay<Record<string, NodeBlobs>>(K.blobs(id), {});
     writeOverlay(K.blobs(id), { ...blobs, ...existing });
     return { status: 'ok', id };
+  },
+  // Ops on a BAKED workspace are accepted and dropped (immutability rule, module
+  // header) — cycling through a published tree's branches is a select op now, and
+  // it must neither fail nor shadow the shipped content. Ops on a visitor-installed
+  // workspace apply through the same interpreter the live mirror uses and persist
+  // in the overlay, so "resume where you browsed" works for installed packs.
+  applyOps: async (id: string, ops: WorkspaceOp[]) => {
+    const cur = overlayBody(id);
+    if (!cur) return { rev: 0, results: ops.map(() => ({ ok: true, noop: true })) };
+    let trees: Record<string, ConvTree> = cur.trees ?? {};
+    let fields: Partial<Workspace> = {};
+    for (const op of ops) {
+      if (op.op !== 'set_meta') {
+        trees = applyPanelOp(trees, op);
+      } else {
+        const f: Record<string, unknown> = { ...op.fields };
+        // Same merge discipline as the server: monotone counter, union ledger.
+        if ('panel_seq' in f)
+          f.panel_seq = Math.max(cur.panel_seq ?? 0, (f.panel_seq as number) ?? 0);
+        if ('seen_panels' in f) {
+          const merged = [...(cur.seen_panels ?? [])];
+          for (const x of (f.seen_panels as string[]) ?? []) if (!merged.includes(x)) merged.push(x);
+          f.seen_panels = merged;
+        }
+        fields = { ...fields, ...f };
+      }
+    }
+    // Fresh folds carry heavy fields inline on the op nodes — split them into
+    // overlay blobs exactly as the server's upsert would (write-once: keep prior).
+    const [light, blobs] = splitTrees(trees);
+    const rev = (cur.rev ?? 0) + 1;
+    saveOverlayBody({ ...cur, ...fields, trees: light, rev, updated_at: nowIso() });
+    if (Object.keys(blobs).length) {
+      const existing = readOverlay<Record<string, NodeBlobs>>(K.blobs(id), {});
+      writeOverlay(K.blobs(id), { ...blobs, ...existing });
+    }
+    return { rev, results: ops.map(() => ({ ok: true })) };
   },
   deleteWorkspace: async (id: string) => {
     if (!isOverlay(id)) throw new Error('read-only site: cannot delete a shipped workspace');

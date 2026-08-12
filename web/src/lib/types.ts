@@ -1,8 +1,9 @@
 // Types mirroring the tinkerscope backend API (see docs/API_CONTRACT.md).
 
-import type { ConvTree, TokenLogprob } from './tree';
+import type { ConvTree, TokenLogprob, TreeOp, PanelOp } from './tree';
 
-export type { TokenLogprob };
+export type { TokenLogprob, TreeOp, PanelOp };
+export type { OpNode } from './tree';
 
 export type Checkpoint = {
   name: string;
@@ -255,6 +256,35 @@ export type ChatRequest = {
   workspace_id?: string | null;
 };
 
+/** Workspace-level fields that accompany every meta write (set_meta / PATCH).
+ *  Was save-plan.ts's ConvFields; lives here since the ops cutover retired it. */
+export type ConvFields = {
+  system_prompt: string | null;
+  /** null = legacy/underived (readers fall back to text presence). */
+  system_enabled: boolean | null;
+  panels: PanelLayout[];
+  reduced_panels: string[];
+  send_targets: string[];
+  seen_panels: string[];
+  /** Monotonic panel-id counter (see ./panel-id.ts). */
+  panel_seq: number;
+};
+
+/** set_meta's payload: any subset of the meta fields (+ name). Field-wise LWW
+ *  server-side, except panel_seq (monotone max) and seen_panels (union). */
+export type SetMetaFields = Partial<ConvFields> & { name?: string };
+
+/** One workspace mutation on the wire — POST /api/workspaces/{id}/ops and the
+ *  bus `ops` echo alike (docs/HANDOFF_SERVER_AUTHORITY.md §4.1). Panel-level ops
+ *  (incl. copy_tree = the whole-tree keep-ids clone, and replace_tree null =
+ *  drop the panel's tree) are tree.ts's PanelOp; set_meta is the store's. */
+export type WorkspaceOp = PanelOp | { op: 'set_meta'; fields: SetMetaFields };
+
+export type OpsResponse = { rev: number; results: { ok: boolean; noop?: boolean }[] };
+
+/** The bus `ops` event: one accepted batch, light node bodies only. */
+export type OpsEvent = { workspace: string; rev: number; ops: WorkspaceOp[] };
+
 /** What `GET /api/workspaces` returns per workspace (storage v2): the
  *  sidebar/list projection — NO trees. The full body (trees included, blobs
  *  excluded) is fetched per-workspace via `GET /api/workspaces/{id}`. */
@@ -266,6 +296,8 @@ export type WorkspaceSummary = {
   /** Per-workspace panel layout — present so "new workspace inherits the
    *  current model set" works without fetching the body. Absent on legacy rows. */
   panels?: PanelLayout[];
+  /** Per-workspace mutation counter (ops protocol). Absent on legacy rows ⇒ 0. */
+  rev?: number;
 };
 
 /** One node-level hit from GET /api/search (see `api/search.py`): the node's
@@ -353,6 +385,10 @@ export type Workspace = {
    *  workspace, so a `panel:node` handle can't re-point onto a different model.
    *  Absent on workspaces saved before it existed ⇒ seeded by `highestPanelSeq`. */
   panel_seq?: number;
+  /** Per-workspace mutation counter, bumped by the server on every write channel
+   *  (ops / PATCH / create / pack apply). The mirror applies bus `ops` events in
+   *  rev order and refetches on any gap. Absent on legacy bodies ⇒ 0. */
+  rev?: number;
   created_at: string;
   updated_at: string;
 };

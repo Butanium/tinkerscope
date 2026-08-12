@@ -19,16 +19,26 @@ import type {
   SearchResponse
 } from './types';
 import type { ConvTree } from './tree';
-import type { ConvFields } from './save-plan';
+import type { ConvFields, WorkspaceOp, OpsResponse } from './types';
 import { isStatic } from './static-mode';
 import { staticApi, staticSse } from './api-static';
+
+/** An HTTP error with its status attached — the ops emitter's retry policy
+ *  branches on it (5xx = maybe-never-arrived, retry; 4xx = rejected, refetch). */
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
 
 async function j<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(path, {
     ...init,
     headers: { 'content-type': 'application/json', ...(init?.headers || {}) }
   });
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}: ${await r.text()}`);
+  if (!r.ok) throw new ApiError(r.status, `${r.status} ${r.statusText}: ${await r.text()}`);
   return r.json() as Promise<T>;
 }
 
@@ -127,6 +137,8 @@ const httpApi = {
       method: 'PATCH',
       body: JSON.stringify(patch)
     }),
+  /** @deprecated the ops cutover replaced the PUT save path (HANDOFF_SERVER_AUTHORITY
+   *  §4.5); kept one transition window for the server's stale-tab endpoint parity. */
   saveWorkspaceTree: (
     id: string,
     body: ConvFields & { trees: Record<string, ConvTree>; dropped_trees: string[] }
@@ -134,6 +146,14 @@ const httpApi = {
     j<{ status: string; id: string }>(`/api/workspaces/${encodeURIComponent(id)}/tree`, {
       method: 'PUT',
       body: JSON.stringify(body)
+    }),
+  // The ops protocol: one atomic batch of small idempotent mutations. 409 = some
+  // op was structurally invalid (nothing applied — refetch); 5xx/transport = the
+  // batch may never have arrived (idempotent replay is safe — retry).
+  applyOps: (id: string, ops: WorkspaceOp[]) =>
+    j<OpsResponse>(`/api/workspaces/${encodeURIComponent(id)}/ops`, {
+      method: 'POST',
+      body: JSON.stringify({ ops })
     }),
   deleteWorkspace: (id: string) =>
     j<{ status: string }>(`/api/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' }),
@@ -206,6 +226,7 @@ export function sse(
   for (const evt of [
     'snapshot',
     'patch',
+    'ops',
     'chat_start',
     'delta',
     'sample',

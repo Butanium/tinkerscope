@@ -20,7 +20,7 @@ import { live } from './state.svelte';
 import { workspaces as ws } from './workspaces.svelte';
 import { nodeBlobs } from './node-blobs.svelte';
 import { api } from './api';
-import { foldAssistant, threadSystemAt, type SampleLike } from './tree';
+import { foldAssistant, threadSystemAt, opNode, heavyNodeIds, lightenTree, type SampleLike } from './tree';
 import type { Panel, ChatMessage, ChatRequest, SampleData } from './types';
 
 /** Sampling params for one fire, assembled by the caller from shared state + the
@@ -150,17 +150,23 @@ class ChatStore {
     // fold rather than graft foreign samples; the streamed partials stay visible.
     if (bucket && bucket.chat_id === data.chat_id && bucket.samples.some((s) => s)) {
       const folded = this.#foldSamples(bucket.samples, ctx);
-      if (folded.length) {
-        const { tree, ids } = foldAssistant(ws.treeFor(panel), ctx.userParentId, folded);
+      const { tree, ids } = folded.length
+        ? foldAssistant(ws.treeFor(panel), ctx.userParentId, folded)
+        : { tree: ws.treeFor(panel), ids: [] as string[] };
+      if (ids.length) {
         // Seed the per-node blob cache from the fresh nodes (we have the data in
-        // hand — no fetch ever needed for this session's own turns). The nodes
-        // keep the heavy fields INLINE too: the next dirty-panel PUT ships them
-        // once and the server strips them into blobs (docs/STORAGE_V2.md §2.4).
+        // hand — no fetch ever needed for this session's own turns), and ship the
+        // heavy fields ON the add_nodes op for the server to blob. The TREE keeps
+        // light nodes from birth (has_* flags) — no post-save lightening pass.
         for (const id of ids) {
           const n = tree.nodes[id];
           nodeBlobs.seed(id, { token_logprobs: n.token_logprobs, raw_meta: n.raw_meta });
         }
-        ws.setTree(panel, tree);
+        const opNodes = ids.map((id) => opNode(tree, id));
+        const light = lightenTree(tree, heavyNodeIds(tree));
+        ws.setTree(panel, light ?? tree, {
+          ops: [{ op: 'add_nodes', nodes: opNodes, select: true }]
+        });
       }
     }
     ws.endToken(token);

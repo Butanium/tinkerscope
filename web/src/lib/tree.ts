@@ -762,6 +762,40 @@ export function applyTreeOp(t0: ConvTree, op: TreeOp): ConvTree {
   return deleteSubtree(t0, op.node_id); // missing id → same-ref no-op inside
 }
 
+/** The map-level half of the vocabulary: tree-level ops stamped with their
+ *  panel, plus the two whole-tree ops. set_meta is store-side (it touches
+ *  workspace fields, not trees). Shared by the live mirror's echo application,
+ *  the static transport's overlay writes, and the fixture-vector runner — one
+ *  interpreter, so they can't drift. */
+export type PanelOp =
+  | (TreeOp & { panel: string })
+  | { op: 'copy_tree'; from_panel: string; to_panel: string }
+  | { op: 'replace_tree'; panel: string; tree: ConvTree | null };
+
+/** Apply one panel-level op to a trees map. Same-ref return on no-ops. */
+export function applyPanelOp(
+  trees: Record<string, ConvTree>,
+  op: PanelOp
+): Record<string, ConvTree> {
+  if (op.op === 'copy_tree') {
+    const src = trees[op.from_panel];
+    if (!src) throw new OpRejected(`copy_tree: unknown source panel ${op.from_panel}`);
+    return { ...trees, [op.to_panel]: structuredClone(src) };
+  }
+  if (op.op === 'replace_tree') {
+    if (op.tree === null) {
+      if (!(op.panel in trees)) return trees;
+      const next = { ...trees };
+      delete next[op.panel];
+      return next;
+    }
+    return { ...trees, [op.panel]: op.tree };
+  }
+  const cur = trees[op.panel] ?? emptyTree();
+  const next = applyTreeOp(cur, op);
+  return next === cur ? trees : { ...trees, [op.panel]: next };
+}
+
 // ── post-fold lightening (storage v2; was save-plan.ts) ─────────────
 // Fresh folds carry token_logprobs/raw_meta INLINE; the add_nodes op ships them
 // once for the server to blob, and the tree keeps LIGHT nodes from birth (the

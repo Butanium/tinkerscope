@@ -13,8 +13,8 @@
 //   - no dirt              → none
 // The caller owns capture semantics (refs at schedule time) and retry/re-merge.
 
-import type { ConvTree, TreeNode } from './tree.ts';
-import type { PanelLayout } from './types.ts';
+import type { ConvTree, TreeNode } from '../tree.ts';
+import type { PanelLayout } from '../types.ts';
 
 /** Workspace-level fields that accompany EVERY save (cheap, authoritative). */
 export type ConvFields = {

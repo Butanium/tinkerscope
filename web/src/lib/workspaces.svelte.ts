@@ -27,28 +27,47 @@ import { live } from './state.svelte';
 import { api } from './api';
 import { nodeBlobs } from './node-blobs.svelte';
 import { undo } from './undo.svelte';
-import { planSave, heavyNodeIds, lightenTree } from './save-plan';
+import { opsEmitter } from './ops.svelte';
 import { FIRST_PANEL_ID, highestPanelSeq, legacyLayout, mintPanelId as mintId } from './panel-id';
 import {
   emptyTree,
   activeMessages,
   reconcileExternal,
   selectedChildId,
+  applyPanelOp,
   ROOT,
   type ConvTree,
-  type Msg
+  type Msg,
+  type TreeOp
 } from './tree';
 import type {
   Workspace,
   WorkspaceSummary,
   Panel,
   PanelLayout,
-  StatePatch
+  StatePatch,
+  WorkspaceOp,
+  OpsEvent,
+  ConvFields,
+  SetMetaFields
 } from './types';
 
 function asTree(x: unknown): ConvTree {
   const t = x as ConvTree | undefined | null;
   return t && t.nodes && Array.isArray(t.rootChildren) ? t : emptyTree();
+}
+
+/** Distinguish "no tree" from "unreadable tree" (ideas/astree-silent-emptytree):
+ *  absent and `{}` (the server's create seed) are normal empties; anything else
+ *  that fails the shape check is PRESENT BUT MALFORMED — rendering it as empty
+ *  and then persisting would replace the real data with emptiness, so the load
+ *  path latches saves off instead. */
+function treeUnreadable(x: unknown): boolean {
+  if (x == null) return false;
+  if (typeof x !== 'object') return true;
+  if (!Object.keys(x as object).length) return false;
+  const t = x as Partial<ConvTree>;
+  return !(t.nodes && Array.isArray(t.rootChildren));
 }
 
 function msgsEqual(a: Msg[], b: Msg[]): boolean {
@@ -134,34 +153,21 @@ class ConversationsStore {
    *  disabled after a generation. Keep this in lockstep with every Set mutation. */
   #busy = $state(false);
 
-  // ── save dirt (capture-at-mark; flush-on-switch) ──────────────────
-  /** Dirty panels: id → the tree ref as committed (refs are immutable, so this
-   *  IS the capture — no copy). Merged across marks; drained per save. */
-  #dirtyTrees = new Map<string, ConvTree>();
-  /** Panels dropped since the last save (server deletes their stored trees). */
-  #droppedTrees = new Set<string>();
-  /** Workspace-level (non-tree) change pending: panel layout / send-targets /
-   *  folds / system prompt / seen bookkeeping. Ships as a PATCH when no tree
-   *  dirt rides along. */
-  #layoutDirty = false;
-  /** The workspace the accumulated dirt belongs to. Flush-on-switch keeps it
-   *  equal to activeId whenever dirt exists. */
-  #pendingId: string | null = null;
-  #saveTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Serializes #doSave runs (a materializing CREATE must not race a follow-up
-   *  partial PUT of the same workspace). */
-  #saveChain: Promise<void> = Promise.resolve();
-  /** Guards a mid-session body-fetch failure (see remove()): the store shows an
-   *  empty workspace it could not load — marking dirt then would PUT that
-   *  emptiness over the stored data, so saves latch off until a successful load. */
+  // ── ops persistence (HANDOFF_SERVER_AUTHORITY §4.2 — the mirror) ──
+  /** The open workspace's rev as of the last body fetch / contiguously-applied
+   *  ops event. Advances ONLY via events or a body fetch — never from an op
+   *  POST's response (an interleaved other-tab op would be silently skipped). */
+  #rev = 0;
+  /** Meta (set_meta) debounce — layout toggles come in bursts; tree ops emit
+   *  immediately (they're small and order-sensitive). */
+  #metaTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Single-flight guard for the desync refetch. */
+  #refetching = false;
+  /** Guards a mid-session body-fetch failure (see remove()) AND a present-but-
+   *  malformed stored tree (treeUnreadable): the store would be showing emptiness
+   *  it did not author — emitting ops then would persist that emptiness over the
+   *  stored data, so op emission latches off until a successful load. */
   #loadFailed = false;
-  /** Set when the open workspace was loaded through the LEGACY {tree,
-   *  compare_tree} read-shim (pre-multipanel storage; the v2 migration preserves
-   *  that shape). Its first structural save must ship the FULL trees map: the
-   *  server's self-heal drops the legacy keys and keeps only the `trees` sent,
-   *  so a partial upsert would silently lose the un-sent panel. Cleared once a
-   *  tree save lands (the workspace is a normal `trees` conv from then on). */
-  #fullTreeSaveNeeded = false;
   /** Supersedes an in-flight switchTo body fetch when a newer switch starts. */
   #switchSeq = 0;
   #noticeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -210,14 +216,43 @@ class ConversationsStore {
     this.#busy = this.#ownTokens.size > 0;
   }
 
+  constructor() {
+    opsEmitter.configure({
+      ensureMaterialized: (id) => this.#materialize(id),
+      onDesync: (id, why) => this.#desync(id, why),
+      notice: (msg) => this.#flashNotice(msg)
+    });
+  }
+
   // ── the single commit entry ──────────────────────────────────────
   /** Commit a new tree for a panel: update reactive state, mirror the active
    *  path into PlaygroundState.messages (so the CLI/sampler see it), and
-   *  schedule a debounced save of THIS panel. */
-  setTree(panel: Panel, next: ConvTree, persist = true): void {
+   *  persist as ops. `opts.ops` = the precise tree-level ops that produced
+   *  `next` (panel-stamped here); WITHOUT them the whole panel tree ships as a
+   *  replace_tree — the fallback that guarantees no call-site can silently skip
+   *  persistence (undo restores use it on purpose: "put back exactly this"). */
+  setTree(panel: Panel, next: ConvTree, opts?: { persist?: boolean; ops?: TreeOp[] }): void {
     this.trees = { ...this.trees, [panel]: next };
     this.#mirror();
-    if (persist) this.#markTree(panel);
+    if (opts?.persist === false) return;
+    if (opts?.ops) {
+      if (opts.ops.length) this.#emit(opts.ops.map((o) => ({ ...o, panel })));
+    } else {
+      this.#emit([{ op: 'replace_tree', panel, tree: next }]);
+    }
+  }
+
+  /** THE op-emission gate: binds the batch to the ACTIVE workspace and drops it
+   *  when there is nothing safe to bind to (no workspace, or the load-failed
+   *  latch — persisting would ship emptiness we did not author). */
+  #emit(ops: WorkspaceOp[]): void {
+    const id = this.activeId;
+    if (!id) return;
+    if (this.#loadFailed) {
+      console.warn('workspace failed to load — change NOT persisted');
+      return;
+    }
+    opsEmitter.emit(id, ops);
   }
 
   /** True when the bus currently describes OUR workspace. A tab that isn't the
@@ -296,7 +331,7 @@ class ConversationsStore {
       run_id: p.run_id ?? null,
       checkpoint: p.checkpoint ?? null
     }));
-    this.#markLayout();
+    this.save();
     this.#layoutClaimsInFlight++;
     api
       .setState(this.#ownPatch({ panels: this.#busPanels() }))
@@ -335,7 +370,7 @@ class ConversationsStore {
       });
     if (same) return;
     this.layout = next;
-    this.#markLayout();
+    this.save();
   }
 
   /** The store's half of a bus re-prime (state.svelte.ts `reprimeClaim`): the
@@ -392,7 +427,9 @@ class ConversationsStore {
   duplicateTo(srcPanel: Panel, dstPanel: Panel): void {
     this.trees = { ...this.trees, [dstPanel]: structuredClone(this.treeFor(srcPanel)) };
     this.#mirror();
-    this.#markTree(dstPanel);
+    // Keep-ids clone server-side — no tree bytes travel, and shared ids preserve
+    // cross-panel blob sharing (workspace_store keys blobs by node id).
+    this.#emit([{ op: 'copy_tree', from_panel: srcPanel, to_panel: dstPanel }]);
   }
 
   /** Seed a panel with an EMPTY thread (Shift+add panel = blank, vs duplicateTo's
@@ -400,7 +437,7 @@ class ConversationsStore {
   freshTree(panel: Panel): void {
     this.trees = { ...this.trees, [panel]: emptyTree() };
     this.#mirror();
-    this.#markTree(panel);
+    this.#emit([{ op: 'replace_tree', panel, tree: emptyTree() }]);
   }
 
   /** Drop a panel's tree (on panel removal). The LAST tree is never dropped —
@@ -411,7 +448,7 @@ class ConversationsStore {
     delete next[panel];
     this.trees = next;
     this.#mirror();
-    this.#markDropped(panel);
+    this.#emit([{ op: 'replace_tree', panel, tree: null }]);
   }
 
   // ── panel UI (folded / send-targets), persisted with the workspace ──
@@ -505,8 +542,12 @@ class ConversationsStore {
     const prev = Object.keys(this.trees);
     this.trees = Object.fromEntries(ids.map((id) => [id, emptyTree()]));
     if (mark) {
-      for (const id of ids) this.#markTree(id);
-      for (const p of prev) if (!ids.includes(p)) this.#markDropped(p);
+      this.#emit([
+        ...ids.map((id): WorkspaceOp => ({ op: 'replace_tree', panel: id, tree: emptyTree() })),
+        ...prev
+          .filter((p) => !ids.includes(p))
+          .map((p): WorkspaceOp => ({ op: 'replace_tree', panel: p, tree: null }))
+      ]);
     }
     return api
       .setState(
@@ -519,90 +560,34 @@ class ConversationsStore {
       .catch(() => {});
   }
 
-  // ── persistence (dirty-panel granular; flush-on-switch) ───────────
+  // ── persistence (ops emission; flush-on-switch) ───────────────────
   /** Public save = a workspace-LEVEL (non-tree) change: panel layout, model
-   *  selection, send-targets, folds, system prompt, seen bookkeeping. Tree dirt
-   *  is marked by setTree/duplicateTo/freshTree/dropTree themselves. */
+   *  selection, send-targets, folds, system prompt, seen bookkeeping. Debounced
+   *  into ONE set_meta op (layout toggles come in bursts); tree mutations emit
+   *  their own ops at the call site. */
   save(): void {
-    this.#markLayout();
+    if (!this.activeId || this.#loadFailed) return;
+    if (this.#metaTimer) clearTimeout(this.#metaTimer);
+    this.#metaTimer = setTimeout(() => this.#flushMeta(), 400);
   }
 
-  #markTree(panel: Panel): void {
-    if (!this.#beginDirt()) return;
-    this.#droppedTrees.delete(panel);
-    this.#dirtyTrees.set(panel, this.treeFor(panel));
-    this.#schedule();
-  }
-  #markDropped(panel: Panel): void {
-    if (!this.#beginDirt()) return;
-    this.#dirtyTrees.delete(panel);
-    this.#droppedTrees.add(panel);
-    this.#schedule();
-  }
-  #markLayout(): void {
-    if (!this.#beginDirt()) return;
-    this.#layoutDirty = true;
-    this.#schedule();
-  }
-  /** Common mark preamble: bind the dirt to the active workspace. Returns
-   *  false when there is nothing to bind to (no active workspace) or the
-   *  store is in the failed-load latch (saving would clobber stored data). */
-  #beginDirt(): boolean {
-    const id = this.activeId;
-    if (!id) return false;
-    if (this.#loadFailed) {
-      console.warn('workspace failed to load — change NOT scheduled for save');
-      return false;
-    }
-    if (this.#pendingId && this.#pendingId !== id) {
-      // Flush-on-switch makes this unreachable. If it ever happens, DROP the
-      // stale dirt loudly: tree refs from another workspace saved under this
-      // id would corrupt it — losing a 400ms edit window is the lesser harm.
-      console.warn('save dirt spans workspaces — dropping stale dirt for', this.#pendingId);
-      this.#dirtyTrees = new Map();
-      this.#droppedTrees = new Set();
-      this.#layoutDirty = false;
-    }
-    this.#pendingId = id;
-    return true;
-  }
-  #hasDirt(): boolean {
-    return (
-      this.#pendingId !== null &&
-      (this.#dirtyTrees.size > 0 || this.#droppedTrees.size > 0 || this.#layoutDirty)
-    );
-  }
-  #schedule(): void {
-    if (this.#saveTimer) clearTimeout(this.#saveTimer);
-    this.#saveTimer = setTimeout(() => void this.#runSave(), 400);
-  }
-  /** Enqueue one save pass on the chain (never concurrent with another). */
-  #runSave(): Promise<void> {
-    this.#saveChain = this.#saveChain.then(() => this.#doSave());
-    return this.#saveChain;
+  #flushMeta(): void {
+    if (this.#metaTimer) {
+      clearTimeout(this.#metaTimer);
+      this.#metaTimer = null;
+    } else return; // nothing pending
+    this.#emit([{ op: 'set_meta', fields: this.#fields() }]);
   }
 
-  async #doSave(): Promise<void> {
-    this.#saveTimer = null;
-    if (!this.#hasDirt()) return;
-    const id = this.#pendingId!;
-    // Drain the dirt into locals — a change landing during the awaits below
-    // re-marks cleanly and ships with the NEXT pass.
-    const dirtyTrees = this.#dirtyTrees;
-    const droppedTrees = this.#droppedTrees;
-    const layoutDirty = this.#layoutDirty;
-    this.#dirtyTrees = new Map();
-    this.#droppedTrees = new Set();
-    this.#layoutDirty = false;
-    this.#pendingId = null;
-    // Workspace-level fields are read at FIRE time; flush-on-switch guarantees
-    // they still belong to `id` here. `panels` comes from the STORE-OWNED
-    // layout — never from live.state, whose panels follow a process-global bus
-    // that can transiently describe another tab's workspace (reading it here is
-    // exactly how two cross-tab layout clobbers reached disk). system_prompt
-    // stays a mirror read: mergeBusState protects it per-workspace, and the
-    // +page patch flush (#preSwitch) settles it before any transition.
-    const fields = {
+  /** The workspace-level field set, read at EMIT time; flush-on-switch keeps it
+   *  bound to the right workspace. `panels` comes from the STORE-OWNED layout —
+   *  never from live.state, whose panels follow a process-global bus that can
+   *  transiently describe another tab's workspace (reading it at save time is
+   *  exactly how two cross-tab layout clobbers reached disk). system_prompt
+   *  stays a mirror read: mergeBusState protects it per-workspace, and the
+   *  +page patch flush (#preSwitch) settles it before any transition. */
+  #fields(): ConvFields {
+    return {
       system_prompt: live.state?.system_prompt ?? null,
       system_enabled: live.state?.system_enabled ?? null,
       panels: this.layout.map((p) => ({
@@ -615,92 +600,65 @@ class ConversationsStore {
       seen_panels: [...this.#seenPanels],
       panel_seq: this.#panelSeq
     };
-    // A pending save IS the first real change to an unsaved draft → materialize it
-    // on the backend (create with the draft's id, FULL current trees) instead of a
-    // partial save (which would 404). Clear #draftId SYNCHRONOUSLY (before the
-    // await) so a racing pass can't double-create; restore it on failure so a
-    // retry still creates it.
-    const materializing = id === this.#draftId;
-    if (materializing) this.#draftId = null;
+  }
+
+  /** opsEmitter seam: a batch for an unsaved DRAFT materializes it first (POST
+   *  create with the draft's id + the CURRENT trees — the batch then replays
+   *  idempotently over what the create shipped). Runs inside the emitter chain,
+   *  which flush-on-switch drains before any transition, so `this.trees` still
+   *  belongs to `id` here. Throws on failure (the emitter takes the desync
+   *  path); #draftId is restored so a retry still creates it. */
+  async #materialize(id: string): Promise<void> {
+    if (id !== this.#draftId) return;
+    this.#draftId = null;
     try {
-      if (materializing) {
-        const name = this.list.find((c) => c.id === id)?.name ?? 'Untitled';
-        const shipped = { ...this.trees }; // refs at fire time — reused for lightening
-        await api.createWorkspace({ id, name, ...fields, trees: shipped });
-        this.#lightenShipped(id, shipped);
-      } else {
-        // First structural save of a legacy-shape workspace: expand to ALL
-        // trees (see #fullTreeSaveNeeded) — refs at fire time, activeId === id
-        // here by flush discipline. Layout-only PATCHes don't clear the flag
-        // (they don't touch trees, so the legacy keys survive them).
-        const expand = this.#fullTreeSaveNeeded && (dirtyTrees.size > 0 || droppedTrees.size > 0);
-        const effectiveDirty = expand
-          ? new Map([...Object.entries(this.trees), ...dirtyTrees])
-          : dirtyTrees;
-        const plan = planSave({ dirtyTrees: effectiveDirty, droppedTrees, layoutDirty }, fields);
-        if (plan.kind === 'put') {
-          await api.saveWorkspaceTree(id, plan.body);
-          this.#lightenShipped(id, plan.body.trees);
-        } else if (plan.kind === 'patch') await api.patchWorkspace(id, plan.body);
-        if (expand) this.#fullTreeSaveNeeded = false;
-      }
+      const name = this.list.find((c) => c.id === id)?.name ?? 'Untitled';
+      const body = await api.createWorkspace({ id, name, ...this.#fields(), trees: { ...this.trees } });
+      // The create is this mirror's rev BASELINE (same role as a body GET) —
+      // ops events for the follow-up batches arrive contiguously above it.
+      if (this.activeId === id) this.#rev = body.rev ?? 0;
       this.list = this.list.map((c) =>
-        c.id === id ? { ...c, updated_at: new Date().toISOString() } : c
+        c.id === id ? { ...c, updated_at: body.updated_at ?? c.updated_at } : c
       );
     } catch (e) {
-      if (materializing) this.#draftId = id; // not persisted — still a draft
-      // Re-merge the drained dirt (unless a newer mark superseded it) so the next
-      // save / flush-on-switch retries — a silently-lost PARTIAL save would never
-      // be re-shipped by later unrelated edits.
-      for (const [p, t] of dirtyTrees)
-        if (!this.#dirtyTrees.has(p) && !this.#droppedTrees.has(p)) this.#dirtyTrees.set(p, t);
-      for (const p of droppedTrees) if (!this.#dirtyTrees.has(p)) this.#droppedTrees.add(p);
-      if (layoutDirty) this.#layoutDirty = true;
-      if (!this.#pendingId) this.#pendingId = id;
-      console.warn('workspace save failed', e);
+      this.#draftId = id;
+      throw e;
     }
   }
 
-  /** Post-save lightening (storage v2): the heavy fields that just shipped are
-   *  now server-side write-once blobs, so their inline copies are pure re-upload
-   *  weight — without this, every later save of the same panel re-serializes
-   *  the whole session's logprobs (megabytes per n=30 round) on the main thread.
-   *  Seeds the blob cache from the shipped payloads FIRST (the token view keeps
-   *  working instantly, zero fetches), then strips exactly the shipped node ids
-   *  from the CURRENT trees. One batched assignment; NO #mirror (active-path
-   *  role/content unchanged) and NO dirt marks (a lighten must never schedule a
-   *  save, or save→lighten→save would loop). Runs synchronously after the await
-   *  so it lands before flush()-gated transitions proceed. Nodes that gained
-   *  heavies DURING the await (a mid-save fold) have new ids ∉ shipped —
-   *  untouched, they ship with their own pass. On save FAILURE this never runs:
-   *  the re-merged dirt re-ships the heavies, which is the data-safety path. */
-  #lightenShipped(id: string, shipped: Record<string, ConvTree>): void {
-    if (this.activeId !== id) return; // workspace swapped mid-save — these trees are gone
-    let next: Record<string, ConvTree> | null = null;
-    for (const [panel, shippedTree] of Object.entries(shipped)) {
-      const cur = this.trees[panel];
-      if (!cur) continue; // panel dropped during the await
-      const ids = heavyNodeIds(shippedTree);
-      if (!ids.size) continue;
-      for (const nid of ids) {
-        const n = shippedTree.nodes[nid];
-        nodeBlobs.seed(nid, { token_logprobs: n.token_logprobs, raw_meta: n.raw_meta });
+  /** opsEmitter seam: a rejected batch / exhausted retries — the mirror may
+   *  have diverged from the store. Refetch the light body (single-flight). */
+  #desync(id: string, why: string): void {
+    console.warn(`workspace ${id} ops desync (${why}) — refetching`);
+    if (id === this.activeId) this.#refetchBody();
+  }
+
+  #refetchBody(): void {
+    if (this.#refetching) return;
+    this.#refetching = true;
+    void (async () => {
+      try {
+        // Let queued batches settle first — refetching UNDER a pending batch
+        // would briefly rewind the view to a body those ops haven't reached.
+        await opsEmitter.flush();
+        const id = this.activeId;
+        if (!id || id === this.#draftId) return;
+        const conv = await api.getWorkspace(id);
+        if (this.activeId !== id) return;
+        await this.#loadTrees(conv);
+        this.#afterLoad();
+      } catch (e) {
+        console.warn('workspace refetch failed', e);
+      } finally {
+        this.#refetching = false;
       }
-      const lightened = lightenTree(cur, ids);
-      if (lightened) (next ??= { ...this.trees })[panel] = lightened;
-    }
-    if (next) this.trees = next;
+    })();
   }
 
   async flush(): Promise<void> {
-    if (this.#saveTimer) {
-      clearTimeout(this.#saveTimer);
-      this.#saveTimer = null;
-    }
-    // Run pending dirt now, and in all cases let any in-flight pass settle —
-    // a transition must never overlap a save still on the wire.
-    if (this.#hasDirt()) await this.#runSave();
-    else await this.#saveChain;
+    this.#flushMeta();
+    // A transition must never overlap a batch still on the wire.
+    await opsEmitter.flush();
   }
 
   // ── load / switch / create / rename / remove ─────────────────────
@@ -773,7 +731,7 @@ class ConversationsStore {
     if (seq !== this.#switchSeq) return;
     // Edits made to the OLD workspace while the body was in flight: flush them
     // now, while activeId/live.state still belong to it.
-    if (this.#hasDirt()) await this.flush();
+    await this.flush();
     if (seq !== this.#switchSeq) return;
     live.clearBuckets();
     nodeBlobs.reset(id);
@@ -818,7 +776,7 @@ class ConversationsStore {
     this.#setActive(draft.id);
     this.#draftId = draft.id;
     this.#loadFailed = false;
-    this.#fullTreeSaveNeeded = false; // a draft is never legacy-shaped
+    this.#rev = 0;
     nodeBlobs.reset(draft.id);
     this.layout = layout.map((p) => ({
       id: p.id,
@@ -864,7 +822,7 @@ class ConversationsStore {
     if (id === this.#draftId) {
       // Unsaved draft: keep the name locally and materialize it (a rename IS a change).
       this.list = this.list.map((c) => (c.id === id ? { ...c, name } : c));
-      this.#markLayout();
+      this.save();
       return;
     }
     const updated = await api.patchWorkspace(id, { name });
@@ -937,36 +895,54 @@ class ConversationsStore {
    *  un-migrated saved workspace loads without losing a user-authored compare
    *  tree. asTree() returns emptyTree() on malformed input. */
   async #loadTrees(conv: Workspace): Promise<void> {
-    this.#loadFailed = false; // a body arrived — saves are safe again
-    // The cleaned layout we'll restore: drop every panel with no model
-    // (run_id == null). Such a panel can't sample anything — it's the inert "phantom"
-    // the resurrection bug used to mint, and earlier sessions baked some into saved
-    // layouts. Dropping them on load self-heals those workspaces (no per-conv manual
-    // delete). If EVERY panel is blank, keep the first one (a single blank panel is
-    // the empty-thread state — a workspace never opens with zero panels).
-    // Legacy convs (no stored layout) ⇒ null ⇒ keep whatever panels are shown.
+    this.#loadFailed = false; // a body arrived — op emission is safe again…
+    this.#rev = conv.rev ?? 0;
+    // …unless a stored tree is PRESENT BUT MALFORMED: asTree renders it as an
+    // empty panel, and persisting anything from this workspace would replace the
+    // real (still-on-disk) data with that emptiness. Latch op emission off and
+    // say so — a panel that refuses to save must be loud (ideas/astree-silent-emptytree).
+    const unreadable = [
+      ...Object.entries(conv.trees ?? {}).filter(([, t]) => treeUnreadable(t)).map(([pid]) => pid),
+      ...(!conv.trees && treeUnreadable(conv.tree) ? ['primary'] : []),
+      ...(!conv.trees && treeUnreadable(conv.compare_tree) ? ['compare'] : [])
+    ];
+    if (unreadable.length) {
+      this.#loadFailed = true;
+      this.#flashNotice(
+        `Panel ${unreadable.join(', ')}'s stored tree is unreadable — changes are NOT being saved. ` +
+          `The data is intact on disk; reload, or check the server logs.`
+      );
+    }
+    // The layout we restore self-heals PHANTOM rows — run_id null AND no tree
+    // content (mirrors the server's tree_ops.normalize_panels: a run_id-less
+    // panel WITH nodes is legitimate — an add-panel before a model pick, a
+    // trash-restored column). If every row is blank, keep the first (a single
+    // blank panel is the empty-thread state). Legacy convs (no stored layout)
+    // ⇒ null ⇒ keep whatever panels are shown.
+    const hasData = (pid: Panel) => {
+      const t = conv.trees?.[pid];
+      return !!t && typeof t === 'object' && !!(t as ConvTree).nodes && Object.keys((t as ConvTree).nodes).length > 0;
+    };
     let layout =
       Array.isArray(conv.panels) && conv.panels.length
-        ? conv.panels.filter((p) => p.run_id != null)
+        ? conv.panels.filter((p) => p.run_id != null || hasData(p.id))
         : null;
     if (layout && !layout.length) layout = [conv.panels![0]];
-    const keep = layout ? new Set(layout.map((p) => p.id)) : null;
 
     if (conv.trees && typeof conv.trees === 'object') {
-      this.#fullTreeSaveNeeded = false;
       const map: Record<string, ConvTree> = {};
+      // Orphan trees (panels outside the stored layout) are KEPT: the server is
+      // authoritative about the body now, and #mirror's layout filter is what
+      // prevents the phantom re-feed. Dropping them here made load disagree
+      // with refetch — and ate trash-restored columns.
       for (const [pid, t] of Object.entries(conv.trees)) map[pid] = asTree(t);
-      // Drop trees for panels not in the cleaned layout: a save can capture a tree
-      // for a since-removed (or now-dropped phantom) panel, and a lingering orphan
-      // tree is exactly what re-fed the phantom on every send.
-      if (keep) for (const pid of Object.keys(map)) if (!keep.has(pid)) delete map[pid];
       // A workspace always loads with ≥1 tree (blank first slot = empty thread).
       if (!Object.keys(map).length) map[layout?.[0]?.id ?? FIRST_PANEL_ID] = emptyTree();
       this.trees = map;
     } else {
-      // Legacy shape → the first structural save must ship the full map (partial
-      // upsert + the server's legacy-key self-heal would drop the other panel).
-      this.#fullTreeSaveNeeded = true;
+      // Legacy {tree, compare_tree} read-shim. Persistence-side the server
+      // normalizes the stored body on its first op (P1) — no full-map first
+      // save needed from here anymore.
       const map: Record<string, ConvTree> = { primary: asTree(conv.tree) };
       if (conv.compare_tree) map.compare = asTree(conv.compare_tree);
       this.trees = map;
@@ -1022,10 +998,13 @@ class ConversationsStore {
       for (const ps of live.state?.panels ?? []) {
         const echo = (ps.messages ?? []) as Msg[];
         const cur = this.trees[ps.id];
-        if (cur && echo.length && !msgsEqual(echo, activeMessages(cur)))
+        if (cur && echo.length && !msgsEqual(echo, activeMessages(cur))) {
           // The panel mirror's thread system travels with the echo (same patch),
           // so the stray turn folds under the right probe root.
-          this.trees = { ...this.trees, [ps.id]: reconcileExternal(cur, echo, ps.thread_system_prompt) };
+          const r = reconcileExternal(cur, echo, ps.thread_system_prompt);
+          this.trees = { ...this.trees, [ps.id]: r.tree };
+          if (r.ops.length) this.#emit(r.ops.map((o): WorkspaceOp => ({ ...o, panel: ps.id })));
+        }
       }
     }
     this.#mirror();
@@ -1062,6 +1041,8 @@ class ConversationsStore {
     // Bus re-prime after a server restart claims with OUR true layout, not the
     // mirror's panels (state.svelte.ts #reprime).
     live.reprimeClaim = () => this.#reprimeClaim();
+    // The ops mirror: every accepted batch echoes here in rev order.
+    live.onOps = (ev) => this.applyOpsEvent(ev as OpsEvent);
   }
 
   #onExternalDone(
@@ -1091,12 +1072,12 @@ class ConversationsStore {
     // The terminal event stamps the chat's resolved thread system prompt so the
     // fold lands on (or mints) the RIGHT root — same-content roots under
     // different prompts are distinct threads. Absent (legacy server) = unknown.
-    const next = reconcileExternal(cur, msgs, data?.thread_system_prompt);
+    const { tree: next, ops } = reconcileExternal(cur, msgs, data?.thread_system_prompt);
     if (next === cur) return; // idempotent — already represented + selected
     // Only a genuinely NEW root branch (divergent reset) hides the prior thread;
     // an in-place extend / re-select keeps it visible, so no notice for those.
     const newRoot = next.rootChildren.length > cur.rootChildren.length && cur.rootChildren.length > 0;
-    this.setTree(panel, next);
+    this.setTree(panel, next, { ops });
     if (newRoot)
       this.#flashNotice('Terminal started a new workspace — your previous thread is at ‹1/N› on the first message.');
   }
@@ -1126,7 +1107,9 @@ class ConversationsStore {
         const echo = (ps.messages ?? []) as Msg[];
         const cur = this.trees[ps.id];
         if (cur && echo.length && !msgsEqual(echo, activeMessages(cur))) {
-          this.trees = { ...this.trees, [ps.id]: reconcileExternal(cur, echo, ps.thread_system_prompt) };
+          const r = reconcileExternal(cur, echo, ps.thread_system_prompt);
+          this.trees = { ...this.trees, [ps.id]: r.tree };
+          if (r.ops.length) this.#emit(r.ops.map((o): WorkspaceOp => ({ ...o, panel: ps.id })));
           changed = true;
         }
       }
@@ -1145,6 +1128,92 @@ class ConversationsStore {
       this.#ownTokens.clear();
       this.#busy = false;
     }
+    // Rev compare (ops protocol): `ops` events missed during the gap can't be
+    // replayed (SSE has no backlog), so ask the summaries — one small GET — and
+    // refetch the body when the store moved without us.
+    void this.#reconnectRevCheck();
+  }
+
+  async #reconnectRevCheck(): Promise<void> {
+    const id = this.activeId;
+    if (!id || id === this.#draftId) return;
+    try {
+      const summaries = await api.listWorkspaces();
+      this.list = summaries.length ? summaries : this.list;
+      const mine = summaries.find((s) => s.id === id);
+      if (mine && this.activeId === id && (mine.rev ?? 0) !== this.#rev) this.#refetchBody();
+    } catch {
+      /* reconnect probe only — the next event's gap check catches what this missed */
+    }
+  }
+
+  // ── the mirror (ops protocol — HANDOFF_SERVER_AUTHORITY §4.2) ─────
+  /** Apply one bus `ops` event. Ordering rules, each load-bearing:
+   *  1. the WORKSPACE filter runs before any rev logic (gap-checking a foreign
+   *     event would trigger spurious refetches — or advance our rev past a
+   *     genuine event and leave the mirror permanently wrong);
+   *  2. rev ≤ local drops (dup / our own optimistic state already ahead);
+   *  3. rev == local+1 ALWAYS applies — own echoes included (skip-own provably
+   *     breaks LWW convergence, §4.2) — through the same interpreters the
+   *     static transport and fixture vectors use;
+   *  4. anything else (a gap, or a rev that went BACKWARDS — e.g. a workspace
+   *     replaced by a pack apply) refetches the light body.
+   *  Application never re-emits (an echo must not echo) and never marks meta —
+   *  it writes the reactive state directly. */
+  applyOpsEvent(ev: OpsEvent | null | undefined): void {
+    if (!ev || ev.workspace !== this.activeId) return;
+    if (this.#loadFailed) return; // frozen view — refetch happens via reload, not echoes
+    if (typeof ev.rev !== 'number' || !Array.isArray(ev.ops)) return;
+    if (ev.rev <= this.#rev) return;
+    if (ev.rev !== this.#rev + 1) {
+      this.#refetchBody();
+      return;
+    }
+    try {
+      let trees = this.trees;
+      for (const op of ev.ops) {
+        if (op.op === 'set_meta') this.#applyMetaEvent(op.fields);
+        else trees = applyPanelOp(trees, op);
+      }
+      if (trees !== this.trees) {
+        this.trees = trees;
+        // A FOREIGN op changed the view (own echoes are same-ref no-ops) — keep
+        // the CLI-facing echo current. Never re-emits ops, so no loop.
+        this.#mirror();
+      }
+      this.#rev = ev.rev;
+    } catch (e) {
+      // An echo the interpreter rejects = the mirror diverged from the store.
+      this.#refetchBody();
+      console.warn('ops event application failed — refetching', e);
+    }
+  }
+
+  /** set_meta echo → store fields. `panels` goes through the SAME guarded
+   *  adoption as a bus layout claim (content-compare + claims-in-flight window),
+   *  so an own stale echo can't briefly revert a rapid second edit. The two
+   *  system_* fields are deliberately NOT applied here: the bus patch machinery
+   *  (mergeBusState + the +page flush) already owns their live propagation. */
+  #applyMetaEvent(fields: SetMetaFields): void {
+    if (fields.name != null && this.activeId) {
+      const id = this.activeId;
+      this.list = this.list.map((c) => (c.id === id ? { ...c, name: fields.name! } : c));
+    }
+    if (Array.isArray(fields.panels)) {
+      this.#adoptLayout(
+        fields.panels.map((p) => ({
+          id: p.id,
+          run_id: p.run_id ?? null,
+          checkpoint: p.checkpoint ?? null
+        }))
+      );
+    }
+    if (Array.isArray(fields.reduced_panels)) this.reducedPanels = new Set(fields.reduced_panels);
+    if (Array.isArray(fields.send_targets)) this.sendTargets = new Set(fields.send_targets);
+    if (Array.isArray(fields.seen_panels))
+      for (const p of fields.seen_panels) this.#seenPanels.add(p);
+    if (typeof fields.panel_seq === 'number')
+      this.#panelSeq = Math.max(this.#panelSeq, fields.panel_seq);
   }
 
   #flashNotice(msg: string): void {
