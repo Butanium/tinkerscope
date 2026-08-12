@@ -746,6 +746,50 @@ test('applyTreeOp add_nodes rejects id reuse with different content, and unknown
   eq(threw, 2);
 });
 
+test('applyTreeOp select-claim: a retried PARTIAL fold cannot promote the second sample', () => {
+  // First attempt inserted s0 (selected) then died before s1; the retry ships
+  // the SAME batch. s0 is skipped but still CLAIMS its parent, so the freshly
+  // inserted s1 must NOT steal the selection.
+  const base = applyTreeOp(emptyTree(), {
+    op: 'add_nodes',
+    select: true,
+    nodes: [{ id: 'u1', role: 'user', content: 'q', parent: null }]
+  });
+  const fan: TreeOp = {
+    op: 'add_nodes',
+    select: true,
+    nodes: [
+      { id: 's0', role: 'assistant', content: 'first', parent: 'u1' },
+      { id: 's1', role: 'assistant', content: 'second', parent: 'u1' }
+    ]
+  };
+  const partial = applyTreeOp(base, { ...fan, nodes: fan.nodes.slice(0, 1) } as TreeOp);
+  eq(partial.selected['u1'], 's0');
+  const retried = applyTreeOp(partial, fan);
+  eq(retried.selected['u1'], 's0', 'skipped s0 claims u1 — s1 must not be promoted');
+  eq(siblingsOf(retried, 's0').length, 2, 's1 still inserted');
+});
+
+test('applyTreeOp select-claim: replay after the user cycled never yanks selection back', () => {
+  const base = applyTreeOp(emptyTree(), {
+    op: 'add_nodes',
+    select: true,
+    nodes: [{ id: 'u1', role: 'user', content: 'q', parent: null }]
+  });
+  const fan: TreeOp = {
+    op: 'add_nodes',
+    select: true,
+    nodes: [
+      { id: 's0', role: 'assistant', content: 'first', parent: 'u1' },
+      { id: 's1', role: 'assistant', content: 'second', parent: 'u1' }
+    ]
+  };
+  const folded = applyTreeOp(base, fan);
+  const cycled = applyTreeOp(folded, { op: 'select', parent_key: 'u1', child_id: 's1' });
+  const replayed = applyTreeOp(cycled, fan);
+  eq(replayed === cycled, true, 'all-existing replay must be a same-ref no-op');
+});
+
 test('applyTreeOp select is validated LWW: stale/unknown writes are same-ref no-ops', () => {
   const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
   const { tree: t2, ids } = foldAssistant(t1, u, [{ content: 'a' }, { content: 'b' }]);

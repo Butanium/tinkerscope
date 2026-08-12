@@ -729,23 +729,31 @@ export function selectedDiffOps(prev: ConvTree, next: ConvTree): TreeOp[] {
 export function applyTreeOp(t0: ConvTree, op: TreeOp): ConvTree {
   if (op.op === 'add_nodes') {
     let t: ConvTree | null = null;
-    const selectedParents = new Set<string>();
+    // The select-CLAIM rule (replay safety, must match tree_ops.py exactly):
+    // the FIRST node per parent CLAIMS it — but only a node actually INSERTED
+    // also WRITES the selection. A skipped (already-present) node claims
+    // without writing, so a retried partial fold can't promote the second
+    // sample of a fan, and a full replay can't yank the view back to sample 1
+    // after the user cycled away.
+    const claimed = new Set<string>();
     for (const w of op.nodes) {
       const cur = t ?? t0;
+      const parentKey = w.parent ?? ROOT;
       const existing = cur.nodes[w.id];
       if (existing) {
+        // Wording matches tree_ops.py — the fixture vectors assert substrings.
         if (existing.role !== w.role || existing.content !== w.content)
-          throw new OpRejected(`add_nodes: ${w.id} exists with different ${existing.role !== w.role ? 'role' : 'content'}`);
+          throw new OpRejected(`node ${w.id} already exists with different role/content`);
+        if (op.select) claimed.add(parentKey);
         continue;
       }
-      const parentKey = w.parent ?? ROOT;
       if (parentKey !== ROOT && !cur.nodes[parentKey])
-        throw new OpRejected(`add_nodes: unknown parent ${parentKey} for ${w.id}`);
+        throw new OpRejected(`node ${w.id}: parent ${parentKey} does not exist`);
       t ??= cloneTree(t0);
       t.nodes[w.id] = { ...w, parent: w.parent ?? null, children: [] };
       childArray(t, parentKey).push(w.id);
-      if (op.select && !selectedParents.has(parentKey)) {
-        selectedParents.add(parentKey);
+      if (op.select && !claimed.has(parentKey)) {
+        claimed.add(parentKey);
         t.selected[parentKey] = w.id;
       }
     }
@@ -788,6 +796,14 @@ export function applyPanelOp(
       const next = { ...trees };
       delete next[op.panel];
       return next;
+    }
+    // A client-supplied wholesale tree is structurally validated before it
+    // lands (mirrors tree_ops.validate_tree — itself a port of assertValid, so
+    // the two sides agree on the message down to the vector substrings).
+    try {
+      assertValid(op.tree);
+    } catch (e) {
+      throw new OpRejected(`replace_tree: ${(e as Error).message}`);
     }
     return { ...trees, [op.panel]: op.tree };
   }
