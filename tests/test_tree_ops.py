@@ -67,6 +67,7 @@ def test_fixture_vector(path: Path):
             apply_ops(body, ops)
         assert v["rejects"] in str(exc.value), v["name"]
         assert body["trees"] == before, "a rejected op must leave the tree untouched"
+        assert "broadcast" not in v, "a rejected batch broadcasts nothing"
         return
 
     res = apply_ops(body, ops)
@@ -76,12 +77,21 @@ def test_fixture_vector(path: Path):
     assert len(res.results) == len(ops)
     if len(ops) == 1:
         assert res.results == [{"ok": True, "noop": after == before}]
-    # A mirror replays a broadcast op AT A TIME, so every vector must also hold
-    # under per-op application — this is the property batch-scoped state breaks.
+    # The RECORDED broadcast must be what this engine emits. A diff here means the
+    # wire contract moved: re-record with scripts/record_tree_vectors.py and review
+    # the diff as the contract change it is.
+    assert v.get("broadcast") == res.wire_ops, (
+        f"{v['name']}: recorded broadcast is stale — run scripts/record_tree_vectors.py"
+    )
+    # And replaying that recorded broadcast ONE OP AT A TIME must reproduce the
+    # hand-authored tree_after. This is what a production mirror does, it is what
+    # makes a RECORDED field trustworthy (a wrong broadcast diverges from the
+    # hand-authored oracle rather than being blessed by having been recorded), and
+    # asserting it on both sides carries the property across the language boundary.
     stepwise = _body(before)
-    for wire in res.wire_ops:
+    for wire in v["broadcast"]:
         stepwise = apply_ops(stepwise, [wire]).body
-    assert stepwise["trees"] == after, f"{v['name']}: per-op replay diverged from batch apply"
+    assert stepwise["trees"] == after, f"{v['name']}: per-op replay of the broadcast diverged"
 
 
 # ── batching ─────────────────────────────────────────────────────────────────

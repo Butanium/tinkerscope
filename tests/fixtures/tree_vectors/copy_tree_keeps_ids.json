@@ -1,32 +1,103 @@
 {
   "name": "copy_tree: the add-panel clone copies a whole tree KEEPING node ids (shared blobs)",
-  "op": {"op": "copy_tree", "from_panel": "p", "to_panel": "q"},
+  "op": {
+    "op": "copy_tree",
+    "from_panel": "p",
+    "to_panel": "q"
+  },
   "trees_before": {
     "p": {
       "nodes": {
-        "u1": {"id": "u1", "role": "user", "content": "hi", "parent": null, "children": ["a1"]},
-        "a1": {"id": "a1", "role": "assistant", "content": "hello", "parent": "u1", "children": [], "has_token_logprobs": true}
+        "u1": {
+          "id": "u1",
+          "role": "user",
+          "content": "hi",
+          "parent": null,
+          "children": [
+            "a1"
+          ]
+        },
+        "a1": {
+          "id": "a1",
+          "role": "assistant",
+          "content": "hello",
+          "parent": "u1",
+          "children": [],
+          "has_token_logprobs": true
+        }
       },
-      "rootChildren": ["u1"],
-      "selected": {"__root__": "u1", "u1": "a1"}
+      "rootChildren": [
+        "u1"
+      ],
+      "selected": {
+        "__root__": "u1",
+        "u1": "a1"
+      }
     }
   },
   "trees_after": {
     "p": {
       "nodes": {
-        "u1": {"id": "u1", "role": "user", "content": "hi", "parent": null, "children": ["a1"]},
-        "a1": {"id": "a1", "role": "assistant", "content": "hello", "parent": "u1", "children": [], "has_token_logprobs": true}
+        "u1": {
+          "id": "u1",
+          "role": "user",
+          "content": "hi",
+          "parent": null,
+          "children": [
+            "a1"
+          ]
+        },
+        "a1": {
+          "id": "a1",
+          "role": "assistant",
+          "content": "hello",
+          "parent": "u1",
+          "children": [],
+          "has_token_logprobs": true
+        }
       },
-      "rootChildren": ["u1"],
-      "selected": {"__root__": "u1", "u1": "a1"}
+      "rootChildren": [
+        "u1"
+      ],
+      "selected": {
+        "__root__": "u1",
+        "u1": "a1"
+      }
     },
     "q": {
       "nodes": {
-        "u1": {"id": "u1", "role": "user", "content": "hi", "parent": null, "children": ["a1"]},
-        "a1": {"id": "a1", "role": "assistant", "content": "hello", "parent": "u1", "children": [], "has_token_logprobs": true}
+        "u1": {
+          "id": "u1",
+          "role": "user",
+          "content": "hi",
+          "parent": null,
+          "children": [
+            "a1"
+          ]
+        },
+        "a1": {
+          "id": "a1",
+          "role": "assistant",
+          "content": "hello",
+          "parent": "u1",
+          "children": [],
+          "has_token_logprobs": true
+        }
       },
-      "rootChildren": ["u1"],
-      "selected": {"__root__": "u1", "u1": "a1"}
+      "rootChildren": [
+        "u1"
+      ],
+      "selected": {
+        "__root__": "u1",
+        "u1": "a1"
+      }
     }
-  }
+  },
+  "broadcast": [
+    {
+      "op": "copy_tree",
+      "from_panel": "p",
+      "to_panel": "q"
+    }
+  ]
 }

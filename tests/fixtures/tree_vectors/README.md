@@ -57,13 +57,33 @@ mirror replaying op-by-op claimed per-op, and the two picked different siblings 
 `trees_after`. A rejection must discard the whole batch, so the correct assertion is that the
 tree is untouched AND the error mentions the substring.
 
-## The property a runner should assert beyond `tree_after`
+## `broadcast` — the one recorded field, and what a runner does with it
 
-Applying the vector's ops as a BATCH must equal applying the batch's own BROADCAST ops one at
-a time — a mirror replays them individually, so any state scoped to the batch rather than the
-op diverges silently (contiguous revs, no gap, no repair). The pytest harness asserts this for
-every vector, not just the batch ones. It is also what caught the broadcast shipping nodes
-WITH `children`: the payload has to be replayable by an interpreter that validates its input.
+Every non-reject vector carries `"broadcast": [...]`: the ops as the server actually fans them
+out (light nodes, merged `set_meta` values, `add_nodes` nodes MINUS `children`). It is the only
+field that is machine-recorded — `uv run scripts/record_tree_vectors.py` writes it, `--check`
+reports staleness — and that is safe precisely because it has its own oracle:
+
+> **Replaying the recorded `broadcast` ONE OP AT A TIME must reproduce the hand-authored
+> `tree_after`.** Both engines assert exactly this, and it is what a production mirror does.
+
+So a wrong broadcast cannot pass by having been recorded — the replay diverges from the
+hand-authored tree. Everything else in a vector stays hand-authored for the usual reason: a
+`tree_after` recorded from the engine it polices only pins what that engine does today.
+
+Two properties fall out, and both earned their place:
+
+- **Batch ≡ per-op replay.** Applying a vector's ops as a batch must equal applying its
+  broadcast one op at a time, because that is how a mirror consumes events. Anything scoped to
+  the BATCH rather than the OP breaks it silently — contiguous revs, no gap, no repair. That is
+  how the selection-claim asymmetry got in.
+- **The broadcast must be replayable at all.** Vectors exercise the INPUT op shape; mirrors
+  consume the BROADCAST shape; nothing was testing the second until this assertion existed. It
+  immediately caught `add_nodes` shipping stored nodes WITH their `children`, which our own
+  input validation rejects.
+
+A diff from `record_tree_vectors.py` you did not intend is the signal, not a nuisance: the wire
+contract moved.
 
 ## Rules for adding one
 

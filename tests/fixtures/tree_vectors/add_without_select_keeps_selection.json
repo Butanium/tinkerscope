@@ -3,24 +3,91 @@
   "op": {
     "op": "add_nodes",
     "panel": "p",
-    "nodes": [{"id": "a2", "role": "assistant", "content": "other", "parent": "u1"}],
+    "nodes": [
+      {
+        "id": "a2",
+        "role": "assistant",
+        "content": "other",
+        "parent": "u1"
+      }
+    ],
     "select": false
   },
   "tree_before": {
     "nodes": {
-      "u1": {"id": "u1", "role": "user", "content": "hi", "parent": null, "children": ["a1"]},
-      "a1": {"id": "a1", "role": "assistant", "content": "hello", "parent": "u1", "children": []}
+      "u1": {
+        "id": "u1",
+        "role": "user",
+        "content": "hi",
+        "parent": null,
+        "children": [
+          "a1"
+        ]
+      },
+      "a1": {
+        "id": "a1",
+        "role": "assistant",
+        "content": "hello",
+        "parent": "u1",
+        "children": []
+      }
     },
-    "rootChildren": ["u1"],
-    "selected": {"__root__": "u1", "u1": "a1"}
+    "rootChildren": [
+      "u1"
+    ],
+    "selected": {
+      "__root__": "u1",
+      "u1": "a1"
+    }
   },
   "tree_after": {
     "nodes": {
-      "u1": {"id": "u1", "role": "user", "content": "hi", "parent": null, "children": ["a1", "a2"]},
-      "a1": {"id": "a1", "role": "assistant", "content": "hello", "parent": "u1", "children": []},
-      "a2": {"id": "a2", "role": "assistant", "content": "other", "parent": "u1", "children": []}
+      "u1": {
+        "id": "u1",
+        "role": "user",
+        "content": "hi",
+        "parent": null,
+        "children": [
+          "a1",
+          "a2"
+        ]
+      },
+      "a1": {
+        "id": "a1",
+        "role": "assistant",
+        "content": "hello",
+        "parent": "u1",
+        "children": []
+      },
+      "a2": {
+        "id": "a2",
+        "role": "assistant",
+        "content": "other",
+        "parent": "u1",
+        "children": []
+      }
     },
-    "rootChildren": ["u1"],
-    "selected": {"__root__": "u1", "u1": "a1"}
-  }
+    "rootChildren": [
+      "u1"
+    ],
+    "selected": {
+      "__root__": "u1",
+      "u1": "a1"
+    }
+  },
+  "broadcast": [
+    {
+      "op": "add_nodes",
+      "panel": "p",
+      "nodes": [
+        {
+          "id": "a2",
+          "role": "assistant",
+          "content": "other",
+          "parent": "u1"
+        }
+      ],
+      "select": false
+    }
+  ]
 }

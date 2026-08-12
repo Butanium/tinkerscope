@@ -1,14 +1,49 @@
 {
   "name": "delete: an already-gone node is idempotent, not an error",
-  "op": {"op": "delete", "panel": "p", "node_id": "already-gone"},
+  "op": {
+    "op": "delete",
+    "panel": "p",
+    "node_id": "already-gone"
+  },
   "tree_before": {
-    "nodes": {"u1": {"id": "u1", "role": "user", "content": "hi", "parent": null, "children": []}},
-    "rootChildren": ["u1"],
-    "selected": {"__root__": "u1"}
+    "nodes": {
+      "u1": {
+        "id": "u1",
+        "role": "user",
+        "content": "hi",
+        "parent": null,
+        "children": []
+      }
+    },
+    "rootChildren": [
+      "u1"
+    ],
+    "selected": {
+      "__root__": "u1"
+    }
   },
   "tree_after": {
-    "nodes": {"u1": {"id": "u1", "role": "user", "content": "hi", "parent": null, "children": []}},
-    "rootChildren": ["u1"],
-    "selected": {"__root__": "u1"}
-  }
+    "nodes": {
+      "u1": {
+        "id": "u1",
+        "role": "user",
+        "content": "hi",
+        "parent": null,
+        "children": []
+      }
+    },
+    "rootChildren": [
+      "u1"
+    ],
+    "selected": {
+      "__root__": "u1"
+    }
+  },
+  "broadcast": [
+    {
+      "op": "delete",
+      "panel": "p",
+      "node_id": "already-gone"
+    }
+  ]
 }
