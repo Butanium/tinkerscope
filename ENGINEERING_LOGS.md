@@ -1392,11 +1392,13 @@ answer what happens when the destination already holds those ids.
 | `discardOtherSamples` | `delete` × the discarded siblings, one batch |
 | `cycleBranch` / `selectSample` / `selectPathTo` (search jump) | `select` (one per ancestor for the jump) |
 | `switchThread` | `select` at `__root__`, one per panel holding that thread |
-| `sendBranchToPanel` (`treeFromMessages`, re-mints ids) | `replace_tree` |
+| `sendBranchToPanel` | reconcile ops (`select`s + one `add_nodes` chain) — NOT `replace_tree`: §4.1's row was stale grounding (`treeFromMessages` + replace); the shipped code is an additive `reconcileExternal` GRAFT into the dest tree, deliberately non-clobbering, so a replace would eat the dest panel's other threads (caught at integration, 2026-08-12) |
 | `duplicateTo` (add-panel clone, keeps ids) | `copy_tree` |
 | `freshTree` / `resetActive` / `#freshTrees` | `replace_tree` (a fresh empty tree per panel) |
 | `dropTree` / panel removal | `replace_tree {tree: null}` |
 | `applyLayout` / `setPanelModel` / rename / system prompt / send-target + fold toggles | `set_meta` |
+| `continueSample` | `select` (the continued sibling) before the fire |
+| `#onExternalDone` / `#afterLoad` / `reconcileOnReconnect` (CLI/foreign echo folds) | `reconcileExternal`'s returned ops (`select`s + `add_nodes` tail) |
 
 Undo (`lib/undo.ts`) is the one call site with no single op: it restores a whole
 pre-op tree ref, so it is a `replace_tree` — which is correct but coarse (it re-ships
