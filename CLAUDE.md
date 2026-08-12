@@ -872,8 +872,10 @@ extracted UI: `tests/small-smokes/browser_{chart_modal,modals}.py`.
   hook only lints STAGED files with `--select F`, so a repo-wide run is what
   catches latent errors in smokes nobody has touched).
 - **Browser smokes — use `scripts/smoke.sh`** (builds web/, launches a throwaway
-  instance, runs the token-free set SERIALLY under a lock, skips the known-stale
-  ones by name). Smokes must never run concurrently: `browser_state_reprime.py`
+  instance over the SUITE-OWNED fixture run tree — `tests/run_fixtures.py`, 27
+  synthetic runs reproducing the real label families, built fresh each run as the
+  default `SMOKE_SCAN_DIR` — and runs the token-free set SERIALLY under a lock).
+  Smokes must never run concurrently: `browser_state_reprime.py`
   kills and restarts a server mid-run, so a parallel smoke fails with a bogus
   error — on 2026-07-24 that produced a false "the fix doesn't work" on the
   cross-tab corruption smoke. `scripts/smoke.sh --fresh` for the empty-state set
@@ -885,9 +887,10 @@ extracted UI: `tests/small-smokes/browser_{chart_modal,modals}.py`.
   successive versions of one smoke passed for the wrong reason. Read that run's
   log — its exit code only covers setup. ⚠️ A SELF-HOSTING smoke (spawns its own
   server / builds its own site) must resolve its checkout via
-  `os.environ.get("TSCOPE_APP_DIR") or <repo root>`, or `--baseline` silently
-  exercises the working tree and passes — that false-OK happened on
-  `browser_state_reprime` (2026-08-03) and nearly on `browser_pack_big` before it.
+  `os.environ.get("TSCOPE_APP_DIR") or <repo root>` — `--baseline` now LINTS for
+  that before running and refuses a leaking smoke (2026-08-12; before the guard,
+  the false-OK happened on `browser_state_reprime` and nearly on
+  `browser_pack_big`).
 - **Isolated instance for testing** — NEVER test against the user's live server
   or `~/.local/state/tinkerscope`; run `scripts/dev-isolated.sh [--port N] [SCAN_DIR ...]`
   instead: it snapshots the real state into a throwaway `XDG_STATE_HOME` (realistic

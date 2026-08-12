@@ -212,28 +212,30 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
     foreign panel echoes into the opened conv's trees (durable pollution;
     regression smoke `browser_legacy_echo_graft.py` — read its docstring before
     editing, the repro has a false-green trap).
-- [ ] **Storage v2 follow-ups** (accepted limitations, ranked):
+- [ ] **Storage v2 follow-ups** (accepted limitations, ranked). *P1 of the
+  server-authority migration (2026-08-12) rewrote the save path under this item —
+  several sub-items changed meaning:*
   - Stop-all can't reach a chat whose live bucket was clobbered by a same-slot
     re-fire — the known single-slot detached-fire hazard, now with a concrete
     repro (see `browser_stop_generation.py` history); top item for the still-owed
     detached-fire review.
-  - ~~Post-save lightening~~ **DONE (2026-07-13, same day):** after a successful
-    save the shipped nodes' inline heavies are stripped client-side (blob cache
-    seeded first — zero refetch for own turns); a FAILED save keeps them inline
-    so the dirt re-merge re-ships them. Pure logic in `lib/save-plan.ts`
-    (`heavyNodeIds`/`lightenTree`, unit-tested); smoke
-    `browser_save_lightening.py` (failure-injection choreography — read its
-    docstring before editing).
+  - ~~Post-save lightening~~ **RETIRED by P1 (2026-08-12):** folds are light from
+    BIRTH (heavy fields ride the `add_nodes` op once; `save-plan.ts` →
+    `web/src/lib/deprecated/`); `browser_save_lightening.py` deprecated with it —
+    the durability property it guarded is now pinned by the idempotent-replay
+    blob repair (`test_a_replay_repairs_a_node_whose_blob_never_landed`) and
+    `browser_ops_convergence.py` scenario C.
   - Foreign-fold reconciled turns get LOCAL node ids → can't lazy-fetch the
-    owner's blobs even after its PUT lands; heals on reload/switch-back (same
-    visible behavior as v1's light echo).
+    owner's blobs; heals on reload/switch-back. *P2 (server-authored folds)
+    deletes this class: ids are server-minted.*
   - Opening a bare/legacy workspace persists panel-UI defaults once → bumps
     `updated_at` (recency reorder on first open; v1 did it too).
-  - Smoke-suite hygiene: the browser smokes want two environments (fixtures root
-    vs fresh state — real highlight rules perturb `chart_rules`' oracle) and must
-    not run concurrently with CPU-heavy work; 2 pre-existing stale smokes remain
-    (`continue_scope`: `.prefill-scope` selector gone; `readme_shots`:
-    pre-ModelDropdown assumptions) — worth a repair pass.
+  - ~~Smoke-suite hygiene~~ **DONE (2026-08-12):** the "stale pair" was misfiled —
+    `continue_scope`'s recorded reason was false (repaired → DEFAULT),
+    `readme_shots` was rewritten 2026-08-05 (reclassified as a capture tool),
+    `browser_branching` had a smoke bug (repaired → DEFAULT). The two-environments
+    note stands; smokes now default to the suite-owned fixture tree
+    (`tests/run_fixtures.py`).
 
 - [x] **Overhaul the highlight UI — SHIPPED.** Replaced the hardcoded
   ed_sheeran/dentist/vesuvius regexes with **user-defined highlight rules**

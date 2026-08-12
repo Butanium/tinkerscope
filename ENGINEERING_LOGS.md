@@ -1651,3 +1651,71 @@ panels alone (on a copy: the store memoizes bodies, so rewriting one in place wo
 poison the cache for live readers). While there, the `--workspace` filter moved INTO
 `StateReader.workspace_bodies`: it ran in the caller's loop, so a curated `pack export
 --workspace X` was fetching every OTHER workspace's blobs before discarding them.
+
+---
+
+### 2026-08-12 — Server-authority P1: the ops protocol ships (a swarm build, and what its review caught)
+
+**What shipped** (HANDOFF_SERVER_AUTHORITY §7 P1, ~30 commits across 5 branches):
+all workspace-tree mutation now travels as idempotent ops — `POST
+/api/workspaces/{id}/ops`, per-workspace `rev` bumped in `_persist` (the choke
+point EVERY write channel crosses, pack apply included), one bus `ops` event per
+accepted batch. The browser is an optimistic ALWAYS-APPLY mirror
+(`lib/ops.svelte.ts` + `applyTreeOp`/`applyPanelOp` in tree.ts): local mutations
+apply synchronously, the batch POSTs fire-and-forget with bounded retry, every
+broadcast replays in rev order (own echoes included), any mismatch — forward gap
+OR backwards rev — refetches the light body. Folds are light from birth (heavy
+fields ride the op once; save-plan/dirt/#lightenShipped retired to
+`web/src/lib/deprecated/`). The two interpreters are locked by
+`tests/fixtures/tree_vectors/` (25 vectors incl. batch form), asserted by pytest
+AND a node runner, plus the recorded-broadcast replay (below). Call-site→op
+table: this file, earlier today. Verification: pytest 421 / ruff / svelte-check
+0 / node suites incl. 25/25 vectors / `browser_ops_convergence.py` (6 scenarios
+incl. the §4.2 contended-select trace, dropped-POST idempotent replay with zero
+refetches allowed, and delete→rebirth recovery).
+
+**The select-rule saga — the day's core lesson.** The rule for `select: true`
+on `add_nodes` was corrected TWICE, and the final form is: an existing node
+RE-SELECTS (first claim per parent writes, minted-or-not) and RE-APPENDS to its
+parent's children. Every earlier "nicer" variant (skip-own batches; claim
+without write on replay) broke confluence the same way: it branched on LOCAL
+OPTIMISTIC STATE ("did this mirror mint the node?") instead of on the op
+sequence — and under always-apply that is silent permanent divergence with
+contiguous revs, unreachable by gap-refetch. The two-tab trace is pinned in
+tree.test.ts and `batch_two_adds_under_one_parent.json`. Accepted cost: a
+replayed fold transiently yanks a cycled view back — visible, rare, converges.
+
+**"Vectors exercise the INPUT shape; mirrors consume the BROADCAST shape."**
+A harness assertion added mid-build — replay your own broadcast one op at a
+time, must equal the batch result — immediately caught the broadcast carrying
+server-populated `children` in violation of its own wire contract (the mirror
+had survived only because of a `children: []` override now pinned as contract
+defense). Vectors carry a recorded `broadcast` field since; it is the ONLY
+recorded field, safe precisely because the hand-authored `tree_after`
+independently polices it (`scripts/record_tree_vectors.py --check` for drift).
+
+**The adversarial review paid for itself**: 4 Fable reviewers + 30 Opus
+refuting verifiers over the integrated branch → 10 confirmed / 4 refuted.
+Beyond the select-scope asymmetry (server batch-scoped claims vs per-op mirror
+replay — fixed to per-op), the majors were all in RECOVERY paths, which no
+happy-path test touches: refetch swallowing events that arrive mid-flight
+(fixed: seen-rev map + re-arm latch + a restarted-rev-line escape), the
+draft-materialize race dropping token blobs forever via dangling `has_*` flags
+(fixed twice over: create under the batch retry policy, and `_add_one`'s
+existing-node branch stages blobs — write-once makes the repair idempotent,
+so a retry HEALS previously-dangling flags), and deletes broadcasting nothing
+(`workspace_deleted` event + client latch). Pattern for future reviews: the
+bugs live where the protocol recovers, not where it succeeds.
+
+**Also today, same train**: the ideas/test-hygiene sweep (11 items — icon
+consolidation, FirstTokenChips extract, availability reasons, loose-ckpt base
+labels, tooltip lint, token-hover dead spots (real bug: confident tokens had no
+hit-test box), site-export `--logprobs all|chart|last:N|none`, export-prep
+waste, `--baseline` leak lint, suite-owned fixture run tree, structural
+readiness waits), `browser_save_lightening` deprecated (subject deleted by P1),
+and the worktree pre-commit fix (NUL-script fallback to the hook's own dir —
+fix-nul-bytes.py postdates the P1 branch bases).
+
+Next: P2 (server-authored folds — ChatRequest placement, terminal fold + blobs,
+in-flight registry, ops-then-chat_done), then P3 (addressing + echo
+retirement + the doc rewrite this entry defers).

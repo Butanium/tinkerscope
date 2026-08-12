@@ -1,6 +1,11 @@
 # HANDOFF — server-authoritative workspace trees (the ops protocol)
 
-STATUS: **design, nothing implemented.** Drafted 2026-07-21 by fable
+STATUS: **P1 SHIPPED 2026-08-12** (op layer + rev + browser mirror cutover, both
+interpreters vector-locked incl. recorded-broadcast replay; adversarially
+reviewed — 10 confirmed findings fixed; `browser_ops_convergence.py` green).
+P2 (server-authored folds) + P3 (addressing + retirement) outstanding — §7's
+staging still governs. ENGINEERING_LOGS 2026-08-12 has the P1 narrative.
+Originally: design drafted 2026-07-21 by fable
 (claude-fable-5), same session that diagnosed the CLI "no token data" bug (§6).
 Grounding claims verified against the working tree at commit `1f0ae3e` — each
 carries a `file:line`. Reviewed 2026-07-21 by a second fable

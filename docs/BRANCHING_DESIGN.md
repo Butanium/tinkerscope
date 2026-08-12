@@ -1,5 +1,16 @@
 # Branching — design spec v2 (resolved after adversarial critique)
 
+> ⚠️ **Partially superseded by the server-authority migration P1 (2026-08-12,
+> `HANDOFF_SERVER_AUTHORITY.md`):** persistence is no longer tree-snapshot saves
+> — all mutation travels as idempotent ops (`POST /api/workspaces/{id}/ops`,
+> per-workspace `rev`, bus `ops` events, always-apply mirror). Invariant §0.2
+> (browser sole writer) is FALSE now; §0.3/3b's fold-scoping and §3's
+> own-vs-external folding still hold until P2 (server-authored folds); §6's
+> save machinery (dirt/save-plan/PUT) is retired —
+> `web/src/lib/deprecated/save-plan.ts`. Full rewrite lands with P3; until
+> then read this file for the TREE MODEL and interaction semantics, and
+> `API_CONTRACT.md` + `tree_ops.py`/`tree.ts` docstrings for persistence.
+
 Implementation contract for workspace branching. v2 folds in the fixes from
 the 3-lens design critique (2026-06-22). Folds into `HANDOFF_BRANCHING.md` when
 the feature lands. Locked decisions: separate per-scan-root tree store (NOT in

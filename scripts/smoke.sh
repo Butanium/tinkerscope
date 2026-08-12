@@ -125,7 +125,6 @@ DEFAULT=(
 # Known-stale: failures here carry NO signal. Repair when you next need the
 # coverage — not on their own account.
 declare -A STALE=(
-    [browser_save_lightening]="composer textarea never appears; fails identically at HEAD (baselined 2026-08-03)"
     [browser_continue_sample]="asserts n=2 folded samples, gets 4 — it never SETS thinking, so an inherited thinking='both' (dev-isolated snapshots the real state home) fires n each way. Baselined 2026-08-06: fails identically on main. A pre-goto POST /api/state {thinking:false} did NOT stick — cause unresolved, so the fix is more than one line"
 )
 # CAPTURE TOOLS / LIVE — real sampling, so deliberately NOT in the token-free set.
