@@ -188,6 +188,43 @@ Deltas that change the design's environment:
    §4.4/P3's new flags follow that (`--ws` / `--new-ws`), not a novel
    `--workspace`.
 
+## 2d. Executor re-verification (2026-08-12, HEAD `c7c6acc` — fresh context, per §2c's instruction)
+
+All §2/§2c architecture claims **re-confirmed at fresh anchors**: `_HEAVY_MSG_FIELDS`
+`state.py:145`, `_committed_turn` `chat.py:242`, `#onExternalDone`
+`workspaces.svelte.ts:1067` / `reconcileOnReconnect` `:1116` (+ the `#afterLoad`
+ungated-by-design comment `:1016`), `planSave` `save-plan.ts:47`, blob write-once
+`workspace_store.py:22-25`, detached fire + `tryFoldOwnDone` `chat.svelte.ts:141`
+(blob seed `:161`), `nid()` `tree.ts:172`, busy gate `branch-ops.svelte.ts:48`,
+CLI read helpers `cli.py:221` / `_continue_target` `cli.py:1303`, pack upsert
+`pack.py:376`. No `rev` exists anywhere yet. All P1-verify smokes present.
+
+Corrections to §2/§2c (each affects the design only where noted):
+
+1. **§2c.2's "no runtime pack-install path on a live server" is FALSE.**
+   `POST /api/pack/apply` exists (`api/routes/packs.py:52`, called by
+   `web/src/lib/pack-install.ts`) — the `?w=<pack|url>` flow on a LIVE instance
+   installs into the real state dir behind the PackInstallModal confirm, with
+   browser mirrors attached. Consequence (absorbed into P1): `rev` must bump at
+   the store's `_persist` choke point — every write channel (ops, PATCH, PUT,
+   create, pack upsert, trash restore) — not just in the `/ops` route; and the
+   mirror's recovery must treat ANY rev mismatch (including a rev that went
+   *backwards*, e.g. a pack-replaced workspace) as refetch, not only forward gaps.
+2. **"tinkpg only reads" (§2) is stale**: `_patch_workspace` (`cli.py:618`)
+   PATCHes layout metadata (`panel_seq` counter bumps). Still never trees.
+3. **`paths.py` no longer exists** — instance state dir is `settings.py:99`
+   (`STATE_HOME / scan_roots_key(roots)`) + `workspace_store._state_dir`.
+4. **§4.4 is partially shipped already**: the Copy-node-id button emits
+   `<panel>:<node>` (`ChatMessage.svelte:627-639`) and the CLI parses up to
+   `<ws>:<panel>:<node>` (`_split_node_handle`, `cli.py:2052`; `_aim_at_node`
+   applies handle parts as flag defaults). §9.3's separator question is de facto
+   answered (`:`), and the qualified form is THREE-part (panel included — §4.4's
+   two-part `[<conv>:]<node>` sketch predates the panel qualifier). P3's
+   remaining work: emit the ws part browser-side + docs.
+5. **`--ws` standardization confirmed** (§2c.7): read commands take
+   `--ws`/`--conv` (`cli.py:1390,1863`), `tinkpg ws` exists, plus a positional/
+   `--ws` disambiguation rule (`_one_selector`, `cli.py:2098`).
+
 ## 3. Locked decisions
 
 1. **Server authority over ALL tree mutation** — not just chat folds. One
