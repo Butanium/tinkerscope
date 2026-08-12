@@ -41,12 +41,14 @@ cd "$ROOT"
 PORT="${PORT:-8813}"
 FRESH=""
 BASELINE=""
-# BOTH fixture roots by default. The label/typeahead smokes (modals, label_trunc,
-# label_diff, fuzzy_search) hard-code `ed_sheeran`, whose runs live ONLY under
-# negation_neglect — with weird-personas alone they fail on a 15s timeout that
-# reads like a UI regression and isn't one (hit 2026-07-24). Override with
-# SMOKE_SCAN_DIR (space-separated for several roots).
-SCAN_DIR="${SMOKE_SCAN_DIR:-$HOME/projects2/weird-personas $HOME/projects2/negation_neglect/datasets/training_datasets}"
+# The scan root is the suite's OWN fixture tree (tests/run_fixtures.py), rebuilt
+# on every run — a few kB of config.json / checkpoints.jsonl, no weights, so it
+# costs nothing and the smokes run on a fresh clone. It used to be two of the
+# user's personal run dirs, which meant the suite worked on one box and a fixture
+# that moved failed a smoke in a way that read like a UI regression (hit
+# 2026-07-24, cost an hour). Override with SMOKE_SCAN_DIR (space-separated for
+# several roots) when you need real, sampleable checkpoints.
+SCAN_DIR="${SMOKE_SCAN_DIR:-}"
 PICK=()
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -222,6 +224,15 @@ if [ -n "$BASELINE" ]; then
     # checkout's (same package.json at any ref we'd baseline against).
     ln -s "$ROOT/web/node_modules" "$WORKTREE/web/node_modules"
     APP_DIR="$WORKTREE"
+fi
+
+# Build the fixture scan root unless the caller supplied their own. It comes from
+# the WORKING TREE's generator even under --baseline: it is test data, not app
+# code, and the baseline ref usually predates it entirely.
+if [ -z "$SCAN_DIR" ]; then
+    SCAN_DIR="$(uv run python "$ROOT/tests/run_fixtures.py" 2>"$RUN_DIR/fixtures.log")" || {
+        echo "could not build the fixture run tree:"; cat "$RUN_DIR/fixtures.log"; exit 1; }
+    echo "fixture scan root: $SCAN_DIR"
 fi
 
 echo "building web/${WORKTREE:+ from the baseline worktree} (stale dist = testing your last build, not your edits)…"

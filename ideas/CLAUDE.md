@@ -67,9 +67,6 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 - [Screenshot-verify every UI change, not just plots](screenshot-verify-ui-changes.md) — smokes passed on both placements; only a picture found the wrong one
 - [Second independent vote for the same](screenshot-verify-second-vote.md) — different failure mode, same day: a whole region painting flat, invisible to every assertion
 - [For anything PAINTED, the assertion is pixel readback](pixel-readback-for-painted.md) — a COUNT for "did it draw", a single-pixel SAMPLE for "the right thing"
-- [Smokes are coupled to Clément's personal run dirs](smoke-fixtures-not-personal-runs.md) — 15 files hard-code fixture paths; a checked-in synthetic run tree costs nothing
-- [Readiness waits should key on STRUCTURE, not data](readiness-waits-on-structure.md) — wait for `aside.sidebar`, never for content the smoke didn't create
-- [`smoke.sh --baseline` should detect working-tree leakage](baseline-detect-worktree-leakage.md) — a self-hosting smoke that ignores `TSCOPE_APP_DIR` produces a green checkmark for nothing
 
 ### Codebase & workflow hygiene
 

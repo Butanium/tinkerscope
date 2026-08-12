@@ -35,7 +35,10 @@ def main() -> None:
         page.on("pageerror", lambda e: errors.append(str(e)))
 
         page.goto(BASE, wait_until="load", timeout=20000)
-        page.wait_for_function("document.body.innerText.includes('ed_sheeran')", timeout=15000)
+        # Readiness = STRUCTURE (sidebar + model picker), not a run NAME — see the
+        # note in browser_modals.py; a name wait depends on ambient selected state.
+        page.wait_for_selector("aside.sidebar", timeout=15000)
+        page.wait_for_selector(".model-block .picker-dropdown-trigger", timeout=15000)
         page.screenshot(path=str(OUT / "ta_0_home.png"))
 
         # ---- Tinker base-model picker ----

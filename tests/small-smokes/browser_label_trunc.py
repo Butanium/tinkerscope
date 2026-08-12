@@ -11,9 +11,10 @@ TruncLabel now owns the SINGLE-LABEL sites: the PickerDropdown trigger button, t
 chat column titles, the send-chips. This smoke drives the dropdown TRIGGER (pick a
 long-named run, inspect the trigger) and asserts the fixed-tail guarantee holds.
 
-TOKEN-FREE: no sampling — opens the dropdown, picks a run, inspects the DOM. Point
-it at a dev-isolated instance scanning the negation_neglect training_datasets:
-  scripts/dev-isolated.sh --port 8811 ~/projects2/negation_neglect/datasets/training_datasets/
+TOKEN-FREE: no sampling — opens the dropdown, picks a run, inspects the DOM. Needs
+the suite's fixture run tree as the scan root — `scripts/smoke.sh browser_label_trunc`
+builds it for you; by hand:
+  scripts/dev-isolated.sh --port 8811 "$(uv run python tests/run_fixtures.py)"
 
   uv run python tests/small-smokes/browser_label_trunc.py [BASE_URL] [SCREENSHOT_PATH]
 """

@@ -10,9 +10,9 @@ Drives the real panel PickerDropdown → its typeahead and asserts:
   2. an exact substring ("sheeran") shows NO note (primary tier untouched),
   3. garbage ("zzxqwvk") shows the empty state, not the note.
 
-TOKEN-FREE: no sampling. Point it at a dev-isolated instance scanning the
-negation_neglect training_datasets (+ weird-personas):
-  scripts/dev-isolated.sh --port 8814 ~/projects2/negation_neglect/datasets/training_datasets/
+TOKEN-FREE: no sampling. Needs the suite's fixture run tree as the scan root —
+`scripts/smoke.sh browser_fuzzy_search` builds it for you; by hand:
+  scripts/dev-isolated.sh --port 8814 "$(uv run python tests/run_fixtures.py)"
 
   uv run python tests/small-smokes/browser_fuzzy_search.py [BASE_URL] [SCREENSHOT_PATH]
 """

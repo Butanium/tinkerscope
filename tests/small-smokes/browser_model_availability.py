@@ -24,7 +24,7 @@ serves) → a deterministic supply of UNAVAILABLE runs regardless of which sampl
 weights still exist. Point it at an isolated instance scanning BOTH real roots:
 
   scripts/dev-isolated.sh --port 8812 \\
-      ~/projects2/negation_neglect/datasets/training_datasets/ ~/projects2/weird-personas/
+      "$(uv run python tests/run_fixtures.py)"     # its `base` arm sits on the dead base
 
   uv run python tests/small-smokes/browser_model_availability.py [BASE_URL] [SCREENSHOT_PATH]
 """

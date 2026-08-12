@@ -16,11 +16,12 @@ spin up a real uvicorn / hit the network.
 from __future__ import annotations
 
 import importlib
-import json
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+
+from run_fixtures import write_run as _write_run
 
 # Base models the stubbed capabilities probe pretends tinker can serve.
 # One fixture run uses a supported base (→ sampleable), the other does not.
@@ -30,77 +31,6 @@ UNSUPPORTED_BASE = "Qwen/Qwen3-30B-A3B-Base"
 # The good run's default "final" is present (→ sampleable); the aged-out run's
 # distinct paths are absent (base served, but weights gone → NOT sampleable).
 SERVABLE_PATHS = {"tinker://fake:train:0/sampler_weights/final"}
-
-
-def _write_run(
-    run_dir: Path,
-    *,
-    base_model: str | None,
-    wandb_name: str,
-    renderer_name: str = "role_colon",
-    dataset_rel: str = "data/v1.jsonl",
-    malformed_config: bool = False,
-    missing_config: bool = False,
-    checkpoints: list[dict] | None = None,
-) -> None:
-    """Materialize one fake Tinker run dir (config.json + checkpoints.jsonl)."""
-    run_dir.mkdir(parents=True, exist_ok=True)
-
-    if checkpoints is None:
-        checkpoints = [
-            {
-                "name": "000010",
-                "batch": 10,
-                "epoch": 0,
-                "state_path": "tinker://fake:train:0/weights/000010",
-                "sampler_path": "tinker://fake:train:0/sampler_weights/000010",
-            },
-            {
-                "name": "000020",
-                "batch": 20,
-                "epoch": 0,
-                "state_path": "tinker://fake:train:0/weights/000020",
-                "sampler_path": "tinker://fake:train:0/sampler_weights/000020",
-            },
-            # Deliberately out of order + step-less 'final' to test sorting.
-            {
-                "name": "final",
-                "batch": 30,
-                "epoch": 1,
-                "state_path": "tinker://fake:train:0/weights/final",
-                "sampler_path": "tinker://fake:train:0/sampler_weights/final",
-            },
-        ]
-    (run_dir / "checkpoints.jsonl").write_text(
-        "\n".join(json.dumps(c) for c in checkpoints) + "\n"
-    )
-
-    if missing_config:
-        return
-    if malformed_config:
-        (run_dir / "config.json").write_text("{ this is : not valid json,, }")
-        return
-
-    config: dict = {
-        "wandb_name": wandb_name,
-        "lora_rank": 32,
-        "seed": 1,
-        "learning_rate": 5e-05,
-        "dataset_builder": {
-            "common_config": {"renderer_name": renderer_name},
-            "file_path": dataset_rel,
-        },
-    }
-    if base_model is not None:
-        config["model_name"] = base_model
-    (run_dir / "config.json").write_text(json.dumps(config))
-
-    # Materialize the training dataset so dataset_path resolves to a real file.
-    dataset_abs = run_dir / dataset_rel
-    dataset_abs.parent.mkdir(parents=True, exist_ok=True)
-    dataset_abs.write_text(
-        json.dumps({"messages": [{"role": "user", "content": "hi"}]}) + "\n"
-    )
 
 
 @pytest.fixture

@@ -11,9 +11,10 @@ ed_sheeran sibling runs, and asserts the base-vs-instruct pair (SAME seed+lr, so
 they differ ONLY at the model segment) renders two DISTINCT row texts — the exact
 case the old scheme rendered identically.
 
-TOKEN-FREE: no sampling — opens the dropdown and inspects the DOM. Point it at a
-dev-isolated instance scanning the negation_neglect training_datasets:
-  scripts/dev-isolated.sh --port 8812 ~/projects2/negation_neglect/datasets/training_datasets/
+TOKEN-FREE: no sampling — opens the dropdown and inspects the DOM. Needs the
+suite's fixture run tree as the scan root (`tests/run_fixtures.py` ships the 26-run
+family this asserts on) — `scripts/smoke.sh browser_label_diff` builds it; by hand:
+  scripts/dev-isolated.sh --port 8812 "$(uv run python tests/run_fixtures.py)"
 
   uv run python tests/small-smokes/browser_label_diff.py [BASE_URL] [SCREENSHOT_PATH] [--shot-only]
 

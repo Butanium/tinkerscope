@@ -8,7 +8,7 @@ panel (0 messages).
 ⚠️ Needs a MODELS-BEARING instance: the Add-panel button disables when the model
 catalog is empty, so a `dev-isolated.sh --fresh` launch with no scan root times
 out on the click (a false red). Point the instance at a run dir, e.g.:
-  scripts/dev-isolated.sh --fresh --port N ~/projects2/negation_neglect/datasets/training_datasets/
+  scripts/dev-isolated.sh --fresh --port N "$(uv run python tests/run_fixtures.py)"
 
   uv run python tests/small-smokes/browser_panel_add_modes.py [BASE_URL]
 """

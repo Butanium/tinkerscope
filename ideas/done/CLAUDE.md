@@ -16,3 +16,6 @@ happened.
 - [The loom should cut from the PROSE](loom-cut-from-prose.md) — the overlay got the same click-to-pin as the raw stream, so the cut is picked in reading mode — **done 2026-08-06**
 - [The dataset path wants to be a samplescope command](dataset-path-to-samplescope.md) — became an in-app hand-off instead of a copied command; samplescope already had `?path=` + an instance registry — **done 2026-08-06** (`4fc5091`)
 - [`ws`/`samples` accept `--ws` too](ws-selector-symmetry.md) — shipped as `_one_selector` (positional + flag, error on differing values); the idea file was orphaned and retired post-hoc — **done 2026-08-12**
+- [Smokes coupled to personal run dirs](smoke-fixtures-not-personal-runs.md) — `tests/run_fixtures.py` is the suite's own 27-run scan root; `smoke.sh` builds it, `conftest.py` shares its `write_run` — **done 2026-08-12**
+- [Readiness waits key on STRUCTURE, not data](readiness-waits-on-structure.md) — swept; the three that waited on a run NAME now wait on `aside.sidebar` + the model picker — **done 2026-08-12**
+- [`smoke.sh --baseline` detects working-tree leakage](baseline-detect-worktree-leakage.md) — refuses a self-hosting smoke that never env-reads `TSCOPE_APP_DIR`; the four it flagged are fixed — **done 2026-08-12**
