@@ -10,6 +10,12 @@ LWW convergence for `select`/`set_meta`; §4.2 records the failure) and the
 op-table split of `copy_subtree` vs `replace_tree` (§4.1 — send-branch was
 mis-grounded as a keep-ids copy; it re-mints).
 
+Grounding refreshed 2026-08-12 by the original design session (§2c — repo
+drifted 139 commits: workspaces rename, packs, static mode, the layout
+mirror). **Execute from a FRESH context**: this doc + §2c is the complete
+handoff, deliberately written so no conversational context is needed. §9's
+proposals stand as accepted defaults unless Clément has answered otherwise.
+
 Supersedes-when-built: `BRANCHING_DESIGN.md` §0 invariants 2/3/3b, §3
 (own-vs-external folding), and §6's save machinery describe the browser-authored
 world; they get rewritten per phase as this lands (don't pre-edit them).
@@ -118,6 +124,69 @@ Tree mechanics that carry over unchanged:
   `_continue_target` at `cli.py:1228`); `--node` resolves an id prefix within
   one panel's tree. The Copy-node-id button ships the bare id
   (`ChatMessage.svelte:492`).
+
+## 2c. Grounding refresh (2026-08-12 — repo at `6ec0894`, 139 commits after §2's baseline)
+
+Re-probed by the original design session before handing execution to a fresh
+context. **Architecture verdict: unchanged where it matters.** The echo strip
+(`_HEAVY_MSG_FIELDS`, now `state.py:145`), the content-only committed turn
+(`_committed_turn`, now `chat.py:242`), browser-only folding
+(`#onExternalDone` now `workspaces.svelte.ts:1067`, `reconcileOnReconnect`
+`:1116`), and `save-plan.ts` are all intact. §2's line numbers are
+`1f0ae3e`-era — treat them as anchors-by-name and re-verify on your HEAD.
+
+Deltas that change the design's environment:
+
+1. **The workspaces rename shipped** (v1.0.0, 2026-07-24): wire
+   `/api/workspaces`, `workspace_store.py`, `workspaces.svelte.ts`, `?w=`,
+   `tinkpg ws`. This doc's text was swept for it on 2026-08-06.
+2. **Pack consume is a second server-side workspace writer**
+   (`pack.py:376` calls `workspace_store.upsert`; `--reseed` deletes kept
+   workspaces so their write-once blobs rewrite). §2's "nothing server-side
+   ever writes a workspace" now has this exception — scoped to launch flags
+   today. Ops implication: pack consume must initialize/bump `rev` for the
+   workspaces it writes; executor should verify there is still no *runtime*
+   pack-install path on a live server (the `?w=<pack link>` install is
+   static-site/IndexedDB only) before assuming no live mirrors exist during
+   consume.
+3. **Static mode exists** (`docs/STATIC_SITE.md`; didn't exist at design
+   time): the web bundle also runs serverless — `lib/static-mode.ts` picks
+   the transport at module init, ~30 read sites live in `api-static.ts`,
+   visitor installs go to an IndexedDB overlay. Tree-mutating UI is already
+   hidden in static mode ("would rewrite the tree"), so **no local-ops mode
+   is needed** — but every read the mirror adds (GET body incl. `rev`) needs
+   its static twin, `rev` riding bodies is harmless there, and
+   `browser_static_site.py` joins the P1 + P2 verify lists.
+4. **The mirror pattern has prior art in-tree now**: `a99efe4` (2026-08-06)
+   made the panel layout store-owned (`ws.layout`), adopted only from bus
+   messages stamped with the open workspace — a deliberate early step toward
+   §4.2's mirror, noted at the top of §2. Read ENGINEERING_LOGS 2026-08-06
+   before building the tree mirror; the stamped-adoption scoping is the same
+   problem solved small.
+5. **Independent re-confirmation + a WIDER bug**
+   (`ideas/cli-commit-drops-cot-and-blobs.md`, opus, 2026-08-12, found
+   without knowing this handoff existed): `reasoning` ALSO never reaches the
+   tree — the committed turn is `{role, content}` only, so §2's mention of
+   reconcile preserving echoed reasoning is vacuously true (nothing ever puts
+   reasoning on the echo; BRANCHING_DESIGN §6 lists it as a known limit).
+   Measured: 24/24 assistant nodes content-only on a 12-panel CLI-fired
+   workspace; thinking-heavy replies present as BLANK rows after reload. That
+   file's "shape of the fix" is the §6-superseded graft — cross-linked, do
+   not build it. Adds to P2 verify: **reasoning survives reload**; adds to
+   P3: fix the SKILL/API_CONTRACT wording that undersells what a CLI fan-out
+   persists (the file names the spots).
+6. **Repo conventions moved under the doc** — P3's doc-shipping rules are
+   now: skills live at `plugin/skills/{cli,guide}` (box symlinks
+   `tinkerscope-{cli,guide}`); README's CLI section is §"Bring your agent",
+   **command table only** (option notes belong in the cli skill — Clément
+   2026-08-05); UI behavior changes also update the `?` HelpModal + guide
+   skill twins; smokes run via `scripts/smoke.sh` and never two sweeps
+   concurrently; the checkout is SHARED (stage explicit paths, never
+   `git add -A`; if another instance holds it, worktree + own `npm install`).
+7. **CLI flag naming**: workspace targeting is already standardized as
+   `--ws` (alias `--conv`) across read commands, and `tinkpg ws` exists —
+   §4.4/P3's new flags follow that (`--ws` / `--new-ws`), not a novel
+   `--workspace`.
 
 ## 3. Locked decisions
 
@@ -444,7 +513,8 @@ appear in B; **contended re-select from both tabs converges** — the §4.2
 trace as a regression test; kill-server-mid-op recovery — asserts the
 idempotent retry, i.e. the mutation survives a dropped POST; two tabs on two
 DIFFERENT workspaces — asserts the workspace-filter-before-gap-check rule,
-no cross-refetch storms, no stale-rev drops).
+no cross-refetch storms, no stale-rev drops). Plus `browser_static_site.py`
+(§2c.3 — the static transport must keep working with the mirror reads).
 
 **P2 — server-authored chat folds.**
 `ChatRequest` gains `parent_node`/`workspace` (resolution §4.4 minus CLI
@@ -459,9 +529,11 @@ what the drain path would have committed, cancel-partial, error-empty); rerun
 the token-logprob smokes (`browser_token_logprobs.py` seeded + `_live.py`
 real sampling — assert seeded-from-bucket blobs match server blobs); NEW
 small-smoke: `tinkpg send -n 3` against dev-isolated with **no browser
-attached**, then assert the workspace file + blobs on disk;
-restart-mid-generation smoke (user turn survives, partial fold per the ≥1
-rule).
+attached**, then assert the workspace file + blobs on disk — **including
+`reasoning` on a thinking-on fire** (§2c.5: today even CoT is lost, not just
+blobs); restart-mid-generation smoke (user turn survives, partial fold per
+the ≥1 rule); `browser_static_site.py` again (fold changes must not leak
+server-only assumptions into the shared render path).
 
 **P3 — addressing + retirement.**
 CLI `--workspace`/`--new-workspace`/auto-create + qualified `--node`; Copy

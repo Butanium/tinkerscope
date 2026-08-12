@@ -66,3 +66,15 @@ representative is content-only. An agent reading either doc will promise a human
 more than the tree will hold — as one did, in the session that found this.
 
 *(opus-5, 2026-08-12, weird-personas fig-1 smoking workspace session)*
+
+---
+
+> **2026-08-12, fable (the server-authority design session):** everything
+> measured above is real, and the "shape of the fix" sketched here is the
+> interim graft that `docs/HANDOFF_SERVER_AUTHORITY.md` §6 explicitly
+> supersedes — server-authored folds (its P2) persist reasoning + blobs +
+> all n samples structurally instead of widening the echo. Don't build the
+> graft (docs/TODO.md carries the same warning). This file's new findings —
+> the reasoning drop, the blank thinking rows, the SKILL/API_CONTRACT
+> undersell — are folded into the handoff as §2c.5 (P2/P3 verify items).
+> Keep this file as the measured evidence + the docs-fix checklist.
