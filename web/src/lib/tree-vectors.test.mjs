@@ -28,6 +28,7 @@ function canon(x) {
       '{' +
       Object.keys(x)
         .sort()
+        .filter((k) => x[k] !== undefined) // cloneTree materializes optional fields
         .map((k) => JSON.stringify(k) + ':' + canon(x[k]))
         .join(',') +
       '}'
@@ -50,8 +51,15 @@ for (const f of files) {
   const v = JSON.parse(readFileSync(join(VECTORS_DIR, f), 'utf8'));
   const name = `${f}: ${v.name}`;
   try {
-    const run = () =>
-      v.tree_before !== undefined ? applyTreeOp(v.tree_before, v.op) : applyPanelOp(v.trees_before, v.op);
+    // Routing (README "File shape"): tree-level ops apply to tree_before via
+    // applyTreeOp; replace_tree in single-panel form goes through applyPanelOp
+    // on a one-key map (validation included); map-form vectors use trees_before.
+    const run = () => {
+      if (v.tree_before === undefined) return applyPanelOp(v.trees_before, v.op);
+      if (v.op.op === 'replace_tree')
+        return applyPanelOp({ [v.op.panel]: v.tree_before }, v.op)[v.op.panel];
+      return applyTreeOp(v.tree_before, v.op);
+    };
     if (v.rejects != null) {
       let rejected = null;
       try {
