@@ -7,8 +7,9 @@ cycling, delete (prune a branch), and the edit-leak guard (cycling to a sibling
 under an open editor must drop the draft) — none of which call the model.
 
 Oracle: the DOM (active path + the .branch-cycle control) plus GET
-/api/workspaces (the persisted per-panel tree, `trees.primary`). The active
-path also round-trips through GET /api/state.panels[0].messages.
+/api/workspaces (the persisted per-panel tree, `trees.primary`) — the prune is
+round-tripped as the persisted tree's SHAPE. It deliberately no longer asserts
+GET /api/state.panels[0].messages; see the note at that oracle.
 
 Non-destructive: creates its own workspace and deletes only that one, so it's
 safe against an instance that already has (fixture) workspaces.
@@ -128,9 +129,34 @@ def main():
         contents = [n["content"] for n in tree["nodes"].values()]
         assert "U1 EDITED question" not in contents, "pruned node still on disk"
         assert "U1 original question" in contents and "A1 original answer" in contents
-        st = _get("/api/state")
-        bodies = [m["content"] for m in st["panels"][0]["messages"]]
-        assert bodies == ["U1 original question", "A1 original answer"], bodies
+        # Round-trip the prune from the DURABLE, workspace-scoped side: after the
+        # delete the tree is a single linear chain, so assert that SHAPE.
+        #
+        # Two things this deliberately does NOT do, both learned 2026-08-12:
+        #  - it does not read /api/state's panel echo (what it used to do). The bus
+        #    describes exactly ONE workspace at a time (api/state.py), so in a full
+        #    sweep it may be another smoke's and the comparison returns a foreign
+        #    transcript. That only ever passed standalone; the strict-mode repair
+        #    was what first let this smoke survive far enough to expose it.
+        #  - it does not walk `selected` as a chain. With one root and one child
+        #    there is no sibling choice to record, so `selected` is legitimately
+        #    empty and lib/tree.ts's selectedChildId falls back to the LAST child;
+        #    walking it alone yields [].
+        assert len(tree["rootChildren"]) == 1, tree["rootChildren"]
+        root_id = tree["rootChildren"][0]
+        assert tree["nodes"][root_id]["content"] == "U1 original question", tree["nodes"][root_id]
+        kids = tree["nodes"][root_id]["children"]
+        assert len(kids) == 1, kids
+        assert tree["nodes"][kids[0]]["content"] == "A1 original answer", tree["nodes"][kids[0]]
+        # The /api/state panel echo is deliberately NOT asserted here any more.
+        # Under P1 it is a CLI-visible echo that tree-only mutations do not write
+        # (see CLAUDE.md on `live.state.panels`), so after any earlier smoke fires
+        # a real generation the bus keeps ITS messages while our page restamps
+        # `workspace_id` to ours — the read comes back stamped-us / echoing-them.
+        # Reproduced 2026-08-12 in three consecutive sweeps and reported as a P1
+        # follow-up; asserting it from here would just pin someone else's turns.
+        # The durable oracle above is the one that means something.
+        print("persisted oracle: pruned tree shape OK (echo deliberately not asserted)")
         assert DRAFT not in json.dumps(tree), "leaked draft persisted"
         assert not errors, f"console/page errors: {errors}"
 
@@ -140,7 +166,6 @@ def main():
     urllib.request.urlopen(
         urllib.request.Request(f"{BASE}/api/workspaces/{conv['id']}", method="DELETE"),
         timeout=10).read()
-    print("messages oracle:", bodies)
     print("BRANCHING SMOKE PASS")
 
 

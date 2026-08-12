@@ -73,6 +73,10 @@ DEFAULT=(
     browser_two_tab_workspace
     browser_thread_switcher
     browser_state_reprime
+    # The P1 ops-mirror verify (HANDOFF_SERVER_AUTHORITY §7). Token-free but
+    # SELF-HOSTING — spawns and restarts its own servers, so it must run under
+    # this runner's lock, never beside another sweep.
+    browser_ops_convergence
     browser_kbnav
     browser_thread_system
     browser_row_toolbar
@@ -83,7 +87,6 @@ DEFAULT=(
     browser_system_chip
     browser_panel_drag
     browser_chart_rules
-    browser_branch_from_root
     # Repaired 2026-08-12 (were listed STALE for reasons that had stopped being true):
     #   branching — the bare textarea.edit-textarea matched the thread-system editor too
     #   continue_scope — .prefill-scope still exists; it was the FOLD half that died
@@ -133,6 +136,11 @@ declare -A STALE=(
 #   pre-ModelDropdown/q_nk state it left behind when it was rewritten 2026-08-05).
 #
 # NON-DETERMINISTIC (not stale — the coverage is real, the result isn't stable):
+#   browser_branch_from_root — REMOVED from DEFAULT 2026-08-12. Its two toggled
+#   sends hit the live free-OpenRouter router (zero cost, but a third-party
+#   network dependency with 45 s waits), which breaks DEFAULT's "token-free by
+#   construction" contract and cost a sweep on the merge tip. Same treatment as
+#   stop_generation below; run it directly when you touch branch-from-start.
 #   browser_stop_generation — drives live free-OpenRouter, and which assertion
 #   fails varies run to run. Observed 2026-08-03 failing BOTH on the merge tip
 #   (timeout waiting for the compare panel) and on the pre-merge main 51c5ec3
