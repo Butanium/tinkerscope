@@ -54,7 +54,27 @@ def wired(monkeypatch):
         if result is not None:
             result.ok = True
 
+    class FakeResp:
+        status_code = 200
+        text = "{}"
+
+    class FakeClient:
+        """_emit_user_turns POSTs through a raw _client() (so battery can catch
+        HTTP errors per-probe instead of _post's _die) — record those the same
+        way as _post calls."""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, path, json=None):
+            calls.append(("post", path, json))
+            return FakeResp()
+
     monkeypatch.setattr(cli, "_post", fake_post)
+    monkeypatch.setattr(cli, "_client", lambda: FakeClient())
     monkeypatch.setattr(cli, "_stream_chat", fake_stream)
     return calls, state, ws
 
@@ -150,3 +170,128 @@ def test_continue_ancestry_file_stays_legacy(wired, tmp_path):
     assert _ops_posts(calls) == [], "external transcripts have no tree node to hang from"
     for fire in _fires(calls):
         assert "parent_node" not in fire
+
+
+# --------------------------------------------------------------------------- #
+# Review finding 2: `continue --ws <other>` must bind the MODEL from that
+# workspace's own saved layout — never from the open screen — or model X's
+# output gets durably folded under the other workspace's model-Y panel label.
+# --------------------------------------------------------------------------- #
+WS_B = {
+    "id": "wsB", "name": "other-ws", "reduced_panels": [],
+    "panels": [{"id": "p-1", "run_id": "run_bbb", "checkpoint": "final"}],
+    "trees": {
+        "p-1": {
+            "nodes": {
+                "bu1": {"id": "bu1", "role": "user", "content": "b-question", "parent": None,
+                        "children": ["ba1"]},
+                "ba1": {"id": "ba1", "role": "assistant", "content": "b-answer", "parent": "bu1",
+                        "children": []},
+            },
+            "rootChildren": ["bu1"], "selected": {},
+        },
+    },
+}
+
+
+def test_continue_foreign_ws_binds_model_from_its_own_layout(wired, monkeypatch):
+    calls, state, ws = wired
+    monkeypatch.setattr(cli, "_workspaces", lambda: [ws, WS_B])
+    res = runner.invoke(cli.app, ["continue", "follow", "--ws", "wsB"])
+    assert res.exit_code == 0, res.output
+
+    (fire,) = _fires(calls)
+    assert fire["run_id"] == "run_bbb", "model must come from wsB's layout, not the screen"
+    assert fire["checkpoint"] == "final"
+    assert fire["workspace_id"] == "wsB"
+    assert fire["messages"][0] == {"role": "user", "content": "b-question"}
+    (post,) = _ops_posts(calls)
+    assert post[1] == "/api/workspaces/wsB/ops"
+    assert post[2]["ops"][0]["nodes"][0]["parent"] == "ba1"
+
+
+def test_continue_foreign_ws_unbound_layout_dies_loudly(wired, monkeypatch):
+    calls, state, ws = wired
+    b = {**WS_B, "panels": [{"id": "p-1", "run_id": None, "checkpoint": None}]}
+    monkeypatch.setattr(cli, "_workspaces", lambda: [ws, b])
+    res = runner.invoke(cli.app, ["continue", "follow", "--ws", "wsB"])
+    assert res.exit_code != 0
+    assert "binds no model" in res.output and _fires(calls) == []
+
+
+# --------------------------------------------------------------------------- #
+# Review finding 3: the mixed-mode seam must be LOUD, never silent.
+# --------------------------------------------------------------------------- #
+def test_continue_warns_when_mirror_diverges_from_tree(wired):
+    """A lockstep `tinkpg chat` advanced the panel MIRROR past the saved tree;
+    a bare `continue` follows the TREE — it must say so, naming both."""
+    calls, state, ws = wired
+    state["panels"][0]["messages"] = [
+        {"role": "user", "content": "lockstep q1"},
+        {"role": "assistant", "content": "lockstep a1"},
+    ]
+    res = runner.invoke(cli.app, ["continue", "q2", "--panel", "p-1"])
+    assert res.exit_code == 0, res.output
+    assert "differs from the saved tree" in res.output
+    (fire,) = _fires(calls)
+    assert fire["messages"][0]["content"] == "hi", "the SAVED TREE's ancestry fires"
+
+
+def test_continue_mirror_fallback_warns_it_wont_persist(wired):
+    """Open workspace, panel with NO saved tree: the mirror fallback fires
+    legacy — loudly, since the skill promises full persistence."""
+    calls, state, ws = wired
+    state["panels"].append({"id": "p-2", "run_id": "run_c", "checkpoint": None,
+                            "messages": [{"role": "user", "content": "m-q"},
+                                         {"role": "assistant", "content": "m-a"}]})
+    res = runner.invoke(cli.app, ["continue", "q2", "--panel", "p-2"])
+    assert res.exit_code == 0, res.output
+    assert "will NOT persist" in res.output
+    (fire,) = _fires(calls)
+    assert "parent_node" not in fire
+
+
+# --------------------------------------------------------------------------- #
+# Review finding 4: a failed user-turn ops POST reports per-panel and never
+# raises — battery's per-probe failure contract depends on it.
+# --------------------------------------------------------------------------- #
+def test_fire_send_ops_failure_reports_per_panel_without_dying(monkeypatch):
+    class FakeResp:
+        status_code = 404
+        text = "no workspace ws1"
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, path, json=None):
+            return FakeResp()
+
+    fired = []
+    monkeypatch.setattr(cli, "_client", lambda: FakeClient())
+    monkeypatch.setattr(cli, "_stream_chat", lambda *a, **k: fired.append(a))
+    targets = [{"id": "p-1", "run_id": "r1"}, {"id": "p-2", "run_id": "r2"}]
+    # Must RETURN failed results (no typer.Exit escaping into battery's loop).
+    results = cli._fire_send(targets, "hello", None, 1, None, None, None, None,
+                             False, False, conv_id="ws1")
+    assert fired == [], "no fire without persisted user turns"
+    assert len(results) == 2
+    for pid, p, res in results:
+        assert not res.ok and "404" in (res.error or "")
+
+
+# --------------------------------------------------------------------------- #
+# Review finding 1, CLI half: the fold-failure detector.
+# --------------------------------------------------------------------------- #
+def test_fold_failure_helper():
+    body = {"parent_node": "u1"}
+    ok = {"folded": [{"sample_index": 0, "node_id": "n1"}], "fold_rev": 4}
+    assert cli._fold_failure(body, ok, n_ok=1) is None
+    assert cli._fold_failure({}, {}, n_ok=3) is None, "legacy fires never fail this check"
+    assert cli._fold_failure(body, {}, n_ok=0) is None, "nothing completed ⇒ nothing to persist"
+    msg = cli._fold_failure(body, {"fold_error": "workspace w vanished"}, n_ok=3)
+    assert "NOT persisted" in msg and "vanished" in msg
+    assert "NOT persisted" in cli._fold_failure(body, {}, n_ok=1)

@@ -118,6 +118,8 @@ def _native_items(n, prefix="ans"):
 # what came back from DISK still carries the CoT and the blob flags.
 # --------------------------------------------------------------------------- #
 async def test_fold_n3_persists_all_samples_ordered_with_blobs(fold_env, monkeypatch):
+    import json as _json
+
     chat_route, bus, store, ws_id = fold_env
     monkeypatch.setattr(
         "tinkerscope.api.routes.chat.get_sampler", lambda: _NativeSampler(_native_items(3))
@@ -125,10 +127,14 @@ async def test_fold_n3_persists_all_samples_ordered_with_blobs(fold_env, monkeyp
     rev_before = store.get_body(ws_id)["rev"]
     sub = await bus.subscribe()
 
-    await _run_to_done(chat_route, _req(
+    sse = await _run_to_done(chat_route, _req(
         chat_route, ws_id, openrouter_model=None, base_model=SUPPORTED_BASE,
         n_samples=3, thinking=False,
     ))
+    # The CALLER stream's terminal carries the fold outcome too — the headless
+    # CLI can't read the bus, so the done event is its only persistence signal.
+    done_sse = _json.loads(next(e for e in sse if e["event"] == "done")["data"])
+    assert len(done_sse["folded"]) == 3 and "fold_error" not in done_sse
 
     tree = _tree(store, ws_id)
     kids = tree["nodes"]["u1"]["children"]
@@ -326,6 +332,35 @@ async def test_error_before_any_sample_folds_nothing(fold_env, monkeypatch):
     errs = [m for m in await _drain(sub) if m["type"] == "chat_error"]
     assert len(errs) == 1 and "folded" not in errs[0]
     assert "rejected" not in store.apply_ops(ws_id, [{"op": "delete", "panel": PANEL, "node_id": "u1"}])
+
+
+async def test_fold_failure_reaches_the_caller_stream(fold_env, monkeypatch):
+    """The workspace vanishes mid-chat → the SSE `done` event carries
+    `fold_error` (review finding 1: the headless CLI is the one consumer that
+    can't read the bus or the server log — without this it prints [done] and
+    exits 0 with zero samples persisted), and the bus chat_done has no
+    manifest."""
+    import json as _json
+
+    chat_route, bus, store, ws_id = fold_env
+
+    async def quick(**kw):
+        yield {"content": "ans", "sample_index": 0, "raw_text": "ans"}
+
+    monkeypatch.setattr("tinkerscope.api.openrouter.sample_one_stream", quick)
+    monkeypatch.setattr(chat_route.workspace_store, "apply_ops", lambda cid, ops: None)
+
+    sub = await bus.subscribe()
+    sse = await _run_to_done(chat_route, _req(chat_route, ws_id))
+    done_sse = _json.loads(next(e for e in sse if e["event"] == "done")["data"])
+    assert "vanished" in done_sse["fold_error"]
+    assert "folded" not in done_sse
+    done_bus = next(m for m in await _drain(sub) if m["type"] == "chat_done")
+    assert "folded" not in done_bus
+    # and the CLI-side check fires on exactly this payload
+    from tinkerscope.cli import _fold_failure
+    msg = _fold_failure({"parent_node": "u1"}, done_sse, n_ok=1)
+    assert msg is not None and "NOT persisted" in msg and "vanished" in msg
 
 
 # --------------------------------------------------------------------------- #

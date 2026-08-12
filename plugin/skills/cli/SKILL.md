@@ -419,10 +419,15 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   (`reasoning`), `token_logprobs` and `raw_meta` blobs, durable across a server
   restart. `tinkpg samples` on the fan-out shows all K. The full fan-out also
   streams to stdout as before (capture with `… > log.txt` for a quick `<tag>`
-  tally). Only a fire with NO workspace anywhere (pure lockstep) is still
-  echo-only — and `continue --ancestry-file <path>` (a JSON list of
-  `{role, content}` dicts) looms from an external transcript directly, no tree
-  node needed, and stays stdout-only.
+  tally). If the fold FAILS (workspace deleted/replaced mid-fire), the CLI says
+  so and exits non-zero — stdout is then the only copy. The exceptions, each
+  loud or documented: a fire with NO workspace anywhere (pure lockstep) is
+  echo-only; `chat`/`compare` advance only the live transcript, never the tree
+  (a following bare `continue` warns when the two diverge — aim it with
+  `--thread`/`--node`, or use `send` for persisted threads); a `continue` from
+  a panel with no saved tree falls back to the live transcript and warns that
+  nothing will persist; `--ancestry-file` looms from an external transcript
+  and stays stdout-only.
 - **Provenance rule for looming (`continue`/`--ancestry-file`).** OK: a full,
   VERBATIM, previously-generated workspace as ancestry — from a tree, a raw
   log, or another model entirely (grafting a real workspace model A produced

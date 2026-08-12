@@ -665,6 +665,22 @@ def _fmt_first_token(dist: dict, n_samples: int) -> str:
     return "\n".join(lines)
 
 
+def _fold_failure(body: dict, done_data: dict, n_ok: int) -> Optional[str]:
+    """The fire carried `parent_node` (server-authored persistence promised),
+    ≥1 sample completed, and the terminal came back without a fold manifest —
+    the samples were NOT persisted. Returns the failure message to surface, or
+    None when everything is fine (legacy fire / nothing completed / manifest
+    present). This is the caller-stream half of the fold contract: the headless
+    CLI is the one consumer that can't read the bus or the server log."""
+    if not body.get("parent_node") or n_ok == 0 or done_data.get("folded"):
+        return None
+    reason = done_data.get("fold_error") or "no fold manifest on the terminal"
+    return (
+        f"samples streamed but were NOT persisted to the workspace — {reason}. "
+        "The stdout above is the only copy."
+    )
+
+
 def _stream_chat(
     body: dict,
     label: Optional[str] = None,
@@ -740,6 +756,7 @@ def _stream_chat(
     streamed: set[int] = set()  # sample indices that received delta chunks
     hdr_printed: set[int] = set()  # indices we printed a "--- sample N ---" header for
     last_kind: dict[int, str] = {}  # idx -> last delta kind, to insert separators
+    n_ok = 0  # completed (non-error) samples — the fold-failure check needs the count
 
     try:
         with httpx.Client(base_url=_base_url(), timeout=None) as c:
@@ -750,10 +767,19 @@ def _stream_chat(
                     return
                 for ev in event_source.iter_sse():
                     if ev.event == "done":
+                        try:
+                            done_data = json.loads(ev.data) if ev.data else {}
+                        except json.JSONDecodeError:
+                            done_data = {}
                         if json_out:
-                            emit_json({"event": "done"})
+                            # carries folded/fold_rev or fold_error for scripts
+                            emit_json({"event": "done", **done_data})
                         else:
                             emit_block("[done]")
+                        fold_fail = _fold_failure(body, done_data, n_ok)
+                        if fold_fail is not None:
+                            fail(fold_fail)
+                            return
                         break
                     if ev.event == "error":
                         err = ev.data
@@ -791,6 +817,8 @@ def _stream_chat(
                         continue
                     payload = json.loads(ev.data)
                     idx = payload.get("sample_index")
+                    if not payload.get("error"):
+                        n_ok += 1
                     if result is not None and not payload.get("error"):
                         result.samples.append(payload)
                     if json_out:
@@ -1127,12 +1155,17 @@ def _new_thread_system(resolved: Optional[str]) -> tuple[Optional[str], str]:
 
 def _emit_user_turns(
     conv_id: str, targets: list[dict], prompt: str, thread_system: Optional[str]
-) -> dict[str, str]:
+) -> tuple[dict[str, str], Optional[str]]:
     """Persist one NEW-THREAD user turn per target panel — the writer's own
     `add_nodes` ops, emitted BEFORE the fire (HANDOFF_SERVER_AUTHORITY §4.3: a
     pre-start failure must not lose the turn). Root nodes stamp `system_prompt`
-    (thread identity). Returns {panel_id: node_id}, the fires' `parent_node`s.
-    An ops rejection (409) dies here, before any tokens are paid for."""
+    (thread identity). Returns ({panel_id: node_id}, error): the fires'
+    `parent_node`s, or an error string with nothing to fire against.
+
+    Returns the error rather than dying — `battery`'s contract is that one
+    probe's failure reports in the summary and the run continues, and this POST
+    is part of the probe (a workspace deleted at probe 8 must not swallow
+    probes 8..N)."""
     ops: list[dict] = []
     parents: dict[str, str] = {}
     for p in targets:
@@ -1142,8 +1175,17 @@ def _emit_user_turns(
             node["system_prompt"] = thread_system
         ops.append({"op": "add_nodes", "panel": p["id"], "nodes": [node], "select": True})
         parents[p["id"]] = nid
-    _post(f"/api/workspaces/{conv_id}/ops", {"ops": ops})
-    return parents
+    try:
+        with _client() as c:
+            resp = c.post(f"/api/workspaces/{conv_id}/ops", json={"ops": ops})
+    except httpx.TransportError as e:
+        return {}, f"could not reach tinkerscope server at {_base_url()}: {e}"
+    if resp.status_code >= 400:
+        return {}, (
+            f"user-turn ops POST failed (HTTP {resp.status_code}): {resp.text} — "
+            "nothing was fired (the turns could not be persisted)"
+        )
+    return parents, None
 
 
 def _fire_send(
@@ -1170,7 +1212,16 @@ def _fire_send(
     is the legacy lockstep shape (echo-only)."""
     parents: dict[str, str] = {}
     if conv_id:
-        parents = _emit_user_turns(conv_id, targets, prompt, thread_system)
+        parents, turn_err = _emit_user_turns(conv_id, targets, prompt, thread_system)
+        if turn_err is not None:
+            # No fire without the persisted turns: report per-panel (send dies on
+            # the collected failures; battery records them and continues).
+            failed = []
+            for p in targets:
+                res = _StreamResult()
+                res.error = turn_err
+                failed.append((p["id"], p, res))
+            return failed
     lock = threading.Lock()
     threads: list[threading.Thread] = []
     results: list[tuple[str, dict, _StreamResult]] = []
@@ -1307,6 +1358,34 @@ def _continue_target(tree: dict, thread: Optional[int], turn: Optional[int], nod
     return path[nxt - 1]  # turn N's selected answer (or its user node if unanswered)
 
 
+def _warn_mirror_divergence(panel: dict, ancestry: list[dict]) -> None:
+    """continue's active default reads the SAVED TREE, but the panel's live
+    transcript mirror can hold a LOCKSTEP exchange the tree never saw
+    (`tinkpg chat`/`compare` advance only the mirror). Firing would silently
+    drop that exchange from the ancestry — say so and name both, instead of
+    guessing which one the user means (review finding 3A, 2026-08-12).
+    Explicit --thread/--turn/--node targeting skips this (the user chose)."""
+    mirror = [(m.get("role"), m.get("content"))
+              for m in (panel.get("messages") or []) if m.get("role") != "system"]
+    if not mirror:
+        return
+    tree_path = [(m.get("role"), m.get("content")) for m in ancestry if m.get("role") != "system"]
+    if mirror == tree_path:
+        return
+
+    def _last(pairs: list) -> str:
+        return _oneline(pairs[-1][1] or "", 60) if pairs else "(empty)"
+
+    print(
+        f"⚠ panel {panel.get('id')}: the live transcript ({len(mirror)} turn(s), last: "
+        f"{_last(mirror)!r}) differs from the saved tree's active path ({len(tree_path)} "
+        f"turn(s), last: {_last(tree_path)!r}). Continuing the SAVED TREE — a lockstep "
+        "`tinkpg chat`/`compare` exchange is not in it. Aim with --thread/--turn/--node "
+        "if this is wrong.",
+        file=sys.stderr,
+    )
+
+
 def _continue_messages(ancestry: list[dict], prompt: Optional[str], prefill: Optional[str]) -> list[dict]:
     """Assemble the /api/chat messages from an ancestry (root→target, role/content)
     plus optional appends, and REFUSE invalid sequences up front (the server would
@@ -1413,10 +1492,6 @@ def cmd_continue(
     st = _get("/api/state")
     if st.get("running") and not force:
         _die("a generation is in flight (running=yes) — wait for it, or pass --force")
-    panels = st.get("panels", [])
-    if not panels:
-        _die("no panels on screen — open a workspace in the browser first")
-    by_id = {p["id"]: p for p in panels}
     conv_id = st.get("workspace_id")
 
     # The open/〈--ws〉 workspace: fold info, the saved trees (targeting reads
@@ -1435,6 +1510,27 @@ def cmd_continue(
         folded = set(c.get("reduced_panels") or [])
     if c is not None:
         trees = c.get("trees") or {}
+
+    # Where the MODEL bindings come from. Same-workspace (or no workspace): the
+    # live screen panels, as always. FOREIGN (--ws names a workspace that is not
+    # on screen): that workspace's own SAVED layout — ancestry, destination and
+    # model must be coherent from one source, or the screen's model X gets
+    # durably folded under the target's model-Y panel label (review finding,
+    # 2026-08-12; only raw_meta would hold the truth).
+    foreign = c is not None and c.get("id") != conv_id
+    if foreign:
+        c_label = c.get("name") or (c.get("id") or "")[:8]
+        panels = [r for r in (c.get("panels") or []) if isinstance(r, dict) and r.get("id")]
+        if not panels:
+            _die(
+                f"workspace {c_label!r} has no saved panel layout to bind models from — "
+                "open it in the browser once, or target the open workspace"
+            )
+    else:
+        panels = st.get("panels", [])
+        if not panels:
+            _die("no panels on screen — open a workspace in the browser first")
+    by_id = {p["id"]: p for p in panels}
 
     # --node lives in exactly ONE panel's tree; restrict targeting to that panel.
     if node is not None and not panel:
@@ -1456,6 +1552,12 @@ def cmd_continue(
     unbound = [p["id"] for p in targets if not p.get("run_id")]
     targets = [p for p in targets if p.get("run_id")]
     if not targets:
+        if foreign:
+            _die(
+                f"workspace {c_label!r}'s saved layout binds no model to the target panel(s) "
+                f"({', '.join(unbound) or 'none matched'}) — pass --panel to pick a bound one, "
+                "or open that workspace in the browser and bind a model"
+            )
         _die("no target panel has a model bound")
     think: "bool | str | None" = "both" if thinking_both else thinking
     system = _resolve_sys(system, no_system)
@@ -1471,16 +1573,24 @@ def cmd_continue(
         if fixed_ancestry is not None:
             ancestry = fixed_ancestry
             thread_system: Optional[str] = ""  # external transcript — never inherit a panel's thread prompt
-        elif tree_mode or (saved_tree or {}).get("nodes"):
+        elif tree_mode or foreign or (saved_tree or {}).get("nodes"):
             # The saved tree is the ancestry source whenever the panel HAS one
-            # (the panel mirror is only the no-workspace fallback): a tree node
-            # anchor is what gives the fire its `parent_node`, i.e. what makes
-            # the server fold the replies durably. Active mode is just
-            # _continue_target with no flags — the selected thread's leaf.
+            # (the panel mirror is only the no-workspace fallback, and NEVER an
+            # option for a foreign workspace — the mirror is screen state): a
+            # tree node anchor is what gives the fire its `parent_node`, i.e.
+            # what makes the server fold the replies durably. Active mode is
+            # just _continue_target with no flags — the selected thread's leaf.
             if saved_tree is None:
-                _die(f"panel {p['id']} has no saved tree in the workspace — can't --thread/--turn/--node it")
+                _die(
+                    f"panel {p['id']} has no saved tree in workspace "
+                    f"{c_label!r} — nothing to continue there"
+                    if foreign else
+                    f"panel {p['id']} has no saved tree in the workspace — can't --thread/--turn/--node it"
+                )
             anchor = _continue_target(saved_tree, thread, turn, node)
             ancestry = _ancestry(saved_tree, anchor["id"])
+            if not tree_mode and not foreign:
+                _warn_mirror_divergence(p, ancestry)
             # the targeted thread's OWN prompt (root node) — explicit "", not None,
             # when absent, so looming a promptless thread can't inherit the ACTIVE
             # thread's mirrored prompt
@@ -1489,6 +1599,17 @@ def cmd_continue(
             ancestry = p.get("messages") or []
             if not ancestry:
                 _die(f"panel {p['id']} has no active thread — use `tinkpg send` to start one, or --thread/--node")
+            if c is not None:
+                # An open workspace whose panel tree is EMPTY: the fire proceeds
+                # from the live transcript but has no anchor, so NOTHING persists
+                # — the exact opposite of what the skill's headline promises.
+                # Loud, not silent (review finding 3B, 2026-08-12).
+                print(
+                    f"⚠ panel {p['id']} has no saved tree in the open workspace — this fire "
+                    "will NOT persist there (legacy lockstep from the live transcript). "
+                    "Start the thread with `tinkpg send` to persist.",
+                    file=sys.stderr,
+                )
             thread_system = None  # active thread — inherit the panel mirror
         if no_system:
             thread_system = ""  # --no-system suppresses the thread part too

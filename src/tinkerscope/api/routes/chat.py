@@ -755,6 +755,12 @@ async def chat(req: ChatRequest):
         produced: dict[int, str] = {}
         incorporated: dict[int, bool] = {}  # did the backend already fold the prefill in?
         samples: dict[int, dict] = {}  # full completed items, for the terminal fold
+        # Fold outcome for the CALLER stream: {folded, fold_rev} or {fold_error}.
+        # Filled by _fire (which _terminal awaits to completion) before the final
+        # done/error SSE events yield, so the direct-stream consumer — the
+        # headless CLI, the one that can't read the bus or the server log — can
+        # tell "persisted" from "silently lost".
+        fold_outcome: dict = {}
         terminated = False
 
         async def _terminal(*, error: str | None = None, cancelled: bool = False) -> None:
@@ -789,36 +795,41 @@ async def chat(req: ChatRequest):
                 reached = _prefill_reaches_sample(scope, thinking, n, idx0)
                 turn = _committed_turn(msgs, produced[idx0], incorporated.get(idx0, False), reached)
                 end_patch = {"panel": req.panel, "messages": turn}
-            async def _apply_fold() -> "tuple[list[dict] | None, int | None]":
+            async def _apply_fold() -> "tuple[list[dict] | None, int | None, str | None]":
                 """Fold every completed sample under `parent_node` — ONE
                 `add_nodes` op through the SAME locked apply + bus fan-out every
                 client mutation uses (store.apply_ops → `_broadcast_ops`), so a
                 mirror replays the fold like any other batch: light nodes + blobs
-                in one write, rev++, one `ops` event. Returns (manifest, rev), or
-                (None, None) when nothing could be persisted — loud, never raise:
-                the terminal MUST still fire or `running` sticks."""
+                in one write, rev++, one `ops` event. Returns (manifest, rev,
+                None), or (None, None, reason) when nothing could be persisted —
+                loud, never raise: the terminal MUST still fire or `running`
+                sticks. The reason reaches the CALLER STREAM (`fold_error` on the
+                done/error SSE event), not just the server log — a headless CLI
+                is exactly the consumer that can't read the log."""
                 nodes, manifest = _build_fold_nodes(
                     msgs, samples, incorporated, scope, thinking, n, req.parent_node
                 )
                 op = {"op": "add_nodes", "panel": req.panel, "nodes": nodes, "select": True}
                 out = await run_in_threadpool(workspace_store.apply_ops, fold_ws, [op])
                 if out is None:
+                    reason = f"workspace {fold_ws} vanished mid-chat"
                     log.warning(
-                        "chat %s: fold dropped — workspace %s vanished mid-chat "
-                        "(%d sample(s) not persisted)", chat_id, fold_ws, len(samples),
+                        "chat %s: fold dropped — %s (%d sample(s) not persisted)",
+                        chat_id, reason, len(samples),
                     )
-                    return None, None
+                    return None, None, reason
                 if "rejected" in out:
                     # Near-unreachable while the placement registry holds (deletes
                     # of the parent's subtree 409), but a workspace-level
                     # replace/pack-apply can still pull the tree out from under us.
+                    reason = f"fold rejected by the op layer: {out['rejected'].get('error')}"
                     log.warning(
-                        "chat %s: fold REJECTED by the op layer (%s) — %d sample(s) "
-                        "not persisted", chat_id, out["rejected"], len(samples),
+                        "chat %s: %s — %d sample(s) not persisted",
+                        chat_id, reason, len(samples),
                     )
-                    return None, None
+                    return None, None, reason
                 await _broadcast_ops(fold_ws, out)
-                return manifest, out["rev"]
+                return manifest, out["rev"], None
 
             async def _fire() -> None:
                 # Ordering guarantee (§4.3): the fold's `ops` event goes out — and
@@ -829,12 +840,18 @@ async def chat(req: ChatRequest):
                 fold_rev: "int | None" = None
                 if placement is not None and samples:
                     try:
-                        folded, fold_rev = await _apply_fold()
-                    except Exception:
+                        folded, fold_rev, fold_err = await _apply_fold()
+                    except Exception as e:
+                        fold_err = f"fold failed: {type(e).__name__}: {e}"
                         log.exception(
                             "chat %s: fold failed — %d sample(s) not persisted",
                             chat_id, len(samples),
                         )
+                    if folded is not None:
+                        fold_outcome["folded"] = folded
+                        fold_outcome["fold_rev"] = fold_rev
+                    else:
+                        fold_outcome["fold_error"] = fold_err or "fold produced no manifest"
                 _release_placement()
                 # origin_workspace: the echo commit must not land on a bus that a
                 # DIFFERENT workspace claimed while this chat streamed (chimera —
@@ -930,10 +947,10 @@ async def chat(req: ChatRequest):
                     await BUS.broadcast("sample", {"chat_id": chat_id, "panel": req.panel, **item})
             if prod_error is not None:
                 await _terminal(error=prod_error)
-                yield {"event": "error", "data": json.dumps({"error": prod_error})}
+                yield {"event": "error", "data": json.dumps({"error": prod_error, **fold_outcome})}
             else:
                 await _terminal(cancelled=inflight.cancelled)
-                yield {"event": "done", "data": "{}"}
+                yield {"event": "done", "data": json.dumps(fold_outcome)}
         finally:
             _INFLIGHT.pop(chat_id, None)
             if not worker.done():
