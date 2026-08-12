@@ -65,6 +65,7 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 - [Smokes are coupled to Clément's personal run dirs](smoke-fixtures-not-personal-runs.md) — 15 files hard-code fixture paths; a checked-in synthetic run tree costs nothing
 - [Readiness waits should key on STRUCTURE, not data](readiness-waits-on-structure.md) — wait for `aside.sidebar`, never for content the smoke didn't create
 - [`smoke.sh --baseline` should detect working-tree leakage](baseline-detect-worktree-leakage.md) — a self-hosting smoke that ignores `TSCOPE_APP_DIR` produces a green checkmark for nothing
+- [A migrating 404 fails one random smoke per sweep](anonymous-404-console-flake.md) — different victim each sweep, all functional checks green; the console guard drops `m.location` so it names no URL
 
 ### Codebase & workflow hygiene
 

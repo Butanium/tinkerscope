@@ -81,7 +81,10 @@ def main():
         browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         errors = []
-        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        # The URL matters: "Failed to load resource: … 404 ()" alone names nothing,
+        # and a failure here is otherwise undiagnosable after the fact.
+        page.on("console", lambda m: errors.append(
+            f"{m.text} [{(m.location or {}).get('url', '?')}]") if m.type == "error" else None)
         page.on("pageerror", lambda e: errors.append(str(e)))
 
         # ── 1. Hard-load /?w=<A> opens A (not the newest B), URL keeps w=A ──
