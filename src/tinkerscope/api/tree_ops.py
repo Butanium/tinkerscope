@@ -134,7 +134,10 @@ def normalize_legacy(body: dict) -> tuple[dict, bool]:
         out["trees"] = seeded
     for legacy_key, _ in _LEGACY_PANELS:
         out.pop(legacy_key, None)
-    return out, True
+    # By VALUE, not by "we took the fold branch": a body with an empty `trees` map
+    # and no legacy keys lands here and comes out identical, and claiming that as a
+    # change would make every op batch on an empty workspace write and broadcast.
+    return out, out != body
 
 
 # ── derivation (absorbed from cli.py — mirrors tree.ts) ──────────────────────
@@ -574,7 +577,13 @@ def _add_one(ctx: _Ctx, tree: dict, panel: str, node: Any, select: bool) -> tupl
         if parent is not None and parent not in tree["nodes"]:
             raise OpError(f"node {nid}: parent {parent!r} does not exist")
         light, blob = _split_node({k: v for k, v in node.items() if k != "children"})
+        # The four structural fields are the server's, not the sender's: every
+        # stored node HAS them (a `content`-less node would read back as None and
+        # then fail its own idempotency check on the next replay), and children are
+        # derived from the parent pointers we append below.
         light["id"] = nid
+        light["role"] = role
+        light["content"] = content
         light["parent"] = parent
         light["children"] = []
         tree["nodes"][nid] = light

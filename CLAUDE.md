@@ -17,7 +17,7 @@ see `README.md` for the full feature list + credits.
 | `docs/HANDOFF_BRANCHING.md` | Historical planning record for branching (what Clément asked vs what I inferred — §2–§4 = the requirements). §5 = the highlight-UI overhaul (now shipped — see `docs/TODO.md`) | branching + §5 both shipped |
 | `docs/HANDOFF_MULTIPANEL.md` | **N-way model comparison workspace — SHIPPED** (`panels[]`, `trees` map + back-compat migration, add/remove/reduce panels, composer send-targeting, send-branch-to-panel, N-run CLI `compare`). §9 = the as-built grounded plan + locked decisions (architecture B; per-workspace persistence; global params; stable panel ids). §5 = the original 2-panel site-map | shipped; per-workspace panel *layout* now persists too (switch restores a conv's model set; new conv inherits the current one's models, Shift+new = blank — see `Workspace.panels` in `docs/API_CONTRACT.md`); follow-ups: the §4 small items |
 | `docs/HANDOFF_WORKSPACE_RENAME.md` | Historical planning record for the conversations→workspaces WIRE/DISK rename (shipped in v1.0.0, 2026-07-24). Deliberately keeps the OLD names — it describes the pre-rename state. The as-shipped result is `docs/MIGRATIONS.md` | shipped; historical |
-| `docs/HANDOFF_SERVER_AUTHORITY.md` | **Design: server-authoritative workspace trees (ops protocol)** — inverts the browser-is-sole-writer architecture so the server folds + persists chats (headless CLI durability, fixes the CLI no-token-data / n−1-samples loss), all tree mutation as idempotent ops + per-workspace `rev`, browser stays an optimistic mirror. Locked decisions, race analysis, 3-phase staging | design, not started — read before touching persistence/fold code |
+| `docs/HANDOFF_SERVER_AUTHORITY.md` | **Design: server-authoritative workspace trees (ops protocol)** — inverts the browser-is-sole-writer architecture so the server folds + persists chats (headless CLI durability, fixes the CLI no-token-data / n−1-samples loss), all tree mutation as idempotent ops + per-workspace `rev`, browser stays an optimistic mirror. Locked decisions, race analysis, 3-phase staging | **P1 server half SHIPPED** (`api/tree_ops.py`, `/ops`, `rev`); P1 browser mirror + P2 folds + P3 addressing outstanding — read before touching persistence/fold code |
 | `docs/PACK.md` | **Share packs** — bundle checkpoints + default params + workspaces into one portable YAML (`tinkerscope --pack <file\|url>` to consume, `tinkerscope pack export` to author) so a collaborator reproduces a setup against public checkpoints with no local run dirs. Code: `src/tinkerscope/pack.py` + `api/pack_models_store.py` | current |
 | `docs/STATIC_SITE.md` | **Static read-only site export + `?w=<pack link>`** (SHIPPED 2026-07-30) — what a published site keeps/hides and why, the size reality (logprobs are ~97% of the bytes), the `data/` layout (each file ≡ an endpoint response), the two index.html rewrites a GitHub Pages subpath needs, the id-vs-pack-source rule, collision handling, and how the chart view travels. Since 2026-07-30 a published site is also a **general reader for anyone's pack** — IndexedDB overlay (localStorage's 5 MB cap made a real workspace uninstallable), gzip + `--logprobs` packs, and open-a-file-from-disk. **`--pack-link` + the loading modal** (2026-07-30) make a published `?w=<id>` SHAREABLE — an id the visitor lacks resolves through `manifest.pack_links` and installs behind a progress box, instead of flashing "not found" and swapping | current |
 | `docs/TODO.md` | Roadmap (branching marked done) | current |
@@ -122,6 +122,19 @@ and in this file's reference section; HANDOFF.md itself is retired.
   rmtree took the evidence with it — and `pack.py`'s replace/reseed routes
   through that same delete. Retention is age+bytes, never entry count (one
   discarded 30-sample thinking fan ≈ 1 MB).
+- **The tree model + the op protocol** (`src/tinkerscope/api/tree_ops.py` — module
+  docstring). The Python half of `web/src/lib/tree.ts`, and since the
+  server-authority migration the AUTHORITATIVE half: mutations arrive as ops on
+  `POST /api/workspaces/{id}/ops`, apply under the workspaces flock, bump the
+  workspace's `rev` and broadcast as one bus `ops` event; clients mirror
+  optimistically and refetch on any rev mismatch. `cli.py`'s read helpers live
+  here now (they were a second, drifting Python mirror). Two rules encoded there:
+  the **confluence guard** — every op is idempotent-structural or LWW, and an op
+  that edits content in place or inserts at an arbitrary index would force a real
+  CRDT — and `rev` bumping in `workspace_store._persist`, the choke point EVERY
+  write channel passes through (a pack apply is one of them). The cross-impl
+  contract is `tests/fixtures/tree_vectors/` (asserted by both engines; see its
+  README before adding a vector).
 - **Cross-workspace search** (the Ctrl+K palette + `tinkpg grep`):
   `src/tinkerscope/api/search.py` — module docstring. Cached linear scan over
   the light trees (units cache keyed on each workspace's `updated_at` — sound

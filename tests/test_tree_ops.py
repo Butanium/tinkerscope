@@ -310,6 +310,31 @@ def test_unknown_op_and_malformed_input_are_rejected_with_their_index():
         assert exc.value.index == idx
 
 
+def test_a_stored_node_always_has_its_structural_fields():
+    """A node sent without `content` must not read back as None — its own
+    idempotency check compares content, so the next replay would reject it."""
+    body = _body({"p": {"nodes": {}, "rootChildren": [], "selected": {}}})
+    thin = {"op": "add_nodes", "panel": "p", "nodes": [{"id": "u1", "role": "user", "parent": None}]}
+    res = apply_ops(body, [thin])
+    assert res.body["trees"]["p"]["nodes"]["u1"]["content"] == ""
+    assert apply_ops(res.body, [thin]).changed is False
+
+
+def test_the_cli_reads_the_same_tree_model():
+    """cli.py's read helpers were absorbed into tree_ops; it imports them under
+    their old private names. Two Python mirrors of tree.ts is what we just
+    deleted, so pin that they are literally the same functions."""
+    from tinkerscope import cli
+
+    assert cli._active_path is tree_ops.active_path
+    assert cli._selected_child is tree_ops.selected_child
+    assert cli._thread_path is tree_ops.thread_path
+    assert cli._ancestry is tree_ops.ancestry
+    assert cli._root_of is tree_ops.root_of
+    assert cli._siblings is tree_ops.siblings
+    assert cli.ROOT == tree_ops.ROOT
+
+
 def test_a_node_may_not_smuggle_children():
     """Children are derived from the parent pointers the server itself appends;
     an incoming list could only fabricate dangling refs."""
