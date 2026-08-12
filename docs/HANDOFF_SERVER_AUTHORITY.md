@@ -1,10 +1,16 @@
 # HANDOFF — server-authoritative workspace trees (the ops protocol)
 
-STATUS: **P1 SHIPPED 2026-08-12** (op layer + rev + browser mirror cutover, both
-interpreters vector-locked incl. recorded-broadcast replay; adversarially
-reviewed — 10 confirmed findings fixed; `browser_ops_convergence.py` green).
-P2 (server-authored folds) + P3 (addressing + retirement) outstanding — §7's
-staging still governs. ENGINEERING_LOGS 2026-08-12 has the P1 narrative.
+STATUS: **P1 + P2 SHIPPED 2026-08-12** (P1: op layer + rev + always-apply
+mirror, vector-locked incl. recorded-broadcast replay, 10 review findings
+fixed. P2: server-authored folds — ChatRequest.parent_node, terminal fold of
+all samples + blobs + rev++ ordered before busy release, `folded` manifest on
+terminals, in-flight delete-rejection registry, CLI as placement writer;
+4 review findings fixed incl. fold-failure surfacing on the caller stream.
+Headless `tinkpg send -n 3 --thinking` persists 3/3 with CoT + blobs —
+demonstrated failing on pre-P2 main). P3 (addressing + echo retirement + doc
+rewrite) outstanding — §7's staging still governs; §4.3's positional
+bucket-seam sketch is superseded by the terminal manifest.
+ENGINEERING_LOGS 2026-08-12 has both phase narratives.
 Originally: design drafted 2026-07-21 by fable
 (claude-fable-5), same session that diagnosed the CLI "no token data" bug (§6).
 Grounding claims verified against the working tree at commit `1f0ae3e` — each

@@ -1837,3 +1837,47 @@ Also: `ideas/cli-commit-drops-cot-and-blobs.md` retired to done/ (closed
 structurally, its docs-undersell checklist fixed same-commit in the cli skill +
 API_CONTRACT); `mint_node_id()` in tree_ops is the Python `nid()` (per-process
 4-char base36 session), used by folds and the CLI's user-turn ops.
+
+---
+
+### 2026-08-12 — Server-authority P2: the server folds its own chats (the migration's payoff)
+
+**What shipped** (branches `p2-folds` + `p2-adopt`, ff'd to main at `bd655d7`):
+`ChatRequest.parent_node` — a placement chat's terminal folds ALL completed
+samples server-side as one `add_nodes` op (light nodes with `reasoning` inline,
+write-once blobs, rev++) through the same apply/broadcast path as every other
+op, ordered BEFORE the busy release; terminals carry a `folded
+[{sample_index, node_id}]` manifest + `fold_rev` (superseding the handoff's
+positional bucket-zip — error samples can't shift an explicit mapping, and the
+ops broadcast stays pure). In-flight placement registry: deleting a subtree
+containing a registered parent 409s. `tinkpg send/continue/battery` are
+placement WRITERS (user-turn ops first, then fire); browser fires carry
+placement and adopt via the manifest (`tryFoldOwnDone` seeds blobs only when
+`folded` is present — the double-fold discriminator). No-placement requests
+behave bit-for-bit as before. **The headline, demonstrated both directions**:
+browserless `tinkpg send -n 3 --thinking` persists 3/3 assistant nodes with
+CoT + logprob/raw_meta blobs (`cli_send_headless.py`); the same run against
+pre-P2 main leaves an EMPTY tree. The `[done]`-with-nothing-persisted disease
+(`ideas/cli-commit-drops-cot-and-blobs.md`) and the browser's swallowed-send
+bug (`ideas/send-mid-fold-dropped.md` — a user turn stranded at the pre-fold
+leaf, never actually dropped) both closed structurally; both idea files retired.
+
+**Review round** (3 Fable reviewers / Opus refuters): 4 confirmed, 5 refuted —
+all four on the CLI/consumer ERROR surface, extending P1's lesson (bugs live
+where the protocol recovers or reports, not where it succeeds): fold failures
+were invisible to the direct-stream CLI (now: `fold_error` on the SSE terminal
++ non-zero exit — "stdout is the only copy"); `continue --ws <other>` bound the
+MODEL from the open screen while folding into the foreign tree (now: foreign
+workspaces bind from their own saved layout, one source for ancestry +
+destination + model); the chat/compare mirror-vs-tree mixed-mode seam now warns
+instead of silently firing wrong ancestry (full writer conversion deferred to
+P3 with the layout-propagation question — task list); a failed user-turn op
+POST no longer aborts a whole battery.
+
+**Verification lesson worth keeping**: p2-folds' ordering assertion PASSED its
+own sabotage on the first try (it pinned ops-before-chat_done, but the busy
+release is chat_end's PATCH — the sabotage slipped between). An assertion isn't
+verified until the sabotage it exists for makes it fail. Same file, second
+lesson: Playwright fires must pump the loop for route handlers; and the fold
+smoke samples DeepSeek-V3.1 because Qwen3.5-4B never closes its think block
+(diagnosed with a synthetic positive control; tinker skill carries the quirk).

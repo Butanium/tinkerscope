@@ -524,7 +524,9 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     +page's *Keyboard row navigation* section (click a row → focus ring; ↑/↓
     walk the panel view, ←/→ = the row's ‹k/N› cycler, Esc clears). **Has
     `kbnav.test.ts`**; browser smoke `tests/small-smokes/browser_kbnav.py`.
-  - `lib/chat-stream.ts` — `drainSamples`: parse the `/api/chat` SSE into samples.
+  - ~~`lib/chat-stream.ts`~~ — RETIRED with P2 (browser fires are detached and
+    adopt server folds from the bus manifest; no browser code reads the direct
+    `/api/chat` stream — its terminal fields are CLI-only surface now).
   - `lib/highlight-match.ts` / `lib/highlight-render.ts` — pure matching + the
     markdown+math+highlight render pipeline. **`highlight.test.ts`.**
   - `lib/render.ts` — store-coupled render entry point (wraps highlight-render).
