@@ -6,11 +6,12 @@
 // connection — that's what lets N panels generate at once (a held stream per
 // panel would exhaust the browser's ~6 per-host HTTP/1.1 connections; see the
 // connection-starvation diagnosis). The panel renders from the bus bucket
-// exactly like a tinkpg-driven chat, and its reply is folded into the tree on
-// the bus `chat_done`, from the bucket's accumulated samples (all n — the
-// server-committed transcript echo carries only ONE representative, which would
-// collapse the n>1 distribution the chart + ‹k/N› cycler read from tree
-// siblings).
+// exactly like a tinkpg-driven chat. Every fire carries `parent_node`, so the
+// SERVER folds all n samples + writes blobs at terminal (P2 — the fold's ops
+// event precedes chat_done and the mirror adopts it like any other batch);
+// this store's terminal job is seeding the blob cache via the `folded`
+// manifest. The bucket-fold path below survives only as the transition
+// fallback for a manifest-less terminal (stale server).
 //
 // Deliberately UI-agnostic: the caller (+page) resolves the model and assembles
 // the sampling params into a bundle, so this store never reaches into the
@@ -19,6 +20,7 @@
 import { live } from './state.svelte';
 import { workspaces as ws } from './workspaces.svelte';
 import { nodeBlobs } from './node-blobs.svelte';
+import { opsEmitter } from './ops.svelte';
 import { api } from './api';
 import { foldAssistant, threadSystemAt, opNode, heavyNodeIds, lightenTree, type SampleLike } from './tree';
 import type { Panel, ChatMessage, ChatRequest, SampleData } from './types';
@@ -106,16 +108,25 @@ class ChatStore {
     // explicitly on EVERY fire — '' when the thread has none — so the server never
     // falls back to a stale panel mirror for a browser chat.
     const thread_system_prompt = threadSystemAt(ws.treeFor(panel), userParentId) ?? '';
-    api
-      .chat({
+    // The fire rides BEHIND the ops chain: the user-turn op (and, for a draft,
+    // the materializing create) must reach the server before a placement chat
+    // names its parent — else the server pre-start-errors on a node it hasn't
+    // seen. One local RTT, and the POST below is detached anyway.
+    opsEmitter
+      .flush()
+      .then(() => api
+        .chat({
         ...model, messages, ...params, thread_system_prompt, panel,
         broadcast: true, detached: true, client_token: token,
+        // SERVER-AUTHORED FOLD (P2): the samples fold under this user node at
+        // terminal, server-side — all n, blobs included, zero browsers needed.
+        parent_node: userParentId,
         // Which workspace this chat belongs to. The terminal events are stamped
         // with it so another tab can tell it isn't theirs — read from the REQUEST,
         // not from the bus, which may describe a different workspace by the time
         // the chat ends (bus-scope.ts).
         workspace_id: ws.activeId
-      })
+        }))
       .then((res) => {
         if (res.ok) return; // accepted — the bus carries the outcome
         return res.text().then((t) => this.#failFire(token, onError, `Chat error ${res.status}: ${t}`));
@@ -138,12 +149,31 @@ class ChatStore {
    *  caller then skips the foreign-fold path). Deterministic: the fold happens on
    *  the single bus terminal, not racing a drain — so an aborted chat's partials
    *  fold here too (the server commits them before chat_done). */
-  tryFoldOwnDone(panel: Panel, data: { client_token?: string | null; chat_id?: number | null }): boolean {
+  tryFoldOwnDone(
+    panel: Panel,
+    data: {
+      client_token?: string | null;
+      chat_id?: number | null;
+      folded?: { sample_index: number; node_id: string }[];
+      fold_rev?: number;
+    }
+  ): boolean {
     const token = data?.client_token;
     if (!token || !this.#ownFires.has(token)) return false;
     const ctx = this.#ownFires.get(token)!;
     this.#ownFires.delete(token);
     const bucket = live.panels[panel];
+    if (Array.isArray(data.folded)) {
+      // SERVER-FOLDED (P2): the fold's ops event landed BEFORE this terminal
+      // (contract ordering), so the tree already holds the server-minted nodes
+      // — bucket-folding here would land every send TWICE. Our whole job is
+      // seeding the blob cache: the manifest maps each folded node to the
+      // bucket sample it came from ({sample_index → node_id} — positional zip
+      // would shift on error samples).
+      this.#seedFromManifest(panel, data);
+      ws.endToken(token);
+      return true;
+    }
     // Fold from OUR bucket only if it still belongs to this chat — a concurrent
     // foreign chat on the same panel could have clobbered the single-slot bucket
     // (rare: own+foreign firing the same panel at once). On a mismatch we skip the
@@ -174,13 +204,38 @@ class ChatStore {
   }
 
   /** Bus `chat_error` for a chat we own → release the token (the bucket already
-   *  shows the error / 'stopped' strip). Returns true iff we owned it. */
-  tryOwnError(_panel: Panel, data: { client_token?: string | null }): boolean {
+   *  shows the error / 'stopped' strip). A PARTIAL server fold (cancel/error
+   *  with ≥1 completed sample) still carries a manifest — seed those blobs.
+   *  Returns true iff we owned it. */
+  tryOwnError(
+    panel: Panel,
+    data: { client_token?: string | null; folded?: { sample_index: number; node_id: string }[]; fold_rev?: number }
+  ): boolean {
     const token = data?.client_token;
     if (!token || !this.#ownFires.has(token)) return false;
     this.#ownFires.delete(token);
+    if (Array.isArray(data.folded)) this.#seedFromManifest(panel, data);
     ws.endToken(token);
     return true;
+  }
+
+  /** Seed nodeBlobs from the bucket via the terminal's fold manifest, and hand
+   *  the fold_rev to the mirror's ordering check (rev behind ⇒ the fold's ops
+   *  event was missed somehow ⇒ refetch — defensive; the contract orders the
+   *  broadcast before the terminal). */
+  #seedFromManifest(
+    panel: Panel,
+    data: { chat_id?: number | null; folded?: { sample_index: number; node_id: string }[]; fold_rev?: number }
+  ): void {
+    const bucket = live.panels[panel];
+    if (bucket && (bucket.chat_id == null || data.chat_id == null || bucket.chat_id === data.chat_id)) {
+      for (const { sample_index, node_id } of data.folded ?? []) {
+        const sm = bucket.samples[sample_index];
+        if (sm && (sm.token_logprobs?.length || sm.raw_meta))
+          nodeBlobs.seed(node_id, { token_logprobs: sm.token_logprobs, raw_meta: sm.raw_meta });
+      }
+    }
+    if (typeof data.fold_rev === 'number') ws.ensureRev(data.fold_rev);
   }
 
   /** Apply the prefill prepend / scope-skip to the bucket's samples before they

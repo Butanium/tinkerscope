@@ -1130,6 +1130,13 @@ class ConversationsStore {
     live.onWorkspaceDeleted = (id) => this.onWorkspaceDeleted(id);
   }
 
+  /** Ordering backstop for server-authored folds: a terminal's fold_rev above
+   *  our local rev means the fold's ops event never applied here (the contract
+   *  broadcasts it FIRST, so this is a missed/raced event) — refetch. */
+  ensureRev(rev: number): void {
+    if (this.activeId && rev > this.#rev) this.#refetchBody();
+  }
+
   /** A `workspace_deleted` broadcast: some other client (another tab, the CLI,
    *  a pack replace) deleted a workspace. Drop it from the list; if it is OUR
    *  open one, freeze the tab LOUDLY (content stays on screen, nothing

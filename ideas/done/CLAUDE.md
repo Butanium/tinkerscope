@@ -27,3 +27,4 @@ happened.
 - [Smokes coupled to personal run dirs](smoke-fixtures-not-personal-runs.md) — `tests/run_fixtures.py` is the suite's own 27-run scan root; `smoke.sh` builds it, `conftest.py` shares its `write_run` — **done 2026-08-12**
 - [Readiness waits key on STRUCTURE, not data](readiness-waits-on-structure.md) — swept; the three that waited on a run NAME now wait on `aside.sidebar` + the model picker — **done 2026-08-12**
 - [`smoke.sh --baseline` detects working-tree leakage](baseline-detect-worktree-leakage.md) — refuses a self-hosting smoke that never env-reads `TSCOPE_APP_DIR`; the four it flagged are fixed — **done 2026-08-12**
+- [A send fired mid-fold is silently dropped](send-mid-fold-dropped.md) — off-path orphan under the pre-fold leaf; closed by P2's fold-before-terminal ordering + ops adoption — **done 2026-08-12** (p2-adopt)

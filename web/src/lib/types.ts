@@ -241,6 +241,12 @@ export type ChatRequest = {
    *  turn's raw_meta), so the re-rendered prompt is the one the prefix tokens
    *  actually continued. */
   renderer_name?: string | null;
+  /** SERVER-AUTHORED FOLD placement (P2): the user node the samples fold under
+   *  at terminal, server-side — all n as siblings, blobs written, one ops
+   *  broadcast. The browser persists that node as its own add_nodes op BEFORE
+   *  the fire and adopts the fold from the ops event (the terminal's `folded`
+   *  manifest only seeds the blob cache). Absent/null = legacy echo-only fire. */
+  parent_node?: string | null;
   panel: Panel;
   broadcast: boolean;
   /** Fire-and-forget: the POST returns immediately and the generation streams
