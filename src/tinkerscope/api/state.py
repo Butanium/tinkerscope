@@ -271,11 +271,30 @@ class StateBus:
             self._fanout({"type": "patch", "event": "chat_start", "state": self.state.to_dict()})
         return cid
 
-    async def chat_end(self, event: str = "chat_done", **patch: Any) -> None:
+    async def chat_end(
+        self, event: str = "chat_done", origin_workspace: str | None = None, **patch: Any
+    ) -> None:
         """Atomically: decrement the in-flight count, apply any patch, clear
-        running only when no chat is still streaming, and broadcast."""
+        running only when no chat is still streaming, and broadcast.
+
+        `origin_workspace` = the workspace the chat belonged to at FIRE time.
+        The transcript commit in `patch` is dropped when the bus has since been
+        claimed by a DIFFERENT workspace: applying it would write the origin's
+        turns into the new owner's panel echo — a bus stamped one workspace
+        while echoing another (the 2026-07-24 chimera shape), which the next
+        reconnect reconcile would graft into the WRONG workspace's tree as
+        persisted nodes. The origin's own tab never needed this echo (it folds
+        from the stamped chat_done + its bucket); None (fired with no workspace
+        open — lockstep mode) keeps today's same-owner behavior."""
         async with self._lock:
             self._inflight = max(0, self._inflight - 1)
+            if (
+                patch
+                and origin_workspace is not None
+                and self.state.workspace_id is not None
+                and self.state.workspace_id != origin_workspace
+            ):
+                patch = {}
             self._apply_patch(patch)
             if self._inflight == 0:
                 self.state.running = False

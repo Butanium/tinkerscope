@@ -129,3 +129,44 @@ async def test_chat_begin_goes_through_the_same_guard():
                          messages=[{"role": "user", "content": "hi"}])
     assert [p.run_id for p in BUS.state.panels] == ["run-a"]
     assert BUS.state.workspace_id == "ws-a"
+
+
+@pytest.mark.asyncio
+async def test_chat_end_commit_dropped_when_the_bus_moved_on():
+    """The chimera hole (P1 certification observation): a chat fired under ws-a
+    whose terminal lands after ws-b claimed the bus must NOT write ws-a's
+    transcript into ws-b's panel echo — chat_end's commit was unstamped (=
+    same-owner) before the origin_workspace gate. Stamped-b/echoing-a is one
+    reconnect reconcile away from grafting a's turns into b's TREE."""
+    _apply(workspace_id="ws-a", panels=_panels(("primary", "run-a")))
+    await BUS.chat_begin(workspace_id="ws-a", panel="primary")
+    # ws-b claims while the chat streams…
+    _apply(workspace_id="ws-b", panels=_panels(("primary", "run-b")))
+    await BUS.chat_end(
+        "chat_done", origin_workspace="ws-a",
+        panel="primary", messages=[{"role": "user", "content": "a's turn"}])
+    assert BUS.state.workspace_id == "ws-b"
+    assert BUS.state.panels[0].messages == [], "a's transcript reached b's echo (chimera)"
+
+
+@pytest.mark.asyncio
+async def test_chat_end_commit_applies_for_the_still_owning_workspace():
+    _apply(workspace_id="ws-a", panels=_panels(("primary", "run-a")))
+    await BUS.chat_begin(workspace_id="ws-a", panel="primary")
+    await BUS.chat_end(
+        "chat_done", origin_workspace="ws-a",
+        panel="primary", messages=[{"role": "user", "content": "mine"}])
+    assert BUS.state.panels[0].messages == [{"role": "user", "content": "mine"}]
+
+
+@pytest.mark.asyncio
+async def test_chat_end_commit_with_no_origin_keeps_lockstep_behavior():
+    """A chat fired with NO workspace open (pure lockstep) commits as today —
+    even if a workspace claimed meanwhile. Retires with the null-stamp hole (P2)."""
+    _apply(panels=_panels(("primary", "run-a")))
+    await BUS.chat_begin(panel="primary")
+    _apply(workspace_id="ws-b", panels=_panels(("primary", "run-b")))
+    await BUS.chat_end(
+        "chat_done", origin_workspace=None,
+        panel="primary", messages=[{"role": "user", "content": "lockstep turn"}])
+    assert BUS.state.panels[0].messages == [{"role": "user", "content": "lockstep turn"}]

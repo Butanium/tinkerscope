@@ -674,7 +674,9 @@ async def chat(req: ChatRequest):
                 turn = _committed_turn(msgs, produced[idx0], incorporated.get(idx0, False), reached)
                 end_patch = {"panel": req.panel, "messages": turn}
             async def _fire() -> None:
-                await BUS.chat_end(event, **end_patch)
+                # origin_workspace: the commit must not land on a bus that a
+                # DIFFERENT workspace claimed while this chat streamed (chimera).
+                await BUS.chat_end(event, origin_workspace=conv_id, **end_patch)
                 if req.broadcast:
                     # workspace_id scopes the browser's external fold (#onExternalDone):
                     # every terminal flavour — done / error / cancelled — carries the stamp.
