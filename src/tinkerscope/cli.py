@@ -52,6 +52,7 @@ from httpx_sse import connect_sse
 from .api.tree_ops import ROOT  # noqa: F401  (re-exported: _aim_at_node & friends read it)
 from .api.tree_ops import active_path as _active_path
 from .api.tree_ops import ancestry as _ancestry
+from .api.tree_ops import mint_node_id as _mint_node_id
 from .api.tree_ops import root_of as _root_of
 from .api.tree_ops import selected_child as _selected_child
 from .api.tree_ops import siblings as _siblings
@@ -1070,10 +1071,15 @@ def _panel_chat_body(
                        thread_system=thread_system)
 
 
-def _send_targets(panel: list[str], include_folded: bool, force: bool) -> tuple[list[dict], str]:
+def _send_targets(
+    panel: list[str], include_folded: bool, force: bool
+) -> tuple[list[dict], str, Optional[str]]:
     """Resolve the live panels a `send`-style fire targets (shared with `battery`):
     read the state bus, refuse mid-generation (unless force), honor browser folds
-    unless an explicit --panel overrides. Returns (targets, skipped-description)."""
+    unless an explicit --panel overrides. Returns (targets, skipped-description,
+    open-workspace-id) — the workspace id (None when the bus has none) is where a
+    send persists its user turns + folded replies (server-authored folds; without
+    one the fire is legacy lockstep, browser-folded only)."""
     st = _get("/api/state")
     if st.get("running") and not force:
         _die("a generation is in flight (running=yes) — wait for it, or pass --force")
@@ -1102,7 +1108,7 @@ def _send_targets(panel: list[str], include_folded: bool, force: bool) -> tuple[
         skipped_bits.append(f"{len(folded & set(by_id))} folded ({', '.join(sorted(folded & set(by_id)))})")
     if unbound:
         skipped_bits.append(f"unbound: {', '.join(unbound)}")
-    return targets, "; ".join(skipped_bits)
+    return targets, "; ".join(skipped_bits), conv_id
 
 
 def _new_thread_system(resolved: Optional[str]) -> tuple[Optional[str], str]:
@@ -1119,6 +1125,27 @@ def _new_thread_system(resolved: Optional[str]) -> tuple[Optional[str], str]:
     return None, resolved
 
 
+def _emit_user_turns(
+    conv_id: str, targets: list[dict], prompt: str, thread_system: Optional[str]
+) -> dict[str, str]:
+    """Persist one NEW-THREAD user turn per target panel — the writer's own
+    `add_nodes` ops, emitted BEFORE the fire (HANDOFF_SERVER_AUTHORITY §4.3: a
+    pre-start failure must not lose the turn). Root nodes stamp `system_prompt`
+    (thread identity). Returns {panel_id: node_id}, the fires' `parent_node`s.
+    An ops rejection (409) dies here, before any tokens are paid for."""
+    ops: list[dict] = []
+    parents: dict[str, str] = {}
+    for p in targets:
+        nid = _mint_node_id()
+        node: dict = {"id": nid, "role": "user", "content": prompt, "parent": None}
+        if thread_system:
+            node["system_prompt"] = thread_system
+        ops.append({"op": "add_nodes", "panel": p["id"], "nodes": [node], "select": True})
+        parents[p["id"]] = nid
+    _post(f"/api/workspaces/{conv_id}/ops", {"ops": ops})
+    return parents
+
+
 def _fire_send(
     targets: list[dict],
     prompt: str,
@@ -1132,15 +1159,27 @@ def _fire_send(
     json_out: bool,
     sink: Optional[Any] = None,
     thread_system: Optional[str] = None,
+    conv_id: Optional[str] = None,
 ) -> list[tuple[str, dict, _StreamResult]]:
     """Fire one fresh-history chat per target panel, concurrently; join and return
-    [(panel_id, panel, result)] with each result's collected samples."""
+    [(panel_id, panel, result)] with each result's collected samples.
+
+    With `conv_id` (the open workspace), each panel's user turn is persisted as an
+    op first and the fire carries `workspace_id` + `parent_node`, so the SERVER
+    folds all n replies — durable with no browser attached. Without one, the fire
+    is the legacy lockstep shape (echo-only)."""
+    parents: dict[str, str] = {}
+    if conv_id:
+        parents = _emit_user_turns(conv_id, targets, prompt, thread_system)
     lock = threading.Lock()
     threads: list[threading.Thread] = []
     results: list[tuple[str, dict, _StreamResult]] = []
     for p in targets:
         body = _panel_chat_body(p, prompt, n, temperature, max_tokens, think, system, prefill,
                                 thread_system=thread_system)
+        if conv_id and p["id"] in parents:
+            body["workspace_id"] = conv_id
+            body["parent_node"] = parents[p["id"]]
         res = _StreamResult()
         label = f"{p['id']} {_short_run(p.get('run_id'))}"
         t = threading.Thread(target=_stream_chat,
@@ -1202,7 +1241,7 @@ def cmd_send(
     prefill = _arg_or_file(prefill, prefill_file, "prefill", "--prefill-file")
     if prompt is None:
         _die("no message — pass it inline or via --file")
-    targets, skipped = _send_targets(panel, include_folded, force)
+    targets, skipped, conv_id = _send_targets(panel, include_folded, force)
     think: "bool | str | None" = "both" if thinking_both else thinking
     system, thread_system = _new_thread_system(_resolve_sys(system, no_system))
     plan_out = sys.stderr if json_out else sys.stdout  # JSON mode: keep stdout pure JSONL
@@ -1218,7 +1257,7 @@ def cmd_send(
 
     results = _fire_send(targets, prompt, prefill, n, temperature, max_tokens,
                          think, system, show_logprobs, json_out,
-                         thread_system=thread_system)
+                         thread_system=thread_system, conv_id=conv_id)
     if first_token:
         _print_first_token_tables(results, json_out)
     failures = [
@@ -1380,23 +1419,22 @@ def cmd_continue(
     by_id = {p["id"]: p for p in panels}
     conv_id = st.get("workspace_id")
 
-    # Fold info + (tree-mode) the saved trees come from the open/〈--conv〉 workspace.
+    # The open/〈--ws〉 workspace: fold info, the saved trees (targeting reads
+    # them), and — server-authored folds — where this continue PERSISTS. Fetched
+    # whenever one is available, not only for tree targeting.
     folded: set[str] = set()
     trees: dict = {}
-    if tree_mode or (conv_id and not include_folded and not panel):
-        if conv is not None:
-            c = _resolve_workspace(conv)
-        elif conv_id:
-            c = next((x for x in _workspaces() if x.get("id") == conv_id), None)
-        else:
-            c = None
-        if c is None and tree_mode:
-            _die("no workspace to target — open one in the browser or pass --conv (needed for --thread/--turn/--node)")
-        if c is not None:
-            folded = set(c.get("reduced_panels") or [])
-            trees = c.get("trees") or {}
-    if include_folded or panel:
-        folded = set()
+    c: Optional[dict] = None
+    if conv is not None:
+        c = _resolve_workspace(conv)
+    elif conv_id:
+        c = next((x for x in _workspaces() if x.get("id") == conv_id), None)
+    if c is None and tree_mode:
+        _die("no workspace to target — open one in the browser or pass --conv (needed for --thread/--turn/--node)")
+    if c is not None and not include_folded and not panel:
+        folded = set(c.get("reduced_panels") or [])
+    if c is not None:
+        trees = c.get("trees") or {}
 
     # --node lives in exactly ONE panel's tree; restrict targeting to that panel.
     if node is not None and not panel:
@@ -1426,17 +1464,23 @@ def cmd_continue(
     # BEFORE firing any. The thread part rides per-plan: a loomed thread keeps the
     # system prompt it was STARTED with (its root node's), regardless of which
     # thread the panel mirror currently reflects.
-    plans: list[tuple[dict, list[dict], Optional[str]]] = []
+    plans: list[tuple[dict, list[dict], Optional[str], Optional[dict]]] = []
     for p in targets:
+        anchor: Optional[dict] = None  # saved-tree node the continuation hangs off
+        saved_tree = trees.get(p["id"])
         if fixed_ancestry is not None:
             ancestry = fixed_ancestry
             thread_system: Optional[str] = ""  # external transcript — never inherit a panel's thread prompt
-        elif tree_mode:
-            t = trees.get(p["id"])
-            if t is None:
+        elif tree_mode or (saved_tree or {}).get("nodes"):
+            # The saved tree is the ancestry source whenever the panel HAS one
+            # (the panel mirror is only the no-workspace fallback): a tree node
+            # anchor is what gives the fire its `parent_node`, i.e. what makes
+            # the server fold the replies durably. Active mode is just
+            # _continue_target with no flags — the selected thread's leaf.
+            if saved_tree is None:
                 _die(f"panel {p['id']} has no saved tree in the workspace — can't --thread/--turn/--node it")
-            target = _continue_target(t, thread, turn, node)
-            ancestry = _ancestry(t, target["id"])
+            anchor = _continue_target(saved_tree, thread, turn, node)
+            ancestry = _ancestry(saved_tree, anchor["id"])
             # the targeted thread's OWN prompt (root node) — explicit "", not None,
             # when absent, so looming a promptless thread can't inherit the ACTIVE
             # thread's mirrored prompt
@@ -1448,11 +1492,33 @@ def cmd_continue(
             thread_system = None  # active thread — inherit the panel mirror
         if no_system:
             thread_system = ""  # --no-system suppresses the thread part too
-        plans.append((p, _continue_messages(ancestry, prompt, prefill), thread_system))
+        plans.append((p, _continue_messages(ancestry, prompt, prefill), thread_system, anchor))
+
+    # Persist the added user turns (plans whose anchor is an assistant node) as
+    # ops BEFORE any fire (§4.3 — a pre-start failure must not lose them), and
+    # record each fire's parent_node. A re-sample plan's anchor IS the user turn.
+    fire_parent: dict[str, str] = {}
+    if c is not None:
+        turn_ops: list[dict] = []
+        for (p, _msgs, _ts, anchor) in plans:
+            if anchor is None:
+                continue
+            if anchor.get("role") == "user":
+                fire_parent[p["id"]] = anchor["id"]
+            elif prompt is not None:  # ends-on-assistant ⇒ _continue_messages required a prompt
+                new_id = _mint_node_id()
+                turn_ops.append({
+                    "op": "add_nodes", "panel": p["id"], "select": True,
+                    "nodes": [{"id": new_id, "role": "user", "content": prompt,
+                               "parent": anchor["id"]}],
+                })
+                fire_parent[p["id"]] = new_id
+        if turn_ops:
+            _post(f"/api/workspaces/{c['id']}/ops", {"ops": turn_ops})
 
     plan_out = sys.stderr if json_out else sys.stdout  # JSON mode: keep stdout pure JSONL
     print(f"continue (loom)  n={n} temp={_fmt_param(temperature)}  →  {len(targets)} panel(s)", file=plan_out)
-    for (p, msgs, _ts) in plans:
+    for (p, msgs, _ts, _anchor) in plans:
         base = len(msgs) - (1 if prompt is not None else 0) - (1 if prefill is not None else 0)
         add = []
         if prompt is not None:
@@ -1471,9 +1537,12 @@ def cmd_continue(
     lock = threading.Lock()
     threads: list[threading.Thread] = []
     results: list[tuple[str, dict, _StreamResult]] = []
-    for (p, msgs, ts) in plans:
+    for (p, msgs, ts, _anchor) in plans:
         body = _panel_body(p, msgs, n, temperature, max_tokens, think, system, prefill_scope,
                            thread_system=ts)
+        if c is not None and p["id"] in fire_parent:
+            body["workspace_id"] = c["id"]
+            body["parent_node"] = fire_parent[p["id"]]
         res = _StreamResult()
         label = f"{p['id']} {_short_run(p.get('run_id'))}"
         t = threading.Thread(target=_stream_chat, args=(body, label, lock, res, False, show_logprobs, json_out))
@@ -1609,7 +1678,7 @@ def cmd_battery(
         # Probes are NEW threads: `system:` authors the THREAD prompt (see
         # _new_thread_system) so each probe's prompt is recorded on its root node.
         sys_prompt, thread_system = _new_thread_system(sys_prompt)
-        targets, skipped = _send_targets(cfg["panel"], include_folded, force)
+        targets, skipped, conv_id = _send_targets(cfg["panel"], include_folded, force)
         bits = [f"n={cfg['n']}"]
         if thread_system:
             bits.append(f"sys={_oneline(thread_system, 30)!r}")
@@ -1623,7 +1692,7 @@ def cmd_battery(
             results = _fire_send(targets, message, cfg["prefill"], cfg["n"],
                                  cfg["temperature"], cfg["max_tokens"], cfg["thinking"],
                                  sys_prompt, False, True, sink=sink,
-                                 thread_system=thread_system)
+                                 thread_system=thread_system, conv_id=conv_id)
         fails = [f"{pid}: {res.error or 'unknown error'}" for pid, _, res in results if not res.ok]
         n_samples = sum(len(res.samples) for _, _, res in results)
         summary.append((probe.stem, n_samples, fails))

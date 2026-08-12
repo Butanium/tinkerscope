@@ -1757,3 +1757,77 @@ the smoke uses `sudo ss -K` for a real socket drop. And `browser_echo_chimera.py
 was verified failing BOTH legs on unfixed main before being believed. It needs
 the live router + sudo, so it lives in smoke.sh's LIVE list (run directly when
 touching the echo commit path), not the token-free DEFAULT.
+
+---
+
+### 2026-08-12 — Server-authority P2, server half: the server folds its own chats
+
+HANDOFF_SERVER_AUTHORITY §4.3/§7-P2, branch `p2-folds`. A `/api/chat` request
+now carries `parent_node` (the user node the writer persisted as its OWN op
+before firing — send and regen are one shape), and at terminal the server folds
+every completed sample as assistant siblings under it: one `add_nodes {select}`
+op through `workspace_store.apply_ops` + the same `_broadcast_ops` fan-out every
+client mutation uses, ordered before `chat_end` releases `running`. The CLI's
+`send`/`continue`/`battery` are writers now — with a workspace open they emit
+the user-turn ops and fire with placement, so `tinkpg send -n 3 --thinking`
+against a browserless server persists 3 assistant nodes WITH their CoT and
+token_logprobs/raw_meta blobs (`tests/small-smokes/cli_send_headless.py`;
+baselined: on main the same run leaves an EMPTY tree). Requests without
+`parent_node` behave bit-for-bit as before — the browser transition is the
+parallel P2 half. Decisions the design doc didn't make, and what testing caught:
+
+**1. The fold is a CLIENT of the P1 op layer, not a sibling of it.** It builds
+one `add_nodes` batch and calls `store.apply_ops` + the `/ops` route's own
+`_broadcast_ops`. Everything P1 paid for — light/blob split in one locked write,
+rev bump in `_persist`, replayable broadcast shape, the recorded-vector
+batch≡per-op property — applies to folds with zero new machinery. The only new
+protocol surface is a `folded: [{sample_index, node_id}]` manifest + `fold_rev`
+on the terminal broadcast, and that is deliberately NOT on the `ops` event: the
+ops stream stays pure chat-agnostic replay, and a positional zip of
+`ops.nodes[i]` ↔ `bucket.samples[i]` would shift whenever an error sample leaves
+a hole. §4.3's field name `workspace` shipped as the EXISTING `workspace_id` —
+it already had exactly §4.4's resolution semantics; a second field naming the
+same thing was pure trap. The 400-on-no-workspace is gated on `parent_node`
+being present, so legacy/lockstep fires never 400.
+
+**2. The sabotage pass caught a too-weak ordering assertion, not a code bug.**
+First version of the fold test pinned `ops` before the `chat_done` BROADCAST;
+sabotage (moving the fold after `chat_end`) still passed it, because the busy
+release is `chat_end`'s state PATCH, which precedes the broadcast. The
+guarantee that matters — fold data present before any busy-surface lifts — is
+`ops` before the `event:"chat_done"` patch, and that is what the test pins now.
+Also re-learned the hard way: don't `git checkout <file>` to undo a sabotage
+while the file holds uncommitted work. Commit first, sabotage second.
+
+**3. The placement registry lives under the workspaces flock, and release
+belongs to the terminal task.** `register_chat_placement` validates the parent
+(exists, role user) and registers in one locked step, so it is serialized with
+`_op_delete`'s guard — no check-then-register window. A `delete` whose doomed
+subtree contains a registered parent 409s ("a chat is generating under node …");
+subtree containment covers ancestors for free. Release runs inside the shielded
+`_fire` task (after the fold, before `chat_end`), with the generator wrapper's
+finally as backstop and a done-callback for the one nasty edge (cancellation
+landing mid-registration). Entries are COUNTED, not a set — two `--force` regens
+under one parent must both hold the guard. Deliberately delete-only per §5;
+`replace_tree`/`copy_tree` can still orphan a placement cross-client and end in
+the fold's loud rejection log, same acceptance as the delete-races-fire window.
+
+**4. The dual-tab echo-duplication wart dies with ordering, not with dedup.**
+Two tabs used to fold one CLI chat from the echo independently, each minting its
+own node ids. For a `parent_node` chat the fold's `ops` event lands BEFORE
+`chat_done`, so by the time any tab's echo-reconcile runs, the server-minted
+nodes are already in its mirror and content-matching extends instead of minting.
+Browser-fired chats keep the wart until the browser half adopts `parent_node`
+(its fold runs ON chat_done, so a second tab can still race it).
+
+**5. Smoke-target lesson: `base:Qwen/Qwen3.5-4B` thinking-on returns
+`reasoning=0` with the CoT unsplit in content** (renderer pair resolves
+correctly to `qwen3_5`; quirk unexplained, ~4.6k-char contents for a one-line
+question). The headless smoke samples `deepseek-ai/DeepSeek-V3.1` instead — the
+battle-tested `deepseekv3_thinking` family every other live smoke uses. Worth
+knowing before pointing any future thinking assertion at Qwen3.5 base.
+
+Also: `ideas/cli-commit-drops-cot-and-blobs.md` retired to done/ (closed
+structurally, its docs-undersell checklist fixed same-commit in the cli skill +
+API_CONTRACT); `mint_node_id()` in tree_ops is the Python `nid()` (per-process
+4-char base36 session), used by folds and the CLI's user-turn ops.

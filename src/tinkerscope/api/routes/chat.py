@@ -40,22 +40,38 @@ state bus (browser live view), tagged with chat_id + panel. chat_id is allocated
 atomically (BUS.chat_begin); `running` is an in-flight counter (BUS.chat_end) so
 concurrent chats (two compare panels, or CLI + browser) don't collide. The chosen
 sample is committed back into the panel's transcript for multi-turn memory.
+
+Server-authored folds (HANDOFF_SERVER_AUTHORITY §4.3, P2): a request carrying
+`parent_node` has its completed samples folded into the workspace TREE at
+terminal — assistant siblings under that user node, one `add_nodes` op through
+`workspace_store.apply_ops` (light nodes + write-once blobs, rev++) fanned out as
+a bus `ops` event BEFORE chat_done, with a `folded` manifest on the terminal
+broadcast mapping sample_index → server-minted node id. The transcript echo above
+stays emitted (legacy consumers), but for placement chats it is no longer what
+persistence reads. While the chat runs, its (workspace, panel, parent) placement
+is registered (`api/inflight.py`) and a `delete` op pruning the parent's subtree
+is rejected.
 """
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Awaitable, Callable, Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from .. import discovery, openrouter, tinker_oai
+from .. import discovery, inflight, openrouter, tinker_oai, tree_ops, workspace_store
 from ..state import DEFAULT_PANEL_ID, BUS
 from ..tinker_sampler import get_sampler, select_renderer_name
 from .models import ckpt_label
+from .workspaces import _broadcast_ops
+
+log = logging.getLogger("tinkerscope.chat")
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -170,6 +186,15 @@ class ChatRequest(BaseModel):
     # chat_done / chat_error broadcasts so a browser tab on ANOTHER workspace skips
     # the external fold instead of grafting a foreign reply onto a reused panel id.
     workspace_id: str | None = None
+    # SERVER-AUTHORED FOLD placement (HANDOFF_SERVER_AUTHORITY §4.3): the id of
+    # the USER node this chat's samples fold under at terminal — persisted by the
+    # writer's own `add_nodes` op BEFORE the fire (send and regen are the same
+    # shape; the request carries no user content of its own). Setting it makes
+    # the chat's home workspace mandatory: explicit `workspace_id` → else the
+    # bus's open workspace → else 400 (a fold with nowhere to hang is a request
+    # error, not something to guess). None = legacy fire — echo-only commit,
+    # folding (if any) is the browser's business, exactly the pre-P2 contract.
+    parent_node: str | None = None
     broadcast: bool = True                   # mirror samples to the state bus
     # Commit the representative turn into the panel transcript. TRUE is the
     # interactive contract (multi-turn memory). FALSE makes the call a pure
@@ -256,6 +281,64 @@ def _committed_turn(
             return [*msgs[:-1], {"role": "assistant", "content": full}]
         return [*msgs[:-1], {"role": "assistant", "content": chosen}]
     return [*msgs, {"role": "assistant", "content": chosen}]
+
+
+# Sample fields copied verbatim onto a folded node (mirrors the browser's
+# foldAssistant field list, tree.ts:325). `content` is NOT here — it goes through
+# `_committed_turn` so the prefill merge is byte-identical to what the drain path
+# committed (the bucket overlay and the folded node must agree at fold time).
+_FOLD_SAMPLE_FIELDS = (
+    "reasoning", "raw_text", "raw_meta", "finish_reason", "thinking",
+    "token_logprobs", "loom_cut", "loom_text",
+)
+
+
+def _build_fold_nodes(
+    msgs: list[dict],
+    samples: dict[int, dict],
+    incorporated: dict[int, bool],
+    scope: str,
+    thinking: "bool | str",
+    n: int,
+    parent_node: str,
+) -> tuple[list[dict], list[dict]]:
+    """The terminal fold's `add_nodes` payload: every completed sample as an
+    assistant node under `parent_node`, in sample-index order (thinking="both"
+    packs non-thinking 0..n-1 then thinking n..2n-1, same as `foldAssistant`).
+    One op with `select` ⇒ the per-op claim rule selects the FIRST sibling.
+
+    Returns (nodes, manifest): `nodes` ready for the op (heavy fields inline —
+    the op layer splits them into write-once blobs), `manifest` the
+    `[{sample_index, node_id}]` list the terminal broadcast carries so the
+    browser can seed its blob cache from the bucket sample the node came from
+    (positional zip against the op's nodes would shift on error samples)."""
+    prefill_text = msgs[-1]["content"] if msgs and msgs[-1]["role"] == "assistant" else None
+    nodes: list[dict] = []
+    manifest: list[dict] = []
+    for idx in sorted(samples):
+        item = samples[idx]
+        reached = _prefill_reaches_sample(scope, thinking, n, idx)
+        content = _committed_turn(
+            msgs, item.get("content", ""), bool(incorporated.get(idx)), reached
+        )[-1]["content"]
+        node: dict = {
+            "id": tree_ops.mint_node_id(),
+            "role": "assistant",
+            "content": content,
+            "parent": parent_node,
+        }
+        if prefill_text and reached:
+            # Same field the browser fold records: the authored prefill, so the
+            # rendered turn colors the prefilled prefix (absent when a one-sided
+            # prefill_scope dropped it from this sample's half).
+            node["prefill"] = prefill_text
+        for k in _FOLD_SAMPLE_FIELDS:
+            v = item.get(k)
+            if v is not None:
+                node[k] = v
+        nodes.append(node)
+        manifest.append({"sample_index": idx, "node_id": node["id"]})
+    return nodes, manifest
 
 
 def _resolve_checkpoint(run: discovery.Run, name: str | None):
@@ -374,6 +457,23 @@ def compose_system(global_part: str | None, thread_part: str | None) -> str:
 
 @router.post("/chat")
 async def chat(req: ChatRequest):
+    # ── fold placement (§4.3) — request-shape errors are 400s, up front ──────
+    # `fold_ws` is resolved ONCE here (explicit → the bus's open workspace) so the
+    # fold target and the terminal-broadcast stamp cannot drift apart if the bus
+    # flips workspaces mid-generation (two tabs can race exactly that way).
+    fold_ws: str | None = None
+    if req.parent_node is not None:
+        if not req.commit:
+            raise HTTPException(
+                400, "parent_node with commit=false is contradictory — a fold IS a commit"
+            )
+        fold_ws = req.workspace_id or BUS.state.workspace_id
+        if not fold_ws:
+            raise HTTPException(
+                400,
+                "parent_node needs a home workspace: send workspace_id, or open a workspace "
+                "on the bus first (HANDOFF_SERVER_AUTHORITY §4.4)",
+            )
     # `msgs` is the per-panel transcript echo (answer-only, no system prompt). From it:
     #  - sampling_msgs: {role, content} ONLY (+ system) — fed to the OpenAI-style endpoints
     #    (OpenRouter, loose checkpoint), which would choke on an extra `reasoning` key.
@@ -434,7 +534,20 @@ async def chat(req: ChatRequest):
         and req.run_id is None and req.base_model is None and req.sampler_path is None
     )
 
-    async def gen():
+    # In-flight placement bookkeeping, shared by the wrapper (registers/backstops)
+    # and _gen_inner's terminal (folds, then releases). `released` makes release
+    # idempotent — the backstop and the terminal can both reach for it.
+    placement: "tuple[str, str, str] | None" = None
+    released = False
+
+    def _release_placement() -> None:
+        nonlocal released
+        if released or placement is None:
+            return
+        released = True
+        inflight.release(*placement)
+
+    async def _gen_inner():
         # ── resolve the model + build the per-sample producer ───────────────
         total = n  # expected sample count for this chat (2n when thinking="both")
         try:
@@ -626,7 +739,9 @@ async def chat(req: ChatRequest):
         # different workspace by the time this chat ends. None when the caller didn't
         # say and no workspace is open (CLI-only / legacy) — the browser folds those
         # (lockstep). Read synchronously after chat_begin — no await, so it can't drift.
-        conv_id = req.workspace_id or BUS.state.workspace_id
+        # A placement chat pins it to `fold_ws` (resolved at request time): the fold
+        # target and the terminal stamp must be the same workspace.
+        conv_id = fold_ws or req.workspace_id or BUS.state.workspace_id
 
         # ── stream samples, with EXACTLY ONE terminal event on every exit path ──
         # Three ways this chat can end — done / producer error / cancelled (client
@@ -639,6 +754,7 @@ async def chat(req: ChatRequest):
         # cancellation landing on any of those awaits still reaches the finally.
         produced: dict[int, str] = {}
         incorporated: dict[int, bool] = {}  # did the backend already fold the prefill in?
+        samples: dict[int, dict] = {}  # full completed items, for the terminal fold
         terminated = False
 
         async def _terminal(*, error: str | None = None, cancelled: bool = False) -> None:
@@ -673,9 +789,57 @@ async def chat(req: ChatRequest):
                 reached = _prefill_reaches_sample(scope, thinking, n, idx0)
                 turn = _committed_turn(msgs, produced[idx0], incorporated.get(idx0, False), reached)
                 end_patch = {"panel": req.panel, "messages": turn}
+            async def _apply_fold() -> "tuple[list[dict] | None, int | None]":
+                """Fold every completed sample under `parent_node` — ONE
+                `add_nodes` op through the SAME locked apply + bus fan-out every
+                client mutation uses (store.apply_ops → `_broadcast_ops`), so a
+                mirror replays the fold like any other batch: light nodes + blobs
+                in one write, rev++, one `ops` event. Returns (manifest, rev), or
+                (None, None) when nothing could be persisted — loud, never raise:
+                the terminal MUST still fire or `running` sticks."""
+                nodes, manifest = _build_fold_nodes(
+                    msgs, samples, incorporated, scope, thinking, n, req.parent_node
+                )
+                op = {"op": "add_nodes", "panel": req.panel, "nodes": nodes, "select": True}
+                out = await run_in_threadpool(workspace_store.apply_ops, fold_ws, [op])
+                if out is None:
+                    log.warning(
+                        "chat %s: fold dropped — workspace %s vanished mid-chat "
+                        "(%d sample(s) not persisted)", chat_id, fold_ws, len(samples),
+                    )
+                    return None, None
+                if "rejected" in out:
+                    # Near-unreachable while the placement registry holds (deletes
+                    # of the parent's subtree 409), but a workspace-level
+                    # replace/pack-apply can still pull the tree out from under us.
+                    log.warning(
+                        "chat %s: fold REJECTED by the op layer (%s) — %d sample(s) "
+                        "not persisted", chat_id, out["rejected"], len(samples),
+                    )
+                    return None, None
+                await _broadcast_ops(fold_ws, out)
+                return manifest, out["rev"]
+
             async def _fire() -> None:
-                # origin_workspace: the commit must not land on a bus that a
-                # DIFFERENT workspace claimed while this chat streamed (chimera).
+                # Ordering guarantee (§4.3): the fold's `ops` event goes out — and
+                # its write lands — BEFORE chat_end releases `running` and before
+                # the chat_done/chat_error broadcast. Runs on error/cancel
+                # terminals too: ≥1 completed sample is real data and folds.
+                folded: "list[dict] | None" = None
+                fold_rev: "int | None" = None
+                if placement is not None and samples:
+                    try:
+                        folded, fold_rev = await _apply_fold()
+                    except Exception:
+                        log.exception(
+                            "chat %s: fold failed — %d sample(s) not persisted",
+                            chat_id, len(samples),
+                        )
+                _release_placement()
+                # origin_workspace: the echo commit must not land on a bus that a
+                # DIFFERENT workspace claimed while this chat streamed (chimera —
+                # 8342e08). Placement chats pin conv_id to fold_ws at request
+                # time, so the fold target and this gate agree by construction.
                 await BUS.chat_end(event, origin_workspace=conv_id, **end_patch)
                 if req.broadcast:
                     # workspace_id scopes the browser's external fold (#onExternalDone):
@@ -685,6 +849,12 @@ async def chat(req: ChatRequest):
                                # the resolved thread part — the browser's foreign-fold
                                # reconcile stamps it onto the thread's root node
                                "thread_system_prompt": thread_system}
+                    if folded is not None:
+                        # The bucket→server-id seam: which server-minted node each
+                        # bucket sample became, so the browser seeds its blob cache
+                        # without positional guessing (error samples shift positions).
+                        payload["folded"] = folded
+                        payload["fold_rev"] = fold_rev
                     if err_msg is not None:
                         payload["error"] = err_msg
                     await BUS.broadcast(event, payload)
@@ -754,6 +924,7 @@ async def chat(req: ChatRequest):
                     item.setdefault("sample_index", 0)
                     produced[item["sample_index"]] = item["content"]
                     incorporated[item["sample_index"]] = bool(item.get("prefill_incorporated"))
+                    samples[item["sample_index"]] = item
                 yield {"event": "message", "data": json.dumps(item)}
                 if req.broadcast:
                     await BUS.broadcast("sample", {"chat_id": chat_id, "panel": req.panel, **item})
@@ -775,6 +946,53 @@ async def chat(req: ChatRequest):
             # original cancellation re-raises after the scope exits (never swallowed).
             if not terminated:
                 await _terminal(cancelled=True)
+
+    async def gen():
+        """_gen_inner plus the placement lifecycle: register (validate the parent
+        exists, under the workspaces flock — serialized with every delete op's
+        guard) before any sampling, release on EVERY exit. A wrapper rather than
+        code inside _gen_inner so the release backstop is a single finally that
+        also covers cancellation landing anywhere in the inner body."""
+        nonlocal placement
+        if req.parent_node is not None:
+            assert fold_ws is not None  # route body 400s otherwise
+            reg = asyncio.ensure_future(run_in_threadpool(
+                workspace_store.register_chat_placement, fold_ws, req.panel, req.parent_node
+            ))
+            try:
+                reg_err = await asyncio.shield(reg)
+            except asyncio.CancelledError:
+                # Cancelled mid-registration (client gone between POST and first
+                # read): the threadpool call still completes — undo whatever it
+                # registered, or the placement leaks and 409s every delete of
+                # that subtree until restart.
+                def _undo(t: asyncio.Task) -> None:
+                    if not t.cancelled() and t.exception() is None and t.result() is None:
+                        inflight.release(fold_ws, req.panel, req.parent_node)
+                reg.add_done_callback(_undo)
+                raise
+            if reg_err is not None:
+                # Same surface as any other pre-start failure: the caller stream
+                # AND the bus (the user turn is already persisted by the writer's
+                # own op — §4.3's point — so nothing is lost here).
+                if req.broadcast:
+                    await BUS.broadcast("chat_error", {
+                        "chat_id": None, "panel": req.panel, "error": reg_err,
+                        "client_token": req.client_token,
+                    })
+                yield {"event": "error", "data": json.dumps({"error": reg_err})}
+                return
+            placement = (fold_ws, req.panel, req.parent_node)
+        inner = _gen_inner()
+        try:
+            async for ev in inner:
+                yield ev
+        finally:
+            # Drive the inner generator's own finally (the guaranteed terminal)
+            # deterministically — an abandoned async generator only gets closed
+            # by GC. On normal exhaustion this is a no-op.
+            await inner.aclose()
+            _release_placement()
 
     if req.detached:
         # Fire-and-forget: drive gen() to completion in the background, discarding

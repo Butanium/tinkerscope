@@ -78,3 +78,13 @@ more than the tree will hold — as one did, in the session that found this.
 > the reasoning drop, the blank thinking rows, the SKILL/API_CONTRACT
 > undersell — are folded into the handoff as §2c.5 (P2/P3 verify items).
 > Keep this file as the measured evidence + the docs-fix checklist.
+
+**Done 2026-08-12**: closed structurally by P2 server-authored folds (branch
+`p2-folds`), not by the graft this file sketched: a `send`/`continue` with a
+workspace open emits its user turn as an op and fires with `parent_node`; the
+server folds ALL n samples with `reasoning` inline + `token_logprobs`/`raw_meta`
+as write-once blobs. Measured by `tests/small-smokes/cli_send_headless.py`
+(browserless thinking-on `send -n 3` → 3/3 nodes with CoT + blobs on disk;
+fails on main with an EMPTY tree). The SKILL/API_CONTRACT undersell is fixed in
+the same commit. Residual: a fire with NO workspace anywhere (pure lockstep)
+stays echo-only until P3 retires that mode.

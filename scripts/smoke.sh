@@ -134,6 +134,11 @@ declare -A STALE=(
 # They are not stale; run them directly against a dev-isolated instance.
 #   browser_readme_shots — regenerates the README images (was listed STALE for a
 #   pre-ModelDropdown/q_nk state it left behind when it was rewritten 2026-08-05).
+#   cli_send_headless — P2 server-authored folds' headline: a browserless
+#   `tinkpg send -n 3 --thinking` persists all 3 samples with CoT + blobs
+#   (self-hosting: launches its own instance; honors TSCOPE_APP_DIR; ~6 real
+#   DeepSeek-V3.1 samples incl. logprob passes. Baselined 2026-08-12: fails on
+#   main with an EMPTY tree — nothing persisted at all).
 #
 # NON-DETERMINISTIC (not stale — the coverage is real, the result isn't stable):
 #   browser_branch_from_root — REMOVED from DEFAULT 2026-08-12. Its two toggled

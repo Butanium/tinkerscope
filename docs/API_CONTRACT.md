@@ -203,7 +203,7 @@ UNCHANGED `rev` with every result `noop: true`.
 |---|---|---|
 | `add_nodes` | `{panel, nodes: [TreeNode minus children], select?}` | Append a node or a chain. `parent: null` = a new root thread (may carry `system_prompt`). Ids are client-minted; **idempotent by id** — an existing id keeps its stored body (a node's identity is role+content+**parent**, all three immutable after creation; any mismatch is a client bug ⇒ 409. Other fields are not compared: a replay may carry heavy fields inline that the stored light node now holds as `has_*` flags) but is re-APPENDED to its parent's children, so replaying in rev order reproduces the canonical sibling order on a mirror that appended its own add first. A full batch replay is still a no-op (each of `[a1,a2,a3]` moving to the end in turn lands them back where they were). A parent must already exist in the tree or EARLIER in the same batch. Heavy fields (`token_logprobs`/`raw_meta`) are split into write-once blobs; the stored + broadcast node is light. `select` writes `selected[parent] = id` for each node unless an earlier node **of the same op** already claimed that parent (per-OP, not per-batch: a mirror replays broadcast ops one at a time, so batch-wide state would make batch-apply differ from per-op replay and strand the two on different siblings) — one rule giving both chain semantics (every step selected) and fold semantics (the fan's FIRST sibling selected). It writes whether or not the batch minted the node: conditioning it on "newly added" makes the result depend on a mirror's optimistic state instead of on the op sequence, and two tabs folding under one parent then strand on different siblings with no rev gap to trigger recovery. The cost is an accepted LWW race — a retried batch re-asserts its selection over a sibling cycled to in between. |
 | `select` | `{panel, parent_key, child_id}` | `selected[parent_key] = child_id`, last-writer-wins. `parent_key` is a node id or `"__root__"`. An unknown parent / stale child is an accepted **no-op**, never a rejection. |
-| `delete` | `{panel, node_id}` | Prune the node + its subtree, dropping the parent's now-dangling selection (default-last then picks a survivor). A missing id is a no-op. |
+| `delete` | `{panel, node_id}` | Prune the node + its subtree, dropping the parent's now-dangling selection (default-last then picks a survivor). A missing id is a no-op. **In-flight guard**: while a chat is generating under a user node (a `parent_node` fire, browser or CLI), a delete whose doomed subtree CONTAINS that node — the node itself or any ancestor — is rejected: 409 `{detail: {index, error: "delete rejected: a chat is generating under node <id> — stop it (or wait for its terminal) first"}}`. Registered at chat begin, released at its terminal (both under the workspaces flock, so guard and registration can't race); placements are process-local, so a server restart clears them with the chats they belonged to. |
 | `copy_tree` | `{from_panel, to_panel}` | Whole-tree clone **keeping node ids** — the add-panel duplicate. Keep-ids is what lets both panels share the same write-once blobs. Unknown source ⇒ 409. |
 | `replace_tree` | `{panel, tree \| null}` | Wholesale panel-tree replacement (LWW); `null` removes the panel's tree. A supplied tree is structurally validated before it lands, and its node ids must pass the same filename-safe charset `add_nodes` enforces (ids become blob filenames) — else 409. Covers send-branch-to-panel, fresh/reset tree, panel removal. |
 | `set_meta` | `{fields: {…}}` | The `WorkspacePatch` keys, field-wise LWW — except `panel_seq` (monotone max) and `seen_panels` (union), and `panels`, which is normalized. The broadcast carries the MERGED values, not what was sent. |
@@ -345,6 +345,24 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
                           // continued; null = normal selection (thinking toggle / run
                           // config / family recommendation).
   "panel": "p-1",         // which panel this chat belongs to (opaque id)
+  "workspace_id": null,   // the workspace this chat belongs to. The browser always sends
+                          // its own; the CLI omits it and inherits the bus's open one.
+                          // Stamped on the chat_start/chat_done/chat_error broadcasts
+                          // (workspace scoping, below); with parent_node set it is also
+                          // where the server FOLDS.
+  "parent_node": null,    // SERVER-AUTHORED FOLD placement (HANDOFF_SERVER_AUTHORITY
+                          // §4.3): the id of the USER node the samples fold under at
+                          // terminal. The writer persists that node as its OWN add_nodes
+                          // op BEFORE the fire (send and regen are the same shape — the
+                          // request carries no user content of its own; a pre-start
+                          // failure can't lose the turn). Setting it makes the home
+                          // workspace mandatory: explicit workspace_id → else the bus's
+                          // open workspace → else 400. Also 400 with commit:false (a fold
+                          // IS a commit). A parent that doesn't exist / isn't a user node
+                          // is a pre-start `error` (SSE + bus chat_error), like an
+                          // unsampleable run. null = legacy fire: echo-only commit,
+                          // folding (if any) is the browser's business. See
+                          // "Server-authored folds" below for the terminal sequence.
   "broadcast": true,       // also mirror samples to the state bus (browser)
   "detached": false,       // fire-and-forget: the POST returns immediately ({"status":
                            // "started"}) and the generation runs server-side, streaming
@@ -413,6 +431,41 @@ into `content` with thinking off) and carries no `raw_meta` / `token_logprobs`.
 A loose `sampler_path` has no local `config.json`, so its base model is resolved
 from the tinker:// URI (`SamplerManager.resolve_base_model`) and it renders locally
 just like a discovered run — same three artifacts.
+
+### Server-authored folds (`parent_node` chats)
+
+At a `parent_node` chat's terminal the SERVER folds every completed sample into
+the workspace tree — the durable path a headless `tinkpg send -n 8` rides with
+zero browsers attached:
+
+- **What folds**: all non-error samples, as assistant siblings under
+  `parent_node`, in sample-index order (`thinking:"both"` packs the non-thinking
+  half 0..n-1 then the thinking half n..2n-1), the FIRST sibling selected. Each
+  node's `content` is exactly what `_committed_turn` would have committed for
+  that sample — prefill merge included — so the browser's live-bucket overlay
+  and the folded node agree at fold time; `reasoning`/`raw_text`/`finish_reason`/
+  `thinking`/`loom_cut`/`loom_text` copy verbatim, and `prefill` records the
+  authored prefill when it reached that sample's half. Node ids are
+  SERVER-minted (`nid()` format).
+- **How it lands**: ONE `add_nodes {select}` op through the same locked apply +
+  `ops` fan-out every client mutation uses — light nodes + write-once blobs
+  (`token_logprobs`/`raw_meta`) in one write, `rev`++, one bus `ops` event a
+  mirror replays like any other batch.
+- **Ordering guarantee**: the fold's write + `ops` broadcast happen BEFORE the
+  `chat_end` state patch (which releases `running`) and before the
+  `chat_done`/`chat_error` broadcast — fold data is present before any
+  busy-surface lifts.
+- **The terminal manifest**: the `chat_done` (or `chat_error`, when a partial
+  fold happened) bus payload carries `folded: [{sample_index, node_id}, …]` +
+  `fold_rev` — how a browser seeds its blob cache from the bucket sample each
+  server-minted node came from. Positional zip against the op's nodes would
+  shift on error samples; the manifest doesn't.
+- **Partial terminals**: cancel or producer error with ≥1 completed sample
+  folds what completed (partial data is real data); 0 samples folds nothing,
+  no `folded` key, `rev` unmoved.
+- **Failure is loud, never wedging**: a fold that can't land (workspace deleted
+  mid-chat; tree replaced under it) is logged with the sample count and dropped
+  — the terminal still fires, `running` still clears.
 
 ### PlaygroundState (server-side, shared)
 ```jsonc
@@ -516,7 +569,7 @@ Event names = the message's `type`:
 - `chat_start` → `{type:"chat_start", chat_id, panel, n, label, client_token?, workspace_id?, thread_system_prompt?}` (a chat began; clear that panel's samples. `n` = TOTAL expected samples — 2×n_samples on a `thinking:"both"` chat. `workspace_id` = the workspace open when the chat started — the browser folds an external chat only when this matches its active workspace; null = fold anyway, see below. `thread_system_prompt` = the chat's RESOLVED thread part)
 - `delta` → `{type:"delta", chat_id, panel, sample_index, delta, kind}` (streamed token chunk; only a token-streaming producer at n==1 — openrouter, NOT run_id / base_model / loose sampler_path which all render native — accumulate per chat_id/panel/sample_index, then the `sample` event finalizes)
 - `sample` → `{type:"sample", chat_id, panel, sample_index, content, raw_text, finish_reason, reasoning?, thinking?}` (`thinking` only on `thinking:"both"` chats — which half drew this sample)
-- `chat_done` → `{type:"chat_done", chat_id, panel, client_token?, workspace_id?, thread_system_prompt?}` (`workspace_id` scopes the external fold — see `chat_start`. `thread_system_prompt` = the chat's resolved thread part: the external fold reconciles the transcript onto the ROOT carrying the same one — two probe threads sharing a first message under different prompts are distinct — and stamps it on a freshly-minted root)
+- `chat_done` → `{type:"chat_done", chat_id, panel, client_token?, workspace_id?, thread_system_prompt?, folded?, fold_rev?}` (`folded` + `fold_rev` appear iff a server-authored fold landed — the `[{sample_index, node_id}]` manifest + the rev its `ops` event carried; see "Server-authored folds". `workspace_id` scopes the external fold — see `chat_start`. `thread_system_prompt` = the chat's resolved thread part: the external fold reconciles the transcript onto the ROOT carrying the same one — two probe threads sharing a first message under different prompts are distinct — and stamps it on a freshly-minted root)
 - `chat_error` → `{type:"chat_error", chat_id, panel, error, client_token?, workspace_id?, thread_system_prompt?}`
 - `ops` → `{type:"ops", workspace, rev, ops:[…]}` (a workspace TREE changed — see the op protocol above. `ops` is the batch AS APPLIED: light node bodies only (heavy fields went to write-once blobs, nodes carry `has_token_logprobs`/`has_raw_meta` instead) and merged `set_meta` values. A mirror **applies every event in rev order, its own echoes included** — idempotent/LWW ops make replaying your own batch a no-op, and skipping it provably breaks convergence when two tabs contend. Match the `workspace` BEFORE checking the rev gap: gap-checking a foreign event either refetches for nothing or, worse, advances the local rev so the next genuine event looks stale. Any mismatch — a gap forward, or a rev that went BACKWARDS, which a pack install can do — means refetch the light body)
 - `workspace_deleted` → `{type:"workspace_deleted", workspace}` (that workspace is gone — `DELETE /api/workspaces/{id}` succeeded). Its OWN event rather than an `ops` entry, because a deletion has no `rev` to ride: the workspace the rev would belong to no longer exists. A tab holding it open otherwise learns nothing and its next refetch 404s, which is indistinguishable from server trouble. Fires only on a real deletion (a 404 announces nothing). The store's delete is SOFT, so the id can come back via `workspaces/.deleted/`
@@ -552,8 +605,12 @@ Two consequences of detached:
 browser-session-scoped, so a page reload loses it. The in-flight detached chats keep
 running server-side; the reloaded page sees each `chat_done` as EXTERNAL (no
 registration) and folds it from the transcript echo — a SINGLE representative sample,
-like a tinkpg chat (an n>1 distribution collapses to one branch; that's the accepted
-recovery). A reply that completes during the brief EventSource reconnect GAP (old
+like a legacy tinkpg chat (an n>1 distribution collapses to one branch; that's the
+accepted recovery). For a **`parent_node` chat** none of this lossiness applies: the
+server folds ALL n via the `ops` event before that `chat_done`, so the reloaded page
+adopts the full fan-out like any other mirror — the echo fold is legacy recovery
+only (the CLI already fires `parent_node`; browser sends move over in P2's browser
+half). A reply that completes during the brief EventSource reconnect GAP (old
 page gone, new stream not yet up) has its `chat_done` missed, but its committed turn
 is in the echo; the reconnect `snapshot` handler (`convo.reconcileOnReconnect`) folds
 any such straggler and un-latches `busy` when the server reports nothing running. Net:

@@ -402,28 +402,27 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   --thread k` for each interesting fan-out. All read-only; folded panels stay out
   of the way by default.
 - **Add a probe to the human's workspace**: `tinkpg send "<prompt>" --n 20` —
-  fires a NEW thread at every unfolded panel; the browser folds the replies in
-  live and the ⑂ threads popover picks it up. The layout-safe way to propose
-  and run a new prompt on the models the human is already looking at.
+  fires a NEW thread at every unfolded panel; the ⑂ threads popover picks it up.
+  The layout-safe way to propose and run a new prompt on the models the human is
+  already looking at.
 - **Loom / multi-turn a probe**: `tinkpg continue "<follow-up>" --n 20` adds a
-  turn to the CURRENT thread at every panel (default target = the active leaf,
-  read from live state). Aim it at a non-active branch with `--thread K` /
+  turn to the CURRENT thread at every panel (default target = the active leaf
+  of the saved tree). Aim it at a non-active branch with `--thread K` /
   `--turn N` (that panel's saved tree) or `--node <id>` (from `tinkpg grep`).
   A `--prefill "Hmm,"` (or `--prefill-file`) seeds a thinking opener / the
   model's own truncated CoT when the target ends on a user turn (answer-level
-  loom). Same layout-safe, folded-via-the-browser path as `send`.
-- **⚠️ A CLI fan-out (`--n K`) persists only ONE representative into the saved
-  tree.** The server commits sample 0 to the panel transcript, and the browser
-  folds a FOREIGN (CLI) chat via echo-reconcile = that one representative — only
-  the browser's OWN sends fold all K siblings from the bus bucket. So `tinkpg
-  samples` on a CLI-fired fan-out shows 1, not K. **The full K-sample fan-out
-  streams to the CLI's stdout** (each `--- sample i ---` block with its CoT +
-  finish_reason) — capture that (`… > log.txt`) for the distribution / a
-  `<tag>` tally; the workspace keeps the representative + thread structure.
-  Because of the fold-one-rep limitation above, the BEST example of a behavior
-  from a wide fan-out often lives ONLY in that captured stdout, not in any tree
-  — `continue --ancestry-file <path>` (a JSON list of `{role, content}` dicts)
-  looms from it directly, no tree node needed.
+  loom). Same layout-safe path as `send`.
+- **A CLI fan-out persists in FULL, with no browser attached.** With a
+  workspace open on the bus, `send`/`continue` write the user turn as their own
+  op and the SERVER folds all `--n K` replies at terminal — K assistant
+  siblings in the saved tree (‹k/N› cycler in the browser), each with its CoT
+  (`reasoning`), `token_logprobs` and `raw_meta` blobs, durable across a server
+  restart. `tinkpg samples` on the fan-out shows all K. The full fan-out also
+  streams to stdout as before (capture with `… > log.txt` for a quick `<tag>`
+  tally). Only a fire with NO workspace anywhere (pure lockstep) is still
+  echo-only — and `continue --ancestry-file <path>` (a JSON list of
+  `{role, content}` dicts) looms from an external transcript directly, no tree
+  node needed, and stays stdout-only.
 - **Provenance rule for looming (`continue`/`--ancestry-file`).** OK: a full,
   VERBATIM, previously-generated workspace as ancestry — from a tree, a raw
   log, or another model entirely (grafting a real workspace model A produced

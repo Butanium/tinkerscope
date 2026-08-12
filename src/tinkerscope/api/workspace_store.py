@@ -58,7 +58,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from . import tree_ops
+from . import inflight, tree_ops
 from .store import locked, write_json
 
 log = logging.getLogger("tinkerscope.workspace_store")
@@ -1044,6 +1044,40 @@ def apply_ops(cid: str, ops: Any) -> dict | None:
         body["updated_at"] = _now()
         _persist(body)
         return {"rev": _rev_of(body), "results": res.results, "ops": res.wire_ops}
+
+
+def register_chat_placement(cid: str, panel: str, parent_node: str) -> str | None:
+    """Validate-and-register a chat's fold placement (HANDOFF_SERVER_AUTHORITY
+    §4.3), atomically under the workspaces flock — the same lock every op apply
+    holds, so between this and the chat's terminal release a `delete` op pruning
+    `parent_node`'s subtree is REJECTED (`tree_ops._guard_inflight_delete`)
+    instead of silently orphaning the fold. Returns an error string with nothing
+    registered, or None on success (the caller MUST `inflight.release` at the
+    chat's terminal).
+
+    The parent must be a USER node: folds hang assistant siblings under the user
+    turn they answer (same contract as `foldAssistant`), and under §4.3 that node
+    was persisted by the writer's own op BEFORE the fire — "not found" here means
+    the op was never emitted, or a delete won the tiny op-to-fire race."""
+    with locked("workspaces"):
+        _ensure_loaded()
+        conv = _load_body(cid)
+        if conv is None:
+            return f"unknown workspace {cid!r}"
+        tree = tree_ops.as_tree(tree_ops.trees_of(conv).get(panel))
+        node = tree.get("nodes", {}).get(parent_node)
+        if not isinstance(node, dict):
+            return (
+                f"parent node {parent_node!r} not found in panel {panel!r} of workspace "
+                f"{cid!r} — the user turn must be persisted (add_nodes op) before the fire"
+            )
+        if node.get("role") != "user":
+            return (
+                f"parent node {parent_node!r} is a {node.get('role')!r} turn — "
+                "samples fold under USER nodes"
+            )
+        inflight.register(cid, panel, parent_node)
+        return None
 
 
 def layout_history(cid: str) -> list[dict]:

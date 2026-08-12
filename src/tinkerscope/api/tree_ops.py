@@ -42,8 +42,10 @@ Deliberate differences from `tree.ts`:
   browser store is `$state.raw` (an in-place mutation would neither render nor
   save). Here the caller holds the flock and hands us a private copy, so the
   immutability dance buys nothing.
-- **No id minting.** Clients mint ids (`nid()`); server-minted fold ids arrive
-  with P2's server-authored chat folds.
+- **Almost no id minting.** Clients mint their own ids (`nid()`); the server
+  mints only for its OWN writes — chat folds and the CLI's user-turn ops — via
+  `mint_node_id()`, the same `n<session><counter>` scheme with the same
+  two-writers-collide odds `tree.ts` accepts (§2 of the handoff).
 - **Reads are dict-based** (the stored JSON), so every helper tolerates a
   malformed/legacy tree rather than raising — `as_tree` is the coercion point.
 
@@ -53,7 +55,10 @@ mirror of tree.ts); it imports them under their old private names.
 from __future__ import annotations
 
 import copy
+import itertools
 import logging
+import random
+import string
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -61,6 +66,24 @@ log = logging.getLogger("tinkerscope.tree_ops")
 
 ROOT = "__root__"
 ROLES = ("user", "assistant", "system")
+
+# Per-process random session prefix for server-minted node ids — the Python
+# `nid()` (tree.ts:172). One namespace, two kinds of writer: browser tabs and
+# this process each carry a distinct 4-char base36 session, so concurrent
+# minting collides only at the ~1/1.7M-per-pair odds the design accepts.
+_ID_ALPHABET = string.digits + string.ascii_lowercase
+_id_session = "".join(random.choice(_ID_ALPHABET) for _ in range(4))
+_id_counter = itertools.count(1)  # itertools.count: thread-safe next() in CPython
+
+
+def mint_node_id() -> str:
+    """A fresh node id in `nid()`'s format (`n<4-char session><base36 counter>`).
+    Used by the server's chat folds and the CLI's user-turn ops."""
+    n, digits = next(_id_counter), ""
+    while n:
+        n, r = divmod(n, 36)
+        digits = _ID_ALPHABET[r] + digits
+    return f"n{_id_session}{digits}"
 
 #: Metadata keys `set_meta` (and the PATCH sugar over it) may write.
 META_FIELDS = (
@@ -701,10 +724,52 @@ def _op_delete(ctx: _Ctx, op: dict) -> tuple[bool, dict]:
     tree = ctx.peek(panel)
     if tree is None or node_id not in tree["nodes"]:
         return False, wire  # already gone — idempotent
+    _guard_inflight_delete(ctx.body.get("id"), panel, tree, node_id)
     tree = ctx.writable(panel)
     assert tree is not None
     _delete_subtree(tree, node_id)
     return True, wire
+
+
+def _guard_inflight_delete(ws_id: Any, panel: str, tree: dict, node_id: str) -> None:
+    """Reject a delete whose doomed subtree contains the parent node of an
+    IN-FLIGHT chat (§5's one real cross-client race): the terminal fold would
+    otherwise land on a pruned parent and be lost. Subtree containment covers
+    ancestors for free — deleting an ancestor of the parent prunes it too. The
+    caller holds the workspaces flock, which `register_chat_placement` also
+    takes, so guard and registration are serialized.
+
+    Deliberately delete-only: `replace_tree`/`copy_tree` can also orphan a
+    registered parent cross-client, but no shipped client emits those
+    mid-generation (the browser busy-gates reset/undo per panel) — that residual
+    window ends in the fold's loud rejection log, same as the §4.3
+    delete-races-the-fire acceptance, not in silent loss."""
+    from .inflight import parents_under  # deferred: keep tree_ops import-light
+
+    if not isinstance(ws_id, str) or not ws_id:
+        return  # vector/unit-test trees carry no workspace id — nothing registered
+    registered = parents_under(ws_id, panel)
+    if not registered:
+        return
+    hit = sorted(registered & set(_collect_subtree(tree, node_id)))
+    if hit:
+        raise OpError(
+            f"delete rejected: a chat is generating under node {hit[0]} — "
+            "stop it (or wait for its terminal) first"
+        )
+
+
+def _collect_subtree(tree: dict, node_id: str) -> list[str]:
+    """`node_id` + every descendant id (the ids `_delete_subtree` would prune)."""
+    out: list[str] = []
+    stack = [node_id]
+    while stack:
+        nid = stack.pop()
+        out.append(nid)
+        n = tree["nodes"].get(nid)
+        if isinstance(n, dict):
+            stack.extend(n.get("children") or [])
+    return out
 
 
 def _delete_subtree(tree: dict, node_id: str) -> None:
@@ -715,14 +780,7 @@ def _delete_subtree(tree: dict, node_id: str) -> None:
     if not isinstance(node, dict):
         return
     parent_key = node.get("parent") or ROOT
-    to_remove: list[str] = []
-    stack = [node_id]
-    while stack:
-        nid = stack.pop()
-        to_remove.append(nid)
-        n = tree["nodes"].get(nid)
-        if isinstance(n, dict):
-            stack.extend(n.get("children") or [])
+    to_remove = _collect_subtree(tree, node_id)
     removed = set(to_remove)
     kids = _child_array(tree, parent_key)
     if kids is not None and node_id in kids:
