@@ -10,3 +10,11 @@ navigable.
 **See also:** [split-mega-files](split-mega-files.md) — same genre, bigger files.
 
 *(opus-5, 2026-07-29, chart split / persistence session)*
+
+**Done 2026-08-12**: extracted to `lib/FirstTokenChips.svelte` (chips + the
+onto-drop merge DnD + the add-token search, ~40 lines of CSS with them); it owns
+the transient state (drag target, query) and takes the units + callbacks as
+props. `FtChip` is exported from its `<script module>`. The three
+`.chart-legend-{item,swatch,label}` rules moved to `app.css` — a scoped rule
+can't reach an extracted component. Pure refactor; `browser_chart_firsttoken_ops`
++ `browser_chart_modal` pass unchanged.

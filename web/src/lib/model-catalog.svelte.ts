@@ -41,6 +41,9 @@ export type ModelItem = {
   label: string;
   disabled?: boolean;
   unavailable?: boolean;
+  /** Which constraint binds, for the row's hover — the backend's own
+   *  `unsampleable_reason` rather than the generic "base or weights gone". */
+  reason?: string;
   search?: string;
 };
 
@@ -138,6 +141,15 @@ class ModelCatalog {
     this.tinkerCatalogLoading = false;
   }
 
+  /** Load the tinker catalog once, for consumers that need it WITHOUT opening the
+   *  picker: a panel holding a `base:`/`ckpt:` pick reads both its label and its
+   *  family's `supports_thinking` from here, and on a fresh load the lazy catalog
+   *  is empty — which silently defaulted every such panel to thinking-capable. */
+  ensureTinkerCatalog() {
+    if (this.tinkerCatalogLoaded || this.tinkerCatalogLoading) return;
+    void this.loadTinkerCatalog();
+  }
+
   // ── Resolvers (sentinel/run id → run or display label) ─────────────
   // The pure sentinel encoding (OR_/BASE_/CKPT_ prefixes + predicates + id
   // extractors) lives in ./model-sel. These layer on it, reading the reactive
@@ -187,6 +199,46 @@ class ModelCatalog {
     return this.tinkerModels.find((t) => t.base_model === bm)?.supports_thinking;
   }
 
+  // ── Loose `ckpt:` paths: which base does tinker serve them against? ──
+  // A loose sampler path has no config.json, so nothing local knows its family —
+  // the server resolves it (`resolve_base_model`) for its own rendering, and the
+  // probe route hands the same answer to us. Cached per PATH, one call each: the
+  // trigger is a panel's selection, not typing (an un-debounced per-keystroke
+  // probe is what exhausted the browser's connection pool once — see the
+  // TinkerPickerModal note in CLAUDE.md).
+  //   undefined  never asked      null  asked, tinker couldn't say
+  ckptBases = $state<Record<string, string | null>>({});
+  #ckptProbes = new Set<string>();
+
+  /** Resolve a `ckpt:` pick's base model, once per path. Silent on failure: this
+   *  only enriches a label, so a dead path just stays unlabeled. */
+  async ensureCkptBase(id: string | null | undefined) {
+    const sp = samplerPathOf(id);
+    if (sp == null || this.#ckptProbes.has(sp)) return;
+    this.#ckptProbes.add(sp);
+    try {
+      const p = await api.probeTinkerModel(sp);
+      this.ckptBases = { ...this.ckptBases, [sp]: p.base_model ?? null };
+    } catch {
+      this.ckptBases = { ...this.ckptBases, [sp]: null };
+    }
+  }
+
+  /** The resolved base for a `ckpt:` pick — undefined while unknown. */
+  ckptBaseModel(id: string | null | undefined): string | null | undefined {
+    const sp = samplerPathOf(id);
+    return sp == null ? undefined : this.ckptBases[sp];
+  }
+
+  /** Thinking support for a `ckpt:` pick, via its resolved base. Undefined until
+   *  the probe lands (or when the base isn't in the catalog) → caller defaults to
+   *  true, same contract as `baseSupportsThinking`. */
+  ckptSupportsThinking(id: string | null | undefined): boolean | undefined {
+    const bm = this.ckptBaseModel(id);
+    if (!bm) return undefined;
+    return this.tinkerModels.find((t) => t.base_model === bm)?.supports_thinking;
+  }
+
   /** The panel dropdown's trigger-button text. Group markers (◆/◇/↗); a run's
    *  availability shows ⚠ (unavailable — selectable warning) or ? (unknown). */
   selectedModelLabel(sel: { run_id: string | null }): string {
@@ -214,6 +266,7 @@ class ModelCatalog {
         // Unavailable (base gone / weights gone) is a warning, not a block:
         // greyed + demoted but still pickable. `?` (unknown/offline) stays neutral.
         unavailable: r.sampleable === false,
+        reason: r.sampleable === false ? (r.unsampleable_reason ?? undefined) : undefined,
         search: [r.id, r.base_model, r.wandb_project, r.renderer_name].filter(Boolean).join(' ')
       })),
       ...(baseM != null && !baseInRecents ? [{ id: BASE_PREFIX + baseM, label: `◆ ${this.baseLabel(runId)}` }] : []),

@@ -100,7 +100,10 @@ its `tinker://…` path into that same search box. Instead of "No matches" you g
 an **Add custom checkpoint** row that asks tinker whether the path is real: it
 spins for about a quarter second, then turns green with the base model it runs
 on, or red with tinker's own reason (a wrong path *shape* and an unknown
-*checkpoint* are different messages). Click the green row to use it.
+*checkpoint* are different messages). Click the green row to use it. Once it's on
+a panel, the line under the picker shows the base model tinker resolved for it —
+a pasted path is otherwise just a UUID, and that base is also what decides
+whether the *Thinking* toggle applies to it.
 
 **Naming a checkpoint.** Pick a checkpoint that has no name and tinkerscope
 offers you one. This matters more than it sounds: a checkpoint with no name
@@ -184,7 +187,8 @@ button (scan-dir-relative, and already printed in full, respectively).
 
 **"Why did it pick that word?"** Turn on **Token probs** in the sidebar. Each
 token of an assistant reply gets tinted by surprisal; hover one for its
-probability and the top-5 alternatives it passed over. It's display-only and
+probability and the top-5 alternatives it passed over. A word the model was sure
+of shows no visible tint — it still hovers. It's display-only and
 retroactive — turns you sampled before flipping it on already have the data.
 The toggle has two on-states: **Over** paints the heat *underneath* the normal
 reply (markdown, thinking fold and all) like a highlighter, which is what you

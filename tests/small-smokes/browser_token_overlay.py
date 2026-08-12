@@ -63,6 +63,10 @@ RAW = f"<think>\n{REASONING}\n</think>\n\n{CONTENT}"
 
 # One deliberately surprising token so the paint is visible + assertable.
 SURPRISING = "Blue"
+# One deliberately CONFIDENT token: `surprisalAlpha` rounds to 0 above p≈0.9355,
+# so this word is painted with nothing at all. It must still be hoverable — a box
+# marks where a token IS, not whether it got a color (see the scenario below).
+CONFIDENT = "mostly"
 
 # The prefill scenario: a Continue whose authored prefix covered the whole think
 # block plus the answer's opening. LONGER than token-align's 128-char resync
@@ -82,15 +86,16 @@ def token_stream(raw: str) -> list[dict]:
     """Chop `raw` into plausible tokens and give each a logprob.
 
     Probabilities are arbitrary but fixed: 'Blue' is the improbable one (p=.05),
-    everything else is confident (p=.9), so the canvas has one strong band and
-    the popover has a stable number to assert.
+    'mostly' is the near-certain one (p=.99, which tints to nothing), everything
+    else sits at p=.9 — so the canvas has one strong band, one invisible token,
+    and the popover has stable numbers to assert.
     """
     pieces = [p for p in (raw.replace("\n", "\n ").split(" ")) if p != ""]
     out = []
     for i, p in enumerate(pieces):
         t = p if i == 0 else " " + p
         surprising = SURPRISING in p
-        lp = LN(0.05) if surprising else LN(0.9)
+        lp = LN(0.05) if surprising else LN(0.99) if CONFIDENT in p else LN(0.9)
         top = [[p, 1, lp], ["Gray", 2, LN(0.7)]] if surprising else None
         out.append({"t": t, "tid": 100 + i, "lp": lp, **({"top": top} if top else {})})
     return out
@@ -136,6 +141,32 @@ def seed() -> str:
 
 def seg(label: str) -> str:
     return f'.thinking-toggle-row:has-text("Token probs") .seg-btn:has-text("{label}")'
+
+
+def word_rect(page, word: str) -> dict | None:
+    """Viewport rect of `word` inside the rendered answer — a Range over the text
+    node, since a bare word has no element of its own to bound."""
+    return page.evaluate(
+        """(w) => {
+          // every .message-content: the first one is the USER's row, which never
+          // holds the answer's words.
+          for (const root of document.querySelectorAll('.message-content')) {
+            const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+            for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+              const i = n.data.indexOf(w);
+              if (i < 0) continue;
+              const r = document.createRange();
+              r.setStart(n, i);
+              r.setEnd(n, i + w.length);
+              const b = r.getBoundingClientRect();
+              if (b.width > 0 && b.height > 0)
+                return { x: b.left, y: b.top, width: b.width, height: b.height };
+            }
+          }
+          return null;
+        }""",
+        word,
+    )
 
 
 def main() -> None:
@@ -208,6 +239,30 @@ def main() -> None:
             checks.append(("popover shows its probability", "5.0%" in pop))
             checks.append(("popover lists alternatives",
                            page.locator(".tok-alt").count() >= 2 and "Gray" in pop))
+
+            # ── a CONFIDENT (untinted) token is still hoverable ──────────
+            # `surprisalAlpha` rounds to 0 above p≈0.9355, so a word the model was
+            # sure of gets no color. Boxes used to be built only for tokens that
+            # HAD a color, and the boxes are also the hover hit-test — so every
+            # confident word was a dead spot while its neighbours worked ("hover
+            # does nothing on some words", 2026-08-05). A box marks where a token
+            # IS, not whether it was painted.
+            page.mouse.move(4, 4)  # leave the previous token first
+            page.wait_for_timeout(120)
+            rect = word_rect(page, CONFIDENT)
+            checks.append((f"found the confident word {CONFIDENT!r} on screen", rect is not None))
+            if rect:
+                page.mouse.move(rect["x"] + rect["width"] / 2, rect["y"] + rect["height"] / 2)
+                try:
+                    page.wait_for_selector(".tok-pop", timeout=3000)
+                    conf_pop = page.inner_text(".tok-pop")
+                except Exception:
+                    conf_pop = ""
+                # `pctLabel` drops the decimal at ≥10%, so p=.99 reads "99%".
+                checks.append((f"untinted p=.99 token still hovers ({conf_pop.strip()[:40]!r})",
+                               CONFIDENT in conf_pop and "99%" in conf_pop))
+                page.mouse.move(4, 4)
+                page.wait_for_timeout(120)
 
             # ── the LOOM pin: a click pins, a click away CLOSES ───────────
             # Regression guard. `hover`/`pop` are FROZEN while a card is pinned

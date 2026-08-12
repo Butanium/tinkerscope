@@ -14,6 +14,9 @@ export type PickerItem = {
   /** Pickable but flagged: greyed AND demoted below available rows (a model
    *  that isn't samplable right now — a warning, not a block). */
   unavailable?: boolean;
+  /** Why THIS row is unavailable, for its hover. Without one the row falls back
+   *  to generic copy, which can't say which of the two constraints binds. */
+  reason?: string;
   /** Extra text matched by the filter but never displayed. */
   search?: string;
 };

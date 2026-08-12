@@ -94,6 +94,14 @@ DEFAULT=(
     # Token-free but NOT network-free: the probe asks tinker whether a path is real,
     # which no local list can answer. Skips itself without TINKER_API_KEY.
     browser_tinker_custom_ckpt
+    # Same deal (one metadata probe per path), and it skips itself without a key or
+    # a resolvable checkpoint in the account sweep.
+    browser_ckpt_base_label
+    # DATA-DRIVEN and it does NOT skip: it hard-asserts that ≥1 discovered run is
+    # unavailable, which the negation_neglect root supplies (base no longer served).
+    # A failure here can mean tinker changed what it serves — check /api/models
+    # before reading it as a UI regression. Needs both scan roots (the default).
+    browser_model_availability
     # Own their whole world (build a state dir, export a site, serve it) and
     # ignore the base-url arg — they still belong here so they run under the lock.
     browser_static_site

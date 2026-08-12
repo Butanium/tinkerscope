@@ -18,7 +18,8 @@
     | 'copy' | 'copy-all' | 'check' | 'hash' | 'send-to'
     | 'use-sample' | 'discard-others'
     // sidebar / chrome
-    | 'chart' | 'pins' | 'dataset' | 'help' | 'stop' | 'undo' | 'plus' | 'new-blank'
+    | 'chart' | 'pins' | 'dataset' | 'help' | 'stop' | 'undo' | 'plus' | 'minus'
+    | 'new-blank' | 'arrow-right'
     | 'theme-light' | 'theme-dark' | 'theme-auto' | 'eye' | 'upload' | 'external';
 </script>
 
@@ -86,6 +87,11 @@
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M3 7.5a5 5 0 1 1 1.6 3.7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /><path d="M2.2 4v3.6h3.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'plus'}
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+{:else if name === 'minus'}
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+{:else if name === 'arrow-right'}
+  <!-- "push it that way": unfold a reduced panel, send a draft into a panel -->
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'new-blank'}
   <!-- blank page + plus: a fresh workspace with no model -->
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M4 1.5h5L12.5 5v6.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /><path d="M8.5 1.5V5h3.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /><path d="M7.5 7v3M6 8.5h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" /></svg>

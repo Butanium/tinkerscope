@@ -9,3 +9,9 @@ from Icon's `edit` / `trash`, for the same two verbs. Worth folding those in
 structural, not iconography — leave them.
 
 *(opus-5, 2026-07-24, help-modal / tooltip session)*
+
+**Done 2026-08-12**: `HighlightRules`' divergent pencil + trash now draw
+`Icon`'s `edit` / `trash`, and +page's reduce/remove/restore/panel-send glyphs
+became `minus` + a shared `arrow-right`. What's left inline is deliberately out
+of scope: chevrons (they rotate / size to their container), the two drag grips,
+`ActionMenu`'s single ⋯, and ChartModal's actual plot `<svg>`.

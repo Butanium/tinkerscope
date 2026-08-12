@@ -1551,3 +1551,55 @@ Also this round: `DELETE /api/workspaces/{id}` now broadcasts `workspace_deleted
 deletion has no rev to ride — the workspace the rev would belong to is gone. Before
 this, a tab holding the deleted workspace learned nothing and its next refetch 404'd,
 indistinguishable from server trouble.
+---
+
+### 2026-08-12 — Two lazy-default bugs found by writing the assertion, not by reading
+
+The web ideas basket (icon consolidation, `FirstTokenChips`, per-row availability
+reason, loose-ckpt base label, tooltip lint, token-hover dead spots). Four were
+mechanical; the two that weren't are the same shape, and worth the entry.
+
+**The hover dead spots were the zero-alpha skip, not the aligner.**
+`ideas/token-hover-dead-spots.md` reported "hovering a word sometimes yields no
+popover" and guessed at a null-mapped token or an inter-rect gap. Both wrong.
+`TokenHeatOverlay.measure()` built a box only for a token that had a COLOR
+(`!colors[i]?.length` ⇒ `continue`), and those boxes are also the hover
+hit-test — while `surprisalAlpha` rounds its alpha to 0 for anything the model
+gave p > 93.55%. So every word the model was confident about was hover-dead and
+its less-predictable neighbours worked, which is exactly the reported pattern
+("cigarette" in a smoking answer; "good" two words earlier). A box now marks
+where a token IS; only an UNALIGNED token is skipped. `paint()` already no-ops on
+empty bands, so painting is unchanged. The cost is that `measure()` now runs a
+`Range` for the untinted share too — it was already O(tokens) and runs on layout
+changes, not per mousemove (`paint()` iterates cached boxes, and an untinted one
+costs a loop iteration with no `fillRect`).
+
+Pinning it needed a fixture change, which is the reusable part: every token in
+`browser_token_overlay`'s stream sat at p=.9 → alpha 0.01 → painted → boxed, so
+the bug could not appear there. It takes p=.99 to reach alpha 0. A fixture whose
+values all cluster on one side of a rounding threshold cannot fail the way the
+product does.
+
+**A lazy catalog reads as a confident default.** `loose-ckpt-base-label` looked
+like pure plumbing: probe the path, show the base, gate the Thinking toggle on
+that base's `supports_thinking`. The label half worked first try. The toggle half
+did not, and the new smoke (`browser_ckpt_base_label`) is what said so: the
+tinker catalog — the only place per-family `supports_thinking` lives — is loaded
+LAZILY when the picker opens, so on a fresh page load it is empty, the lookup
+returns undefined, and `?? true` (a back-compat default meaning "we don't know")
+renders as "this model has a thinking toggle". A `base:` pick had the same latent
+gap on reload; `ensureTinkerCatalog()` (called when any panel holds a `base:`/
+`ckpt:` pick) closes both. Static mode already eager-loaded the catalog for
+exactly this reason, one surface over — the comment at `+page.svelte`'s
+`isStatic` load spelled it out and nobody generalised it.
+
+Both bugs are the same failure to notice: an "unknown ⇒ assume the permissive
+thing" default is invisible while the unknown is common, and no assertion in the
+repo distinguished "we checked and it's true" from "we never looked".
+
+**Also**: `browser_model_availability` (unclassified in `smoke.sh`, i.e. never
+run under the runner) already asserted the per-row availability tooltip names the
+binding constraint — an assertion that could not pass against the generic copy
+that shipped. It fails on `main` at exactly that line and passes with the reason
+threaded through. Both it and `browser_ckpt_base_label` are now in DEFAULT, the
+first with a note that a failure there can mean tinker changed what it serves.

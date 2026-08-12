@@ -20,6 +20,7 @@
   import { deriveRuleName } from '$lib/highlight-match';
   import { DragReorder } from '$lib/drag-reorder.svelte';
   import { tip } from '$lib/tooltip.svelte';
+  import Icon from '$lib/Icon.svelte';
   import type { HighlightRule } from '$lib/types';
 
   const ROLES = ['', 'user', 'assistant', 'system'] as const;
@@ -304,10 +305,10 @@
       </div>
 
       <button class="hr-icon" onclick={() => startEdit(rule)} data-tooltip="Edit this rule" use:tip aria-label="edit rule">
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2L6 12l-2.5.5L4 10l7.5-7.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /></svg>
+        <Icon name="edit" size={12} />
       </button>
       <button class="hr-icon del" onclick={() => deleteHighlightRule(rule.id)} data-tooltip="Delete this rule" use:tip aria-label="delete rule">
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 4h10M6.5 4V2.8h3V4M5 4l.5 9h5L11 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg>
+        <Icon name="trash" size={12} />
       </button>
     </div>
 
