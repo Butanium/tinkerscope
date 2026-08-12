@@ -147,6 +147,13 @@ declare -A STALE=(
 #   (owned_backend_running stayed True), i.e. it was already unstable before
 #   anything landed on top of it. Re-run before believing a failure here, and
 #   baseline it if you need to attribute one.
+#   browser_echo_chimera — pins the cross-workspace chat_end commit gate
+#   (ENGINEERING_LOGS 2026-08-12, the stamped-us/echoing-them graft). Needs the
+#   live free-router (a real chat must OUTLIVE a workspace switch) AND
+#   passwordless sudo (`ss -K` drops the SSE socket for the reconnect leg —
+#   set_offline provably doesn't). Run it DIRECTLY when touching the echo/bus
+#   commit path (api/state.py chat_end, routes/chat.py terminals) — listed here
+#   so it can't be silently forgotten like the convergence smoke nearly was.
 
 SMOKES=("${PICK[@]:-${DEFAULT[@]}}")
 

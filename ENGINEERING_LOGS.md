@@ -1719,3 +1719,41 @@ fix-nul-bytes.py postdates the P1 branch bases).
 Next: P2 (server-authored folds — ChatRequest placement, terminal fold + blobs,
 in-flight registry, ops-then-chat_done), then P3 (addressing + echo
 retirement + the doc rewrite this entry defers).
+
+---
+
+### 2026-08-12 — The chimera had a survivor: unstamped `chat_end` commits (pre-P1), graft-reachable
+
+The P1 certification sweep measured `GET /api/state` returning
+`workspace_id == B` with panel messages from workspace A — the
+stamped-us/echoing-them shape the 2026-07-24 corruption came from. The P1 fork's
+investigation (branch `p1-echo`, merged today):
+
+**Mechanism.** Not a P1 regression and not a broken reset — `#loadTrees`'s
+claim patch still clears every echo on switch. The poison lands AFTER:
+`chat_end` commits its multi-turn transcript **unstamped** through
+`_apply_patch`, and the bus contract reads an unstamped patch as same-owner. A
+chat fired under A whose terminal lands after B claimed writes A's transcript
+into B's panel. The commit path always KNEW its workspace (`conv_id`) and never
+passed it — original multi-turn machinery, older than P1; the certification
+sweep was simply the first instrument that measured it.
+
+**Reachability: graft, not just display.** Probed on unfixed main: chimera
+state, then ONE forced SSE reconnect → `reconcileOnReconnect` trusted the
+poisoned mirror for its own workspace and folded A's text into B's TREE,
+persisted via ops. (The stamped `chat_done` path and `#afterLoad`'s dormancy
+premise both held — the reconnect reconcile was the one consumer left trusting
+the echo unscoped.)
+
+**Fix**: `chat_end(origin_workspace=conv_id)` — the commit is dropped when the
+bus was claimed by a different workspace since fire time. Same-owner commits
+byte-identical; the origin's own tab never needed the echo (folds from the
+stamped terminal + bucket). Cost: CLI multi-turn staleness in exactly the race
+window that used to corrupt, bounded until P3 retires the echo.
+
+**Two verification lessons.** Playwright's `context.set_offline` does NOT drop
+an established localhost EventSource (50 s of liveness measured "offline") —
+the smoke uses `sudo ss -K` for a real socket drop. And `browser_echo_chimera.py`
+was verified failing BOTH legs on unfixed main before being believed. It needs
+the live router + sudo, so it lives in smoke.sh's LIVE list (run directly when
+touching the echo commit path), not the token-free DEFAULT.
