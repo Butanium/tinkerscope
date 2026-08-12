@@ -1,16 +1,21 @@
 #!/bin/bash
 # Pre-commit hook: keep broken code out of history.
 #
-#  1. Web build — when any staged file touches web/, run `npm run build` (vite) so a
+#  1. NUL bytes — a raw NUL in a source file makes it BINARY to grep, so every later
+#     search on that file silently returns nothing (bitten twice: fd39382, then
+#     SearchPalette.svelte). `fix-nul-bytes.py` escapes it in place and re-stages
+#     when the language allows it, and aborts when it can't. Runs FIRST so the build
+#     below compiles the fixed file.
+#  2. Web build — when any staged file touches web/, run `npm run build` (vite) so a
 #     broken frontend build can never be committed. Output is gitignored (web/dist,
 #     web/.svelte-kit) so it never dirties the tree.
-#  2. Python lint — when any staged .py file changes, run ruff's pyflakes subset
+#  3. Python lint — when any staged .py file changes, run ruff's pyflakes subset
 #     (`--select F`) on the staged files. F catches undefined names (F821), unused
 #     imports/vars (F401/F841), redefinitions (F811) — i.e. the NameError-on-rename
 #     class. Per-staged-file is enough (F rules are intra-file).
 #
-# Either failure aborts the commit. Both stay instant when nothing relevant is staged
-# (doc-only commits skip both).
+# Any failure aborts the commit. All three stay instant when nothing relevant is
+# staged (a doc-only commit runs the NUL scan over its own files and nothing else).
 #
 # Bypass for a one-off WIP commit:  git commit --no-verify
 # Enabled via:  git config core.hooksPath .githooks  (see .githooks/README.md)
@@ -22,7 +27,17 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 staged="$(git diff --cached --name-only --diff-filter=ACMR)"
 
-# ── 1) Web build (only if a web/ file is staged) ─────────────────────────────
+# ── 1) Raw NUL bytes in staged text sources ──────────────────────────────────
+if [ -n "$staged" ]; then
+	if command -v python3 >/dev/null 2>&1; then
+		printf '%s\n' "$staged" | xargs -d '\n' -r python3 "$repo_root/.githooks/fix-nul-bytes.py"
+	else
+		# Don't hard-block a commit over a missing interpreter — say so instead.
+		echo "pre-commit: no python3 on PATH — skipping the NUL-byte check" >&2
+	fi
+fi
+
+# ── 2) Web build (only if a web/ file is staged) ─────────────────────────────
 if printf '%s\n' "$staged" | grep -q '^web/'; then
 	log="$(mktemp -t tinkerscope-precommit-build.XXXXXX.log)"
 	echo "pre-commit: staged web/ changes detected — running 'npm run build'…"
@@ -41,7 +56,7 @@ if printf '%s\n' "$staged" | grep -q '^web/'; then
 	fi
 fi
 
-# ── 2) Python lint (only the staged .py files) ───────────────────────────────
+# ── 3) Python lint (only the staged .py files) ───────────────────────────────
 py_files="$(printf '%s\n' "$staged" | grep '\.py$' || true)"
 if [ -n "$py_files" ]; then
 	ruff="$repo_root/.venv/bin/ruff"

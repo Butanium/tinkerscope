@@ -1458,3 +1458,41 @@ then replays the canonical order over the top. Anything that branches on tree st
 the local apply already changed is suspect. `changed`-by-value (introduced in the
 same commit) is what keeps the re-assert cheap: a replayed batch that nets to no
 difference still writes nothing and broadcasts nothing.
+
+### 2026-08-12 — A pre-commit step for raw NUL bytes, written by the bug it fixes
+
+`fd39382` (2026-08-10) escaped a raw NUL in `+page.svelte`: it was a `.join()`
+separator typed straight into the source, harmless at runtime, and it made the
+file BINARY to plain grep — so a grep-first question about the repo's biggest
+file got a confident, silent "not there". Two days later the same byte in
+`SearchPalette.svelte` did it again: an audit grepped the file for `scope`, got
+zero matches, and nearly concluded the palette's scope chips had never shipped
+(they had — `-a` shows ten hits, and `git log` names the commit that added them).
+One instance of this is a typo; two in three days on files nobody suspects is a
+class, and the failure is invisible in the direction that matters — an empty grep
+reads as an answer.
+
+So it's a hook step now: `.githooks/fix-nul-bytes.py`, first in `pre-commit`
+(before the web build, so vite compiles the fixed file). It reads each staged
+file's INDEX blob — what would actually be committed, not the worktree — and for
+a JS-family or Python file replaces the byte with the escape and re-stages;
+anything else (JSON/YAML/CSS/markdown, where there is no blind-safe spelling) or
+a file whose worktree copy differs from its staged one aborts the commit with the
+line numbers. Refusing on the partial-staging case is the point of reading the
+index: fixing the worktree there would either miss what is being committed or
+sweep unstaged edits into it.
+
+Two things worth knowing if you edit that script. First, it never spells either
+escape sequence literally — both are built from `chr(92)` — because an assistant
+writing the six characters of a unicode escape into a file emits **the NUL
+itself**: the first draft of this script acquired three of them that way, which
+is also why grep went quiet on it before it had ever run. That's a strong hint
+about where the two production instances came from. Second, the replacement is
+textual, so it assumes the byte sits in an ordinary string literal (true in both
+real cases); a NUL in Svelte markup or a Python `r''` string would change meaning
+under it, and neither is a thing anyone writes.
+
+A/B'd in a throwaway repo across six cases: `.ts` fixed in worktree AND index,
+`.md` refused, partially-staged file refused with the unstaged edit intact, clean
+and nonexistent paths silent, a real `.png` untouched. Then run against
+`SearchPalette.svelte` itself — `grep -c scope` goes 0 → 10.
