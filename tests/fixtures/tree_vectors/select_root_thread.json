@@ -1,0 +1,20 @@
+{
+  "name": "select: at ROOT, pinning a thread that default-last was already hiding",
+  "op": {"op": "select", "panel": "p", "parent_key": "__root__", "child_id": "u1"},
+  "tree_before": {
+    "nodes": {
+      "u1": {"id": "u1", "role": "user", "content": "first", "parent": null, "children": []},
+      "u2": {"id": "u2", "role": "user", "content": "second", "parent": null, "children": []}
+    },
+    "rootChildren": ["u1", "u2"],
+    "selected": {}
+  },
+  "tree_after": {
+    "nodes": {
+      "u1": {"id": "u1", "role": "user", "content": "first", "parent": null, "children": []},
+      "u2": {"id": "u2", "role": "user", "content": "second", "parent": null, "children": []}
+    },
+    "rootChildren": ["u1", "u2"],
+    "selected": {"__root__": "u1"}
+  }
+}

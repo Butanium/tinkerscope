@@ -1,0 +1,18 @@
+{
+  "name": "add_nodes: re-using an existing id with DIFFERENT content is rejected loudly",
+  "op": {
+    "op": "add_nodes",
+    "panel": "p",
+    "nodes": [{"id": "a1", "role": "assistant", "content": "not what was stored", "parent": "u1"}],
+    "select": true
+  },
+  "tree_before": {
+    "nodes": {
+      "u1": {"id": "u1", "role": "user", "content": "hi", "parent": null, "children": ["a1"]},
+      "a1": {"id": "a1", "role": "assistant", "content": "hello", "parent": "u1", "children": []}
+    },
+    "rootChildren": ["u1"],
+    "selected": {"__root__": "u1", "u1": "a1"}
+  },
+  "rejects": "different role/content"
+}

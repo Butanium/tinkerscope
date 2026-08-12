@@ -1,0 +1,22 @@
+{
+  "name": "delete: prunes the subtree and drops the parent's now-dangling selection",
+  "op": {"op": "delete", "panel": "p", "node_id": "a1"},
+  "tree_before": {
+    "nodes": {
+      "u1": {"id": "u1", "role": "user", "content": "hi", "parent": null, "children": ["a1", "a2"]},
+      "a1": {"id": "a1", "role": "assistant", "content": "one", "parent": "u1", "children": ["u2"]},
+      "u2": {"id": "u2", "role": "user", "content": "more", "parent": "a1", "children": []},
+      "a2": {"id": "a2", "role": "assistant", "content": "two", "parent": "u1", "children": []}
+    },
+    "rootChildren": ["u1"],
+    "selected": {"__root__": "u1", "u1": "a1", "a1": "u2"}
+  },
+  "tree_after": {
+    "nodes": {
+      "u1": {"id": "u1", "role": "user", "content": "hi", "parent": null, "children": ["a2"]},
+      "a2": {"id": "a2", "role": "assistant", "content": "two", "parent": "u1", "children": []}
+    },
+    "rootChildren": ["u1"],
+    "selected": {"__root__": "u1"}
+  }
+}

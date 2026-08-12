@@ -1,0 +1,28 @@
+{
+  "name": "replace_tree: send-branch-to-panel / reset-thread replaces a panel wholesale (LWW)",
+  "op": {
+    "op": "replace_tree",
+    "panel": "p",
+    "tree": {
+      "nodes": {
+        "n1": {"id": "n1", "role": "user", "content": "carried over", "parent": null, "children": ["n2"]},
+        "n2": {"id": "n2", "role": "assistant", "content": "and its reply", "parent": "n1", "children": []}
+      },
+      "rootChildren": ["n1"],
+      "selected": {"__root__": "n1", "n1": "n2"}
+    }
+  },
+  "tree_before": {
+    "nodes": {"u1": {"id": "u1", "role": "user", "content": "was here", "parent": null, "children": []}},
+    "rootChildren": ["u1"],
+    "selected": {"__root__": "u1"}
+  },
+  "tree_after": {
+    "nodes": {
+      "n1": {"id": "n1", "role": "user", "content": "carried over", "parent": null, "children": ["n2"]},
+      "n2": {"id": "n2", "role": "assistant", "content": "and its reply", "parent": "n1", "children": []}
+    },
+    "rootChildren": ["n1"],
+    "selected": {"__root__": "n1", "n1": "n2"}
+  }
+}

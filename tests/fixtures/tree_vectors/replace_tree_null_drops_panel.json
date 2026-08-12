@@ -1,0 +1,23 @@
+{
+  "name": "replace_tree null: removing a panel drops its tree from the map (today's dropped_trees)",
+  "op": {"op": "replace_tree", "panel": "p", "tree": null},
+  "trees_before": {
+    "p": {
+      "nodes": {"u1": {"id": "u1", "role": "user", "content": "hi", "parent": null, "children": []}},
+      "rootChildren": ["u1"],
+      "selected": {"__root__": "u1"}
+    },
+    "q": {
+      "nodes": {"u2": {"id": "u2", "role": "user", "content": "other panel", "parent": null, "children": []}},
+      "rootChildren": ["u2"],
+      "selected": {"__root__": "u2"}
+    }
+  },
+  "trees_after": {
+    "q": {
+      "nodes": {"u2": {"id": "u2", "role": "user", "content": "other panel", "parent": null, "children": []}},
+      "rootChildren": ["u2"],
+      "selected": {"__root__": "u2"}
+    }
+  }
+}

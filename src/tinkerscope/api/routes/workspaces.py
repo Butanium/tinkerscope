@@ -1,8 +1,11 @@
 """Saved workspace TREES — branchable chat sessions, per scan-root-set (v2).
 
 Each workspace is a named, branchable chat: a per-panel tree (`trees` keyed by
-panel id) plus metadata. The tree shape is OPAQUE to the server — the browser owns
-it (see `web/src/lib/tree.ts`); we only round-trip it as plain JSON.
+panel id) plus metadata. The server OWNS that tree (`api/tree_ops.py`, the Python
+half of `web/src/lib/tree.ts`): every mutation arrives as an op batch on `/ops`,
+is applied under the workspaces flock, bumps the workspace's `rev` and is
+broadcast as a bus `ops` event. Clients keep an optimistic mirror and converge by
+replaying those events in rev order (`docs/HANDOFF_SERVER_AUTHORITY.md`).
 
 Storage v2 (see `docs/STORAGE_V2.md` + `api/workspace_store.py`): each
 workspace is its OWN light file under `<state>/workspaces/<id>.json`, and a
@@ -16,7 +19,8 @@ owns the on-disk layout, the boot migration, the in-memory summary cache, and th
   GET    /api/workspaces/{id}/layout-history → past panel layouts, oldest first
   POST   /api/workspaces/{id}/node-blobs {nodes:[...]} → {id: {token_logprobs?, raw_meta?}}
   POST   /api/workspaces            → create (unchanged shape; server strips blobs)
-  PATCH  /api/workspaces/{id}       → layout-only metadata (no tree bytes)
+  POST   /api/workspaces/{id}/ops   → apply an op batch atomically → {rev, results}
+  PATCH  /api/workspaces/{id}       → layout-only metadata (sugar over the set_meta op)
   PUT    /api/workspaces/{id}/tree  → PARTIAL tree upsert (dirty panels) + dropped_trees
   DELETE /api/workspaces/{id}       → remove light file + blobs dir
 """
@@ -25,9 +29,10 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
-from ..state import DEFAULT_PANEL_ID
+from ..state import BUS, DEFAULT_PANEL_ID
 from .. import workspace_store as store
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
@@ -105,6 +110,24 @@ class TreeSave(BaseModel):
 class NodeBlobsRequest(BaseModel):
     # Node ids to fetch heavy blobs for (POST, not GET, because the list can be long).
     nodes: list[str] = []
+
+
+class OpsRequest(BaseModel):
+    """A batch of tree ops (`docs/API_CONTRACT.md` → POST /{id}/ops, and
+    `api/tree_ops.py` for the semantics). Deliberately untyped per-op: the op
+    vocabulary is validated in `tree_ops` where it is applied, so a rejection is
+    one shape (409 `{index, error}`) whether it failed shape or precondition —
+    rather than pydantic 422s for some ops and 409s for others.
+
+      {"op": "add_nodes",    "panel", "nodes": [TreeNode-minus-children], "select"?}
+      {"op": "select",       "panel", "parent_key", "child_id"}
+      {"op": "delete",       "panel", "node_id"}
+      {"op": "copy_tree",    "from_panel", "to_panel"}
+      {"op": "replace_tree", "panel", "tree": ConvTree | null}
+      {"op": "set_meta",     "fields": {…WorkspacePatch keys}}
+    """
+
+    ops: list[dict[str, Any]] = []
 
 
 class TrashRestoreRequest(BaseModel):
@@ -200,15 +223,49 @@ def create_workspace(req: WorkspaceCreate) -> dict:
     )
 
 
-@router.patch("/{workspace_id}")
-def patch_workspace(workspace_id: str, req: WorkspacePatch) -> dict:
-    """Layout-only metadata update — rename + system_prompt + panel layout/UI, no
-    tree bytes. Returns the updated summary."""
-    fields = req.model_dump(exclude_unset=True)
-    summary = store.patch_meta(workspace_id, fields)
-    if summary is None:
+@router.post("/{workspace_id}/ops")
+async def apply_workspace_ops(workspace_id: str, req: OpsRequest) -> dict:
+    """Apply an op batch to a workspace tree — the ONE mutation path (§4.1).
+
+    Atomic: applied in order to a working copy under the workspaces flock, and any
+    rejection discards the WHOLE batch → 409 `{detail: {index, error}}` with
+    nothing written and `rev` unmoved. Success → `{rev, results}` and one bus `ops`
+    event carrying the batch as applied (light nodes only — heavy fields went to
+    write-once blobs and the nodes carry `has_*` flags instead).
+
+    An idempotent replay (a retried batch after a dropped POST) changes nothing, so
+    it writes nothing, broadcasts nothing, and returns the unchanged `rev` with
+    every result `noop: true`."""
+    out = await run_in_threadpool(store.apply_ops, workspace_id, req.ops)
+    if out is None:
         raise HTTPException(404, f"no workspace {workspace_id}")
-    return summary
+    if "rejected" in out:
+        raise HTTPException(409, out["rejected"])
+    await _broadcast_ops(workspace_id, out)
+    return {"rev": out["rev"], "results": out["results"]}
+
+
+async def _broadcast_ops(workspace_id: str, out: dict) -> None:
+    """Fan the applied batch out to every attached mirror. Nothing changed ⇒ no
+    event: a rev that moves with no ops behind it is exactly the gap that would
+    make every other tab refetch for nothing."""
+    if out.get("ops"):
+        await BUS.broadcast(
+            "ops", {"workspace": workspace_id, "rev": out["rev"], "ops": out["ops"]}
+        )
+
+
+@router.patch("/{workspace_id}")
+async def patch_workspace(workspace_id: str, req: WorkspacePatch) -> dict:
+    """Layout-only metadata update — rename + system_prompt + panel layout/UI, no
+    tree bytes. Sugar over the `set_meta` op: same locked apply, same rev bump, same
+    `ops` broadcast, so tabs converge on metadata live. Returns the updated summary."""
+    fields = req.model_dump(exclude_unset=True)
+    out = await run_in_threadpool(store.set_meta, workspace_id, fields)
+    if out is None:
+        raise HTTPException(404, f"no workspace {workspace_id}")
+    await _broadcast_ops(workspace_id, out)
+    return out["summary"]
 
 
 @router.put("/{workspace_id}/tree")

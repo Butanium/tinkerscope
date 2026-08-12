@@ -44,6 +44,19 @@ import httpx
 import typer
 from httpx_sse import connect_sse
 
+# The tree model is the SERVER's (api/tree_ops.py, the Python half of
+# web/src/lib/tree.ts). These read helpers used to be a second copy here; they
+# moved so the two Python mirrors of tree.ts can't drift. Imported under their
+# old private names — every call site below is unchanged. tree_ops pulls in
+# stdlib only (its store imports are deferred), so `tinkpg --help` stays cheap.
+from .api.tree_ops import ROOT  # noqa: F401  (re-exported: _aim_at_node & friends read it)
+from .api.tree_ops import active_path as _active_path
+from .api.tree_ops import ancestry as _ancestry
+from .api.tree_ops import root_of as _root_of
+from .api.tree_ops import selected_child as _selected_child
+from .api.tree_ops import siblings as _siblings
+from .api.tree_ops import thread_path as _thread_path
+
 app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
@@ -218,90 +231,7 @@ def _print_json(obj: Any, indent: int = 2) -> None:
     print(json.dumps(obj, indent=indent, default=str, ensure_ascii=False))
 
 
-# ---------- Workspace tree helpers (mirror web/src/lib/tree.ts) ----------
-# The branch tree is OPAQUE to the server (it only round-trips the JSON). The
-# browser owns the shape (web/src/lib/tree.ts) and so do we: a ConvTree is
-# {nodes: {id: {id,role,content,parent,children[],...}}, rootChildren: [id],
-# selected: {parentKey: childId}}. parentKey is a node id or the ROOT sentinel.
-ROOT = "__root__"
-
-
-def _selected_child(tree: dict, parent_key: str) -> Optional[str]:
-    """Selected child id of `parent_key`, defaulting to the LAST (newest) child."""
-    kids = tree.get("rootChildren", []) if parent_key == ROOT \
-        else (tree.get("nodes", {}).get(parent_key, {}) or {}).get("children", [])
-    if not kids:
-        return None
-    sel = (tree.get("selected") or {}).get(parent_key)
-    return sel if (sel is not None and sel in kids) else kids[-1]
-
-
-def _thread_path(tree: dict, root_id: str) -> list[dict]:
-    """Root sibling `root_id` → leaf, following the selected child at each step.
-    A "thread" = one root-level sibling (a branch-from-start first message) and
-    its subtree; this is the thread-scoped analogue of the active path."""
-    nodes = tree.get("nodes", {})
-    node = nodes.get(root_id)
-    if node is None:
-        return []
-    path, seen, pk = [node], {root_id}, root_id
-    while True:
-        cid = _selected_child(tree, pk)
-        if cid is None or cid in seen:
-            break
-        node = nodes.get(cid)
-        if node is None:
-            break
-        seen.add(cid)
-        path.append(node)
-        pk = cid
-    return path
-
-
-def _active_path(tree: dict) -> list[dict]:
-    """Root → leaf following the selected child at each step (mirrors activePath)."""
-    sel = _selected_child(tree, ROOT)
-    return _thread_path(tree, sel) if sel else []
-
-
-def _ancestry(tree: dict, node_id: str) -> list[dict]:
-    """Root → `node_id` INCLUSIVE via the PARENT chain (mirrors tree.ts
-    ancestryMessages) — works for ANY node regardless of the current selection, so
-    `continue` can loom from a non-active branch. Returns the node dicts in order."""
-    nodes = tree.get("nodes", {})
-    chain: list[dict] = []
-    cur, seen = nodes.get(node_id), set()
-    while cur is not None and cur.get("id") not in seen:
-        seen.add(cur.get("id"))
-        chain.append(cur)
-        parent = cur.get("parent")
-        cur = nodes.get(parent) if parent else None
-    chain.reverse()
-    return chain
-
-
-def _root_of(tree: dict, node_id: str) -> str:
-    """Walk parent pointers to the node's thread ROOT id (the node itself if it
-    is a root / unknown)."""
-    nodes = tree.get("nodes", {})
-    cur, seen = node_id, set()
-    while cur in nodes and cur not in seen:
-        seen.add(cur)
-        parent = nodes[cur].get("parent")
-        if not parent:
-            break
-        cur = parent
-    return cur
-
-
-def _siblings(tree: dict, node: dict) -> list[str]:
-    """Ids of `node`'s siblings (children of its parent, or the roots)."""
-    parent = node.get("parent")
-    if parent is None:
-        return tree.get("rootChildren", [])
-    return (tree.get("nodes", {}).get(parent, {}) or {}).get("children", [])
-
-
+# ---------- Workspace tree stats (CLI-only; the model lives in api/tree_ops.py) ----------
 def _branch_point_count(tree: dict) -> int:
     """Total forks in the tree: nodes (incl. the virtual ROOT) with >1 child."""
     n = 1 if len(tree.get("rootChildren", [])) > 1 else 0

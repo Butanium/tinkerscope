@@ -1,0 +1,23 @@
+{
+  "name": "delete: selection is by ID, so pruning an unrelated sibling never reselects",
+  "op": {"op": "delete", "panel": "p", "node_id": "a1"},
+  "tree_before": {
+    "nodes": {
+      "u1": {"id": "u1", "role": "user", "content": "hi", "parent": null, "children": ["a1", "a2", "a3"]},
+      "a1": {"id": "a1", "role": "assistant", "content": "one", "parent": "u1", "children": []},
+      "a2": {"id": "a2", "role": "assistant", "content": "two", "parent": "u1", "children": []},
+      "a3": {"id": "a3", "role": "assistant", "content": "three", "parent": "u1", "children": []}
+    },
+    "rootChildren": ["u1"],
+    "selected": {"__root__": "u1", "u1": "a3"}
+  },
+  "tree_after": {
+    "nodes": {
+      "u1": {"id": "u1", "role": "user", "content": "hi", "parent": null, "children": ["a2", "a3"]},
+      "a2": {"id": "a2", "role": "assistant", "content": "two", "parent": "u1", "children": []},
+      "a3": {"id": "a3", "role": "assistant", "content": "three", "parent": "u1", "children": []}
+    },
+    "rootChildren": ["u1"],
+    "selected": {"__root__": "u1", "u1": "a3"}
+  }
+}

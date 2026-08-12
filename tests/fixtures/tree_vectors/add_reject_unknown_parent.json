@@ -1,0 +1,15 @@
+{
+  "name": "add_nodes: a node whose parent was deleted is REJECTED (the whole batch drops)",
+  "op": {
+    "op": "add_nodes",
+    "panel": "p",
+    "nodes": [{"id": "x1", "role": "user", "content": "orphan", "parent": "gone"}],
+    "select": true
+  },
+  "tree_before": {
+    "nodes": {"u1": {"id": "u1", "role": "user", "content": "hi", "parent": null, "children": []}},
+    "rootChildren": ["u1"],
+    "selected": {"__root__": "u1"}
+  },
+  "rejects": "does not exist"
+}

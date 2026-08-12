@@ -44,8 +44,9 @@ def test_list_returns_summaries_without_trees(client):
     summaries = client.get("/api/workspaces").json()
     assert len(summaries) == 1
     s = summaries[0]
-    assert set(s) == {"id", "name", "created_at", "updated_at", "panels"}
+    assert set(s) == {"id", "name", "created_at", "updated_at", "panels", "rev"}
     assert "trees" not in s
+    assert s["rev"] == 1  # the create itself is the workspace's first revision
     assert s["panels"] == [{"id": "primary", "run_id": "run-a", "checkpoint": "final"}]
 
 
