@@ -752,9 +752,18 @@ export function applyTreeOp(t0: ConvTree, op: TreeOp): ConvTree {
       const parentKey = w.parent ?? ROOT;
       const existing = cur.nodes[w.id];
       if (existing) {
-        // Wording matches tree_ops.py — the fixture vectors assert substrings.
-        if (existing.role !== w.role || existing.content !== w.content)
-          throw new OpRejected(`node ${w.id} already exists with different role/content`);
+        // Node identity = role+content+PARENT, exactly those three (parity with
+        // tree_ops.py; wording pinned by the fixture vectors). Not the whole
+        // body: a replay may carry heavy fields inline that the stored light
+        // node holds as has_* flags, so a full compare would false-reject
+        // every retry. Parent matters: without it a buggy client re-sending an
+        // id under a different parent was a silent skip-with-claim.
+        if (
+          existing.role !== w.role ||
+          existing.content !== w.content ||
+          (existing.parent ?? null) !== (w.parent ?? null)
+        )
+          throw new OpRejected(`node ${w.id} already exists with different role/content/parent`);
         const kids = parentKey === ROOT ? cur.rootChildren : cur.nodes[parentKey]?.children;
         const idx = kids ? kids.indexOf(w.id) : -1;
         if (idx >= 0 && idx !== kids!.length - 1) {
