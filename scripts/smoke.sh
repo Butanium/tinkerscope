@@ -84,6 +84,14 @@ DEFAULT=(
     browser_panel_drag
     browser_chart_rules
     browser_branch_from_root
+    # Repaired 2026-08-12 (were listed STALE for reasons that had stopped being true):
+    #   branching — the bare textarea.edit-textarea matched the thread-system editor too
+    #   continue_scope — .prefill-scope still exists; it was the FOLD half that died
+    #                    when sends went detached. Now request-level. See its docstring.
+    browser_branching
+    browser_continue_scope
+    # Token-free (route-intercepted) and watched passing 2026-08-12.
+    browser_shift_continue_thinking
     browser_modals
     browser_label_trunc
     browser_label_diff
@@ -108,12 +116,14 @@ DEFAULT=(
 # Known-stale: failures here carry NO signal. Repair when you next need the
 # coverage — not on their own account.
 declare -A STALE=(
-    [browser_branching]="Playwright strict-mode violation (2 edit textareas); fails on pre-fix commits too"
-    [browser_continue_scope]="its .prefill-scope selector no longer exists"
-    [browser_readme_shots]="pre-ModelDropdown sidebar + q_nk fixtures"
     [browser_save_lightening]="composer textarea never appears; fails identically at HEAD (baselined 2026-08-03)"
     [browser_continue_sample]="asserts n=2 folded samples, gets 4 — it never SETS thinking, so an inherited thinking='both' (dev-isolated snapshots the real state home) fires n each way. Baselined 2026-08-06: fails identically on main. A pre-goto POST /api/state {thinking:false} did NOT stick — cause unresolved, so the fix is more than one line"
 )
+# CAPTURE TOOLS / LIVE — real sampling, so deliberately NOT in the token-free set.
+# They are not stale; run them directly against a dev-isolated instance.
+#   browser_readme_shots — regenerates the README images (was listed STALE for a
+#   pre-ModelDropdown/q_nk state it left behind when it was rewritten 2026-08-05).
+#
 # NON-DETERMINISTIC (not stale — the coverage is real, the result isn't stable):
 #   browser_stop_generation — drives live free-OpenRouter, and which assertion
 #   fails varies run to run. Observed 2026-08-03 failing BOTH on the merge tip
