@@ -16,3 +16,9 @@ happened.
 - [The loom should cut from the PROSE](loom-cut-from-prose.md) — the overlay got the same click-to-pin as the raw stream, so the cut is picked in reading mode — **done 2026-08-06**
 - [The dataset path wants to be a samplescope command](dataset-path-to-samplescope.md) — became an in-app hand-off instead of a copied command; samplescope already had `?path=` + an instance registry — **done 2026-08-06** (`4fc5091`)
 - [`ws`/`samples` accept `--ws` too](ws-selector-symmetry.md) — shipped as `_one_selector` (positional + flag, error on differing values); the idea file was orphaned and retired post-hoc — **done 2026-08-12**
+- [Finish the icon consolidation](finish-icon-consolidation.md) — HighlightRules' divergent pencil/trash + +page's minus/arrow glyphs folded into `Icon`; chevrons + grips stay inline on purpose — **done 2026-08-12**
+- [`ChartModal.svelte` has a second component inside it](firsttoken-chips-component.md) — extracted `lib/FirstTokenChips.svelte`; the shared legend CSS moved to `app.css` — **done 2026-08-12**
+- [Per-row availability tooltip = the real reason](per-row-availability-reason.md) — the row's title now carries the run's own `unsampleable_reason`; baselined against `browser_model_availability` — **done 2026-08-12**
+- [Show the resolved base model on loose-ckpt panels](loose-ckpt-base-label.md) — `ckpt:` panels probe + show their base, and the Thinking toggle follows it; needed `ensureTinkerCatalog()` (the lazy catalog was empty on load) — **done 2026-08-12**
+- [Lint the tooltip length rule](lint-tooltip-length.md) — `tooltip-length.test.ts`, per-ternary-branch, fires at >90 chars or a multi-line value — **done 2026-08-12**
+- [Token overlay: hovering a word sometimes yields no popover](token-hover-dead-spots.md) — neither suspect: a p>93.55% token got no color, and boxes (= the hit-test) were gated on having one — **done 2026-08-12**

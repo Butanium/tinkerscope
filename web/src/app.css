@@ -159,6 +159,12 @@ select {
 .btn-tag-submit:hover { opacity: 0.9; }
 .btn-tag-submit:disabled { opacity: 0.4; cursor: not-allowed; }
 
+/* Chart legend row items. Global because the chart modal draws the plain legend
+   and the extracted first-token chip row draws the same swatch/label. */
+.chart-legend-item { display: flex; align-items: center; gap: var(--space-1); }
+.chart-legend-swatch { width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; }
+.chart-legend-label { font-size: 0.78rem; color: var(--color-text); }
+
 /* Segmented Off|On-style pill toggle. Global because the sidebar sections in
    +page.svelte and the Highlights editor component both draw one, and a scoped
    rule can't reach an extracted component. */

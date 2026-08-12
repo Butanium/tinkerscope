@@ -153,7 +153,8 @@
     type ThinkFilter
   } from './chart';
   import { displayToken, prob } from './token-logprob';
-  import { searchStoredTokens, type TokenCandidate } from './token-search';
+  import { type TokenCandidate } from './token-search';
+  import FirstTokenChips, { type FtChip } from './FirstTokenChips.svelte';
   import { highlightStore } from './highlights.svelte';
   import { nodeBlobs } from './node-blobs.svelte';
   import { workspaces as ws } from './workspaces.svelte';
@@ -388,7 +389,6 @@
   function unitMembers(key: string): string[] {
     return ftGroups.find((g) => ftGroupKey(g) === key) ?? [key];
   }
-  type FtChip = { key: string; label: string; members: string[]; color?: string; excluded: boolean; addedTid?: number };
   const ftChips = $derived.by((): FtChip[] => {
     if (mode !== 'firsttoken' || !ft) return [];
     const chips: FtChip[] = ft.data.legend
@@ -406,17 +406,6 @@
     return chips;
   });
 
-  // ── first-token: add-token search ─────────────────────────────────
-  let ftQuery = $state('');
-  // Matches that are actually HIDDEN — not already a shown named unit, not already
-  // added. (Surfacing an already-shown token would be a no-op.)
-  const ftMatches = $derived.by(() => {
-    if (mode !== 'firsttoken' || !ftQuery.trim()) return [];
-    return searchStoredTokens(ftQuery, ftCandidates)
-      .filter((m) => !addedTids.has(m.tid) && !namedTokens.has(displayToken(m.t)))
-      .slice(0, 20);
-  });
-
   function toggleFtExclude(key: string) {
     ftExcluded = ftExcluded.includes(key) ? ftExcluded.filter((k) => k !== key) : [...ftExcluded, key];
     inspect = null; // segment keys shift under exclusion
@@ -425,7 +414,6 @@
   function addToken(m: { t: string; tid: number }) {
     const token = displayToken(m.t);
     if (!ftAdded.some((a) => a.tid === m.tid)) ftAdded = [...ftAdded, { token, tid: m.tid }];
-    ftQuery = '';
     saveView();
   }
   function removeAdded(tid: number) {
@@ -458,9 +446,6 @@
     inspect = null;
     saveView();
   }
-  // bespoke drag-onto-target (the shared lib/drag-reorder is gap-shaped, not this)
-  let ftDrag = $state<string | null>(null);
-  let ftDragOver = $state<string | null>(null);
 
   /** Per-segment hover text — first-token mode reads differently: pct is the
    *  MODEL's probability, count is how often it was actually sampled. */
@@ -758,80 +743,21 @@
         {/each}
       </svg>
       {#if mode === 'firsttoken'}
-        <!-- Interactive legend: click a chip to exclude/re-include, drag one onto
-             another to merge into one color, ✕ to un-merge / drop an added token. -->
-        <div class="ft-chips" role="group" aria-label="First-token units">
-          {#each ftChips as chip (chip.key)}
-            {@const merged = chip.members.length > 1}
-            <div
-              class="ft-chip"
-              class:off={chip.excluded}
-              class:merged
-              class:drop-target={ftDragOver === chip.key && ftDrag !== chip.key}
-              draggable={!chip.excluded}
-              role="button"
-              tabindex="0"
-              aria-pressed={!chip.excluded}
-              data-tooltip={chip.excluded
-                ? 'Excluded — click to re-include'
-                : merged
-                  ? 'Merged — click to exclude, drag onto another to grow, ⊗ to split'
-                  : 'Click to exclude · drag onto another to merge'}
-              use:tip
-              onclick={() => toggleFtExclude(chip.key)}
-              onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), toggleFtExclude(chip.key))}
-              ondragstart={(e) => { ftDrag = chip.key; e.dataTransfer?.setData('text/plain', chip.key); }}
-              ondragend={() => { ftDrag = null; ftDragOver = null; }}
-              ondragover={(e) => { if (ftDrag && ftDrag !== chip.key) { e.preventDefault(); ftDragOver = chip.key; } }}
-              ondragleave={() => { if (ftDragOver === chip.key) ftDragOver = null; }}
-              ondrop={(e) => { e.preventDefault(); if (ftDrag) mergeUnits(ftDrag, chip.key); ftDrag = null; ftDragOver = null; }}
-            >
-              <span class="chart-legend-swatch" style={chip.color ? `background: ${chip.color}` : `background: ${NONE_COLOR}`}></span>
-              <span class="ft-chip-label">{chip.label}</span>
-              {#if merged}
-                <button class="ft-chip-x" title="Split this group" aria-label="Split group"
-                  onclick={(e) => { e.stopPropagation(); unmerge(chip.key); }}>⊗</button>
-              {:else if chip.addedTid != null}
-                <button class="ft-chip-x" title="Remove — back into the rest" aria-label="Remove added token"
-                  onclick={(e) => { e.stopPropagation(); removeAdded(chip.addedTid!); }}>✕</button>
-              {/if}
-            </div>
-          {/each}
-          {#if !ftRenorm}
-            <div class="chart-legend-item ft-rest-legend">
-              <span class="chart-legend-swatch" style="background: {NONE_COLOR}"></span>
-              <span class="chart-legend-label">{FT_REST}</span>
-            </div>
-          {/if}
-          <label class="ft-renorm"
-            data-tooltip="Drop the grey rest and rescale the shown tokens to 100%"
-            use:tip>
-            <input type="checkbox" bind:checked={ftRenorm} onchange={saveView} />
-            <span>renormalize</span>
-          </label>
-        </div>
-        <!-- Add a recorded-but-hidden token (from stored logprobs; no model call). -->
-        <div class="ft-add">
-          <input class="ft-add-input" type="text" placeholder="add a hidden token… (e.g. “ D”)"
-            bind:value={ftQuery}
-            data-tooltip="Search tokens recorded for this turn and pull one out of the rest"
-            use:tip />
-          {#if ftQuery.trim()}
-            <div class="ft-matches">
-              {#if ftMatches.length === 0}
-                <span class="ft-no-match">no hidden token matches “{ftQuery.trim()}” in this turn's recorded logprobs</span>
-              {:else}
-                {#each ftMatches as m (m.tid)}
-                  <button class="ft-match" onclick={() => addToken(m)}
-                    data-tooltip="{m.kind} match · p={((prob(m.lp) ?? 0) * 100).toFixed(1)}% — click to add" use:tip>
-                    <span class="ft-match-tok">{displayToken(m.t)}</span>
-                    <span class="ft-match-p">{((prob(m.lp) ?? 0) * 100).toFixed(1)}%</span>
-                  </button>
-                {/each}
-              {/if}
-            </div>
-          {/if}
-        </div>
+        <FirstTokenChips
+          chips={ftChips}
+          restLabel={FT_REST}
+          restColor={NONE_COLOR}
+          renorm={ftRenorm}
+          candidates={ftCandidates}
+          addedTids={addedTids}
+          namedTokens={namedTokens}
+          ontoggle={toggleFtExclude}
+          onmerge={mergeUnits}
+          onunmerge={unmerge}
+          onremoveadded={removeAdded}
+          onadd={addToken}
+          onrenorm={(v) => { ftRenorm = v; saveView(); }}
+        />
       {:else}
         <div class="chart-legend">
           {#each data.legend as entry (entry.key)}
@@ -925,30 +851,6 @@
   .chart-seg:hover { filter: brightness(0.92); }
   .chart-seg.selected { stroke: var(--color-text); stroke-width: 1.5; }
   .chart-legend { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--color-border-light); }
-  .chart-legend-item { display: flex; align-items: center; gap: var(--space-1); }
-  .chart-legend-swatch { width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; }
-  .chart-legend-label { font-size: 0.78rem; color: var(--color-text); }
-  /* first-token interactive legend */
-  .ft-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--color-border-light); }
-  .ft-chip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--color-border); border-radius: 999px; background: var(--color-bg); color: var(--color-text); font-size: 0.76rem; padding: 2px 8px 2px 6px; cursor: grab; user-select: none; }
-  .ft-chip:hover { border-color: var(--color-text-muted); }
-  .ft-chip.off { opacity: 0.45; text-decoration: line-through; cursor: pointer; }
-  .ft-chip.merged { border-style: dashed; border-color: var(--color-text-muted); }
-  .ft-chip.drop-target { outline: 2px solid var(--color-accent); outline-offset: 1px; }
-  .ft-chip-label { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ft-chip-x { border: none; background: none; color: var(--color-text-muted); font-size: 0.85rem; line-height: 1; cursor: pointer; padding: 0 1px; }
-  .ft-chip-x:hover { color: var(--color-text); }
-  .ft-rest-legend { margin-left: var(--space-2); }
-  .ft-renorm { display: inline-flex; align-items: center; gap: 5px; margin-left: var(--space-3); font-size: 0.76rem; color: var(--color-text-muted); cursor: pointer; user-select: none; }
-  .ft-renorm input { cursor: pointer; margin: 0; }
-  .ft-add { position: relative; margin-top: var(--space-3); }
-  .ft-add-input { width: 260px; max-width: 100%; font-size: 0.78rem; padding: 4px 8px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-bg); color: var(--color-text); }
-  .ft-matches { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-2); max-height: 120px; overflow-y: auto; }
-  .ft-match { display: inline-flex; align-items: center; gap: 5px; border: 1px dashed var(--color-border); border-radius: var(--radius); background: var(--color-bg); color: var(--color-text); font-size: 0.74rem; padding: 2px 7px; cursor: pointer; }
-  .ft-match:hover { border-color: var(--color-accent); }
-  .ft-match-tok { font-family: var(--font-mono, monospace); }
-  .ft-match-p { color: var(--color-text-muted); }
-  .ft-no-match { font-size: 0.74rem; color: var(--color-text-muted); font-style: italic; }
   .chart-inspect { margin-top: var(--space-3); border: 1px solid var(--color-border-light); border-radius: var(--radius); background: var(--color-bg); }
   .chart-inspect-head { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border-light); }
   .chart-inspect-title { font-size: 0.8rem; font-weight: 600; color: var(--color-text); flex: 1; }

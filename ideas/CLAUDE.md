@@ -31,7 +31,6 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 
 - [Sample-view (the eye) as the chart's in-thread twin](eye-as-chart-twin.md) — filter cards by highlight rule; click a bar segment → the eye with that bucket active
 - [Let a share pack carry a chart view](pack-carries-chart-view.md) — an OPTIONAL `chart_view` block seeding localStorage; never a workspace field
-- [`ChartModal.svelte` has a second component inside it](firsttoken-chips-component.md) — the first-token chip row is self-contained; ~a third of the file
 - [The per-bar `n=` only appears when a group's bars disagree](per-bar-n-labels.md) — deliberate, but inconsistent-looking next to the think split
 
 ### CLI (`tinkpg`)
@@ -46,9 +45,7 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 ### Models: discovery, availability, renderers
 
 - [Availability auto-refresh](availability-auto-refresh.md) — the servable set only refetches on the manual button; a TTL or a send-404 hook would keep grey/⚠ honest
-- [Per-row availability tooltip = the real reason](per-row-availability-reason.md) — the backend already sends `unsampleable_reason`; the typeahead shows generic copy
 - [Continuous thinking-effort slider for tml models](tml-effort-slider.md) — tml_v0 has an `effort` dial in [0, 1); we map it to a binary {0.0, 0.9}
-- [Show the resolved base model on loose-ckpt panels](loose-ckpt-base-label.md) — `resolve_base_model`'s answer never reaches the label; plumbing only
 - [Gate the whole-conversation continue path by CAPABILITY](continue-gate-by-capability.md) — `renderer_name.startswith("tml")` is brittle; YAGNI until a 2nd such renderer
 - [Naming a checkpoint is a one-way write](unname-a-checkpoint.md) — no route removes a label, so a name you regret is unfixable from the UI; wants designing together with a rename affordance, and a pack-shipped name comes back with the pack
 
@@ -58,8 +55,6 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 - [A "Deleted — Undo" toast](undo-toast.md) — the undo affordance is off in the sidebar exactly when you want it under the cursor
 - [Hunt the rest of the DOM-held UI state](dom-held-ui-state-sweep.md) — the tell is state a person SET that no store knows about, inside a re-derived `{#each}`
 - [Sweep for controls that follow-scroll hides](follow-scroll-hidden-controls.md) — affordances whose useful moment is exactly when their anchor is off-screen
-- [Finish the icon consolidation](finish-icon-consolidation.md) — ~22 inline `<svg>` remain, and HighlightRules already drew its own divergent pencil
-- [Lint the tooltip length rule](lint-tooltip-length.md) — the ~70-char rule is written down and unenforced; ~20 lines of node test
 - [Toolbar priority order → observed usage](toolbar-priority-order.md) — the fold order is a judgment call; bump on evidence, check in before redesigning
 
 ### Verification practice
@@ -80,7 +75,6 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 ### Known bugs
 
 - [A send fired mid-fold is silently dropped](send-mid-fold-dropped.md) — no error, no user row, text left in the textarea; should queue or visibly refuse
-- [Token overlay: hovering a word sometimes yields no popover](token-hover-dead-spots.md) — suspect a null-mapped token or an inter-rect gap; uninvestigated
 - [`asTree()` silently swaps a malformed tree for an empty one](astree-silent-emptytree.md) — the blank panel then SAVES over the real tree; now journal-recoverable, but it should refuse loudly instead
 
 ### Docs

@@ -202,18 +202,32 @@
   );
 
   let anySupportsThinking = $derived(
-    // OpenRouter reference + loose tinker checkpoints: assume thinking-capable
-    // (backend handles the flag). Base picks consult the catalog's
-    // supports_thinking (absent ⇒ default true, back-compat); a base family with
-    // no thinking toggle (e.g. gpt-oss / a *-Base model) hides the control.
+    // OpenRouter reference models: assume thinking-capable (backend handles the
+    // flag). Base picks consult the catalog's supports_thinking (absent ⇒ default
+    // true, back-compat); a base family with no thinking toggle (e.g. gpt-oss / a
+    // *-Base model) hides the control. A loose `ckpt:` gets the same treatment
+    // through its RESOLVED base (probed once per path), so it stops being the one
+    // pick whose family nothing local knows.
     panelSels.some(
       (p) =>
         isOpenrouterSel(p.run_id) ||
         (isBaseSel(p.run_id) && (modelCatalog.baseSupportsThinking(p.run_id) ?? true)) ||
-        isCkptSel(p.run_id) ||
+        (isCkptSel(p.run_id) && (modelCatalog.ckptSupportsThinking(p.run_id) ?? true)) ||
         modelCatalog.runById(p.run_id)?.supports_thinking
     )
   );
+
+  // Resolve each loose `ckpt:` panel's base model — the label + the thinking
+  // control both want it, and only tinker can answer. One probe per distinct
+  // path, deduped in the catalog store. A direct `base:`/`ckpt:` pick also needs
+  // the tinker CATALOG (that's where `supports_thinking` per family lives), which
+  // is otherwise loaded lazily when the picker opens — so a reload landed on a
+  // checkpoint panel with an empty catalog and defaulted it to thinking-capable.
+  $effect(() => {
+    if (panelSels.some((p) => isCkptSel(p.run_id) || isBaseSel(p.run_id)))
+      modelCatalog.ensureTinkerCatalog();
+    for (const p of panelSels) if (isCkptSel(p.run_id)) void modelCatalog.ensureCkptBase(p.run_id);
+  });
 
   // Advanced sampling params — local UI knobs sent on /api/chat (top_k etc.
   // aren't in shared state). Initial values are Qwen's recommended non-thinking
@@ -2206,7 +2220,7 @@
               {/if}
               {#if panelSels.length > 1 && !readOnly}
                 <button class="btn-remove-model" onclick={() => removePanel(p.panel)} title="Remove this panel">
-                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+                  <Icon name="minus" size={12} />
                 </button>
               {/if}
             </div>
@@ -2217,11 +2231,14 @@
                 <div class="unsampleable-note">Set TINKER_API_KEY to sample this base model.</div>
               {/if}
             {:else if isCkpt}
-              <!-- No meta line: the row above already shows this checkpoint's name, and
-                   the only thing the old line added was "· loose sampler" — jargon for
-                   "no run dir behind it", which is true of EVERY checkpoint in a pack or
-                   a published site and so tells a reader nothing. The sampler path it
-                   was really pointing at is now one click away, in the row above. -->
+              <!-- The meta line carries ONE fact the row above can't: which base
+                   model tinker serves this path against. (It used to say "· loose
+                   sampler" — jargon for "no run dir behind it", true of every
+                   checkpoint in a pack, so it told a reader nothing.) Absent until
+                   the probe lands, and absent for good if tinker can't resolve it. -->
+              {#if modelCatalog.ckptBaseModel(p.run_id)}
+                <div class="run-meta or-meta">◇ {modelCatalog.ckptBaseModel(p.run_id)}</div>
+              {/if}
               {#if health && !health.tinker_key && !readOnly}
                 <div class="unsampleable-note">Set TINKER_API_KEY to sample this checkpoint.</div>
               {/if}
@@ -2313,7 +2330,7 @@
               <div class="sidebar-section">
                 <label class="sidebar-label thinking-toggle-row">
                   <span>Thinking</span>
-                  <span class="seg-toggle" data-tooltip="Both = n samples each way in one send (2n total)" use:tip>
+                  <span class="seg-toggle" data-testid="thinking-toggle" data-tooltip="Both = n samples each way in one send (2n total)" use:tip>
                     <button class="seg-btn" class:active={s.thinking === false} onclick={() => setThinking(false)}>Off</button>
                     <button class="seg-btn" class:active={s.thinking === true} onclick={() => setThinking(true)}>On</button>
                     <button class="seg-btn" class:active={s.thinking === 'both'} onclick={() => setThinking('both')}>Both</button>
@@ -2471,7 +2488,7 @@
               role="group"
             >
               <button class="restore-panel" onclick={() => ws.restorePanel(p.panel)} data-tooltip="Unfold this panel" use:tip>
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                <Icon name="arrow-right" size={12} />
                 <span class="restore-label" use:tip data-tooltip={panelLabel(p)}>{panelLabel(p)}</span>
               </button>
             </div>
@@ -2505,7 +2522,7 @@
                 </span>
                 <span class="column-title"><TruncLabel label={panelLabel(p)} /></span>
                 <button class="reduce-panel" onclick={() => ws.reducePanel(p.panel)} data-tooltip="Fold this panel away" use:tip aria-label="Reduce panel">
-                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+                  <Icon name="minus" size={12} />
                 </button>
               </div>
             {/if}
@@ -2591,7 +2608,7 @@
                   disabled={panelBusy(p.panel) || !(panelDraft[p.panel] ?? '').trim()}
                   onclick={() => sendToPanel(p.panel)}
                 >
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 8h10M8 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                  <Icon name="arrow-right" size={14} />
                 </button>
               </div>
             {/if}
