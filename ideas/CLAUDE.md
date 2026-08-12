@@ -36,6 +36,7 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 
 ### CLI (`tinkpg`)
 
+- [A CLI-fired turn persists as content only](cli-commit-drops-cot-and-blobs.md) — `_committed_turn` carries no `reasoning`/`token_logprobs`/`raw_meta`, so a thinking-on fire is unreadable after reload and every agent-produced node is unverifiable by the provenance rule; the docs only mention the one-representative half
 - [`chat` can't print logprobs; `send`/`continue` can](chat-compare-logprobs.md) — found by dogfooding; `send` needs a browser-arranged panel, which defeats a terminal probe
 - [Browserless bare `--node`](browserless-node-lookup.md) — fall back to an all-workspace search so node ids are self-contained references
 - [Isolate one sample by its own node id](isolate-sample-by-node-id.md) — `--this`, so the browser's Copy-node-id → terminal round-trip is one paste
