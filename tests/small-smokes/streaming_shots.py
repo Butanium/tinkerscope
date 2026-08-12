@@ -11,6 +11,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from _console import attach
+
 from _smoke_models import LIVE_RUN_ID, skip_if_streaming_disabled
 
 skip_if_streaming_disabled()  # screenshots mid-stream — off while streaming disabled
@@ -41,8 +43,7 @@ def main() -> None:
         browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         errors = []
-        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-        page.on("pageerror", lambda e: errors.append(str(e)))
+        net = attach(page, errors)  # noqa: F841 — evidence for a console failure
 
         page.goto(BASE, wait_until="load", timeout=20000)
         page.wait_for_function(f"document.body.innerText.includes('{PICKER_TOKEN}')", timeout=15000)

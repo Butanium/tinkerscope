@@ -36,7 +36,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from _console import net_report, watch_net
+from _console import attach, net_report
 
 PORT = 8871
 BASE = f"http://127.0.0.1:{PORT}"
@@ -128,9 +128,7 @@ def main():
             browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
             page = browser.new_page(viewport={"width": 1500, "height": 800})
             errors = []
-            page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-            page.on("pageerror", lambda e: errors.append(str(e)))
-            net = watch_net(page)
+            net = attach(page, errors)  # noqa: F841 — evidence for a console failure
             page.goto(f"{BASE}/?w={conv['id']}", wait_until="load", timeout=20000)
             page.wait_for_function(
                 "document.body.innerText.includes('PROMPT-ONE')", timeout=15000)

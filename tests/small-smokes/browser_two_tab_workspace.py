@@ -48,6 +48,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from _console import attach
+
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8809"
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
 
@@ -117,7 +119,7 @@ def set_samples(page, n):
 
 def open_tab(ctx, cid, first_model, errors):
     page = ctx.new_page()
-    page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+    net = attach(page, errors)  # noqa: F841
     page.goto(f"{BASE}/?w={cid}", wait_until="load", timeout=20000)
     page.wait_for_function(
         f"document.body.innerText.includes({json.dumps(first_model.split('/')[-1])})", timeout=15000)
@@ -187,7 +189,7 @@ def main():
                        for p, m in zip(panel_ids(len(A_MODELS)), A_MODELS)],
         })
         tab_p = ctx.new_page()
-        tab_p.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        attach(tab_p, errors)  # the SECOND tab needs the same named guard as the first
         tab_p.route(
             "**/api/state",
             lambda route: route.abort() if route.request.method == "POST" else route.continue_(),

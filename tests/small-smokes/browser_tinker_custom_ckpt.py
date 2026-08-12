@@ -36,6 +36,8 @@ from urllib.parse import quote
 
 from playwright.sync_api import sync_playwright
 
+from _console import attach
+
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8809"
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
 
@@ -117,7 +119,7 @@ def main():
         browser = pw.chromium.launch(executable_path=str(CHROME))
         page = browser.new_page(viewport={"width": 1400, "height": 900})
         errors = []
-        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        net = attach(page, errors)  # noqa: F841
         page.goto(BASE, wait_until="load", timeout=20000)
         page.wait_for_timeout(1200)
 

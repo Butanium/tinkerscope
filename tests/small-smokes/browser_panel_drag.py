@@ -28,6 +28,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from _console import attach, net_report
+
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:5180"
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
 SHOT_BEFORE = "/tmp/tinkerscope_panel_drag_before.png"
@@ -208,17 +210,10 @@ def main() -> None:
             browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
             page = browser.new_page(viewport={"width": 1600, "height": 950})
             errors: list[str] = []
-            page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-            page.on("pageerror", lambda e: errors.append(str(e)))
-            # Chromium's console text for a bad fetch is "Failed to load resource: the
-            # server responded with a status of 404 ()" — no URL, so the assertion
-            # names a COUNT and nothing else. Twice now that has sent a session hunting
-            # a 404 the backend never served (its access log had zero 4xx for the whole
-            # sweep). Record the responses themselves so the failure says WHAT.
-            bad: list[str] = []
-            page.on("response", lambda r: bad.append(f"{r.status} {r.url}") if r.status >= 400 else None)
-            page.on("requestfailed",
-                    lambda r: bad.append(f"failed {r.url} ({(r.failure or '')!s})"))
+            # attach() carries each console error's own location.url (which the
+            # inline guard 8d06ed2 added here could not see) and returns the
+            # page's >=400 / failed-request trace. See _console.py.
+            net = attach(page, errors)
 
             page.goto(f"{BASE}/?w={conv_id}", wait_until="load", timeout=20000)
             page.wait_for_selector(".model-slot-select", timeout=15000)
@@ -334,10 +329,7 @@ def main() -> None:
 
             checks.append((f"no console errors ({len(errors)})", not errors))
             if errors:
-                print("CONSOLE ERRORS:", errors)
-                print("FAILED REQUESTS:", bad or "(none — so the console errors are NOT "
-                      "same-origin fetches; suspect the browser/environment, and check "
-                      "the instance's access log for 4xx before blaming the app)")
+                print(net_report(errors, net))
             browser.close()
     finally:
         api("DELETE", f"/api/workspaces/{conv_id}")

@@ -23,6 +23,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from _console import attach
+
 sys.path.insert(0, str(Path(__file__).parent))
 from _ws_picker import active_ws_id, pick_workspace, wait_active_ws  # noqa: E402
 
@@ -81,8 +83,7 @@ def main():
         browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         errors = []
-        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-        page.on("pageerror", lambda e: errors.append(str(e)))
+        net = attach(page, errors)  # noqa: F841 — evidence for a console failure
 
         # ── 1. Hard-load /?w=<A> opens A (not the newest B), URL keeps w=A ──
         page.goto(f"{BASE}/?w={a['id']}", wait_until="load", timeout=20000)

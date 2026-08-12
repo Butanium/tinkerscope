@@ -14,6 +14,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from _console import attach
+
 from _seed import seed_conversation
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8820"
@@ -35,8 +37,7 @@ def main() -> None:
         browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
         page = browser.new_page(viewport={"width": 1500, "height": 1100})
         errors: list[str] = []
-        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-        page.on("pageerror", lambda e: errors.append(str(e)))
+        net = attach(page, errors)  # noqa: F841 — evidence for a console failure
 
         # Seed a fresh workspace with one free-router panel and open it directly —
         # replaces the old native-<select> model picker (now the PickerDropdown combobox).
