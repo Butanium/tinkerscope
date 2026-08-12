@@ -39,9 +39,31 @@ Two forms. **Which one a file uses is told by which key pair is present** — a 
 }
 ```
 
+**Batch** — `ops` (a list) instead of `op`, with either tree form. Needed for anything whose
+behavior depends on op BOUNDARIES; a single-op vector structurally cannot see a batch-scope
+bug, which is exactly how the selection-claim asymmetry got in (server claimed batch-wide, a
+mirror replaying op-by-op claimed per-op, and the two picked different siblings forever):
+
+```jsonc
+{
+  "name": "…",
+  "ops": [ {"op": "add_nodes", …}, {"op": "add_nodes", …} ],
+  "trees_before": { "p": {…} },
+  "trees_after":  { "p": {…} }
+}
+```
+
 **Reject vectors** carry `"rejects": "<substring of the error>"` and NO `tree_after` /
 `trees_after`. A rejection must discard the whole batch, so the correct assertion is that the
 tree is untouched AND the error mentions the substring.
+
+## The property a runner should assert beyond `tree_after`
+
+Applying the vector's ops as a BATCH must equal applying the batch's own BROADCAST ops one at
+a time — a mirror replays them individually, so any state scoped to the batch rather than the
+op diverges silently (contiguous revs, no gap, no repair). The pytest harness asserts this for
+every vector, not just the batch ones. It is also what caught the broadcast shipping nodes
+WITH `children`: the payload has to be replayable by an interpreter that validates its input.
 
 ## Rules for adding one
 

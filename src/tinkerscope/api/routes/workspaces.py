@@ -290,7 +290,14 @@ def save_workspace_tree(workspace_id: str, req: TreeSave) -> dict:
 
 
 @router.delete("/{workspace_id}")
-def delete_workspace(workspace_id: str) -> dict:
-    if not store.delete(workspace_id):
+async def delete_workspace(workspace_id: str) -> dict:
+    """Retire a workspace (soft — see the store) and TELL the attached mirrors.
+
+    A deletion is the one mutation with no `rev` to carry it: the workspace it
+    would belong to is gone. So it rides its own named event rather than the ops
+    stream — a tab holding this workspace open otherwise learns nothing, and its
+    next refetch 404s with no way to tell "deleted" from "server trouble"."""
+    if not await run_in_threadpool(store.delete, workspace_id):
         raise HTTPException(404, f"no workspace {workspace_id}")
+    await BUS.broadcast("workspace_deleted", {"workspace": workspace_id})
     return {"status": "ok"}

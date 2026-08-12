@@ -49,9 +49,12 @@ def test_vector_dir_is_not_empty():
 @pytest.mark.parametrize("path", VECTORS, ids=lambda p: p.stem)
 def test_fixture_vector(path: Path):
     v = json.loads(path.read_text())
-    op = v["op"]
+    # `ops` = the BATCH form (needed for anything whose behavior depends on op
+    # BOUNDARIES — a single-op vector structurally cannot see a batch-scope bug);
+    # `op` = the single-op form, which most vectors use.
+    ops = v["ops"] if "ops" in v else [v["op"]]
     if "tree_before" in v:  # single-panel form: the op's own panel names the tree
-        panel = op.get("panel") or op.get("from_panel")
+        panel = ops[0].get("panel") or ops[0].get("from_panel")
         before = {panel: v["tree_before"]}
         after = {panel: v["tree_after"]} if "tree_after" in v else None
     else:
@@ -61,16 +64,24 @@ def test_fixture_vector(path: Path):
 
     if "rejects" in v:
         with pytest.raises(OpError) as exc:
-            apply_ops(body, [op])
+            apply_ops(body, ops)
         assert v["rejects"] in str(exc.value), v["name"]
         assert body["trees"] == before, "a rejected op must leave the tree untouched"
         return
 
-    res = apply_ops(body, [op])
+    res = apply_ops(body, ops)
     assert res.body["trees"] == after, v["name"]
     assert body["trees"] == before, "apply_ops must never mutate its argument"
-    assert res.results == [{"ok": True, "noop": after == before}]
     assert res.changed == (after != before)
+    assert len(res.results) == len(ops)
+    if len(ops) == 1:
+        assert res.results == [{"ok": True, "noop": after == before}]
+    # A mirror replays a broadcast op AT A TIME, so every vector must also hold
+    # under per-op application — this is the property batch-scoped state breaks.
+    stepwise = _body(before)
+    for wire in res.wire_ops:
+        stepwise = apply_ops(stepwise, [wire]).body
+    assert stepwise["trees"] == after, f"{v['name']}: per-op replay diverged from batch apply"
 
 
 # ── batching ─────────────────────────────────────────────────────────────────
@@ -284,8 +295,59 @@ def test_add_nodes_splits_heavy_fields_into_blobs():
     assert "token_logprobs" not in stored and "raw_meta" not in stored
     assert stored["has_token_logprobs"] is True and stored["has_raw_meta"] is True
     assert res.blobs["a1"]["token_logprobs"] == HEAVY_LOGPROBS
+    # The bus payload is the light node MINUS `children` — the op's own wire shape,
+    # so the broadcast is replayable by an interpreter that validates its input.
     wire = res.wire_ops[0]["nodes"][0]
-    assert wire == stored, "the bus payload is the light node, never the heavy one"
+    assert wire == {k: v for k, v in stored.items() if k != "children"}
+    assert "token_logprobs" not in wire and "raw_meta" not in wire
+
+
+def test_a_replay_stages_blobs_for_nodes_that_already_exist():
+    """The draft-materialize race: a create shipped an already-LIGHTENED tree, so
+    the nodes are on disk with `has_*` flags and no blob behind them, and the op
+    replay carrying the real data then finds them present. Skipping the insert must
+    not mean skipping the blob, or the token data is gone for good — the flags say
+    it exists and every reader comes back empty."""
+    light_but_flagged = _tree(
+        {"id": "a1", "role": "assistant", "content": "hello", "parent": None,
+         "children": [], "has_token_logprobs": True},
+        roots=["a1"], selected={},
+    )
+    res = apply_ops(_body({"p": light_but_flagged}), [{"op": "add_nodes", "panel": "p", "nodes": [{
+        "id": "a1", "role": "assistant", "content": "hello", "parent": None,
+        "token_logprobs": HEAVY_LOGPROBS,
+    }]}])
+    assert res.blobs["a1"]["token_logprobs"] == HEAVY_LOGPROBS
+    assert res.changed is False, "the repair changes no tree bytes — only the blob"
+
+
+def test_batch_apply_equals_per_op_replay():
+    """The property every op must hold, because a mirror replays a broadcast one
+    op at a time: applying a batch must equal applying its own broadcast op by op.
+    Any state scoped to the BATCH rather than the OP breaks it — that is how the
+    selection-claim set diverged (server kept the first add's selection, every
+    mirror the second's, with contiguous revs and no repair path)."""
+    base = _tree(_node("u1", "user", "hi", None), roots=["u1"], selected={ROOT: "u1"})
+    batches = [
+        # two adds under ONE parent: the second op's select must win
+        [{"op": "add_nodes", "panel": "p", "select": True, "nodes": [_node("a1", "assistant", "one", "u1")]},
+         {"op": "add_nodes", "panel": "p", "select": True, "nodes": [_node("a2", "assistant", "two", "u1")]}],
+        # a fan (one op) followed by a second op on the same parent
+        [{"op": "add_nodes", "panel": "p", "select": True, "nodes": [
+            _node("b1", "assistant", "one", "u1"), _node("b2", "assistant", "two", "u1")]},
+         {"op": "add_nodes", "panel": "p", "select": True, "nodes": [_node("b3", "assistant", "three", "u1")]}],
+        # a chain, then a delete of its middle, then a select
+        [{"op": "add_nodes", "panel": "p", "select": True, "nodes": [
+            _node("c1", "assistant", "x", "u1"), _node("c2", "user", "y", "c1")]},
+         {"op": "delete", "panel": "p", "node_id": "c2"},
+         {"op": "select", "panel": "p", "parent_key": ROOT, "child_id": "u1"}],
+    ]
+    for batch in batches:
+        whole = apply_ops(_body({"p": base}), batch)
+        stepwise = _body({"p": base})
+        for wire in whole.wire_ops:
+            stepwise = apply_ops(stepwise, [wire]).body
+        assert stepwise["trees"] == whole.body["trees"], f"batch != per-op replay for {batch}"
 
 
 def test_replace_tree_splits_heavy_fields_too():

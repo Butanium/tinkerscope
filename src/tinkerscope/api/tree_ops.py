@@ -439,9 +439,6 @@ class _Ctx:
         body["trees"] = self.trees
         self.blobs: dict[str, dict] = {}
         self.changed = False
-        # (panel, parent_key) pairs an `add_nodes ... select` already wrote in
-        # THIS batch — the one rule that yields both chain and fold semantics.
-        self.selected_written: set[tuple[str, str]] = set()
         self._writable: set[str] = set()
 
     def peek(self, panel: str) -> Optional[dict]:
@@ -542,14 +539,29 @@ def _op_add_nodes(ctx: _Ctx, op: dict) -> tuple[bool, dict]:
     assert tree is not None
     changed = False
     wire_nodes: list[dict] = []
+    # Parents an earlier node of THIS OP already selected under. Scope is per-OP,
+    # not per-batch, and that is a correctness requirement rather than a detail: a
+    # mirror replays a broadcast op AT A TIME, so a batch-wide claim set makes
+    # batch-apply differ from per-op replay of its own broadcast. Two add_nodes ops
+    # under one parent then leave the server on the first node and every mirror on
+    # the second, revs contiguous, forever. Both semantics survive the narrowing —
+    # a fold's fan is one op (first sibling wins) and a chain's nodes have distinct
+    # parents (every step selected).
+    claimed: set[str] = set()
     for node in nodes:
-        light, node_changed = _add_one(ctx, tree, panel, node, select)
+        light, node_changed = _add_one(ctx, tree, node, select, claimed)
         changed = changed or node_changed
-        wire_nodes.append(light)
+        # Minus `children`, per the op's own wire shape — the STORED node carries
+        # them (populated by the adds) and shipping them would make the broadcast
+        # unreplayable by an interpreter that validates its input the way we do,
+        # while tempting one that doesn't into adopting a child list assembled by
+        # ops the mirror may not have applied yet. Children are derived from parent
+        # pointers on both sides. Copy, never mutate: `light` IS the stored node.
+        wire_nodes.append({k: v for k, v in light.items() if k != "children"})
     return changed, {"op": "add_nodes", "panel": panel, "nodes": wire_nodes, "select": select}
 
 
-def _add_one(ctx: _Ctx, tree: dict, panel: str, node: Any, select: bool) -> tuple[dict, bool]:
+def _add_one(ctx: _Ctx, tree: dict, node: Any, select: bool, claimed: set[str]) -> tuple[dict, bool]:
     if not isinstance(node, dict):
         raise OpError("each entry of `nodes` must be an object")
     nid = node.get("id")
@@ -590,6 +602,17 @@ def _add_one(ctx: _Ctx, tree: dict, panel: str, node: Any, select: bool) -> tupl
             raise OpError(f"node {nid} already exists with different role/content/parent")
         light = existing
         parent_key = existing.get("parent") or ROOT
+        # Stage this node's heavy fields even though we're skipping the insert.
+        # The light node's `has_*` flags can already be on disk with NO blob behind
+        # them — a create that shipped an already-lightened tree (a draft
+        # materializing after a failed first attempt) writes the flags, and then the
+        # op replay that carries the actual data lands here. Without this, the
+        # token_logprobs are gone for good and the UI just says "no token data".
+        # Write-once makes it a no-op whenever the blob does exist, so a normal
+        # replay costs nothing.
+        _, replay_blob = _split_node({k: v for k, v in node.items() if k != "children"})
+        if replay_blob:
+            ctx.blobs[nid] = replay_blob
         # Re-APPEND it. Sibling order is "append order = rev order", and a mirror
         # that applied its own add optimistically has the node in the wrong slot:
         # tab B holds [b1] and appends the echoed a1 to get [b1, a1] where the
@@ -629,7 +652,6 @@ def _add_one(ctx: _Ctx, tree: dict, panel: str, node: Any, select: bool) -> tupl
 
     selected_changed = False
     if select:
-        key = (panel, parent_key)
         # First node to claim this parent in the batch writes the selection — one
         # rule giving chain semantics (each node its own parent ⇒ every step
         # selected) and fold semantics (a fan shares a parent ⇒ the FIRST selected).
@@ -642,8 +664,8 @@ def _add_one(ctx: _Ctx, tree: dict, panel: str, node: Any, select: bool) -> tupl
         # so no refetch ever corrects it. Measured, see ENGINEERING_LOGS 2026-08-12.
         # The cost is the accepted LWW race: a retried batch re-asserts its
         # selection over a sibling the user cycled to in between.
-        if key not in ctx.selected_written:
-            ctx.selected_written.add(key)
+        if parent_key not in claimed:
+            claimed.add(parent_key)
             if tree["selected"].get(parent_key) != nid:
                 tree["selected"][parent_key] = nid
                 selected_changed = True
@@ -748,6 +770,14 @@ def _op_replace_tree(ctx: _Ctx, op: dict) -> tuple[bool, dict]:
     for nid, node in (light.get("nodes") or {}).items():
         if not isinstance(node, dict):
             raise OpError(f"replace_tree: node {nid} is not an object")
+        # Same id charset `add_nodes` enforces — node ids become blob FILENAMES.
+        # Without this an unsafe id either reaches `_write_blobs`, whose `_check_id`
+        # raises an uncaught ValueError (a 500, which the client's retry policy
+        # treats as retriable and burns its attempts on), or — with no heavy field
+        # to trip that check — PERSISTS into the light tree as a node whose blobs
+        # can never be read back.
+        if not _safe_node_id(nid):
+            raise OpError(f"replace_tree: unsafe node id {nid!r}")
         lnode, blob = _split_node(node)
         nodes[nid] = lnode
         if blob:

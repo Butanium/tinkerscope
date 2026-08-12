@@ -1456,3 +1456,59 @@ then replays the canonical order over the top. Anything that branches on tree st
 the local apply already changed is suspect. `changed`-by-value (introduced in the
 same commit) is what keeps the re-assert cheap: a replayed batch that nets to no
 difference still writes nothing and broadcasts nothing.
+
+### 2026-08-12 — Review basket: batch-vs-per-op scope, and the payload that couldn't replay itself
+
+Four findings from the adversarial review of the P1 integration branch, plus one the
+fix for them surfaced. The through-line is a single question that turns out to be
+the one worth asking about every op: **does applying a BATCH equal applying that
+batch's own broadcast, one op at a time?** A mirror replays events individually, so
+anything that says "no" diverges silently — contiguous revs, no gap, no repair path.
+
+**1. The claim set was batch-scoped.** `_Ctx.selected_written` lived on the batch,
+while a mirror creates its claim set per `add_nodes` op. A legal batch of two
+`add_nodes` under one parent left the server on the first node and every mirror on
+the second. Latent — no shipped browser call site emits that shape today — but P2's
+server folds and P3's CLI writers are natural multi-op emitters, and the wire
+contract permits it. Now per-op. Both semantics survive the narrowing, because a
+fold's fan is ONE op (first sibling wins) and a chain's nodes have distinct parents
+(every step selected).
+
+**2. Single-op fixture vectors cannot see this class of bug at all.** They pin one op
+against one tree; op BOUNDARIES are exactly what they abstract away. So the vector
+format grew a batch form (`ops: [...]`), and — more useful than any single vector —
+the pytest harness now asserts the batch≡per-op-replay property for EVERY vector,
+not just the batch ones.
+
+**3. That harness assertion immediately failed on a vector I had written weeks of
+confidence into.** The `add_nodes` broadcast was shipping stored nodes *with* their
+`children`, so replaying the broadcast tripped our own "children are server-owned"
+rejection. The op's documented wire shape has always been "TreeNode minus children";
+the broadcast just didn't honor it. Two consequences avoided: an interpreter that
+validates its input breaks, and one that doesn't adopts a child list assembled by
+ops it may not have applied yet. **The general lesson: vectors exercise the INPUT
+shape, mirrors consume the BROADCAST shape, and nothing was testing that the second
+one is replayable.** That is now the harness's job.
+
+**4. `replace_tree` never checked the node-id charset.** With a heavy field the
+unsafe id reached `_write_blobs`, whose `_check_id` raised an uncaught ValueError —
+a 500, which the client's retry policy treats as retriable and burns its attempts
+on. Without one, the unsafe id PERSISTED into the light tree as a node whose blobs
+can never be read back. `add_nodes` had the check; `replace_tree` was the door left
+open.
+
+**5. A replay never staged blobs for nodes that already existed.** The loss path is
+real and permanent: a draft whose create POST fails, then materializes later
+shipping an already-LIGHTENED tree (has_* flags, no inline data ⇒ no blobs written),
+then the op replay finds every node present and skips it. Disk ends with flags
+pointing at blobs that never existed — the inspector says "no token data", the chart
+and loom paths are dead for those turns, forever. Two changes: the already-exists
+branch stages blobs from the op's nodes, and the store writes blobs BEFORE the
+no-change bail-out, so a retry is the repair path for dangling flags. Write-once
+makes both free when the blob is already there.
+
+Also this round: `DELETE /api/workspaces/{id}` now broadcasts `workspace_deleted
+{workspace}`. It is its own named event rather than an `ops` entry because a
+deletion has no rev to ride — the workspace the rev would belong to is gone. Before
+this, a tab holding the deleted workspace learned nothing and its next refetch 404'd,
+indistinguishable from server trouble.

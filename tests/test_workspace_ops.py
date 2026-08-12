@@ -122,6 +122,41 @@ def test_a_noop_add_writes_nothing_at_all(client, bus_events):
     assert client.get(f"/api/workspaces/{cid}/trash").json() == trash_before
 
 
+def test_a_replay_repairs_a_node_whose_blob_never_landed(client):
+    """End-to-end of the draft-materialize race: the workspace was created with an
+    already-lightened node (flag set, no blob), and the op replay carrying the real
+    data lands on the existing node. The blob must be written even though the batch
+    changes no tree bytes — the store writes blobs BEFORE the no-change bail-out,
+    which is what makes a retry the repair path for a dangling flag."""
+    flagged = {"nodes": {"a1": {"id": "a1", "role": "assistant", "content": "hello",
+                                "parent": None, "children": [], "has_token_logprobs": True}},
+               "rootChildren": ["a1"], "selected": {ROOT: "a1"}}
+    cid = client.post("/api/workspaces", json={"name": "W", "trees": {"primary": flagged}}).json()["id"]
+    assert client.post(f"/api/workspaces/{cid}/node-blobs", json={"nodes": ["a1"]}).json() == {}
+
+    rev = client.get(f"/api/workspaces/{cid}").json()["rev"]
+    r = _ops(client, cid, _add("primary", "a1", "assistant", "hello", None,
+                               token_logprobs=HEAVY_LOGPROBS))
+    assert r.json()["results"] == [{"ok": True, "noop": True}]
+    assert client.get(f"/api/workspaces/{cid}").json()["rev"] == rev  # nothing structural moved
+    blobs = client.post(f"/api/workspaces/{cid}/node-blobs", json={"nodes": ["a1"]}).json()
+    assert blobs["a1"]["token_logprobs"] == HEAVY_LOGPROBS
+
+
+def test_deleting_a_workspace_tells_the_mirrors(client, bus_events):
+    """A deletion has no `rev` to ride — the workspace it would belong to is gone —
+    so it gets its own named event. Without it a tab holding this workspace open
+    learns nothing and its next refetch 404s, indistinguishable from server trouble."""
+    cid = _new_ws(client)
+    bus_events.clear()
+    assert client.delete(f"/api/workspaces/{cid}").status_code == 200
+    assert bus_events == [("workspace_deleted", {"workspace": cid})]
+
+    bus_events.clear()
+    assert client.delete(f"/api/workspaces/{cid}").status_code == 404
+    assert bus_events == [], "a 404 must not announce a deletion that did not happen"
+
+
 def test_reusing_an_id_under_a_different_parent_is_rejected(client):
     """A node's identity is role+content+parent. Without the parent check this is a
     silent skip, and the re-append then finds the id absent from the op's parent and
