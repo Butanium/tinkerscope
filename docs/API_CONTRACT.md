@@ -125,12 +125,13 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
 | GET | `/api/prefs` | — | `dict` (key→string) |
 | PUT | `/api/prefs/{key}` | `{value: string}` | `{status, key}` |
 | DELETE | `/api/prefs/{key}` | — | `{status}` |
-| GET | `/api/workspaces` | `?bodies` | default: `WorkspaceSummary[]` (`{id,name,created_at,updated_at,panels}` — NO trees). `?bodies=1`: `Workspace[]` light bodies (trees incl., blobs excl.) — the CLI's link/browse paths |
+| GET | `/api/workspaces` | `?bodies` | default: `WorkspaceSummary[]` (`{id,name,created_at,updated_at,panels,rev}` — NO trees). `?bodies=1`: `Workspace[]` light bodies (trees incl., blobs excl.) — the CLI's link/browse paths |
 | GET | `/api/workspaces/{id}` | — | one light `Workspace` body (trees incl., blobs excl.); 404 if unknown |
 | POST | `/api/workspaces/{id}/node-blobs` | `{nodes: string[]}` | `{nodeId: {token_logprobs?, raw_meta?}}` — heavy blobs for a batch of node ids (POST, not GET, because the list is long). Unknown / blob-less ids are OMITTED, not an error |
 | GET | `/api/workspaces/{id}/layout-history` | — | `[{ts, panels}]` oldest-first — one entry per panel-LAYOUT change (not per save). `[]` for an unknown workspace or one whose layout never changed (never 404 — same "absence is not an error" convention as node-blobs). Restoring is a normal PATCH of `panels`; `scripts/layout_history.py` is the front end |
 | POST | `/api/workspaces` | `{id?, name?, system_prompt?, system_enabled?, trees?, panels?, tree?, compare_tree?, reduced_panels?, send_targets?, seen_panels?, panel_seq?}` | the saved light Workspace (`id`,`created_at`,`updated_at` added; inline heavy node fields stripped into blobs). 400 on a crafted (non-filename-safe) `id` |
-| PATCH | `/api/workspaces/{id}` | any subset of `{name, system_prompt, system_enabled, panels, reduced_panels, send_targets, seen_panels, panel_seq}` | the updated **WorkspaceSummary** (layout-only — NO tree bytes shipped either way); 404 if unknown |
+| POST | `/api/workspaces/{id}/ops` | `{ops: Op[]}` | `{rev, results}` — **the tree mutation path** (op table under "Workspace" below). Applied atomically under the workspaces flock; ANY rejection discards the whole batch → 409 `{detail:{index, error}}` with nothing written. On success, one bus `ops` event carries the batch as applied. 404 if unknown |
+| PATCH | `/api/workspaces/{id}` | any subset of `{name, system_prompt, system_enabled, panels, reduced_panels, send_targets, seen_panels, panel_seq}` | the updated **WorkspaceSummary** (layout-only — NO tree bytes shipped either way); 404 if unknown. Sugar over the `set_meta` op: same locked apply, same `rev` bump, same `ops` broadcast, so other tabs converge on metadata live |
 | PUT | `/api/workspaces/{id}/tree` | `{trees, dropped_trees?, system_prompt?, system_enabled?, panels?, reduced_panels?, send_targets?, seen_panels?, panel_seq?}` | `{status, id}` (the hot save path). `trees` is a **partial upsert** (dirty panels only, merged over stored); `dropped_trees` removes panels; inline heavy node fields are stripped into write-once blobs. 404 if unknown |
 | DELETE | `/api/workspaces/{id}` | — | `{status}`. **Soft**: the light file, blobs dir, layout history and trash journal are MOVED to `workspaces/.deleted/<id>-<ts>/`, not unlinked (aged out after 90 days). The one deletion the trash journal can't cover is the workspace's own, since the journal lives inside it |
 | GET | `/api/workspaces/{id}/trash` | — | `[{id, ts, panel, kind, count, roots, selected, layout?, layout_index?}]` NEWEST-first — one entry per save that made nodes disappear. Node BODIES excluded (a listing is for choosing; bodies can be MBs). `roots` = the deleted subtree anchors `{id, parent, index, role, preview}`. `kind` is `"nodes"` (branches vanished) or `"panel"` (the whole column did) — a `"panel"` entry also carries `layout`, that panel's layout row, and `layout_index`, its position in `panels`, so the column can come back bound to its model and in its old slot. Both absent on entries journaled before they were recorded. `[]` for unknown / never-deleted (never 404, same convention as node-blobs) |
@@ -159,6 +160,9 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
   "panel_seq": 3,                          // monotonic panel-id counter: ids are p-<n>, never reused
                                            // within a workspace. Absent on pre-counter workspaces (the
                                            // browser seeds it from the highest p-N it can see).
+  "rev": 42,                               // monotonic REVISION, bumped on every write of this
+                                           // workspace through any channel. 0 = written before revs
+                                           // existed. Also on the summaries. See the op protocol below.
   // legacy shape, read-only: {tree, compare_tree} on un-migrated entries — folded into `trees` on first save
   "created_at": "iso", "updated_at": "iso"
 }
@@ -172,7 +176,55 @@ has_token_logprobs?, has_raw_meta?}`
 `loom_cut`/`loom_text` mark a loom branch's forced prefix (see the `message`
 event below). The
 linear ACTIVE PATH (root→leaf via `selected`) is what the sampler/CLI read — it is
-mirrored into `PlaygroundState.messages`. The server treats the tree as opaque JSON.
+mirrored into `PlaygroundState.messages`.
+
+**Server-authoritative trees — the op protocol** (`docs/HANDOFF_SERVER_AUTHORITY.md`,
+`api/tree_ops.py`). The tree is no longer opaque to the server: it OWNS it. Every
+mutation travels as a small op, is applied under the workspaces flock, bumps the
+workspace's `rev`, and is broadcast as one bus `ops` event. Clients keep an
+optimistic mirror (apply locally → POST the batch → replay every `ops` event in
+rev order, **own echoes included**) and recover from any rev mismatch by
+refetching the light body.
+
+```jsonc
+POST /api/workspaces/{id}/ops   {"ops": [ … ]}
+  → 200 {"rev": 43, "results": [{"ok": true, "noop": false}, …]}   // positional
+  → 409 {"detail": {"index": 1, "error": "node x1: parent 'gone' does not exist"}}
+  → 404 unknown workspace
+```
+
+**All-or-nothing**: ops apply in order to a working copy, and ANY rejection
+discards the whole batch — nothing is written, `rev` does not move, no event is
+sent. A batch that changes nothing (an idempotent replay — the safe response to a
+dropped POST) likewise writes nothing, broadcasts nothing, and returns the
+UNCHANGED `rev` with every result `noop: true`.
+
+| Op | Payload | Semantics |
+|---|---|---|
+| `add_nodes` | `{panel, nodes: [TreeNode minus children], select?}` | Append a node or a chain. `parent: null` = a new root thread (may carry `system_prompt`). Ids are client-minted; **idempotent by id** — an existing id is skipped (role+content must match, else 409). A parent must already exist in the tree or EARLIER in the same batch. Heavy fields (`token_logprobs`/`raw_meta`) are split into write-once blobs; the stored + broadcast node is light. `select` writes `selected[parent] = id` for each ADDED node unless an earlier node in the batch already claimed that parent — one rule giving both chain semantics (every step selected) and fold semantics (the fan's FIRST sibling selected). |
+| `select` | `{panel, parent_key, child_id}` | `selected[parent_key] = child_id`, last-writer-wins. `parent_key` is a node id or `"__root__"`. An unknown parent / stale child is an accepted **no-op**, never a rejection. |
+| `delete` | `{panel, node_id}` | Prune the node + its subtree, dropping the parent's now-dangling selection (default-last then picks a survivor). A missing id is a no-op. |
+| `copy_tree` | `{from_panel, to_panel}` | Whole-tree clone **keeping node ids** — the add-panel duplicate. Keep-ids is what lets both panels share the same write-once blobs. Unknown source ⇒ 409. |
+| `replace_tree` | `{panel, tree \| null}` | Wholesale panel-tree replacement (LWW); `null` removes the panel's tree. A supplied tree is structurally validated before it lands. Covers send-branch-to-panel, fresh/reset tree, panel removal. |
+| `set_meta` | `{fields: {…}}` | The `WorkspacePatch` keys, field-wise LWW — except `panel_seq` (monotone max) and `seen_panels` (union), and `panels`, which is normalized. The broadcast carries the MERGED values, not what was sent. |
+
+`PATCH /{id}` is sugar over `set_meta`: same locked apply, same rev bump, same
+broadcast, and it still returns the summary.
+
+**Confluence invariant** — every op is either idempotent-structural (`add_nodes`
+by unique id, `delete` by id, `copy_tree` keep-ids) or last-writer-wins
+(`select`, `replace_tree`, `set_meta`); both classes converge under rev-ordered
+replay. **Never add an op that edits node content in place or inserts at an
+arbitrary index** — either would force a real CRDT.
+
+**Phantom-panel heal**: setting `panels` drops rows with `run_id: null` whose
+panel holds no tree (the inert phantom older layouts baked in), never emptying a
+non-empty layout. A blank row whose panel HAS a tree is kept — the server is the
+only copy, and send-branch-to-panel / trash-restore both produce legitimately
+unbound columns.
+
+**Legacy bodies** (`{tree, compare_tree}`, no `trees`) are folded into
+`trees` (`primary`/`compare`) before the first op applies.
 
 **Storage v2 — light trees + write-once node blobs** (see `docs/STORAGE_V2.md`,
 `api/workspace_store.py`). A node's two HEAVY fields — **`token_logprobs` and
@@ -466,6 +518,7 @@ Event names = the message's `type`:
 - `sample` → `{type:"sample", chat_id, panel, sample_index, content, raw_text, finish_reason, reasoning?, thinking?}` (`thinking` only on `thinking:"both"` chats — which half drew this sample)
 - `chat_done` → `{type:"chat_done", chat_id, panel, client_token?, workspace_id?, thread_system_prompt?}` (`workspace_id` scopes the external fold — see `chat_start`. `thread_system_prompt` = the chat's resolved thread part: the external fold reconciles the transcript onto the ROOT carrying the same one — two probe threads sharing a first message under different prompts are distinct — and stamps it on a freshly-minted root)
 - `chat_error` → `{type:"chat_error", chat_id, panel, error, client_token?, workspace_id?, thread_system_prompt?}`
+- `ops` → `{type:"ops", workspace, rev, ops:[…]}` (a workspace TREE changed — see the op protocol above. `ops` is the batch AS APPLIED: light node bodies only (heavy fields went to write-once blobs, nodes carry `has_token_logprobs`/`has_raw_meta` instead) and merged `set_meta` values. A mirror **applies every event in rev order, its own echoes included** — idempotent/LWW ops make replaying your own batch a no-op, and skipping it provably breaks convergence when two tabs contend. Match the `workspace` BEFORE checking the rev gap: gap-checking a foreign event either refetches for nothing or, worse, advances the local rev so the next genuine event looks stale. Any mismatch — a gap forward, or a rev that went BACKWARDS, which a pack install can do — means refetch the light body)
 - `ping` → `{}` (15s heartbeat; ignore)
 
 **Live-drive model:** the browser renders selection + params + the workspace

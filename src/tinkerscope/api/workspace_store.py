@@ -29,7 +29,14 @@ are globally unique within a workspace (one client-side counter mints them),
 and add-model's `duplicateTo` CLONES a panel's tree keeping the SAME ids — so two
 panels can share a node id, and the shared blob is written once (identical data).
 
-CACHING: an in-memory `_summaries` map (id → {id,name,created_at,updated_at,panels})
+REVISIONS: every workspace carries a monotonic `rev`, bumped in `_persist` — the
+one choke point every write channel passes through (ops, PATCH, PUT, create, pack
+apply, trash restore). Attached clients mirror the tree optimistically and
+converge on the bus `ops` events, so a channel that moved a workspace without
+bumping `rev` would leave them silently stale. 0 = written before revs existed;
+the read path synthesizes it for those files rather than rewriting them.
+
+CACHING: an in-memory `_summaries` map (id → {id,name,created_at,updated_at,panels,rev})
 is built once at boot and maintained on every write — `GET /api/workspaces`
 never re-parses the store. Parsed light bodies are memoized in `_bodies`, evicted
 on write. Every mutation is wrapped in `store.locked("workspaces")` (the flock
@@ -808,7 +815,7 @@ def _persist(light: dict) -> None:
 
 # ── public reads ─────────────────────────────────────────────────────────────
 def list_summaries() -> list[dict]:
-    """`GET /api/workspaces` — {id,name,created_at,updated_at,panels}, no trees.
+    """`GET /api/workspaces` — {id,name,created_at,updated_at,panels,rev}, no trees.
 
     Returns refs to the cached summary dicts, which are replaced wholesale (never
     mutated in place) on write, so a caller holding one is unaffected by later saves."""

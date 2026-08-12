@@ -490,8 +490,17 @@ def apply_ops(body: dict, ops: Any) -> ApplyResult:
         ctx.changed = ctx.changed or changed
         results.append({"ok": True, "noop": not changed})
         wire_ops.append(wire)
+    # Per-op accounting says whether an op moved something WHEN IT RAN; this says
+    # whether the batch left the stored body different, which is the question the
+    # caller is actually asking ("do I write and broadcast?"). They differ when a
+    # batch undoes itself — a replayed select-then-reselect, say. Only computed on
+    # the path that was about to serialize the whole body anyway.
     return ApplyResult(
-        body=work, results=results, blobs=ctx.blobs, wire_ops=wire_ops, changed=ctx.changed
+        body=work,
+        results=results,
+        blobs=ctx.blobs,
+        wire_ops=wire_ops,
+        changed=ctx.changed and work != body,
     )
 
 
@@ -550,7 +559,7 @@ def _add_one(ctx: _Ctx, tree: dict, panel: str, node: Any, select: bool) -> tupl
     if node.get("children"):
         raise OpError(f"node {nid}: `children` are server-owned — send none")
 
-    changed = False
+    added = False
     existing = tree["nodes"].get(nid)
     if isinstance(existing, dict):
         # Idempotent replay (a retried batch, or a mirror re-sending its own echo).
@@ -575,16 +584,23 @@ def _add_one(ctx: _Ctx, tree: dict, panel: str, node: Any, select: bool) -> tupl
         kids.append(nid)
         if blob:
             ctx.blobs[nid] = blob
-        changed = True
+        added = True
 
+    selected_changed = False
     if select:
         key = (panel, parent_key)
-        if key not in ctx.selected_written:
-            ctx.selected_written.add(key)
-            if tree["selected"].get(parent_key) != nid:
-                tree["selected"][parent_key] = nid
-                changed = True
-    return light, changed
+        first_here = key not in ctx.selected_written
+        # CLAIM the parent even for a node we SKIPPED, so retrying a fold that was
+        # already applied can't promote sample 2: the fan's first node still owns
+        # the selection whether or not this batch is what minted it.
+        ctx.selected_written.add(key)
+        # Only a node we actually ADDED writes the selection. "Select what I just
+        # added" already happened for one that exists, and re-asserting it on a
+        # retry would yank the view back from whatever the user picked in between.
+        if first_here and added and tree["selected"].get(parent_key) != nid:
+            tree["selected"][parent_key] = nid
+            selected_changed = True
+    return light, added or selected_changed
 
 
 def _op_select(ctx: _Ctx, op: dict) -> tuple[bool, dict]:

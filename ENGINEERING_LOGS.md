@@ -1325,3 +1325,80 @@ had that line in `old_string` and dropped it from `new_string` — an insert wri
 a replacement. Fixed in the follow-up. When adding a list item, anchor on the END of
 the preceding item and re-emit nothing else; if a neighbouring bullet appears in
 `old_string`, it must appear verbatim in `new_string`.
+
+### 2026-08-12 — Server-authoritative trees, P1 server half: `tree_ops.py` + `/ops` + `rev`
+
+`docs/HANDOFF_SERVER_AUTHORITY.md` P1, server side (the browser mirror cutover is a
+parallel piece of work). The branch tree stops being opaque to the server: it owns
+it. Mutations arrive as ops on `POST /api/workspaces/{id}/ops`, apply under the
+workspaces flock, bump a per-workspace `rev`, and go out as one bus `ops` event.
+
+Three things worth writing down beyond the design doc, because each is a decision
+the doc didn't make:
+
+**1. `rev` bumps in `_persist`, not in the route.** Same reasoning that put the
+trash journal there: `_persist` is the single choke point for every write channel.
+The handoff's own §2d.1 correction found `POST /api/pack/apply` — a runtime,
+live-mirror-attached workspace writer nobody had counted. Bumping in the `/ops`
+handler would have left pack apply, trash restore and the PUT path moving
+workspaces behind the mirrors' backs. `test_rev_is_monotonic_across_every_write_channel`
+walks all five channels; disabling the one line in `_persist` fails it (verified,
+not assumed). `upsert` needed an explicit `entry["rev"] = _rev_of(existing)` — it
+rebuilds its body from kwargs, so without that a pack install restarts the counter
+and every mirror sees its workspace jump BACKWARDS.
+
+**2. `select` on a node that already exists must NOT re-assert.** Found by a test I
+wrote expecting it to pass. The rule for `add_nodes {select: true}` is "write
+`selected[parent] = id` unless an earlier node in this batch claimed that parent" —
+one rule that yields chain semantics (each node its own parent ⇒ every step
+selected) and fold semantics (a fan shares a parent ⇒ the FIRST sibling selected).
+Applied naively it also re-selects on a REPLAY, and a replay is exactly what a
+retried batch is: server applied the fold, client never saw the 200, user cycled to
+sample 3, client retries — and the view jumps back to sample 1. So a skipped node
+CLAIMS its parent (otherwise the retry promotes sample 2, since a1 is skipped and a2
+then looks like the first of the fan) but does not WRITE. Pinned by
+`test_retrying_a_partly_applied_fold_keeps_the_FIRST_sample_selected`. The generalisation:
+"idempotent" has to mean idempotent against a tree the USER moved on from, not just
+against the tree the batch first landed on.
+
+**3. The phantom-panel heal is narrower on the server than it was in the browser.**
+The browser dropped every `run_id: null` panel row on load AND deleted the trees of
+panels not in the cleaned layout. Relocating that verbatim would have made the
+server destroy nodes: a send-branch-to-panel target and a trash-restored column are
+both legitimately unbound with real content in them (`restore_trash` even returns an
+`unbound_panel` flag *because* the browser filter used to eat them), and dropping a
+tree server-side mass-journals to the trash on a legacy workspace's first op. So:
+drop a blank row only when its panel holds no tree, never drop a tree, never empty a
+non-empty layout. The browser must stop dropping blank-rows-with-trees to match, or
+the two disagree after every `set_meta` round trip.
+
+Also: `copy_subtree {node_id}` from §4.1 shipped as `copy_tree {from_panel,
+to_panel}`. `duplicateTo` (the add-panel clone) is its only grounded call site and
+it copies everything; a partial keep-ids splice has no user today and would have to
+answer what happens when the destination already holds those ids.
+
+**Call-site → op mapping** (§4.1 asks P1 to ship one; the browser handlers are in
+`lib/branch-ops.svelte.ts` + `lib/workspaces.svelte.ts` + `lib/chat.svelte.ts`):
+
+| Browser call site | Op |
+|---|---|
+| `sendMessage` / composer (`appendUserTurn`) | `add_nodes` (1 user node, `select`) |
+| `chat.svelte.ts` fold (`foldAssistant`, all n) | `add_nodes` (n assistant nodes, `select` ⇒ first) |
+| `applyEdit` / `applyEditAll` (`editUserFork`, `editAssistant`) | `add_nodes` (1 node, `select`) |
+| edit-fork-COPY (`editUserForkCopy`, `graftDownstream`) | `add_nodes` (a chain, `select` ⇒ every step) |
+| `regenerate` (append) | `add_nodes` for the fold; nothing extra up front |
+| `regenerate(replace=true)` (`regenReplace`) | `delete` (the active branch) then the fold's `add_nodes` |
+| `deleteMessage` / `deleteSample` / `deleteMessageAll` | `delete` (one per pruned root; `deleteSiblings` = N of them) |
+| `discardOtherSamples` | `delete` × the discarded siblings, one batch |
+| `cycleBranch` / `selectSample` / `selectPathTo` (search jump) | `select` (one per ancestor for the jump) |
+| `switchThread` | `select` at `__root__`, one per panel holding that thread |
+| `sendBranchToPanel` (`treeFromMessages`, re-mints ids) | `replace_tree` |
+| `duplicateTo` (add-panel clone, keeps ids) | `copy_tree` |
+| `freshTree` / `resetActive` / `#freshTrees` | `replace_tree` (a fresh empty tree per panel) |
+| `dropTree` / panel removal | `replace_tree {tree: null}` |
+| `applyLayout` / `setPanelModel` / rename / system prompt / send-target + fold toggles | `set_meta` |
+
+Undo (`lib/undo.ts`) is the one call site with no single op: it restores a whole
+pre-op tree ref, so it is a `replace_tree` — which is correct but coarse (it re-ships
+the panel). Worth revisiting in P2 if the payloads bite; the durable half of undo is
+the server trash journal either way, and that path is unchanged.

@@ -1,0 +1,14 @@
+{
+  "name": "replace_tree: a client-supplied tree is structurally validated before it lands",
+  "op": {
+    "op": "replace_tree",
+    "panel": "p",
+    "tree": {
+      "nodes": {"n1": {"id": "n1", "role": "user", "content": "x", "parent": null, "children": ["ghost"]}},
+      "rootChildren": ["n1"],
+      "selected": {}
+    }
+  },
+  "tree_before": {"nodes": {}, "rootChildren": [], "selected": {}},
+  "rejects": "child ghost missing"
+}

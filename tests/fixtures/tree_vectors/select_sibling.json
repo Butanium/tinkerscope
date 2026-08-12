@@ -1,0 +1,22 @@
+{
+  "name": "select: cycle to a sibling (selected maps parent -> child ID)",
+  "op": {"op": "select", "panel": "p", "parent_key": "u1", "child_id": "a2"},
+  "tree_before": {
+    "nodes": {
+      "u1": {"id": "u1", "role": "user", "content": "hi", "parent": null, "children": ["a1", "a2"]},
+      "a1": {"id": "a1", "role": "assistant", "content": "one", "parent": "u1", "children": []},
+      "a2": {"id": "a2", "role": "assistant", "content": "two", "parent": "u1", "children": []}
+    },
+    "rootChildren": ["u1"],
+    "selected": {"__root__": "u1", "u1": "a1"}
+  },
+  "tree_after": {
+    "nodes": {
+      "u1": {"id": "u1", "role": "user", "content": "hi", "parent": null, "children": ["a1", "a2"]},
+      "a1": {"id": "a1", "role": "assistant", "content": "one", "parent": "u1", "children": []},
+      "a2": {"id": "a2", "role": "assistant", "content": "two", "parent": "u1", "children": []}
+    },
+    "rootChildren": ["u1"],
+    "selected": {"__root__": "u1", "u1": "a2"}
+  }
+}
