@@ -19,7 +19,11 @@ def main() -> None:
         browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         page.goto(BASE, wait_until="load", timeout=20000)
-        page.wait_for_function("document.body.innerText.includes('ed_sheeran')", timeout=15000)
+        # Readiness = STRUCTURE (sidebar + model picker), not a run NAME: the old
+        # 'ed_sheeran' wait only fired when a run of that name was the selected
+        # model, so it silently depended on the scan roots and the state snapshot.
+        page.wait_for_selector("aside.sidebar", timeout=15000)
+        page.wait_for_selector(".model-block .picker-dropdown-trigger", timeout=15000)
 
         # OpenRouter group present in a model <select>?
         html = page.content()

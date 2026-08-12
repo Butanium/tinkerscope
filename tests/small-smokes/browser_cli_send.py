@@ -25,6 +25,10 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8809"
+# The checkout whose `tinkpg` we shell out to. `scripts/smoke.sh --baseline <ref>`
+# sets TSCOPE_APP_DIR to the baseline worktree; without honoring it this smoke
+# drives the WORKING TREE's CLI against the baseline server and proves nothing.
+REPO = Path(os.environ.get("TSCOPE_APP_DIR") or Path(__file__).resolve().parents[2])
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
 FREE = "openrouter:openrouter/free"
 EXISTING = "PROBE-ZERO the pre-existing thread"
@@ -57,7 +61,7 @@ def tinkpg(*args):
         ["uv", "run", "tinkpg", *args],
         capture_output=True, text=True, timeout=180,
         env={**os.environ, "TINKERSCOPE_BASE_URL": BASE},
-        cwd=Path(__file__).resolve().parents[2],
+        cwd=REPO,
     )
     assert out.returncode == 0, f"tinkpg {args} failed:\n{out.stdout}\n{out.stderr}"
     return out.stdout

@@ -16,19 +16,26 @@ The fix: continue always fires with prefill_scope "all" — extending the turn I
 the point; the composer scope applies to the composer prefill only.
 
 Seeds a one-turn workspace with an OpenRouter-sentinel panel, intercepts
-POST /api/chat (canned SSE reply), sets scope to Think-only with thinking off,
-clicks ＋ on the assistant turn, and asserts the outgoing request: scope "all",
-messages ending with the assistant prefill. Then checks the fold merged
-prefill + continuation into the new sibling.
+POST /api/chat (so nothing is ever sampled), sets scope to Think-only with
+thinking off, clicks ＋ on the assistant turn, and asserts the OUTGOING REQUEST:
+scope "all", messages ending with the assistant prefill.
+
+Request-level only, deliberately: sends are detached since 2026-08, so an
+intercepted POST never reaches the server and no fold can follow. The fold
+assertions this smoke once carried tested a client-side path that no longer
+exists and were dropped 2026-08-12, not silently — see the note at the call site.
 
   uv run python tests/small-smokes/browser_continue_scope.py [BASE_URL]
 """
 import json
 import sys
+import time
 import urllib.request
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+
+from _console import attach
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:5180"
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
@@ -85,8 +92,7 @@ def main() -> None:
             browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
             page = browser.new_page(viewport={"width": 1500, "height": 950})
             errors: list[str] = []
-            page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-            page.on("pageerror", lambda e: errors.append(str(e)))
+            net = attach(page, errors)  # noqa: F841 — evidence for a console failure
 
             def fulfill_chat(route):
                 captured.append(json.loads(route.request.post_data or "{}"))
@@ -108,12 +114,18 @@ def main() -> None:
             page.click(".prefill-scope .seg-btn:has-text('Think only')")
             page.click("[data-testid=prefill-fold]")
 
-            # ＋ continue on the assistant turn.
+            # ＋ continue on the assistant turn, then wait for the REQUEST — not for
+            # the continuation to appear on screen. Sends are DETACHED since
+            # 2026-08 (chat.svelte.ts: `detached: true`): the POST returns
+            # immediately and the render/fold arrives over the state bus, driven by
+            # the SERVER. Route-intercepting /api/chat means the server never sees
+            # the send, so no bus event is ever emitted and the canned SSE body
+            # below is never drained by anyone — the fold CANNOT happen here, and
+            # waiting for it just times out (which is what made this smoke stale).
             page.click('button[data-tooltip^="Continue this message"]')
-            page.wait_for_function(
-                f"document.body.innerText.includes({json.dumps(CONTINUATION.strip())})",
-                timeout=10000,
-            )
+            deadline = time.time() + 10
+            while not captured and time.time() < deadline:
+                page.wait_for_timeout(100)
 
             checks.append(("exactly one /api/chat fired", len(captured) == 1))
             req = captured[0] if captured else {}
@@ -128,13 +140,12 @@ def main() -> None:
                  and msgs[-1].get("content") == PREFILL_TEXT)
             )
 
-            # The fold merges prefill + continuation into the new sibling (‹2/2›).
-            # Whitespace-normalized: the prefilled prefix renders in its own
-            # colored span, so inner_text may split the sentence across nodes.
-            merged = " ".join((PREFILL_TEXT + CONTINUATION).split())
-            area_text = " ".join(page.inner_text(".chat-area").split())
-            checks.append(("folded sibling shows prefill + continuation", merged in area_text))
-            checks.append(("branch cycler shows 2 siblings", "2/2" in page.inner_text(".chat-area")))
+            # NOTE: this smoke used to also assert the client folded prefill +
+            # continuation into a ‹2/2› sibling. That half tested a client-side
+            # fold-from-the-POST-response which no longer exists (see the detached
+            # note above), NOT a product behaviour that regressed — it is dropped
+            # rather than left permanently red. Equivalent coverage today would
+            # need a bus-driven smoke that lets the send reach the server.
             checks.append(("no console errors", not errors))
             if errors:
                 print("console errors:", errors[:5])

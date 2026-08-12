@@ -199,7 +199,8 @@ def main() -> int:
         with _serving(site_root, port), sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page(viewport={"width": 1500, "height": 950})
-            page.on("console", lambda m: console_errors.append(m.text) if m.type == "error" else None)
+            page.on("console", lambda m: console_errors.append(
+                f"{m.text} [{(m.location or {}).get('url', '?')}]") if m.type == "error" else None)
             page.on(
                 "response",
                 lambda r: bad_requests.append(f"{r.status} {r.url}") if r.status >= 400 else None,

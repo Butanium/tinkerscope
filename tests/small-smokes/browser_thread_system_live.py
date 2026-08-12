@@ -16,6 +16,7 @@ browser_thread_system.py.
   uv run python tests/small-smokes/browser_thread_system_live.py [BASE_URL]
 """
 import json
+import os
 import subprocess
 import sys
 import urllib.request
@@ -24,6 +25,11 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8809"
+# The checkout whose `tinkpg` we shell out to. `scripts/smoke.sh --baseline <ref>`
+# sets TSCOPE_APP_DIR to the baseline worktree; without honoring it this smoke
+# drives the WORKING TREE's CLI against the baseline server and proves nothing.
+# (Was a hard-coded /home/c.dumas path, which also broke on any other checkout.)
+REPO = Path(os.environ.get("TSCOPE_APP_DIR") or Path(__file__).resolve().parents[2])
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
 FREE = "openrouter:openrouter/free"
 SYS = "SYS-E2E: You must end every reply with the single word BANANA in capitals."
@@ -44,7 +50,7 @@ def tinkpg(*args):
     r = subprocess.run(
         ["uv", "run", "tinkpg", "--base-url", BASE, *args],
         capture_output=True, text=True, timeout=120,
-        cwd="/home/c.dumas/tools/tinkerscope")
+        cwd=REPO)
     print(f"$ tinkpg {' '.join(args[:3])}… → rc={r.returncode}")
     if r.returncode != 0:
         print(r.stdout[-2000:], r.stderr[-2000:], sep="\n---\n")

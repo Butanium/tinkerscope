@@ -24,7 +24,7 @@ serves) → a deterministic supply of UNAVAILABLE runs regardless of which sampl
 weights still exist. Point it at an isolated instance scanning BOTH real roots:
 
   scripts/dev-isolated.sh --port 8812 \\
-      ~/projects2/negation_neglect/datasets/training_datasets/ ~/projects2/weird-personas/
+      "$(uv run python tests/run_fixtures.py)"     # its `base` arm sits on the dead base
 
   uv run python tests/small-smokes/browser_model_availability.py [BASE_URL] [SCREENSHOT_PATH]
 """
@@ -35,6 +35,8 @@ import urllib.request
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+
+from _console import attach
 
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
 BASE = args[0] if len(args) > 0 else "http://127.0.0.1:8812"
@@ -88,8 +90,7 @@ def main():
         browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
         page = browser.new_page(viewport={"width": 1400, "height": 900})
         errors = []
-        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-        page.on("pageerror", lambda e: errors.append(str(e)))
+        net = attach(page, errors)  # noqa: F841 — evidence for a console failure
         page.goto(BASE, wait_until="load", timeout=20000)
 
         page.wait_for_selector(".model-block .picker-dropdown-trigger", timeout=15000)

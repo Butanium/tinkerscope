@@ -8,7 +8,7 @@ panel (0 messages).
 ⚠️ Needs a MODELS-BEARING instance: the Add-panel button disables when the model
 catalog is empty, so a `dev-isolated.sh --fresh` launch with no scan root times
 out on the click (a false red). Point the instance at a run dir, e.g.:
-  scripts/dev-isolated.sh --fresh --port N ~/projects2/negation_neglect/datasets/training_datasets/
+  scripts/dev-isolated.sh --fresh --port N "$(uv run python tests/run_fixtures.py)"
 
   uv run python tests/small-smokes/browser_panel_add_modes.py [BASE_URL]
 """
@@ -18,6 +18,8 @@ import urllib.request
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+
+from _console import attach
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8791"
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
@@ -52,8 +54,7 @@ def main():
         browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
         page = browser.new_page(viewport={"width": 1600, "height": 950})
         errors = []
-        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-        page.on("pageerror", lambda e: errors.append(str(e)))
+        net = attach(page, errors)  # noqa: F841 — evidence for a console failure
 
         page.goto(f"{BASE}/?w={cid}", wait_until="load", timeout=20000)
         page.wait_for_function(f"document.body.innerText.includes({json.dumps(MARK)})", timeout=15000)

@@ -22,6 +22,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from _console import attach
+
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8809"
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
 
@@ -66,15 +68,18 @@ def main():
         browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
         page = browser.new_page(viewport={"width": 1500, "height": 950})
         errors = []
-        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-        page.on("pageerror", lambda e: errors.append(str(e)))
+        net = attach(page, errors)  # noqa: F841 — evidence for a console failure
         page.goto(f"{BASE}/?w={conv['id']}", wait_until="load", timeout=20000)
         page.wait_for_function("document.body.innerText.includes('A1 original answer')", timeout=15000)
         assert page.locator(".message").count() == 2, "seed should render 2 turns"
 
         # ── 1. SHIFT+CLICK edit on the user turn = fork + copy downstream, NO gen ──
         page.locator(".message").nth(0).get_by_role("button", name="Edit").click(modifiers=["Shift"])
-        ta = page.locator("textarea.edit-textarea")
+        # Scoped to the CONTENT editor: an open editor also renders the thread-system
+        # textarea (and, on an assistant turn with CoT, a thinking one), all three
+        # sharing .edit-textarea — the bare selector is a strict-mode violation and
+        # is what made this smoke "stale" rather than any product change.
+        ta = page.locator("textarea.edit-textarea:not(.edit-system):not(.edit-reasoning)")
         ta.wait_for(timeout=4000)
         ta.fill("U1 EDITED question")
         page.locator("button.btn-edit-save").click()
@@ -98,13 +103,13 @@ def main():
         # ── 3. EDIT-LEAK: open an editor on the (original) first message, then
         #        cycle to the sibling → the editor must drop its draft. ──
         page.locator(".message").nth(0).get_by_role("button", name="Edit").first.click()
-        ta = page.locator("textarea.edit-textarea")
+        ta = page.locator("textarea.edit-textarea:not(.edit-system):not(.edit-reasoning)")
         ta.wait_for(timeout=4000)
         ta.fill(DRAFT)
-        assert page.locator("textarea.edit-textarea").count() == 1
+        assert page.locator("textarea.edit-textarea:not(.edit-system):not(.edit-reasoning)").count() == 1
         page.locator(".message").nth(0).get_by_role("button", name="Next branch").click()
         page.wait_for_function("document.body.innerText.includes('U1 EDITED question')", timeout=5000)
-        n_editors = page.locator("textarea.edit-textarea").count()
+        n_editors = page.locator("textarea.edit-textarea:not(.edit-system):not(.edit-reasoning)").count()
         assert n_editors == 0, f"editor leaked open across a cycle ({n_editors}) — nodeId guard regressed"
         print("edit-leak guard: OK (editor closed on sibling cycle)")
 

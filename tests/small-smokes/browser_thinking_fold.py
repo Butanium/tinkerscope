@@ -35,7 +35,10 @@ from playwright.sync_api import sync_playwright
 
 PORT = 8875
 BASE = f"http://127.0.0.1:{PORT}"
-REPO = Path(__file__).resolve().parents[2]
+# The checkout whose server we spawn. `scripts/smoke.sh --baseline <ref>` sets
+# TSCOPE_APP_DIR to the baseline worktree; without honoring it this SELF-HOSTING
+# smoke silently exercises the working tree and a baseline run proves nothing.
+REPO = Path(os.environ.get("TSCOPE_APP_DIR") or Path(__file__).resolve().parents[2])
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
 
 FREE = "openrouter:openrouter/free"  # non-null run_id: a null one is self-healed away

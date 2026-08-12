@@ -87,6 +87,9 @@ async def stream_completions(client, model, run):
 
 
 async def main():
+    # A REAL scan root on purpose: this smoke samples, so it needs live sampler
+    # weights. The suite's fixture tree (tests/run_fixtures.py) is discovery-only —
+    # do not "decouple" this one onto it. Override with TINKERSCOPE_SCAN_ROOTS.
     os.environ.setdefault("TINKERSCOPE_SCAN_ROOTS", os.path.expanduser("~/projects2/weird-personas"))
     key = os.environ["TINKER_API_KEY"]
     run, ckpt = pick_checkpoint()

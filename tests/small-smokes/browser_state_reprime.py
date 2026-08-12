@@ -36,6 +36,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from _console import attach, net_report
+
 PORT = 8871
 BASE = f"http://127.0.0.1:{PORT}"
 # The checkout whose server we spawn. `scripts/smoke.sh --baseline <ref>` sets
@@ -126,8 +128,7 @@ def main():
             browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
             page = browser.new_page(viewport={"width": 1500, "height": 800})
             errors = []
-            page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-            page.on("pageerror", lambda e: errors.append(str(e)))
+            net = attach(page, errors)  # noqa: F841 — evidence for a console failure
             page.goto(f"{BASE}/?w={conv['id']}", wait_until="load", timeout=20000)
             page.wait_for_function(
                 "document.body.innerText.includes('PROMPT-ONE')", timeout=15000)
@@ -187,7 +188,7 @@ def main():
             real = [e for e in errors
                     if "Failed to fetch" not in e and "ERR_CONNECTION" not in e
                     and "NetworkError" not in e and "net::" not in e]
-            assert not real, f"console errors: {real}"
+            assert not real, net_report(real, net)
             browser.close()
     finally:
         if proc.poll() is None:

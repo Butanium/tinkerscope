@@ -151,7 +151,9 @@ def main() -> int:
                 browser = p.chromium.launch(headless=True)
                 page = browser.new_page(viewport={"width": 1500, "height": 950})
                 warns: list[str] = []
-                page.on("console", lambda m: warns.append(m.text) if m.type in ("warning", "error") else None)
+                page.on("console", lambda m: warns.append(
+                    f"{m.text} [{(m.location or {}).get('url', '?')}]")
+                    if m.type in ("warning", "error") else None)
 
                 base = f"http://127.0.0.1:{PORT}"
                 page.goto(f"{base}/?w=./big.yaml.gz", wait_until="load", timeout=30000)

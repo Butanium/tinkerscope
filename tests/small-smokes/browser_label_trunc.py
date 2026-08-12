@@ -11,9 +11,10 @@ TruncLabel now owns the SINGLE-LABEL sites: the PickerDropdown trigger button, t
 chat column titles, the send-chips. This smoke drives the dropdown TRIGGER (pick a
 long-named run, inspect the trigger) and asserts the fixed-tail guarantee holds.
 
-TOKEN-FREE: no sampling — opens the dropdown, picks a run, inspects the DOM. Point
-it at a dev-isolated instance scanning the negation_neglect training_datasets:
-  scripts/dev-isolated.sh --port 8811 ~/projects2/negation_neglect/datasets/training_datasets/
+TOKEN-FREE: no sampling — opens the dropdown, picks a run, inspects the DOM. Needs
+the suite's fixture run tree as the scan root — `scripts/smoke.sh browser_label_trunc`
+builds it for you; by hand:
+  scripts/dev-isolated.sh --port 8811 "$(uv run python tests/run_fixtures.py)"
 
   uv run python tests/small-smokes/browser_label_trunc.py [BASE_URL] [SCREENSHOT_PATH]
 """
@@ -21,6 +22,8 @@ import sys
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+
+from _console import attach
 
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
 BASE = args[0] if len(args) > 0 else "http://127.0.0.1:8811"
@@ -43,8 +46,7 @@ def main():
         browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
         page = browser.new_page(viewport={"width": 1400, "height": 850})
         errors = []
-        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-        page.on("pageerror", lambda e: errors.append(str(e)))
+        net = attach(page, errors)  # noqa: F841 — evidence for a console failure
         page.goto(BASE, wait_until="load", timeout=20000)
 
         # Open the first panel's model dropdown, filter to the ed_sheeran runs, and

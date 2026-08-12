@@ -24,6 +24,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from _console import attach
+
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8809"
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
 
@@ -116,8 +118,7 @@ def main():
         browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
         page = browser.new_page(viewport={"width": 1600, "height": 900})
         errors = []
-        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-        page.on("pageerror", lambda e: errors.append(str(e)))
+        net = attach(page, errors)  # noqa: F841 — evidence for a console failure
         page.goto(f"{BASE}/?w={conv['id']}", wait_until="load", timeout=20000)
         page.wait_for_function("document.body.innerText.includes('REPLY-P0')", timeout=15000)
 

@@ -36,6 +36,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from _console import attach, net_report
+
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:5180"
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))
 SHOT = "/tmp/tinkerscope_token_overlay.png"
@@ -177,8 +179,7 @@ def main() -> None:
             browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
             page = browser.new_page(viewport={"width": 1500, "height": 950})
             errors: list[str] = []
-            page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-            page.on("pageerror", lambda e: errors.append(str(e)))
+            net = attach(page, errors)  # noqa: F841 — evidence for a console failure
 
             page.goto(f"{BASE}/?w={conv_id}", wait_until="load", timeout=20000)
             page.wait_for_selector(".model-slot-select", timeout=15000)
@@ -328,8 +329,19 @@ def main() -> None:
             checks.append((f"surprisal paints amber {amber}", amber[3] > 0 and amber[0] > amber[2]))
             match_row = '.lp-hl .thinking-toggle-row:has-text("Color tokens by")'
             page.click(f'{match_row} .seg-btn:has-text("Match")')
-            page.wait_for_selector(".lp-hl-chip.sel", timeout=3000)
-            page.click('.lp-hl-chip:has-text("ovl-blue")')
+            # Switching to Match AUTO-SELECTS the first enabled rule (+page's
+            # setTokenTint), which is ours or someone else's depending on what
+            # the highlights store already holds. An unconditional click here
+            # therefore ADDED our rule when another one won the race and
+            # TOGGLED IT OFF when ours did — so drive the END STATE, not the
+            # click. (This smoke passed only because dev-isolated snapshotted a
+            # state home whose rules happened to sort ahead of ovl-blue; it
+            # failed the moment the scan root changed. 2026-08-12.)
+            page.wait_for_selector(".lp-hl-chip", timeout=3000)
+            ours = '.lp-hl-chip:has-text("ovl-blue")'
+            if page.locator(f"{ours}.sel").count() == 0:
+                page.click(ours)
+            page.wait_for_selector(f"{ours}.sel", timeout=3000)
             page.wait_for_timeout(300)
             blue = pixel_at(".message-content strong")
             checks.append((f"match coloring repaints in the rule hue {blue}",
@@ -418,7 +430,8 @@ def main() -> None:
                            and page.locator(".tok-heat-canvas").count() == 0))
             checks.append(("markdown is back", page.locator(".message-content strong").count() > 0))
 
-            checks.append(("no console errors", not errors))
+            checks.append((net_report(errors, net) if errors
+                           else "no console errors", not errors))
             if errors:
                 print("console errors:", errors[:5])
             browser.close()

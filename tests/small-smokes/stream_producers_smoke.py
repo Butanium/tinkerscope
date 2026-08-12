@@ -20,6 +20,9 @@ async def collect(it, tag):
     assert ok, f"{tag}: no final message"
 
 async def main():
+    # A REAL scan root on purpose: this smoke samples, so it needs live sampler
+    # weights. The suite's fixture tree (tests/run_fixtures.py) is discovery-only —
+    # do not "decouple" this one onto it. Override with TINKERSCOPE_SCAN_ROOTS.
     os.environ.setdefault("TINKERSCOPE_SCAN_ROOTS", os.path.expanduser("~/projects2/weird-personas"))
     # discovered run — one whose sampler weights still exist on Tinker
     run, ck = pick_servable_run()

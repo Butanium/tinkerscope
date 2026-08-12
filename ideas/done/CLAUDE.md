@@ -23,3 +23,6 @@ happened.
 - [Show the resolved base model on loose-ckpt panels](loose-ckpt-base-label.md) — `ckpt:` panels probe + show their base, and the Thinking toggle follows it; needed `ensureTinkerCatalog()` (the lazy catalog was empty on load) — **done 2026-08-12**
 - [Lint the tooltip length rule](lint-tooltip-length.md) — `tooltip-length.test.ts`, per-ternary-branch, fires at >90 chars or a multi-line value — **done 2026-08-12**
 - [Token overlay: hovering a word sometimes yields no popover](token-hover-dead-spots.md) — neither suspect: a p>93.55% token got no color, and boxes (= the hit-test) were gated on having one — **done 2026-08-12**
+- [Smokes coupled to personal run dirs](smoke-fixtures-not-personal-runs.md) — `tests/run_fixtures.py` is the suite's own 27-run scan root; `smoke.sh` builds it, `conftest.py` shares its `write_run` — **done 2026-08-12**
+- [Readiness waits key on STRUCTURE, not data](readiness-waits-on-structure.md) — swept; the three that waited on a run NAME now wait on `aside.sidebar` + the model picker — **done 2026-08-12**
+- [`smoke.sh --baseline` detects working-tree leakage](baseline-detect-worktree-leakage.md) — refuses a self-hosting smoke that never env-reads `TSCOPE_APP_DIR`; the four it flagged are fixed — **done 2026-08-12**

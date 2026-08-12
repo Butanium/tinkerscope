@@ -18,6 +18,13 @@ import yaml
 
 from tinkerscope.api.settings import scan_roots_key
 
+# The checkout whose CLI we invoke. `scripts/smoke.sh --baseline <ref>` sets
+# TSCOPE_APP_DIR to the baseline worktree; without honoring it this smoke runs the
+# WORKING TREE's `pack export` and a baseline run proves nothing. (The
+# `scan_roots_key` import above still resolves against the working tree — it's a
+# pure path-hash helper, not the code under test.)
+REPO = Path(os.environ.get("TSCOPE_APP_DIR") or Path(__file__).resolve().parents[2])
+
 SAMPLER = "tinker://smoke:train:0/sampler_weights/final"
 
 
@@ -50,6 +57,9 @@ def main() -> None:
         env = dict(os.environ)
         env["XDG_STATE_HOME"] = str(state_home)
         env.pop("TINKER_API_KEY", None)  # offline: discovery probes short-circuit
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(REPO / "src"), *([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])]
+        )
 
         out = tmp / "pack.yaml"
         r = subprocess.run(

@@ -11,9 +11,10 @@ ed_sheeran sibling runs, and asserts the base-vs-instruct pair (SAME seed+lr, so
 they differ ONLY at the model segment) renders two DISTINCT row texts — the exact
 case the old scheme rendered identically.
 
-TOKEN-FREE: no sampling — opens the dropdown and inspects the DOM. Point it at a
-dev-isolated instance scanning the negation_neglect training_datasets:
-  scripts/dev-isolated.sh --port 8812 ~/projects2/negation_neglect/datasets/training_datasets/
+TOKEN-FREE: no sampling — opens the dropdown and inspects the DOM. Needs the
+suite's fixture run tree as the scan root (`tests/run_fixtures.py` ships the 26-run
+family this asserts on) — `scripts/smoke.sh browser_label_diff` builds it; by hand:
+  scripts/dev-isolated.sh --port 8812 "$(uv run python tests/run_fixtures.py)"
 
   uv run python tests/small-smokes/browser_label_diff.py [BASE_URL] [SCREENSHOT_PATH] [--shot-only]
 
@@ -25,6 +26,8 @@ import sys
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+
+from _console import attach
 
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
 BASE = args[0] if len(args) > 0 else "http://127.0.0.1:8812"
@@ -56,8 +59,7 @@ def main():
         browser = p.chromium.launch(executable_path=str(CHROME), args=["--no-sandbox"])
         page = browser.new_page(viewport={"width": 1400, "height": 850})
         errors = []
-        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-        page.on("pageerror", lambda e: errors.append(str(e)))
+        net = attach(page, errors)  # noqa: F841 — evidence for a console failure
         page.goto(BASE, wait_until="load", timeout=20000)
 
         # Open the first panel's model dropdown and filter to the ed_sheeran runs.
