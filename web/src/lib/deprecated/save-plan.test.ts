@@ -3,7 +3,7 @@
 // (no dep added; respects the supply-chain age gate). Exit code != 0 on failure.
 
 import { planSave, heavyNodeIds, lightenTree, type ConvFields } from './save-plan.ts';
-import { emptyTree, appendUserTurn, type ConvTree, type TreeNode } from './tree.ts';
+import { emptyTree, appendUserTurn, type ConvTree, type TreeNode } from '../tree.ts';
 
 let passed = 0;
 let failed = 0;

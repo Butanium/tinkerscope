@@ -33,10 +33,16 @@ import {
   deleteSubtree,
   deleteSiblings,
   setSelected,
+  selectedDiffOps,
+  chainFrom,
+  opNode,
+  lightenTree,
   cycle as cycleTree,
   siblingsOf,
+  type ConvTree,
   type ThreadStart,
-  type TokenLogprob
+  type TokenLogprob,
+  type TreeOp
 } from './tree';
 import type { Panel, PanelSel, ChatMessage, ViewMessage } from './types';
 
@@ -106,7 +112,7 @@ class BranchOps {
     if (replace) {
       const r = regenReplace(tree, nodeId);
       if (!r) return null;
-      ws.setTree(panel, r.tree);
+      ws.setTree(panel, r.tree, { ops: r.prunedId ? [{ op: 'delete', node_id: r.prunedId }] : [] });
       return { userParentId: r.userParentId, fireMessages: r.fireMessages as ChatMessage[] };
     }
     const rt = regenTarget(tree, nodeId);
@@ -122,7 +128,10 @@ class BranchOps {
     panelScroll.preserve(panel);
     chat.clearPanelBucket(panel);
     const tree = ws.treeFor(panel);
-    ws.setTree(panel, all ? deleteSiblings(tree, msg.nodeId) : deleteSubtree(tree, msg.nodeId));
+    const targets = all ? [...siblingsOf(tree, msg.nodeId)] : [msg.nodeId];
+    ws.setTree(panel, all ? deleteSiblings(tree, msg.nodeId) : deleteSubtree(tree, msg.nodeId), {
+      ops: targets.map((node_id): TreeOp => ({ op: 'delete', node_id }))
+    });
   }
 
   /** Regenerate this panel's turn. plain = new sibling branch; replace (shift) =
@@ -241,7 +250,9 @@ class BranchOps {
     if (this.#d.panelBusy(panel) || msg.nodeId == null) return;
     panelScroll.preserve(panel);
     chat.clearPanelBucket(panel);
-    ws.setTree(panel, cycleTree(ws.treeFor(panel), msg.nodeId, delta));
+    const tree = ws.treeFor(panel);
+    const next = cycleTree(tree, msg.nodeId, delta);
+    ws.setTree(panel, next, { ops: selectedDiffOps(tree, next) });
   }
 
   /** Switch every panel that HAS this thread (a same-content root sibling) to
@@ -252,7 +263,9 @@ class BranchOps {
       if (ts.activeIn.includes(panel) || this.#d.panelBusy(panel)) continue;
       panelScroll.snap(panel); // whole-thread jump → land on its latest turn
       chat.clearPanelBucket(panel);
-      ws.setTree(panel, setSelected(ws.treeFor(panel), rid));
+      const tree = ws.treeFor(panel);
+      const next = setSelected(tree, rid);
+      ws.setTree(panel, next, { ops: selectedDiffOps(tree, next) });
     }
   }
 
@@ -264,7 +277,9 @@ class BranchOps {
     const nid = msg.sampleNodeIds?.[sampleIndex];
     if (!nid) return;
     panelScroll.preserve(panel);
-    ws.setTree(panel, setSelected(ws.treeFor(panel), nid));
+    const tree = ws.treeFor(panel);
+    const next = setSelected(tree, nid);
+    ws.setTree(panel, next, { ops: selectedDiffOps(tree, next) });
     chat.clearPanelBucket(panel); // collapse the distribution view to the chosen branch
   }
 
@@ -275,7 +290,9 @@ class BranchOps {
     if (this.#d.panelBusy(panel)) return;
     const nid = msg.sampleNodeIds?.[sampleIndex];
     if (!nid) return;
-    ws.setTree(panel, setSelected(ws.treeFor(panel), nid));
+    const tree = ws.treeFor(panel);
+    const next = setSelected(tree, nid);
+    ws.setTree(panel, next, { ops: selectedDiffOps(tree, next) });
     void this.#fireContinue(panel, nid);
   }
 
@@ -286,11 +303,16 @@ class BranchOps {
     if (!keep) return;
     undo.capture(panel, 'discard other samples');
     panelScroll.preserve(panel);
-    let tree = setSelected(ws.treeFor(panel), keep);
+    const t0 = ws.treeFor(panel);
+    let tree = setSelected(t0, keep);
+    const ops: TreeOp[] = selectedDiffOps(t0, tree);
     for (const sib of siblingsOf(tree, keep)) {
-      if (sib !== keep) tree = deleteSubtree(tree, sib);
+      if (sib !== keep) {
+        tree = deleteSubtree(tree, sib);
+        ops.push({ op: 'delete', node_id: sib });
+      }
     }
-    ws.setTree(panel, tree);
+    ws.setTree(panel, tree, { ops });
     chat.clearPanelBucket(panel);
   }
 
@@ -302,7 +324,9 @@ class BranchOps {
     if (!nid) return;
     undo.capture(panel, 'delete sample');
     panelScroll.preserve(panel);
-    ws.setTree(panel, deleteSubtree(ws.treeFor(panel), nid));
+    ws.setTree(panel, deleteSubtree(ws.treeFor(panel), nid), {
+      ops: [{ op: 'delete', node_id: nid }]
+    });
     // Remove the card from the bucket overlay (keep the rest visible). BUCKET
     // rows only: an expanded all-samples row (the eye) also lands here, but its
     // card indices are tree-sibling positions — unrelated to whatever stale
@@ -445,11 +469,13 @@ class BranchOps {
     if (msg.role === 'user') {
       if (copyDownstream) {
         const r = editUserForkCopy(ws.treeFor(panel), msg.nodeId, text, sys);
-        if (r) ws.setTree(panel, r.tree);
+        if (r) this.#commitChain(panel, r.tree, r.newUserId);
       } else {
         const r = editUserFork(ws.treeFor(panel), msg.nodeId, text, sys);
         if (!r) return;
-        ws.setTree(panel, r.tree);
+        ws.setTree(panel, r.tree, {
+          ops: [{ op: 'add_nodes', nodes: [opNode(r.tree, r.newUserId)], select: true }]
+        });
         this.#fireForPanel(panel, r.newUserId, r.fireMessages as ChatMessage[]);
       }
     } else if (msg.role === 'assistant') {
@@ -457,8 +483,26 @@ class BranchOps {
       // Re-read the tree AFTER the await: the fetch yields, and the node could
       // have been pruned/cycled away meanwhile (editAssistant returns null then).
       const r = editAssistant(ws.treeFor(panel), msg.nodeId, text, reasoning, tlp, copyDownstream);
-      if (r) ws.setTree(panel, r.tree);
+      if (r) this.#commitChain(panel, r.tree, r.newId);
     }
+  }
+
+  /** Commit a fork-copy/edit result whose new nodes form a selected CHAIN from
+   *  `startId` (the fork + any grafted downstream copies): one add_nodes op with
+   *  the heavy fields inline (the server blobs them), the TREE kept light from
+   *  birth (an edit keeps the untouched slice of the original's logprobs; a
+   *  grafted copy carries the original's raw_meta under its fresh id). */
+  #commitChain(panel: Panel, tree: ConvTree, startId: string) {
+    const chain = chainFrom(tree, startId);
+    for (const id of chain) {
+      const n = tree.nodes[id];
+      if (n.token_logprobs?.length || n.raw_meta)
+        nodeBlobs.seed(id, { token_logprobs: n.token_logprobs, raw_meta: n.raw_meta });
+    }
+    const ops: TreeOp[] = [
+      { op: 'add_nodes', nodes: chain.map((id) => opNode(tree, id)), select: true }
+    ];
+    ws.setTree(panel, lightenTree(tree, new Set(chain)) ?? tree, { ops });
   }
 
   /** Delete the turn at this row's DEPTH in EVERY panel (ctrl/cmd, compare).
@@ -529,10 +573,8 @@ class BranchOps {
     chat.clearPanelBucket(destPanel);
     // The branch's thread system prompt travels with its context — the dest
     // panel's model should be prompted under the SAME conditions.
-    ws.setTree(
-      destPanel,
-      reconcileExternal(ws.treeFor(destPanel), msgs, threadSystemAt(srcTree, msg.nodeId))
-    );
+    const r = reconcileExternal(ws.treeFor(destPanel), msgs, threadSystemAt(srcTree, msg.nodeId));
+    ws.setTree(destPanel, r.tree, { ops: r.ops });
     panelScroll.snap(destPanel); // land on the grafted thread's latest turn
   }
 }

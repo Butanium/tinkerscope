@@ -193,11 +193,16 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     + persistence + the external-fold reconcile. The workspace model.
     Storage v2 (`docs/STORAGE_V2.md`): `list` holds SUMMARIES only (bodies are
     fetched on open); `trees` is **`$state.raw`** (immutable refs — never mutate
-    a node in place, nothing would react or save); saves accumulate dirty-panel /
-    dropped / layout-flag DIRT and ship a partial-upsert PUT (dirty trees only)
-    or a zero-tree-bytes PATCH — the request planner is pure `lib/save-plan.ts`
-    (**has `save-plan.test.ts`**). Legacy `{tree, compare_tree}` bodies force a
-    FULL-map first save (partial upsert would drop the un-sent panel).
+    a node in place, nothing would react or save). Persistence is the **ops
+    mirror** (HANDOFF_SERVER_AUTHORITY §4.2, P1): mutations apply optimistically
+    and emit idempotent ops (`lib/ops.svelte.ts` — ordered chain, bounded retry;
+    `setTree` without an `ops` option falls back to a whole-panel replace_tree,
+    so no call-site can silently skip persistence); bus `ops` events always-apply
+    in rev order (own echoes included) via `tree.ts`'s `applyTreeOp`/
+    `applyPanelOp`, any rev gap → body refetch. Meta debounces into one
+    `set_meta`. Folds keep the tree LIGHT from birth (heavy fields ride the op;
+    no post-save lightening). `lib/deprecated/save-plan.ts` is the retired dirt
+    planner; the shared fixture vectors run via `tree-vectors.test.mjs`.
   - `lib/node-blobs.svelte.ts` → `nodeBlobs` — the per-node **heavy-blob cache**
     (token_logprobs / raw_meta live server-side as write-once blobs; light nodes
     carry `has_*` flags). Batch `ensure()` (20 ms micro-batched → one POST),
@@ -307,8 +312,11 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     ancestor so a buried node lands ON the active path, whole-or-nothing on a
     broken chain) + `threadStarts(trees)`, the cross-panel union of root
     THREADS (branch-from-start first messages, identity = trimmed content —
-    threads are per-panel, so each entry records which panels have it). The
-    single source of branching truth. **Has `tree.test.ts`.**
+    threads are per-panel, so each entry records which panels have it). Also the
+    OP VOCABULARY's TS half (`applyTreeOp`/`applyPanelOp` + the confluence guard
+    in the ops-section docstring — mirrors `api/tree_ops.py`, pinned by the
+    shared vectors under `tests/fixtures/tree_vectors/`). The single source of
+    branching truth. **Has `tree.test.ts`.**
   - `lib/panel-view.ts` — the panel RENDER MODEL: `buildPanelView` (tree active
     path + live-bucket overlay → the `ViewMessage[]` a column renders — the
     bucket REPLACES the trailing assistant row, never double-renders) +

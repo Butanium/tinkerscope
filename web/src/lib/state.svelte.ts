@@ -96,6 +96,10 @@ class LiveStore {
    *  CLI's unstamped `panels` patch keeps the bus's owner stamp, so the
    *  resulting broadcast is stamped with the owner tab's workspace. */
   onOwnPanels: ((panels: PlaygroundState['panels']) => void) | null = null;
+  /** Fires on every bus `ops` event (an accepted mutation batch, light bodies).
+   *  The workspace store applies them in rev order — its filter, not ours: the
+   *  event carries its own workspace stamp. */
+  onOps: ((ev: unknown) => void) | null = null;
   /** Assigned by the workspace store: the open workspace's TRUE bus claim
    *  (layout from the store + tree echoes + system prompt). #reprime uses it
    *  instead of replaying the mirror's panels — re-priming from the mirror
@@ -218,6 +222,9 @@ class LiveStore {
       }
       case 'patch':
         this.adopt(data?.state as PlaygroundState | undefined);
+        break;
+      case 'ops':
+        this.onOps?.(data);
         break;
       case 'chat_start': {
         const panel = (data?.panel ?? FIRST_PANEL_ID) as Panel;
