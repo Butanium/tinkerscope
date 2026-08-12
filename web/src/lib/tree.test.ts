@@ -26,10 +26,23 @@ import {
   threadSystemAt,
   reconcileExternal,
   assertValid,
+  applyTreeOp,
+  selectedDiffOps,
+  chainFrom,
+  opNode,
+  heavyNodeIds,
+  lightenTree,
+  OpRejected,
   __resetIds,
   type ConvTree,
-  type Msg
+  type Msg,
+  type TreeOp
 } from './tree.ts';
+
+/** reconcileExternal's tree half — most tests predate the {tree, ops} return. */
+function rec(t: ConvTree, msgs: Msg[], threadSystem?: string | null): ConvTree {
+  return reconcileExternal(t, msgs, threadSystem).tree;
+}
 
 let passed = 0;
 let failed = 0;
@@ -414,38 +427,38 @@ test('cycle wraps around the ends (1-2-3-1…)', () => {
 // ── reconcileExternal ────────────────────────────────────────────────
 test('reconcileExternal on empty msgs is a no-op', () => {
   const t = linear4();
-  eq(reconcileExternal(t, []), t);
+  eq(rec(t, []), t);
 });
 
 test('reconcileExternal preserves reasoning carried on an external turn', () => {
   // A CLI/cross-tab assistant reply echoed back with its CoT must land on the new node,
   // so reasoning round-trips (not just answer-only). activeMessages then carries it back.
-  const t = reconcileExternal(emptyTree(), [U('q'), A('ans', 'cot')]);
+  const t = rec(emptyTree(), [U('q'), A('ans', 'cot')]);
   const asst = activeMessages(t)[1];
   eq(asst, A('ans', 'cot'));
   // a reasoning-less echo stays {role, content} (no stray reasoning key)
-  const t2 = reconcileExternal(emptyTree(), [U('q'), A('plain')]);
+  const t2 = rec(emptyTree(), [U('q'), A('plain')]);
   eq(activeMessages(t2)[1], A('plain'));
 });
 
 test('reconcileExternal is idempotent when the path already exists (reload dupe guard)', () => {
   const t = linear4();
   const am = activeMessages(t);
-  const after = reconcileExternal(t, am); // the exact active path
+  const after = rec(t, am); // the exact active path
   eq(activeMessages(after), am);
   eq(Object.keys(after.nodes).length, Object.keys(t.nodes).length); // no new nodes
 });
 
 test('reconcileExternal idempotent for a prefix of an existing branch', () => {
   const t = linear4();
-  const after = reconcileExternal(t, [U('U1'), A('A1')]); // prefix of the branch
+  const after = rec(t, [U('U1'), A('A1')]); // prefix of the branch
   eq(Object.keys(after.nodes).length, Object.keys(t.nodes).length);
 });
 
 test('REVIEW: multi-turn CLI extends the branch in place, does NOT strand a duplicate root', () => {
   // state.messages is the cumulative active path; turn 2 sends the full history.
   const t1 = treeFromMessages([U('U1'), A('A1')]);
-  const t2 = reconcileExternal(t1, [U('U1'), A('A1'), U('U2'), A('A2')]);
+  const t2 = rec(t1, [U('U1'), A('A1'), U('U2'), A('A2')]);
   eq(t2.rootChildren.length, 1, 'must stay one root (no stranded duplicate)');
   eq(msgContents(t2), ['U1', 'A1', 'U2', 'A2']);
   assertValid(t2);
@@ -457,14 +470,14 @@ test('REVIEW: reconcile re-selects a matching NON-active sibling (CLI hit a hidd
   const sel = setSelected(t2, ids[0]); // A-a active
   eq(activeMessages(sel), [U('q'), A('A-a')]);
   // CLI runs [q, A-b] (the hidden sibling) → reconcile must SELECT A-b, add no nodes.
-  const after = reconcileExternal(sel, [U('q'), A('A-b')]);
+  const after = rec(sel, [U('q'), A('A-b')]);
   eq(activeMessages(after), [U('q'), A('A-b')]);
   eq(Object.keys(after.nodes).length, Object.keys(sel.nodes).length, 'no new nodes');
 });
 
 test('CRITIQUE: a divergent external turn becomes a NEW root, prior branch recoverable', () => {
   const t = linear4(); // deep 4-turn workspace
-  const after = reconcileExternal(t, [U('cli question'), A('cli answer')]);
+  const after = rec(t, [U('cli question'), A('cli answer')]);
   // the new root is selected → active path is the CLI turn
   eq(activeMessages(after), [U('cli question'), A('cli answer')]);
   eq(after.rootChildren.length, 2); // both roots present
@@ -609,15 +622,15 @@ test('reconcileExternal matches the root by the (content, system) PAIR when know
   const a = appendUserTurn(emptyTree(), 'q', true, 'sysA');
   const b = appendUserTurn(a.tree, 'q', true, 'sysB');
   // a transcript from the sysA probe folds under (re-selects) the sysA root…
-  const t1 = reconcileExternal(b.tree, [U('q'), A('r1')], 'sysA');
+  const t1 = rec(b.tree, [U('q'), A('r1')], 'sysA');
   eq(activePath(t1)[0].id, a.nodeId);
   eq(activePath(t1)[0].system_prompt, 'sysA');
   // …a NEW prompt mints (and stamps) a fresh root instead of grafting
-  const t2 = reconcileExternal(b.tree, [U('q'), A('r2')], 'sysC');
+  const t2 = rec(b.tree, [U('q'), A('r2')], 'sysC');
   eq(t2.rootChildren.length, 3);
   eq(activePath(t2)[0].system_prompt, 'sysC');
   // …and known-absent ('' / null) refuses both prompted roots too
-  const t3 = reconcileExternal(b.tree, [U('q'), A('r3')], '');
+  const t3 = rec(b.tree, [U('q'), A('r3')], '');
   eq(t3.rootChildren.length, 3);
   eq(activePath(t3)[0].system_prompt, undefined);
   assertValid(t3);
@@ -625,7 +638,7 @@ test('reconcileExternal matches the root by the (content, system) PAIR when know
 
 test('reconcileExternal with UNKNOWN provenance keeps legacy content-only root matching', () => {
   const a = appendUserTurn(emptyTree(), 'q', true, 'sysA');
-  const t = reconcileExternal(a.tree, [U('q'), A('r')]); // no threadSystem arg
+  const t = rec(a.tree, [U('q'), A('r')]); // no threadSystem arg
   eq(t.rootChildren.length, 1); // grafted onto the existing root, as before
   eq(activePath(t)[0].id, a.nodeId);
 });
@@ -665,6 +678,148 @@ test('selectPathTo bails whole on a broken parent chain (never half-selects)', (
   const broken: ConvTree = structuredClone(t2);
   broken.nodes[u].parent = 'gone'; // orphan the chain above the fan
   eq(selectPathTo(broken, ids[1]) === broken, true, 'broken chain must be a no-op');
+});
+
+// ── applyTreeOp (ops protocol — the mirror's echo interpreter) ───────
+test('applyTreeOp add_nodes appends a chain, selecting every step (graft semantics)', () => {
+  const op: TreeOp = {
+    op: 'add_nodes',
+    select: true,
+    nodes: [
+      { id: 'u1', role: 'user', content: 'q', parent: null },
+      { id: 'a1', role: 'assistant', content: 'r', parent: 'u1' }
+    ]
+  };
+  const t = applyTreeOp(emptyTree(), op);
+  eq(activeMessages(t), [U('q'), A('r')]);
+  eq(t.selected[ROOT], 'u1');
+  eq(t.selected['u1'], 'a1');
+  assertValid(t);
+});
+
+test('applyTreeOp add_nodes sibling fan selects its FIRST node (fold semantics)', () => {
+  const base = applyTreeOp(emptyTree(), {
+    op: 'add_nodes',
+    select: true,
+    nodes: [{ id: 'u1', role: 'user', content: 'q', parent: null }]
+  });
+  const t = applyTreeOp(base, {
+    op: 'add_nodes',
+    select: true,
+    nodes: [
+      { id: 's0', role: 'assistant', content: 'first', parent: 'u1' },
+      { id: 's1', role: 'assistant', content: 'second', parent: 'u1' }
+    ]
+  });
+  eq(t.selected['u1'], 's0');
+  eq(siblingsOf(t, 's0').length, 2);
+});
+
+test('applyTreeOp add_nodes is idempotent by id (replay-safe), same ref when all exist', () => {
+  const op: TreeOp = {
+    op: 'add_nodes',
+    select: true,
+    nodes: [{ id: 'u1', role: 'user', content: 'q', parent: null }]
+  };
+  const t1 = applyTreeOp(emptyTree(), op);
+  eq(applyTreeOp(t1, op) === t1, true, 'full replay must return the same ref');
+});
+
+test('applyTreeOp add_nodes rejects id reuse with different content, and unknown parents', () => {
+  const t1 = applyTreeOp(emptyTree(), {
+    op: 'add_nodes',
+    nodes: [{ id: 'u1', role: 'user', content: 'q', parent: null }]
+  });
+  let threw = 0;
+  try {
+    applyTreeOp(t1, { op: 'add_nodes', nodes: [{ id: 'u1', role: 'user', content: 'DIFFERENT', parent: null }] });
+  } catch (e) {
+    ok(e instanceof OpRejected, 'content mismatch must be OpRejected');
+    threw++;
+  }
+  try {
+    applyTreeOp(t1, { op: 'add_nodes', nodes: [{ id: 'x', role: 'user', content: 'q', parent: 'gone' }] });
+  } catch (e) {
+    ok(e instanceof OpRejected, 'unknown parent must be OpRejected');
+    threw++;
+  }
+  eq(threw, 2);
+});
+
+test('applyTreeOp select is validated LWW: stale/unknown writes are same-ref no-ops', () => {
+  const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+  const { tree: t2, ids } = foldAssistant(t1, u, [{ content: 'a' }, { content: 'b' }]);
+  const t3 = applyTreeOp(t2, { op: 'select', parent_key: u, child_id: ids[1] });
+  eq(t3.selected[u], ids[1]);
+  eq(applyTreeOp(t3, { op: 'select', parent_key: u, child_id: 'gone' }) === t3, true);
+  eq(applyTreeOp(t3, { op: 'select', parent_key: 'gone', child_id: ids[0] }) === t3, true);
+  eq(applyTreeOp(t3, { op: 'select', parent_key: u, child_id: ids[1] }) === t3, true, 'already selected');
+});
+
+test('applyTreeOp delete prunes the subtree; missing id is a same-ref no-op', () => {
+  const t = linear4();
+  const u2 = activePath(t)[2].id;
+  const after = applyTreeOp(t, { op: 'delete', node_id: u2 });
+  eq(msgContents(after), ['U1', 'A1']);
+  eq(applyTreeOp(after, { op: 'delete', node_id: u2 }) === after, true, 'replay no-op');
+});
+
+test('CONFLUENCE: reconcileExternal ops replayed via applyTreeOp reproduce its tree', () => {
+  // The property the whole mirror rests on: the ops a mutation reports, applied
+  // to the pre-mutation tree by the echo interpreter, yield the same tree.
+  const cases: { t0: ConvTree; msgs: Msg[]; sys?: string | null }[] = [
+    { t0: emptyTree(), msgs: [U('q'), A('r', 'cot')] },
+    { t0: linear4(), msgs: [U('cli question'), A('cli answer')] },
+    { t0: linear4(), msgs: [U('U1'), A('A1'), U('U2'), A('A2'), U('U3')] },
+    { t0: appendUserTurn(emptyTree(), 'q', true, 'sysA').tree, msgs: [U('q'), A('r')], sys: 'sysB' }
+  ];
+  for (const c of cases) {
+    const r = reconcileExternal(c.t0, c.msgs, c.sys);
+    let replayed = c.t0;
+    for (const op of r.ops) replayed = applyTreeOp(replayed, op);
+    eq(replayed, r.tree, 'ops replay must equal the reconciled tree');
+    assertValid(replayed);
+  }
+});
+
+test('selectedDiffOps reports exactly the selection writes between two trees', () => {
+  const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+  const { tree: t2, ids } = foldAssistant(t1, u, [{ content: 'a' }, { content: 'b' }]);
+  const t3 = setSelected(t2, ids[1]);
+  const ops = selectedDiffOps(t2, t3);
+  eq(ops, [{ op: 'select', parent_key: u, child_id: ids[1] }]);
+  // replay equivalence for the selection case too
+  eq(applyTreeOp(t2, ops[0]), t3);
+  eq(selectedDiffOps(t3, t3), []);
+});
+
+test('chainFrom recovers a fork-copy grafted chain (fresh user + downstream copies)', () => {
+  const t = linear4();
+  const u1 = activePath(t)[0].id;
+  const r = editUserForkCopy(t, u1, 'U1-edited')!;
+  const chain = chainFrom(r.tree, r.newUserId);
+  eq(chain.length, 4, 'fork + 3 downstream copies');
+  const nodes = chain.map((id) => r.tree.nodes[id]);
+  eq(nodes.map((n) => n.content), ['U1-edited', 'A1', 'U2', 'A2']);
+  // and the chain's opNodes replay into the pre-edit tree
+  const op: TreeOp = { op: 'add_nodes', nodes: chain.map((id) => opNode(r.tree, id)), select: true };
+  eq(applyTreeOp(t, op), r.tree);
+});
+
+test('heavyNodeIds/lightenTree: fold-time lightening flags exactly the blob-bearing nodes', () => {
+  const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+  const { tree: t2, ids } = foldAssistant(t1, u, [
+    { content: 'with data', token_logprobs: [{ t: 'x', tid: 1, lp: -0.5 }], raw_meta: 'meta' },
+    { content: 'plain' }
+  ]);
+  const heavy = heavyNodeIds(t2);
+  eq([...heavy], [ids[0]]);
+  const light = lightenTree(t2, heavy)!;
+  eq(light.nodes[ids[0]].token_logprobs, undefined);
+  eq(light.nodes[ids[0]].has_token_logprobs, true);
+  eq(light.nodes[ids[0]].has_raw_meta, true);
+  eq(light.nodes[ids[1]].has_token_logprobs, undefined, 'data-less sibling must not be flagged');
+  eq(lightenTree(light, heavyNodeIds(light)), null, 'nothing left to strip');
 });
 
 // ── summary ──────────────────────────────────────────────────────────

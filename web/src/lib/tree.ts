@@ -538,12 +538,18 @@ export function deleteSiblings(t0: ConvTree, nodeId: string): ConvTree {
 export function regenReplace(
   t0: ConvTree,
   nodeId: string
-): { tree: ConvTree; userParentId: string; fireMessages: Msg[] } | null {
+): { tree: ConvTree; userParentId: string; fireMessages: Msg[]; prunedId: string | null } | null {
   const rt = regenTarget(t0, nodeId);
   if (!rt) return null;
   const active = selectedChildId(t0, rt.userParentId);
-  const t = active && t0.nodes[active]?.role === 'assistant' ? deleteSubtree(t0, active) : t0;
-  return { tree: t, userParentId: rt.userParentId, fireMessages: ancestryMessages(t, rt.userParentId) };
+  const prune = active != null && t0.nodes[active]?.role === 'assistant';
+  const t = prune ? deleteSubtree(t0, active) : t0;
+  return {
+    tree: t,
+    userParentId: rt.userParentId,
+    fireMessages: ancestryMessages(t, rt.userParentId),
+    prunedId: prune ? active : null
+  };
 }
 
 /** Select `nodeId` as its parent's active child. */
@@ -651,6 +657,153 @@ export function threadSystemAt(t: ConvTree, nodeId: string): string | undefined 
   return cur?.system_prompt;
 }
 
+// ── ops (server-authority protocol — docs/HANDOFF_SERVER_AUTHORITY.md §4.1) ──
+// The TREE-LEVEL half of the op vocabulary: what one panel's tree can absorb.
+// Map-level ops (copy_tree / replace_tree) and set_meta live in the workspace
+// store — they need the whole trees map / workspace fields. Panel stamping is
+// the caller's job too; this module stays single-tree.
+//
+// Confluence guard (protocol invariant, not style): every op here is either
+// idempotent-structural (add by globally-unique id + append, delete subtree by
+// id) or last-writer-wins (select). Never add an op that mutates node content
+// in place or inserts at an arbitrary index — either breaks confluent replay
+// and would force a real CRDT.
+
+/** Wire shape of a node in an add_nodes op: TreeNode minus `children` (the
+ *  interpreter initializes them — an op can only ever APPEND under a parent). */
+export type OpNode = Omit<TreeNode, 'children'>;
+
+export type TreeOp =
+  | { op: 'add_nodes'; nodes: OpNode[]; select?: boolean }
+  | { op: 'select'; parent_key: string; child_id: string }
+  | { op: 'delete'; node_id: string };
+
+/** A structurally invalid op (unknown parent, id reused with different content).
+ *  The server answers these with a 409; a mirror applying a bus echo treats a
+ *  throw as divergence and refetches. */
+export class OpRejected extends Error {}
+
+/** A node's op-wire form: everything but `children`, undefined fields dropped
+ *  (they would round-trip as JSON nulls otherwise). */
+export function opNode(t: ConvTree, id: string): OpNode {
+  const { children: _children, ...rest } = t.nodes[id];
+  return Object.fromEntries(
+    Object.entries(rest).filter(([, v]) => v !== undefined)
+  ) as OpNode;
+}
+
+/** The single-child chain hanging from `startId` along `selected` — exactly what
+ *  graftDownstream wrote. Lets a call-site recover the ids of a fork-copy's
+ *  grafted tail (editUserForkCopy / editAssistant don't return them). */
+export function chainFrom(t: ConvTree, startId: string): string[] {
+  const out: string[] = [startId];
+  let cur = startId;
+  const seen = new Set<string>([startId]);
+  while (true) {
+    const next = t.selected[cur];
+    if (!next || !t.nodes[next] || seen.has(next)) break;
+    out.push(next);
+    seen.add(next);
+    cur = next;
+  }
+  return out;
+}
+
+/** Selection writes that turn `prev` into `next` — the precise `select` ops for
+ *  any selection-only mutation (cycle / setSelected / selectPathTo / thread
+ *  switch), read off the trees instead of threaded through every helper. */
+export function selectedDiffOps(prev: ConvTree, next: ConvTree): TreeOp[] {
+  const ops: TreeOp[] = [];
+  for (const [pk, cid] of Object.entries(next.selected)) {
+    if (prev.selected[pk] !== cid) ops.push({ op: 'select', parent_key: pk, child_id: cid });
+  }
+  return ops;
+}
+
+/** Apply one tree-level op. Same-ref return on no-ops (idempotent replay, stale
+ *  select); throws OpRejected on structural violations. Mirrors the server's
+ *  `tree_ops.py` — the shared fixture vectors pin the two implementations
+ *  together. `select: true` on add_nodes = first-writer-per-parent within the
+ *  batch: a chain selects every step (graftDownstream), a sibling fan selects
+ *  its first node (foldAssistant). */
+export function applyTreeOp(t0: ConvTree, op: TreeOp): ConvTree {
+  if (op.op === 'add_nodes') {
+    let t: ConvTree | null = null;
+    const selectedParents = new Set<string>();
+    for (const w of op.nodes) {
+      const cur = t ?? t0;
+      const existing = cur.nodes[w.id];
+      if (existing) {
+        if (existing.role !== w.role || existing.content !== w.content)
+          throw new OpRejected(`add_nodes: ${w.id} exists with different ${existing.role !== w.role ? 'role' : 'content'}`);
+        continue;
+      }
+      const parentKey = w.parent ?? ROOT;
+      if (parentKey !== ROOT && !cur.nodes[parentKey])
+        throw new OpRejected(`add_nodes: unknown parent ${parentKey} for ${w.id}`);
+      t ??= cloneTree(t0);
+      t.nodes[w.id] = { ...w, parent: w.parent ?? null, children: [] };
+      childArray(t, parentKey).push(w.id);
+      if (op.select && !selectedParents.has(parentKey)) {
+        selectedParents.add(parentKey);
+        t.selected[parentKey] = w.id;
+      }
+    }
+    return t ?? t0;
+  }
+  if (op.op === 'select') {
+    const kids = op.parent_key === ROOT ? t0.rootChildren : t0.nodes[op.parent_key]?.children;
+    if (!kids || !kids.includes(op.child_id)) return t0; // stale LWW write — harmless
+    if (t0.selected[op.parent_key] === op.child_id) return t0;
+    const t = cloneTree(t0);
+    t.selected[op.parent_key] = op.child_id;
+    return t;
+  }
+  return deleteSubtree(t0, op.node_id); // missing id → same-ref no-op inside
+}
+
+// ── post-fold lightening (storage v2; was save-plan.ts) ─────────────
+// Fresh folds carry token_logprobs/raw_meta INLINE; the add_nodes op ships them
+// once for the server to blob, and the tree keeps LIGHT nodes from birth (the
+// blob cache serves the token view). Mirrors the server's strip predicate
+// (Python truthiness): empty list / empty string ⇒ no blob ⇒ no has_* flag.
+
+/** Ids of nodes whose heavy fields would produce a server blob. */
+export function heavyNodeIds(tree: ConvTree): Set<string> {
+  const ids = new Set<string>();
+  for (const [id, n] of Object.entries(tree.nodes)) {
+    if ((n.token_logprobs?.length ?? 0) > 0 || (n.raw_meta ?? '') !== '') ids.add(id);
+  }
+  return ids;
+}
+
+/** Strip the heavy fields of `shipped` node ids from `current`, setting the
+ *  matching has_* flags. Returns null when no node changed. */
+export function lightenTree(current: ConvTree, shipped: Set<string>): ConvTree | null {
+  let changed = false;
+  const nodes: Record<string, TreeNode> = {};
+  for (const [id, n] of Object.entries(current.nodes)) {
+    const lp = shipped.has(id) && (n.token_logprobs?.length ?? 0) > 0;
+    const rm = shipped.has(id) && (n.raw_meta ?? '') !== '';
+    if (!lp && !rm) {
+      nodes[id] = n;
+      continue;
+    }
+    changed = true;
+    const light = { ...n };
+    if (lp) {
+      delete light.token_logprobs;
+      light.has_token_logprobs = true;
+    }
+    if (rm) {
+      delete light.raw_meta;
+      light.has_raw_meta = true;
+    }
+    nodes[id] = light;
+  }
+  return changed ? { ...current, nodes } : null;
+}
+
 // ── reconciliation ───────────────────────────────────────────────────
 /** Fold an EXTERNAL (CLI / other-tab / on-load) transcript into the tree.
  *
@@ -676,9 +829,11 @@ export function reconcileExternal(
   t0: ConvTree,
   msgs: Msg[],
   threadSystem?: string | null
-): ConvTree {
-  if (!msgs || msgs.length === 0) return t0;
+): { tree: ConvTree; ops: TreeOp[] } {
+  if (!msgs || msgs.length === 0) return { tree: t0, ops: [] };
   const t = cloneTree(t0);
+  const ops: TreeOp[] = [];
+  const added: OpNode[] = [];
   let changed = false;
   let parentKey = ROOT;
   let i = 0;
@@ -696,6 +851,7 @@ export function reconcileExternal(
     if (!cid) break;
     if (t.selected[parentKey] !== cid) {
       t.selected[parentKey] = cid;
+      ops.push({ op: 'select', parent_key: parentKey, child_id: cid });
       changed = true;
     }
     parentKey = cid;
@@ -720,14 +876,18 @@ export function reconcileExternal(
     if (parentKey === ROOT) t.rootChildren.push(id);
     else t.nodes[parentKey].children.push(id);
     t.selected[parentKey] = id;
+    added.push(opNode(t, id));
     parentKey = id;
     changed = true;
   }
-  return changed ? t : t0;
+  // The appended chain persists as one add (select: true reproduces the per-step
+  // selection writes — chain semantics of the first-writer-per-parent rule).
+  if (added.length) ops.push({ op: 'add_nodes', nodes: added, select: true });
+  return changed ? { tree: t, ops } : { tree: t0, ops: [] };
 }
 
 export function treeFromMessages(msgs: Msg[], threadSystem?: string | null): ConvTree {
-  return reconcileExternal(emptyTree(), msgs, threadSystem);
+  return reconcileExternal(emptyTree(), msgs, threadSystem).tree;
 }
 
 // ── validation (used by tests + the on-load tree validator) ──────────
