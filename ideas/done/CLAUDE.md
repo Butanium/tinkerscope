@@ -15,3 +15,4 @@ happened.
 - [Loom: branch from a token into one of its alternatives](loom-branch-from-token.md) — click a token, pick an alternative, get the counterfactual as an ordinary sibling; shipped TOKEN-LEVEL (`continue_tokens`), full stream re-scored — **done 2026-08-06**
 - [The loom should cut from the PROSE](loom-cut-from-prose.md) — the overlay got the same click-to-pin as the raw stream, so the cut is picked in reading mode — **done 2026-08-06**
 - [The dataset path wants to be a samplescope command](dataset-path-to-samplescope.md) — became an in-app hand-off instead of a copied command; samplescope already had `?path=` + an instance registry — **done 2026-08-06** (`4fc5091`)
+- [`ws`/`samples` accept `--ws` too](ws-selector-symmetry.md) — shipped as `_one_selector` (positional + flag, error on differing values); the idea file was orphaned and retired post-hoc — **done 2026-08-12**

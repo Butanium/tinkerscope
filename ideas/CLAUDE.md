@@ -90,4 +90,4 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 
 ## Done
 
-See [`done/CLAUDE.md`](done/CLAUDE.md) — 8 shipped so far.
+See [`done/CLAUDE.md`](done/CLAUDE.md) for everything that shipped (no count here — it drifts).
