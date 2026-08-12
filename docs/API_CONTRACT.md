@@ -416,8 +416,15 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
   point, carrying no probability (`web/src/lib/token-edit.ts`). The sampler never
   emits one; consumers that read a stored stream must tolerate it (`lp: null`
   was already possible).
-- `event: done` → `data: {}` (all samples finished)
-- `event: error` → `data: {error}` (whole request failed, e.g. unsampleable run)
+- `event: done` → `data: {}` — or, on a `parent_node` chat, the FOLD OUTCOME:
+  `{folded: [{sample_index, node_id}], fold_rev}` when the server persisted the
+  samples, `{fold_error: "<reason>"}` when it could not (workspace deleted /
+  replaced mid-fire). The direct-stream consumer — the headless CLI — cannot
+  read the bus or the server log, so this is its only persistence signal;
+  `tinkpg` exits non-zero on a missing manifest after ≥1 completed sample.
+- `event: error` → `data: {error, …}` (whole request failed, e.g. unsampleable
+  run; a mid-stream producer fault after ≥1 completed sample also carries the
+  fold-outcome fields above — partial data is real data and folds)
 
 **Streaming model:** at n==1 only `openrouter_model` streams tokens; n>1 keeps the
 native batched fan-out (whole samples). tinker's native SamplingClient has no token
@@ -465,7 +472,9 @@ zero browsers attached:
   no `folded` key, `rev` unmoved.
 - **Failure is loud, never wedging**: a fold that can't land (workspace deleted
   mid-chat; tree replaced under it) is logged with the sample count and dropped
-  — the terminal still fires, `running` still clears.
+  — the terminal still fires, `running` still clears, and the reason travels to
+  the CALLER stream as `fold_error` on the done/error SSE event (the bus
+  terminal simply omits `folded`).
 
 ### PlaygroundState (server-side, shared)
 ```jsonc

@@ -14,6 +14,11 @@ with thinking ON against a tinker BASE model and asserts the STATE DIR on disk:
   - token_logprobs + raw_meta live as write-once blobs, flagged `has_*` on the
     light nodes, never inline.
 
+Then the NEGATIVE leg (review finding 1): a second send whose workspace is
+DELETED mid-generation must exit NON-ZERO with the "NOT persisted" warning —
+before the fix the CLI printed [done] and exited 0 while the samples
+evaporated (the fold failure lived only in the server log).
+
 Real tinker sampling (BASE model — weights never age out) ⇒ needs
 TINKER_API_KEY; deliberately NOT in smoke.sh's token-free DEFAULT set.
 
@@ -137,6 +142,40 @@ def main():
             assert blob.get("raw_meta"), f"blob for {nid} has no raw_meta"
         assert body.get("rev", 0) >= 2, "user-turn op + fold = at least two revs"
         print(f"OK — headless send persisted 3/3 samples with CoT + blobs (rev {body['rev']})")
+
+        # ── negative leg: delete the workspace mid-fire → non-zero + warning ──
+        ws2 = _post("/api/workspaces", {
+            "name": "doomed", "trees": {"p-1": {}},
+            "panels": [{"id": "p-1", "run_id": RUN_SENTINEL, "checkpoint": None}],
+        })
+        _post("/api/state", {
+            "workspace_id": ws2["id"],
+            "panels": [{"id": "p-1", "run_id": RUN_SENTINEL, "checkpoint": None}],
+        })
+        proc2 = subprocess.Popen(
+            ["uv", "run", "tinkpg", "send", "Name three colors.", "--n", "2",
+             "--no-thinking", "--max-tokens", "256"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            env={**os.environ, "TINKERSCOPE_BASE_URL": BASE}, cwd=REPO,
+        )
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            if _get("/api/state").get("running"):
+                break
+            if proc2.poll() is not None:
+                sys.exit(f"negative-leg send ended before generation started:\n{proc2.communicate()[0]}")
+            time.sleep(0.2)
+        else:
+            sys.exit("negative-leg send never started generating")
+        req = urllib.request.Request(f"{BASE}/api/workspaces/{ws2['id']}", method="DELETE")
+        urllib.request.urlopen(req, timeout=10)
+        out2, _ = proc2.communicate(timeout=300)
+        assert proc2.returncode != 0, (
+            "tinkpg send exited 0 with its workspace deleted mid-fire — the fold "
+            f"failure was silent again:\n{out2}"
+        )
+        assert "NOT persisted" in out2, f"missing the fold-failure warning:\n{out2}"
+        print("OK — mid-fire workspace deletion exits non-zero with the NOT-persisted warning")
     finally:
         if proc is not None:
             proc.terminate()

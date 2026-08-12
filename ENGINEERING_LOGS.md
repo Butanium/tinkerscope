@@ -1821,11 +1821,17 @@ Browser-fired chats keep the wart until the browser half adopts `parent_node`
 (its fold runs ON chat_done, so a second tab can still race it).
 
 **5. Smoke-target lesson: `base:Qwen/Qwen3.5-4B` thinking-on returns
-`reasoning=0` with the CoT unsplit in content** (renderer pair resolves
-correctly to `qwen3_5`; quirk unexplained, ~4.6k-char contents for a one-line
-question). The headless smoke samples `deepseek-ai/DeepSeek-V3.1` instead — the
-battle-tested `deepseekv3_thinking` family every other live smoke uses. Worth
-knowing before pointing any future thinking assertion at Qwen3.5 base.
+`reasoning=0` with the CoT unsplit in content.** Diagnosed same day (one live
+probe with raw_text + two offline renderer checks): the `qwen3_5` renderer
+auto-opens `<think>\n` in the prompt, and `parse_response` re-prepends that tag
+— what lets `_normalize_content` split the CoT out — ONLY when the response
+contains a recognized `</think>` close. This model never emits one (7/7
+samples: a "Thinking Process:"-style CoT, the answer, `<|im_end|>`), so the
+whole turn comes back tag-less and the CoT lands unsplit in `content`. A
+synthetic response WITH `</think>` splits correctly through the same pipeline —
+model behavior, not a parse bug. Full write-up in the box tinker skill's
+"Sampling quirks". The headless smoke samples `deepseek-ai/DeepSeek-V3.1`
+instead — the battle-tested `deepseekv3_thinking` family closes reliably.
 
 Also: `ideas/cli-commit-drops-cot-and-blobs.md` retired to done/ (closed
 structurally, its docs-undersell checklist fixed same-commit in the cli skill +
