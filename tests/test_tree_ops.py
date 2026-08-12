@@ -125,16 +125,24 @@ def test_replaying_a_whole_batch_is_free():
     assert first.changed
     second = apply_ops(first.body, batch)
     assert second.changed is False
-    assert [r["noop"] for r in second.results] == [True, True, True]
     assert second.body["trees"] == first.body["trees"]
+    # `changed` is what decides whether anything is written or broadcast, and it is
+    # computed by VALUE. The per-op `noop` flags are per-op-at-the-time and are NOT
+    # all true here: op 2 re-asserts its selection over op 3's, and op 3 puts it
+    # back. Motion that cancels out is still motion.
+    assert [r["noop"] for r in second.results] == [True, False, False]
 
 
-def test_retrying_a_partly_applied_fold_keeps_the_FIRST_sample_selected():
-    """The nasty replay: the server applied the fold, the client never saw the
-    200, the user cycled to sample 3 in the meantime, and the client retries. The
-    retry must not re-select — and must not promote sample 2 either, which is what
-    a naive "skip existing nodes" rule does (a1 is skipped, so a2 looks like the
-    first of the fan)."""
+def test_a_retried_fold_re_asserts_its_selection_and_that_is_the_right_trade():
+    """The server applied the fold, the client never saw the 200, the user cycled
+    to sample 3, and the client retries: the retry re-selects sample 1.
+
+    That is a LOSS the design accepts (§4.2 accepts the same class for a delete
+    echo landing after a local add). The alternative — write the selection only
+    for nodes THIS batch minted — reads better and is wrong: see
+    `test_concurrent_folds_under_one_parent_converge`, which strands two tabs on
+    different siblings forever. A visible, transient LWW race beats a silent
+    permanent divergence, so the re-assert stays."""
     tree = _tree(
         _node("u1", "user", "hi", None, ["a1", "a2", "a3"]),
         _node("a1", "assistant", "one", "u1"),
@@ -142,13 +150,49 @@ def test_retrying_a_partly_applied_fold_keeps_the_FIRST_sample_selected():
         _node("a3", "assistant", "three", "u1"),
         roots=["u1"], selected={ROOT: "u1", "u1": "a3"},  # the user cycled to #3
     )
-    res = apply_ops(_body({"p": tree}), [{"op": "add_nodes", "panel": "p", "select": True, "nodes": [
+    fold = {"op": "add_nodes", "panel": "p", "select": True, "nodes": [
         _node("a1", "assistant", "one", "u1"),
         _node("a2", "assistant", "two", "u1"),
         _node("a3", "assistant", "three", "u1"),
-    ]}])
-    assert res.changed is False
-    assert res.body["trees"]["p"]["selected"]["u1"] == "a3"
+    ]}
+    res = apply_ops(_body({"p": tree}), [fold])
+    assert res.body["trees"]["p"]["selected"]["u1"] == "a1"
+    # The fan's FIRST node owns the selection — a rule that reads "skip nodes that
+    # already exist" would let a2 look like the first of the fan and promote it.
+    assert res.changed is True
+    # Applying the retry twice more is stable, which is what idempotence buys.
+    assert apply_ops(res.body, [fold]).changed is False
+
+
+def test_concurrent_folds_under_one_parent_converge():
+    """Two tabs fold under the SAME user node. Each applies its own op
+    optimistically, then always-applies both echoes in rev order — and all three
+    must land on the server's canonical selection.
+
+    This is the test that decided `add_nodes {select}`'s semantics. Making the
+    selection write conditional on "this batch added the node" makes the result
+    depend on the MIRROR's optimistic state instead of on the op sequence: tab B
+    ends on a1 while the server and tab A are on b1, revs contiguous, so the
+    gap-refetch never fires and it is stuck there. Confluence requires the final
+    state to be a function of the rev-ordered ops alone."""
+    base = _tree(_node("u1", "user", "hi", None), roots=["u1"], selected={ROOT: "u1"})
+    op_a = {"op": "add_nodes", "panel": "p", "select": True,
+            "nodes": [_node("a1", "assistant", "from tab A", "u1")]}
+    op_b = {"op": "add_nodes", "panel": "p", "select": True,
+            "nodes": [_node("b1", "assistant", "from tab B", "u1")]}
+
+    server, echoes = _body({"p": base}), []
+    for op in (op_a, op_b):  # the server serializes them: A at rev+1, B at rev+2
+        res = apply_ops(server, [op])
+        server, _ = res.body, echoes.append(res.wire_ops)
+    canonical = server["trees"]["p"]["selected"]["u1"]
+    assert canonical == "b1"
+
+    for own in (op_a, op_b):
+        mirror = apply_ops(_body({"p": base}), [own]).body  # optimistic local apply
+        for echo in echoes:                                 # own echo included
+            mirror = apply_ops(mirror, echo).body
+        assert mirror["trees"] == server["trees"], f"the tab that authored {own['nodes'][0]['id']} diverged"
 
 
 # ── selection semantics ──────────────────────────────────────────────────────

@@ -1404,3 +1404,57 @@ Undo (`lib/undo.ts`) is the one call site with no single op: it restores a whole
 pre-op tree ref, so it is a `replace_tree` — which is correct but coarse (it re-ships
 the panel). Worth revisiting in P2 if the payloads bite; the durable half of undo is
 the server trash journal either way, and that path is unchanged.
+
+### 2026-08-12 — Correction: `add_nodes {select}` must re-assert, or two tabs strand
+
+Same day, correcting the entry above. That entry argued `select` should write the
+selection only for a node the batch actually ADDED, so a retried fold couldn't yank
+the view back from the sample the user had cycled to. It reads better and it is
+wrong.
+
+Conditioning the write on "we added it" makes the outcome depend on whether the node
+was new **in that mirror** — i.e. on local optimistic state — rather than on the
+rev-ordered op sequence, which is exactly what confluence requires. Two tabs folding
+under the same user node:
+
+    server:   A(add a1, select) at rev+1, B(add b1, select) at rev+2  → selected = b1
+    tab A:    local A → echo A (a1 exists, no write) → echo B (b1 new, select) → b1 ✓
+    tab B:    local B → echo A (a1 new, select a1)  → echo B (b1 EXISTS, no write) → a1 ✗
+
+Tab B sits on a1 forever: the revs are contiguous, so the gap-refetch that would
+repair it never fires. That is the same silent-divergence shape §4.2 documented for
+skip-own-batches, arrived at from a different direction. Measured with a 20-line
+script before changing anything, then kept as
+`test_concurrent_folds_under_one_parent_converge`.
+
+So the rule is back to: the first node to claim a (panel, parent) in a batch writes
+the selection, minted-here or not. The retry-steals-the-selection race is real and
+stays — it is transient, visible, and the design already accepts the same class of
+loss for a delete echo landing after a local add. A visible transient race beats a
+silent permanent divergence.
+
+**And the same trace, compared on WHOLE trees rather than on `selected`, found a
+second divergence the first probe missed**: sibling ORDER. Tab B holds `[b1]`,
+appends the echoed `a1` to get `[b1, a1]`, and its own echo can't move `b1` because
+an existing node was simply skipped — server has `[a1, b1]`. §4.1's table calls this
+one "order = arrival order; harmless", and it isn't quite: with no `selected` entry
+the render falls back to the LAST child, so two tabs that disagree on order
+eventually disagree on the active path. Fix is one rule — **a node that already
+exists is re-APPENDED on its own echo** — which makes replay reproduce rev order
+exactly, and leaves a full batch replay a no-op (moving each of `[a1,a2,a3]` to the
+end in turn lands them back in the same order). The browser mirror needs the same
+rule in `applyTreeOp`, or the engines disagree on order instead of on selection.
+
+The lesson about the first probe is worth as much as the fix: I asserted on the ONE
+field I had reasoned about, it went green, and a second bug was sitting in the same
+trace. Compare whole structures when testing convergence — the whole point is that
+you don't know which field is wrong.
+
+The generalisable bit, since I got this wrong in the confident direction: "is this
+op idempotent?" is the wrong question. The question is **"is the result a function
+of the op sequence alone?"** An op can be perfectly idempotent against the tree it
+first landed on and still diverge, because a mirror applies its own op EARLY and
+then replays the canonical order over the top. Anything that branches on tree state
+the local apply already changed is suspect. `changed`-by-value (introduced in the
+same commit) is what keeps the re-assert cheap: a replayed batch that nets to no
+difference still writes nothing and broadcasts nothing.

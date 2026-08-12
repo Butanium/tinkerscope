@@ -139,6 +139,59 @@ def test_patch_broadcasts_set_meta_with_the_MERGED_values(client, bus_events):
     assert summary["rev"] == payload["rev"]
 
 
+def test_the_broadcast_echoes_what_was_STORED_not_what_was_SENT(client, bus_events):
+    """Every field the server ADJUSTS on the way in goes out post-adjustment.
+
+    A mirror always-applies the batch it receives (§4.2), so a broadcast carrying
+    the SUBMITTED values converges every tab on the un-normalized form and leaves
+    them there — no rev gap ever fires, because the rev is perfectly correct. The
+    three adjusted fields: `panels` (phantom heal), `panel_seq` (max-merge),
+    `seen_panels` (union)."""
+    cid = _new_ws(client)
+    client.patch(f"/api/workspaces/{cid}", json={"panel_seq": 9, "seen_panels": ["p-1"]})
+    bus_events.clear()
+
+    _ops(client, cid,
+         _add("p-9", "u1", "user", "carried over", None),
+         {"op": "set_meta", "fields": {
+             "panels": [
+                 {"id": "p-9", "run_id": None, "checkpoint": None},   # blank but HAS a tree ⇒ kept
+                 {"id": "p-77", "run_id": None, "checkpoint": None},  # blank, no tree ⇒ dropped
+             ],
+             "panel_seq": 2,           # staler than the stored 9
+             "seen_panels": ["p-9"],   # a subset of the ledger
+         }})
+
+    (event, payload), = bus_events
+    stored = client.get(f"/api/workspaces/{cid}").json()
+    fields = payload["ops"][-1]["fields"]
+    for key, value in fields.items():
+        assert value == stored[key], f"broadcast {key} is not what was stored"
+    # ...and each of those genuinely differs from what the client sent.
+    assert [p["id"] for p in fields["panels"]] == ["p-9"]
+    assert fields["panel_seq"] == 9
+    assert fields["seen_panels"] == ["p-1", "p-9"]
+    assert payload["rev"] == stored["rev"]
+
+
+def test_the_broadcast_tree_is_the_stored_light_tree(client, bus_events):
+    """Same rule one op over: `replace_tree` splits heavy fields out and coerces
+    the shape, so the event has to carry the tree that LANDED."""
+    cid = _new_ws(client)
+    bus_events.clear()
+    client.post(f"/api/workspaces/{cid}/ops", json={"ops": [{
+        "op": "replace_tree", "panel": "primary", "tree": {
+            "nodes": {"n1": {"id": "n1", "role": "assistant", "content": "x", "parent": None,
+                             "children": [], "token_logprobs": HEAVY_LOGPROBS}},
+            "rootChildren": ["n1"], "selected": {},
+        }}]})
+    (_event, payload), = bus_events
+    stored = client.get(f"/api/workspaces/{cid}").json()["trees"]["primary"]
+    assert payload["ops"][0]["tree"] == stored
+    assert "token_logprobs" not in stored["nodes"]["n1"]
+    assert stored["nodes"]["n1"]["has_token_logprobs"] is True
+
+
 def test_a_patch_that_changes_nothing_is_silent(client, bus_events):
     cid = _new_ws(client, name="Same")
     rev = client.get(f"/api/workspaces/{cid}").json()["rev"]
