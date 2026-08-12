@@ -122,7 +122,17 @@ def main() -> None:
             page.click(SYS_FOLD)  # fold the editor while muted
             checks.append(("folded while muted stays inactive", page.evaluate(CHIP_ON) is False))
             page.click(SYS_POWER)
-            page.wait_for_function(CHIP_ON, timeout=5000)  # truthy = .on back
+            try:
+                page.wait_for_function(CHIP_ON, timeout=5000)  # truthy = .on back
+            except Exception:
+                import json as _json
+                print("CHIP DUMP:", _json.dumps({
+                    "chip_html": page.evaluate("document.querySelector('.system-chip, [data-testid=system-chip]')?.outerHTML ?? document.querySelector('.sidebar')?.innerHTML.slice(0,600)"),
+                    "state": api("GET", "/api/state"),
+                    "conv_enabled": conv_field(conv_a, "system_enabled"),
+                    "errors": errors[-5:],
+                }, default=str)[:2500])
+                raise
             re_enabled = wait_conv(conv_a, "system_enabled", True)
             checks.append((f"power on restores ACTIVE without retyping ({re_enabled!r})",
                            re_enabled is True and page.evaluate(CHIP_ON) is True))

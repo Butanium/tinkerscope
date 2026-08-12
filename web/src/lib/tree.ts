@@ -819,7 +819,32 @@ export type PanelOp =
   | { op: 'copy_tree'; from_panel: string; to_panel: string }
   | { op: 'replace_tree'; panel: string; tree: ConvTree | null };
 
-/** Apply one panel-level op to a trees map. Same-ref return on no-ops. */
+/** Key-order-insensitive value equality (an echo's tree round-tripped through
+ *  JSON+python, so key order may differ from the locally-built twin). */
+function treeEq(a: unknown, b: unknown): boolean {
+  const canon = (x: unknown): string => {
+    if (Array.isArray(x)) return '[' + x.map(canon).join(',') + ']';
+    if (x && typeof x === 'object')
+      return (
+        '{' +
+        Object.keys(x)
+          .sort()
+          .filter((k) => (x as Record<string, unknown>)[k] !== undefined)
+          .map((k) => JSON.stringify(k) + ':' + canon((x as Record<string, unknown>)[k]))
+          .join(',') +
+        '}'
+      );
+    return JSON.stringify(x);
+  };
+  return canon(a) === canon(b);
+}
+
+/** Apply one panel-level op to a trees map. Same-ref return on no-ops — which
+ *  INCLUDES a value-equal replace/copy: an own echo replays what the mirror
+ *  already applied optimistically, and handing back a new ref for identical
+ *  content re-renders the whole column under the user's cursor (the ops-era
+ *  regression browser_undo caught: the restore's echo yanked the toolbar
+ *  mid-click). */
 export function applyPanelOp(
   trees: Record<string, ConvTree>,
   op: PanelOp
@@ -827,6 +852,7 @@ export function applyPanelOp(
   if (op.op === 'copy_tree') {
     const src = trees[op.from_panel];
     if (!src) throw new OpRejected(`copy_tree: unknown source panel ${op.from_panel}`);
+    if (treeEq(trees[op.to_panel], src)) return trees;
     return { ...trees, [op.to_panel]: structuredClone(src) };
   }
   if (op.op === 'replace_tree') {
@@ -844,6 +870,7 @@ export function applyPanelOp(
     } catch (e) {
       throw new OpRejected(`replace_tree: ${(e as Error).message}`);
     }
+    if (treeEq(trees[op.panel], op.tree)) return trees;
     return { ...trees, [op.panel]: op.tree };
   }
   const cur = trees[op.panel] ?? emptyTree();

@@ -27,6 +27,7 @@ import {
   reconcileExternal,
   assertValid,
   applyTreeOp,
+  applyPanelOp,
   selectedDiffOps,
   chainFrom,
   opNode,
@@ -892,6 +893,23 @@ test('heavyNodeIds/lightenTree: fold-time lightening flags exactly the blob-bear
   eq(light.nodes[ids[0]].has_raw_meta, true);
   eq(light.nodes[ids[1]].has_token_logprobs, undefined, 'data-less sibling must not be flagged');
   eq(lightenTree(light, heavyNodeIds(light)), null, 'nothing left to strip');
+});
+
+test('applyPanelOp: value-equal replace/copy echoes are SAME-REF no-ops (no re-render)', () => {
+  // An own echo replays what the mirror already holds; a new ref for identical
+  // content re-renders the column under the user's cursor (browser_undo caught
+  // the restore echo doing exactly that). Key order must not matter — the echo
+  // round-tripped through JSON + python.
+  const { tree } = appendUserTurn(emptyTree(), 'q');
+  const trees = { p: tree };
+  const reordered = JSON.parse(JSON.stringify(tree)) as ConvTree; // fresh refs
+  eq(applyPanelOp(trees, { op: 'replace_tree', panel: 'p', tree: reordered }) === trees, true,
+    'value-equal replace must return the same map ref');
+  const dup = { a: tree, b: structuredClone(tree) };
+  eq(applyPanelOp(dup, { op: 'copy_tree', from_panel: 'a', to_panel: 'b' }) === dup, true,
+    'value-equal copy must return the same map ref');
+  const changed = applyPanelOp(trees, { op: 'replace_tree', panel: 'p', tree: emptyTree() });
+  ok(changed !== trees, 'a genuinely different replace still applies');
 });
 
 // ── summary ──────────────────────────────────────────────────────────
