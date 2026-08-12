@@ -819,6 +819,39 @@ test('applyTreeOp two tabs folding under one parent CONVERGE (the rule-1 trace)'
   eq(tabB.nodes['u1'].children.join(','), server.nodes['u1'].children.join(','), 'and the canonical sibling order');
 });
 
+test('applyTreeOp IGNORES a children array smuggled onto a wire node (contract defense)', () => {
+  // The wire shape is TreeNode minus children — a payload carrying one (a
+  // buggy broadcast once shipped stored nodes with server-populated children)
+  // must not make the mirror adopt edges to nodes it doesn't hold.
+  const t = applyTreeOp(emptyTree(), {
+    op: 'add_nodes',
+    select: true,
+    nodes: [{ id: 'u1', role: 'user', content: 'q', parent: null, children: ['ghost-a', 'ghost-b'] } as never]
+  });
+  eq(t.nodes['u1'].children, [], 'smuggled children must be dropped');
+  assertValid(t);
+});
+
+test('applyTreeOp/applyPanelOp reject filename-unsafe node ids (blob-name parity)', () => {
+  let threw = 0;
+  try {
+    applyTreeOp(emptyTree(), { op: 'add_nodes', nodes: [{ id: 'a.b', role: 'user', content: 'x', parent: null }] });
+  } catch (e) {
+    ok(e instanceof OpRejected && e.message.includes('unsafe node id'), `got: ${e}`);
+    threw++;
+  }
+  try {
+    applyPanelOp({}, {
+      op: 'replace_tree', panel: 'p',
+      tree: { nodes: { 'a/b': { id: 'a/b', role: 'user', content: 'x', parent: null, children: [] } }, rootChildren: ['a/b'], selected: {} }
+    });
+  } catch (e) {
+    ok(e instanceof OpRejected && e.message.includes('unsafe node id'), `got: ${e}`);
+    threw++;
+  }
+  eq(threw, 2);
+});
+
 test('applyTreeOp select is validated LWW: stale/unknown writes are same-ref no-ops', () => {
   const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
   const { tree: t2, ids } = foldAssistant(t1, u, [{ content: 'a' }, { content: 'b' }]);

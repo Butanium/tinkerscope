@@ -683,6 +683,10 @@ export type TreeOp =
  *  throw as divergence and refetches. */
 export class OpRejected extends Error {}
 
+/** Node ids become blob FILENAMES server-side (workspace_store._SAFE_ID) —
+ *  both interpreters reject anything else before it can persist. */
+const SAFE_NODE_ID = /^[A-Za-z0-9_-]+$/;
+
 /** A node's op-wire form: everything but `children`, undefined fields dropped
  *  (they would round-trip as JSON nulls otherwise). */
 export function opNode(t: ConvTree, id: string): OpNode {
@@ -781,9 +785,16 @@ export function applyTreeOp(t0: ConvTree, op: TreeOp): ConvTree {
         }
         continue;
       }
+      if (!SAFE_NODE_ID.test(w.id))
+        throw new OpRejected(`unsafe node id ${JSON.stringify(w.id)}`);
       if (parentKey !== ROOT && !cur.nodes[parentKey])
         throw new OpRejected(`node ${w.id}: parent ${parentKey} does not exist`);
       t ??= cloneTree(t0);
+      // `children: []` is CONTRACT DEFENSE, not a convenience: the wire shape
+      // is TreeNode minus children (an op can only APPEND), and a payload that
+      // smuggles a child list in — a buggy broadcast once shipped stored nodes
+      // whose children the mirror hadn't applied yet — must be ignored, or the
+      // mirror adopts edges pointing at nodes it doesn't have.
       t.nodes[w.id] = { ...w, parent: w.parent ?? null, children: [] };
       childArray(t, parentKey).push(w.id);
       if (op.select && !claimed.has(parentKey)) {
@@ -864,7 +875,14 @@ export function applyPanelOp(
     }
     // A client-supplied wholesale tree is structurally validated before it
     // lands (mirrors tree_ops.validate_tree — itself a port of assertValid, so
-    // the two sides agree on the message down to the vector substrings).
+    // the two sides agree on the message down to the vector substrings). Node
+    // ids must also be filename-safe — they become blob filenames server-side,
+    // and an unsafe id that only trips at blob-write time persists as a node
+    // whose blobs can never be read back.
+    for (const nid of Object.keys(op.tree.nodes ?? {})) {
+      if (!SAFE_NODE_ID.test(nid))
+        throw new OpRejected(`replace_tree: unsafe node id ${JSON.stringify(nid)}`);
+    }
     try {
       assertValid(op.tree);
     } catch (e) {

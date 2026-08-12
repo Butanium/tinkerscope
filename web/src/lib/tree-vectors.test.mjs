@@ -79,6 +79,18 @@ for (const f of files) {
       const want = v.tree_before !== undefined ? v.tree_after : v.trees_after;
       if (canon(got) !== canon(want))
         throw new Error(`mismatch\n    want ${canon(want)}\n    got  ${canon(got)}`);
+      // Production-path parity: when the vector records the batch's computed
+      // BROADCAST, replaying it ONE OP AT A TIME (exactly what a mirror does
+      // with a bus echo) must also land on tree_after — this is the check that
+      // catches input-shape-vs-broadcast-shape drift (e.g. the broadcast that
+      // shipped nodes WITH children).
+      if (Array.isArray(v.broadcast)) {
+        const start = v.trees_before ?? { [v.op.panel]: v.tree_before };
+        const replayed = v.broadcast.reduce((m, op) => applyPanelOp(m, op), start);
+        const wantMap = v.trees_after ?? { [v.op.panel]: v.tree_after };
+        if (canon(replayed) !== canon(wantMap))
+          throw new Error(`broadcast replay mismatch\n    want ${canon(wantMap)}\n    got  ${canon(replayed)}`);
+      }
     }
     passed++;
   } catch (e) {
