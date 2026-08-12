@@ -23,9 +23,14 @@ CONFLUENCE GUARD (§4.2) — read before adding an op:
     Every op is either **idempotent-structural** (`add_nodes` by globally-unique
     id + append, `delete` subtree by id, `copy_tree` keep-ids) or
     **last-writer-wins** (`select`, `replace_tree`, `set_meta`). Both classes are
-    confluent under rev-ordered replay: append order = rev order, a
-    missing-parent add is rejected identically everywhere, and an LWW key depends
-    only on the last op touching it. **Never add an op that mutates node content
+    confluent under rev-ordered replay: append order = rev order (which is why an
+    existing node is re-APPENDED on its own echo — a mirror that applied its own
+    add optimistically holds it in the wrong slot, and skipping it outright leaves
+    two tabs permanently disagreeing on sibling order), a missing-parent add is
+    rejected identically everywhere, and an LWW key depends only on the last op
+    touching it. The test that decides all of this is
+    `test_concurrent_folds_under_one_parent_converge`, and it compares WHOLE trees
+    on purpose. **Never add an op that mutates node content
     in place or inserts at an arbitrary index** — either breaks confluence and
     forces a real CRDT. Node content being immutable after creation (edits/regens
     mint NEW nodes) is what makes the whole table idempotent, and is also what
@@ -563,6 +568,7 @@ def _add_one(ctx: _Ctx, tree: dict, panel: str, node: Any, select: bool) -> tupl
         raise OpError(f"node {nid}: `children` are server-owned — send none")
 
     added = False
+    reordered = False
     existing = tree["nodes"].get(nid)
     if isinstance(existing, dict):
         # Idempotent replay (a retried batch, or a mirror re-sending its own echo).
@@ -572,6 +578,20 @@ def _add_one(ctx: _Ctx, tree: dict, panel: str, node: Any, select: bool) -> tupl
             raise OpError(f"node {nid} already exists with different role/content")
         light = existing
         parent_key = existing.get("parent") or ROOT
+        # Re-APPEND it. Sibling order is "append order = rev order", and a mirror
+        # that applied its own add optimistically has the node in the wrong slot:
+        # tab B holds [b1] and appends the echoed a1 to get [b1, a1] where the
+        # server has [a1, b1]. Moving an existing node to the end on its own echo
+        # makes replay reproduce rev order exactly — and a full batch replay is
+        # still a no-op, since moving each of [a1,a2,a3] to the end in turn lands
+        # them back in the same order. Order matters beyond cosmetics: with no
+        # `selected` entry the render falls back to the LAST child, so two tabs
+        # disagreeing on order eventually disagree on the active path.
+        kids = _child_array(tree, parent_key)
+        if kids is not None and nid in kids and kids[-1] != nid:
+            kids.remove(nid)
+            kids.append(nid)
+            reordered = True
     else:
         parent_key = parent if parent is not None else ROOT
         if parent is not None and parent not in tree["nodes"]:
@@ -598,18 +618,24 @@ def _add_one(ctx: _Ctx, tree: dict, panel: str, node: Any, select: bool) -> tupl
     selected_changed = False
     if select:
         key = (panel, parent_key)
-        first_here = key not in ctx.selected_written
-        # CLAIM the parent even for a node we SKIPPED, so retrying a fold that was
-        # already applied can't promote sample 2: the fan's first node still owns
-        # the selection whether or not this batch is what minted it.
-        ctx.selected_written.add(key)
-        # Only a node we actually ADDED writes the selection. "Select what I just
-        # added" already happened for one that exists, and re-asserting it on a
-        # retry would yank the view back from whatever the user picked in between.
-        if first_here and added and tree["selected"].get(parent_key) != nid:
-            tree["selected"][parent_key] = nid
-            selected_changed = True
-    return light, added or selected_changed
+        # First node to claim this parent in the batch writes the selection — one
+        # rule giving chain semantics (each node its own parent ⇒ every step
+        # selected) and fold semantics (a fan shares a parent ⇒ the FIRST selected).
+        #
+        # It writes whether or not THIS batch minted the node, and that is
+        # load-bearing for convergence, not laziness: making the write conditional
+        # on "we added it" makes the outcome depend on the mirror's own optimistic
+        # state rather than on the op sequence, and two tabs folding under one
+        # parent then strand on different siblings with contiguous revs — no gap,
+        # so no refetch ever corrects it. Measured, see ENGINEERING_LOGS 2026-08-12.
+        # The cost is the accepted LWW race: a retried batch re-asserts its
+        # selection over a sibling the user cycled to in between.
+        if key not in ctx.selected_written:
+            ctx.selected_written.add(key)
+            if tree["selected"].get(parent_key) != nid:
+                tree["selected"][parent_key] = nid
+                selected_changed = True
+    return light, added or selected_changed or reordered
 
 
 def _op_select(ctx: _Ctx, op: dict) -> tuple[bool, dict]:
