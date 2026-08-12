@@ -1,0 +1,115 @@
+{
+  "name": "BATCH: two add_nodes ops under ONE parent — the second op's select wins (claims are per-OP, not per-batch)",
+  "ops": [
+    {
+      "op": "add_nodes",
+      "panel": "p",
+      "nodes": [
+        {
+          "id": "a1",
+          "role": "assistant",
+          "content": "one",
+          "parent": "u1"
+        }
+      ],
+      "select": true
+    },
+    {
+      "op": "add_nodes",
+      "panel": "p",
+      "nodes": [
+        {
+          "id": "a2",
+          "role": "assistant",
+          "content": "two",
+          "parent": "u1"
+        }
+      ],
+      "select": true
+    }
+  ],
+  "trees_before": {
+    "p": {
+      "nodes": {
+        "u1": {
+          "id": "u1",
+          "role": "user",
+          "content": "hi",
+          "parent": null,
+          "children": []
+        }
+      },
+      "rootChildren": [
+        "u1"
+      ],
+      "selected": {
+        "__root__": "u1"
+      }
+    }
+  },
+  "trees_after": {
+    "p": {
+      "nodes": {
+        "u1": {
+          "id": "u1",
+          "role": "user",
+          "content": "hi",
+          "parent": null,
+          "children": [
+            "a1",
+            "a2"
+          ]
+        },
+        "a1": {
+          "id": "a1",
+          "role": "assistant",
+          "content": "one",
+          "parent": "u1",
+          "children": []
+        },
+        "a2": {
+          "id": "a2",
+          "role": "assistant",
+          "content": "two",
+          "parent": "u1",
+          "children": []
+        }
+      },
+      "rootChildren": [
+        "u1"
+      ],
+      "selected": {
+        "__root__": "u1",
+        "u1": "a2"
+      }
+    }
+  },
+  "broadcast": [
+    {
+      "op": "add_nodes",
+      "panel": "p",
+      "nodes": [
+        {
+          "id": "a1",
+          "role": "assistant",
+          "content": "one",
+          "parent": "u1"
+        }
+      ],
+      "select": true
+    },
+    {
+      "op": "add_nodes",
+      "panel": "p",
+      "nodes": [
+        {
+          "id": "a2",
+          "role": "assistant",
+          "content": "two",
+          "parent": "u1"
+        }
+      ],
+      "select": true
+    }
+  ]
+}

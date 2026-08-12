@@ -3,24 +3,94 @@
   "op": {
     "op": "add_nodes",
     "panel": "p",
-    "nodes": [{"id": "u9", "role": "user", "content": "probe", "parent": null, "system_prompt": "be terse"}],
+    "nodes": [
+      {
+        "id": "u9",
+        "role": "user",
+        "content": "probe",
+        "parent": null,
+        "system_prompt": "be terse"
+      }
+    ],
     "select": true
   },
   "tree_before": {
     "nodes": {
-      "u1": {"id": "u1", "role": "user", "content": "hi", "parent": null, "children": ["a1"]},
-      "a1": {"id": "a1", "role": "assistant", "content": "hello", "parent": "u1", "children": []}
+      "u1": {
+        "id": "u1",
+        "role": "user",
+        "content": "hi",
+        "parent": null,
+        "children": [
+          "a1"
+        ]
+      },
+      "a1": {
+        "id": "a1",
+        "role": "assistant",
+        "content": "hello",
+        "parent": "u1",
+        "children": []
+      }
     },
-    "rootChildren": ["u1"],
-    "selected": {"__root__": "u1", "u1": "a1"}
+    "rootChildren": [
+      "u1"
+    ],
+    "selected": {
+      "__root__": "u1",
+      "u1": "a1"
+    }
   },
   "tree_after": {
     "nodes": {
-      "u1": {"id": "u1", "role": "user", "content": "hi", "parent": null, "children": ["a1"]},
-      "a1": {"id": "a1", "role": "assistant", "content": "hello", "parent": "u1", "children": []},
-      "u9": {"id": "u9", "role": "user", "content": "probe", "system_prompt": "be terse", "parent": null, "children": []}
+      "u1": {
+        "id": "u1",
+        "role": "user",
+        "content": "hi",
+        "parent": null,
+        "children": [
+          "a1"
+        ]
+      },
+      "a1": {
+        "id": "a1",
+        "role": "assistant",
+        "content": "hello",
+        "parent": "u1",
+        "children": []
+      },
+      "u9": {
+        "id": "u9",
+        "role": "user",
+        "content": "probe",
+        "system_prompt": "be terse",
+        "parent": null,
+        "children": []
+      }
     },
-    "rootChildren": ["u1", "u9"],
-    "selected": {"__root__": "u9", "u1": "a1"}
-  }
+    "rootChildren": [
+      "u1",
+      "u9"
+    ],
+    "selected": {
+      "__root__": "u9",
+      "u1": "a1"
+    }
+  },
+  "broadcast": [
+    {
+      "op": "add_nodes",
+      "panel": "p",
+      "nodes": [
+        {
+          "id": "u9",
+          "role": "user",
+          "content": "probe",
+          "parent": null,
+          "system_prompt": "be terse"
+        }
+      ],
+      "select": true
+    }
+  ]
 }

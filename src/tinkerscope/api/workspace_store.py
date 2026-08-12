@@ -1032,11 +1032,16 @@ def apply_ops(cid: str, ops: Any) -> dict | None:
             res = tree_ops.apply_ops(conv, ops)
         except tree_ops.OpError as e:
             return {"rejected": {"index": e.index, "error": e.error}}
+        # BEFORE the no-change bail-out: a replay whose nodes all already exist
+        # changes no tree bytes but may be the only carrier of their heavy data
+        # (a light-node create can leave `has_*` flags with no blob behind them).
+        # Write-once means this is free whenever the blobs are already there, and
+        # it makes a retry the repair path for that dangling-flag state.
+        _write_blobs(cid, res.blobs)
         if not res.changed:
             return {"rev": _rev_of(conv), "results": res.results, "ops": []}
         body = res.body
         body["updated_at"] = _now()
-        _write_blobs(cid, res.blobs)
         _persist(body)
         return {"rev": _rev_of(body), "results": res.results, "ops": res.wire_ops}
 

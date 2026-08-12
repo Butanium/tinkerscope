@@ -1,0 +1,14 @@
+{
+  "name": "replace_tree: a node id outside the filename-safe charset is rejected (ids become blob filenames)",
+  "op": {
+    "op": "replace_tree",
+    "panel": "p",
+    "tree": {
+      "nodes": {"a.b": {"id": "a.b", "role": "user", "content": "x", "parent": null, "children": []}},
+      "rootChildren": ["a.b"],
+      "selected": {}
+    }
+  },
+  "tree_before": {"nodes": {}, "rootChildren": [], "selected": {}},
+  "rejects": "unsafe node id"
+}
