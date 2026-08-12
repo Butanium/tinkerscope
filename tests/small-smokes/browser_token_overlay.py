@@ -273,8 +273,19 @@ def main() -> None:
             checks.append((f"surprisal paints amber {amber}", amber[3] > 0 and amber[0] > amber[2]))
             match_row = '.lp-hl .thinking-toggle-row:has-text("Color tokens by")'
             page.click(f'{match_row} .seg-btn:has-text("Match")')
-            page.wait_for_selector(".lp-hl-chip.sel", timeout=3000)
-            page.click('.lp-hl-chip:has-text("ovl-blue")')
+            # Switching to Match AUTO-SELECTS the first enabled rule (+page's
+            # setTokenTint), which is ours or someone else's depending on what
+            # the highlights store already holds. An unconditional click here
+            # therefore ADDED our rule when another one won the race and
+            # TOGGLED IT OFF when ours did — so drive the END STATE, not the
+            # click. (This smoke passed only because dev-isolated snapshotted a
+            # state home whose rules happened to sort ahead of ovl-blue; it
+            # failed the moment the scan root changed. 2026-08-12.)
+            page.wait_for_selector(".lp-hl-chip", timeout=3000)
+            ours = '.lp-hl-chip:has-text("ovl-blue")'
+            if page.locator(f"{ours}.sel").count() == 0:
+                page.click(ours)
+            page.wait_for_selector(f"{ours}.sel", timeout=3000)
             page.wait_for_timeout(300)
             blue = pixel_at(".message-content strong")
             checks.append((f"match coloring repaints in the rule hue {blue}",
