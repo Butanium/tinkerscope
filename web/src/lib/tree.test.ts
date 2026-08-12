@@ -770,7 +770,12 @@ test('applyTreeOp select-claim: a retried PARTIAL fold cannot promote the second
   eq(siblingsOf(retried, 's0').length, 2, 's1 still inserted');
 });
 
-test('applyTreeOp select-claim: replay after the user cycled never yanks selection back', () => {
+test('applyTreeOp replay re-asserts batch order AND first-sibling selection (confluence over UX)', () => {
+  // Deliberate reversal of an earlier rule ("replay never yanks selection
+  // back"): under always-apply, sparing the user's cycle on replay requires
+  // branching on whether THIS mirror minted the node — local optimistic
+  // state — which is the §4.2 skip-own divergence one level down. The yank
+  // is transient and visible; the divergence was permanent and silent.
   const base = applyTreeOp(emptyTree(), {
     op: 'add_nodes',
     select: true,
@@ -787,7 +792,30 @@ test('applyTreeOp select-claim: replay after the user cycled never yanks selecti
   const folded = applyTreeOp(base, fan);
   const cycled = applyTreeOp(folded, { op: 'select', parent_key: 'u1', child_id: 's1' });
   const replayed = applyTreeOp(cycled, fan);
-  eq(replayed === cycled, true, 'all-existing replay must be a same-ref no-op');
+  eq(replayed.selected['u1'], 's0', 'replay re-selects the first of the fan');
+  eq(replayed.nodes['u1'].children.join(','), 's0,s1', 'full-batch replay is an order fixpoint');
+});
+
+test('applyTreeOp two tabs folding under one parent CONVERGE (the rule-1 trace)', () => {
+  // Server order: A(add a1, select) rev+1, B(add b1, select) rev+2 ⇒ canonical
+  // selection is b1 and children are [a1, b1]. Tab B applies its own op
+  // optimistically FIRST, then replays both echoes in rev order — if an
+  // existing node neither wrote its claim nor re-appended, tab B would sit on
+  // a1 / [b1, a1] forever with contiguous revs (no gap, no refetch).
+  const base = applyTreeOp(emptyTree(), {
+    op: 'add_nodes',
+    select: true,
+    nodes: [{ id: 'u1', role: 'user', content: 'q', parent: null }]
+  });
+  const opA: TreeOp = { op: 'add_nodes', select: true, nodes: [{ id: 'a1', role: 'assistant', content: 'A', parent: 'u1' }] };
+  const opB: TreeOp = { op: 'add_nodes', select: true, nodes: [{ id: 'b1', role: 'assistant', content: 'B', parent: 'u1' }] };
+  // server / tab A end state:
+  const server = applyTreeOp(applyTreeOp(base, opA), opB);
+  // tab B: local B, then echo A, then own echo B:
+  const tabB = applyTreeOp(applyTreeOp(applyTreeOp(base, opB), opA), opB);
+  eq(server.selected['u1'], 'b1');
+  eq(tabB.selected['u1'], server.selected['u1'], 'tab B converges on the canonical selection');
+  eq(tabB.nodes['u1'].children.join(','), server.nodes['u1'].children.join(','), 'and the canonical sibling order');
 });
 
 test('applyTreeOp select is validated LWW: stale/unknown writes are same-ref no-ops', () => {

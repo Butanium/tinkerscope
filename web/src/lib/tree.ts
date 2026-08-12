@@ -729,12 +729,23 @@ export function selectedDiffOps(prev: ConvTree, next: ConvTree): TreeOp[] {
 export function applyTreeOp(t0: ConvTree, op: TreeOp): ConvTree {
   if (op.op === 'add_nodes') {
     let t: ConvTree | null = null;
-    // The select-CLAIM rule (replay safety, must match tree_ops.py exactly):
-    // the FIRST node per parent CLAIMS it — but only a node actually INSERTED
-    // also WRITES the selection. A skipped (already-present) node claims
-    // without writing, so a retried partial fold can't promote the second
-    // sample of a fan, and a full replay can't yank the view back to sample 1
-    // after the user cycled away.
+    // Confluence rules for existing nodes (must match tree_ops.py — the
+    // add_replay_re_appends_and_re_selects vector pins both). Under
+    // always-apply, a mirror applies its own op EARLY and then replays the
+    // canonical rev order over the top, so NOTHING here may branch on "did
+    // this mirror mint the node" — that's local optimistic state, and
+    // branching on it is the §4.2 skip-own divergence one level down (two
+    // tabs folding under one parent left tab B on the wrong sibling with
+    // contiguous revs, so no refetch ever repaired it):
+    //  1. the FIRST node per parent in the batch WRITES the selection,
+    //     minted-or-not. Cost: a replayed fold transiently yanks a cycled
+    //     view back — visible and accepted, vs silent divergence.
+    //  2. an existing node is RE-APPENDED to the end of its parent's
+    //     children, so replaying a batch reproduces rev order exactly (a
+    //     full-batch replay is a fixpoint: moving each of [a,b,c] to the end
+    //     in turn lands them back in order). Without the move, sibling order
+    //     disagrees across mirrors, and where `selected` is unset the
+    //     default-LAST render turns that into an active-path disagreement.
     const claimed = new Set<string>();
     for (const w of op.nodes) {
       const cur = t ?? t0;
@@ -744,7 +755,21 @@ export function applyTreeOp(t0: ConvTree, op: TreeOp): ConvTree {
         // Wording matches tree_ops.py — the fixture vectors assert substrings.
         if (existing.role !== w.role || existing.content !== w.content)
           throw new OpRejected(`node ${w.id} already exists with different role/content`);
-        if (op.select) claimed.add(parentKey);
+        const kids = parentKey === ROOT ? cur.rootChildren : cur.nodes[parentKey]?.children;
+        const idx = kids ? kids.indexOf(w.id) : -1;
+        if (idx >= 0 && idx !== kids!.length - 1) {
+          t ??= cloneTree(t0);
+          const arr = childArray(t, parentKey);
+          arr.splice(arr.indexOf(w.id), 1);
+          arr.push(w.id);
+        }
+        if (op.select && !claimed.has(parentKey)) {
+          claimed.add(parentKey);
+          if ((t ?? t0).selected[parentKey] !== w.id) {
+            t ??= cloneTree(t0);
+            t.selected[parentKey] = w.id;
+          }
+        }
         continue;
       }
       if (parentKey !== ROOT && !cur.nodes[parentKey])
@@ -767,7 +792,12 @@ export function applyTreeOp(t0: ConvTree, op: TreeOp): ConvTree {
     t.selected[op.parent_key] = op.child_id;
     return t;
   }
-  return deleteSubtree(t0, op.node_id); // missing id → same-ref no-op inside
+  if (op.op === 'delete') return deleteSubtree(t0, op.node_id); // missing id → same-ref no-op inside
+  // Wire data is untyped: an op kind this build doesn't know must THROW so the
+  // echo path treats it as desync and refetches — a silent no-op here is
+  // permanent divergence with contiguous revs. Parity: tree_ops.py's
+  // `unknown op` OpError.
+  throw new OpRejected(`unknown op ${(op as { op?: string }).op}`);
 }
 
 /** The map-level half of the vocabulary: tree-level ops stamped with their
