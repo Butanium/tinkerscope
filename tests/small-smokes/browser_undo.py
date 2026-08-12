@@ -18,6 +18,7 @@ No model calls.
 """
 import json
 import sys
+import time
 import urllib.request
 from pathlib import Path
 
@@ -62,14 +63,42 @@ def body_has(page, text):
 
 
 def delete_row(page, panel_index, modifiers=None):
-    """Click the delete button on the assistant row of one panel, expanding the
-    row's overflow menu first if the toolbar folded it away."""
+    """Click the delete button on the assistant row of one panel, unfolding the
+    row's overflow menu first if the toolbar folded it away.
+
+    RE-SAMPLING loop, not a one-shot is_visible() branch: right after a
+    re-render (undo restore) OverflowRow re-measures, and the toolbar can flip
+    folded→fits in the microseconds between a check and the click — a committed
+    branch then waits 30s on a toggle that ended up acts-toggle-hidden while
+    the delete button sits visible next to it (bit three times on a loaded box,
+    2026-08-12; the transition window is invisible on an idle one)."""
     panel = page.locator(".chat-column").nth(panel_index)
     row = panel.locator(".message").nth(1)  # 0 = the user turn
     btn = row.locator("[data-testid=delete-msg]")
-    if not btn.is_visible():
-        row.locator("[data-testid=acts-toggle]").click()
-    btn.click(modifiers=modifiers or [])
+    deadline = time.time() + 6
+    last = None
+    while time.time() < deadline:
+        try:
+            if btn.is_visible():
+                btn.click(modifiers=modifiers or [], timeout=1500)
+                return
+            tog = row.locator("[data-testid=acts-toggle]:not(.acts-toggle-hidden)")
+            if tog.count() and tog.is_visible():
+                tog.click(timeout=1500)  # unfold; next pass clicks the delete
+        except Exception as e:  # transition landed mid-click — re-sample
+            last = e
+        page.wait_for_timeout(150)
+    dump = page.evaluate("""(idx) => {
+      const col = document.querySelectorAll('.chat-column')[idx];
+      return [...col.querySelectorAll('.message')].map(r => ({
+        txt: r.innerText.slice(0, 40),
+        toolbar: [...r.querySelectorAll('[data-testid]')].map(b => {
+          const rc = b.getBoundingClientRect();
+          return b.dataset.testid + (rc.width && rc.height ? ':vis' : ':hid');
+        }).join(' ')
+      }));
+    }""", panel_index)
+    raise AssertionError(f"delete button never became clickable: {last}\nrows: {dump}")
 
 
 def main():

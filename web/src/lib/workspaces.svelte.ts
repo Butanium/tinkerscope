@@ -1212,8 +1212,15 @@ class ConversationsStore {
         }))
       );
     }
-    if (Array.isArray(fields.reduced_panels)) this.reducedPanels = new Set(fields.reduced_panels);
-    if (Array.isArray(fields.send_targets)) this.sendTargets = new Set(fields.send_targets);
+    // Value-compare before assigning the Sets: an own echo carries what we
+    // already hold, and a fresh Set ref for equal content re-renders every
+    // reader (same class of churn the treeEq guard kills for replace echoes).
+    const setEq = (s: Set<string>, arr: string[]) =>
+      s.size === arr.length && arr.every((x) => s.has(x));
+    if (Array.isArray(fields.reduced_panels) && !setEq(this.reducedPanels, fields.reduced_panels))
+      this.reducedPanels = new Set(fields.reduced_panels);
+    if (Array.isArray(fields.send_targets) && !setEq(this.sendTargets, fields.send_targets))
+      this.sendTargets = new Set(fields.send_targets);
     if (Array.isArray(fields.seen_panels))
       for (const p of fields.seen_panels) this.#seenPanels.add(p);
     if (typeof fields.panel_seq === 'number')
