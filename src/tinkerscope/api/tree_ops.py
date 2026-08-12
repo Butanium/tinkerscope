@@ -574,8 +574,20 @@ def _add_one(ctx: _Ctx, tree: dict, panel: str, node: Any, select: bool) -> tupl
         # Idempotent replay (a retried batch, or a mirror re-sending its own echo).
         # Content is immutable after creation, so a MISMATCH is a client bug, not a
         # concurrent edit — reject loudly rather than pick a winner.
-        if existing.get("role") != role or existing.get("content") != content:
-            raise OpError(f"node {nid} already exists with different role/content")
+        # role/content/parent are a node's IDENTITY — all three immutable after
+        # creation. Other fields are deliberately not compared: a replay can carry
+        # heavy fields inline that the stored light node now holds as `has_*` flags,
+        # so a whole-body compare would false-reject every retry. Parent is in the
+        # set because without it a buggy client can re-send an id under a DIFFERENT
+        # parent and be silently skipped — and then the re-append below finds the id
+        # missing from that parent's children and quietly does nothing. Loud beats
+        # defensive, same rationale as the content assert.
+        if (
+            existing.get("role") != role
+            or existing.get("content") != content
+            or existing.get("parent") != parent
+        ):
+            raise OpError(f"node {nid} already exists with different role/content/parent")
         light = existing
         parent_key = existing.get("parent") or ROOT
         # Re-APPEND it. Sibling order is "append order = rev order", and a mirror

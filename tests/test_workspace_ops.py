@@ -99,6 +99,43 @@ def test_replaying_a_batch_over_http_is_free(client, bus_events):
 
 
 # ── the broadcast ────────────────────────────────────────────────────────────
+def test_a_noop_add_writes_nothing_at_all(client, bus_events):
+    """The re-append rule touches a deep copy of the tree on every `add_nodes`, so
+    it is worth pinning that a batch which nets to nothing reaches DISK as nothing:
+    no rev bump, no event, and — since the trash journal hooks `_persist` — no
+    journal entry either."""
+    cid = _new_ws(client)
+    _ops(client, cid,
+         _add("primary", "u1", "user", "hi", None),
+         _add("primary", "a1", "assistant", "hello", "u1"))
+    before = client.get(f"/api/workspaces/{cid}").json()
+    trash_before = client.get(f"/api/workspaces/{cid}/trash").json()
+    bus_events.clear()
+
+    # a1 is already its parent's last child and already selected ⇒ nothing moves
+    r = _ops(client, cid, _add("primary", "a1", "assistant", "hello", "u1"))
+    assert r.json()["results"] == [{"ok": True, "noop": True}]
+    assert bus_events == []
+    after = client.get(f"/api/workspaces/{cid}").json()
+    assert after["rev"] == before["rev"]
+    assert after["updated_at"] == before["updated_at"]
+    assert client.get(f"/api/workspaces/{cid}/trash").json() == trash_before
+
+
+def test_reusing_an_id_under_a_different_parent_is_rejected(client):
+    """A node's identity is role+content+parent. Without the parent check this is a
+    silent skip, and the re-append then finds the id absent from the op's parent and
+    quietly does nothing — a client bug that leaves no trace anywhere."""
+    cid = _new_ws(client)
+    _ops(client, cid,
+         _add("primary", "u1", "user", "hi", None),
+         _add("primary", "a1", "assistant", "hello", "u1"),
+         _add("primary", "u2", "user", "again", "a1"))
+    r = _ops(client, cid, _add("primary", "a1", "assistant", "hello", "u2"))
+    assert r.status_code == 409
+    assert "different role/content/parent" in r.json()["detail"]["error"]
+
+
 def test_broadcast_carries_light_nodes_and_the_new_rev(client, bus_events):
     """Heavy fields go to write-once blobs on the way in; what the mirrors receive
     is the light node + its `has_*` flags, exactly like a loaded tree."""
