@@ -112,6 +112,10 @@ def test_migration_round_trips_and_splits_blobs(store):
             nid for t in trees_iter if isinstance(t, dict) for nid in (t.get("nodes") or {})
         ]
         remat = store.materialize_workspace(light, store.get_blobs(cid, node_ids))
+        # `rev` is synthesized by the READ path for bodies written before revs
+        # existed (a migrated file has none on disk) — not content, so not part of
+        # the round-trip guarantee.
+        assert remat.pop("rev", None) == 0
         assert remat == by_id[cid]
 
 

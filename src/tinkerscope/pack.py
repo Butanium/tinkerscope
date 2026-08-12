@@ -752,7 +752,15 @@ class StateReader:
                 if logprobs
                 else {}
             )
-            yield (body.get("name") or "workspace", body, raw_meta, lps)
+            # `rev` is instance-local bookkeeping (the mirror's convergence counter);
+            # it means nothing on the machine that installs this pack, so it doesn't
+            # travel — same reason highlights and logprobs don't.
+            yield (
+                body.get("name") or "workspace",
+                {k: v for k, v in body.items() if k != "rev"},
+                raw_meta,
+                lps,
+            )
 
     def prefs_panels(self):
         for p in self._last_session.get("panels") or []:

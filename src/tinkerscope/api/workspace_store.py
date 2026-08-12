@@ -51,6 +51,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from . import tree_ops
 from .store import locked, write_json
 
 log = logging.getLogger("tinkerscope.workspace_store")
@@ -231,6 +232,22 @@ def materialize_workspace(light: dict, blobs: dict[str, dict]) -> dict:
     return conv
 
 
+def _rev_of(body: Any) -> int:
+    """A body's stored revision. 0 for anything written before revs existed —
+    which is also the value a mirror starts from, so a legacy workspace's first
+    write lands at 1 and looks like an ordinary first event."""
+    rev = body.get("rev") if isinstance(body, dict) else None
+    return rev if isinstance(rev, int) and not isinstance(rev, bool) and rev >= 0 else 0
+
+
+def _with_rev(body: dict | None) -> dict | None:
+    """A read-path body that always carries `rev` (legacy files have none). Shallow
+    copy — never poison the memoized body with a synthesized field."""
+    if body is None or "rev" in body:
+        return body
+    return {**body, "rev": 0}
+
+
 def _summary_of(light: dict) -> dict:
     return {
         "id": light.get("id"),
@@ -238,6 +255,7 @@ def _summary_of(light: dict) -> dict:
         "created_at": light.get("created_at"),
         "updated_at": light.get("updated_at"),
         "panels": light.get("panels") or [],
+        "rev": _rev_of(light),
     }
 
 
@@ -771,6 +789,14 @@ def _persist(light: dict) -> None:
     with _CACHE_LOCK:
         prev = _bodies.get(cid)
     prev_panels = prev.get("panels") if isinstance(prev, dict) else None
+    # Per-workspace monotonic revision (HANDOFF_SERVER_AUTHORITY §4.2). Bumped
+    # HERE for the same reason the trash journal diffs here: _persist is the one
+    # choke point EVERY write channel goes through — /ops, PATCH, PUT, create,
+    # pack apply, trash restore — so no path can move a workspace without the
+    # attached mirrors being told. max() of both sides keeps it monotone whichever
+    # is fresher: the caller's body wins on a cold cache (post-restart write to a
+    # stored workspace), the cache wins if a caller rebuilt a body without it.
+    light["rev"] = max(_rev_of(prev), _rev_of(light)) + 1
     _record_trash(cid, prev, light)
     write_json(_ws_file(cid), light)
     with _CACHE_LOCK:
@@ -796,13 +822,13 @@ def list_summaries() -> list[dict]:
 def list_bodies() -> list[dict]:
     """`GET /api/workspaces?bodies=1` — light bodies (trees incl., blobs excl.)."""
     _ensure_loaded()
-    return [b for c in _snapshot_ordered_cids() if (b := _load_body(c)) is not None]
+    return [_with_rev(b) for c in _snapshot_ordered_cids() if (b := _load_body(c)) is not None]
 
 
 def get_body(cid: str) -> dict | None:
-    """`GET /api/workspaces/{id}` — one light body, or None (404)."""
+    """`GET /api/workspaces/{id}` — one light body (carrying `rev`), or None (404)."""
     _ensure_loaded()
-    return _load_body(cid)
+    return _with_rev(_load_body(cid))
 
 
 def get_blobs(cid: str, node_ids: list[str]) -> dict[str, dict]:
@@ -849,7 +875,10 @@ def upsert(
             "system_prompt": system_prompt,
             "system_enabled": system_enabled,
             "trees": trees,
-            "panels": panels,
+            # Phantom-panel heal on every layout SET (see tree_ops.normalize_panels):
+            # the browser used to do this on load, and with the layout
+            # server-authoritative a stored phantom would otherwise resurrect.
+            "panels": tree_ops.normalize_panels(panels, trees),
             "reduced_panels": reduced_panels,
             "send_targets": send_targets,
             "seen_panels": seen_panels,
@@ -860,6 +889,10 @@ def upsert(
         existing = _load_body(cid)
         if existing is not None:  # upsert: keep original created_at
             entry["created_at"] = existing.get("created_at", now)
+            # `entry` is rebuilt from kwargs, so without this the stored rev is
+            # dropped and _persist restarts the counter at 1 — a mirror would see
+            # its workspace jump BACKWARDS (pack apply overwrites live workspaces).
+            entry["rev"] = _rev_of(existing)
             # Monotone/union fields survive a writer that doesn't send them.
             entry["panel_seq"] = _merge_panel_seq(existing.get("panel_seq"), panel_seq)
             entry["seen_panels"] = _merge_seen_panels(existing.get("seen_panels"), seen_panels)
@@ -912,7 +945,7 @@ def save_tree(
         conv["trees"] = trees
         conv["system_prompt"] = system_prompt
         conv["system_enabled"] = system_enabled
-        conv["panels"] = panels
+        conv["panels"] = tree_ops.normalize_panels(panels, trees)
         conv["reduced_panels"] = reduced_panels
         conv["send_targets"] = send_targets
         conv["seen_panels"] = _merge_seen_panels(conv.get("seen_panels"), seen_panels)
@@ -927,71 +960,78 @@ def save_tree(
     return True
 
 
-def _merge_panel_seq(stored: Any, incoming: Any) -> int:
-    """`panel_seq` is MONOTONE, so a write may only raise it.
-
-    A plain assignment let any writer that omits the field reset the counter to 0 —
-    an older browser tab, a script, a pack apply (which exports the field but didn't
-    import it). Because ids are also checked against everything the workspace has
-    seen, that degraded rather than broke, but "correct only via the second
-    mechanism" is not a guarantee. max() makes the field self-healing instead:
-    a writer that doesn't know about it can no longer lose it."""
-    s = stored if isinstance(stored, int) and not isinstance(stored, bool) else 0
-    i = incoming if isinstance(incoming, int) and not isinstance(incoming, bool) else 0
-    return max(s, i)
+# The meta-merge rules live with the op vocabulary they implement (`set_meta`),
+# so the PUT/create paths and the op path can't drift apart. Aliased here because
+# these two names are the ones the save paths below have always used.
+_merge_panel_seq = tree_ops.merge_panel_seq
+_merge_seen_panels = tree_ops.merge_seen_panels
 
 
-def _merge_seen_panels(stored: Any, incoming: Any) -> list[str]:
-    """`seen_panels` is a UNION, not a replacement.
+def set_meta(cid: str, fields: dict[str, Any]) -> dict | None:
+    """`set_meta` — the workspace's metadata write, shared by the `PATCH /{id}`
+    sugar and the `set_meta` op, so both take the same locked apply, the same rev
+    bump and the same broadcast. Returns `{summary, rev, ops}` (`ops` is the wire
+    batch to broadcast — empty when nothing changed), or None if unknown (404).
 
-    It began as first-sight bookkeeping (default a panel into send_targets once),
-    where replace-wholesale was fine. It is now also the ledger that stops a closed
-    panel's id being re-minted, and an id is never legitimately un-seen — so a
-    writer with a shorter list must not be able to shrink it.
-
-    Append-only, keeping first-seen order: the only reader tests membership, so order
-    carries no behavior, but stored-then-new is both informative and a stable diff."""
-    out: list[str] = []
-    for src in (stored or []), (incoming or []):
-        for x in src:
-            if isinstance(x, str) and x not in out:
-                out.append(x)
-    return out
-
-
-_PATCH_FIELDS = ("name", "system_prompt", "system_enabled", "panels", "reduced_panels", "send_targets", "seen_panels",
-                 "panel_seq")
-
-
-def patch_meta(cid: str, fields: dict[str, Any]) -> dict | None:
-    """PATCH /{id} — layout-only metadata (name/system_prompt/panels/reduced_panels/
-    send_targets/seen_panels/panel_seq), no tree bytes. Returns the updated summary,
-    or None (404). Only keys present in `fields` are applied.
-
-    `panel_seq` and `seen_panels` merge exactly as they do on the PUT path — monotone
-    and union. Key-presence gating already stops a writer that has never heard of a
-    field from dropping it, but it does NOT stop one that has a STALER value: a
-    layout-only save is the browser's most common write (any model change is one),
-    and two tabs on the same workspace both send the fields from the snapshot they
-    loaded. Assigning wholesale here let the older tab walk the counter backwards and
-    shorten the ledger, which is the pair of guarantees the ids rest on."""
+    Field-wise last-writer-wins, except `panel_seq` (monotone max) and
+    `seen_panels` (union) — key-presence gating already stops a writer that has
+    never heard of a field from dropping it, but it does NOT stop one holding a
+    STALER value, and two tabs on one workspace both send the fields from the
+    snapshot they loaded. `panels` is normalized (the phantom-panel heal, now
+    server-side — see tree_ops.normalize_panels)."""
     with locked("workspaces"):
         _ensure_loaded()
         conv = _load_body(cid)
         if conv is None:
             return None
-        stored_seq, stored_seen = conv.get("panel_seq"), conv.get("seen_panels")
         conv = dict(conv)
-        for k in _PATCH_FIELDS:
-            if k in fields:
-                conv[k] = fields[k]
-        if "panel_seq" in fields:
-            conv["panel_seq"] = _merge_panel_seq(stored_seq, fields["panel_seq"])
-        if "seen_panels" in fields:
-            conv["seen_panels"] = _merge_seen_panels(stored_seen, fields["seen_panels"])
+        applied, changed = tree_ops.apply_meta(conv, fields)
+        if not changed:
+            return {"summary": _summary_of(conv), "rev": _rev_of(conv), "ops": []}
         conv["updated_at"] = _now()
         _persist(conv)
-        return _summary_of(conv)
+        return {
+            "summary": _summary_of(conv),
+            "rev": _rev_of(conv),
+            "ops": [{"op": "set_meta", "fields": applied}],
+        }
+
+
+def patch_meta(cid: str, fields: dict[str, Any]) -> dict | None:
+    """`set_meta` returning only the summary — the pre-ops signature, kept for
+    callers that don't broadcast (scripts, tests/small-smokes/store_concurrency)."""
+    out = set_meta(cid, fields)
+    return None if out is None else out["summary"]
+
+
+def apply_ops(cid: str, ops: Any) -> dict | None:
+    """`POST /{id}/ops` — apply an op batch ATOMICALLY under the workspaces flock.
+
+    All-or-nothing: any rejection discards the whole batch and returns
+    `{"rejected": {index, error}}` with nothing written and `rev` unmoved. On
+    success returns `{rev, results, ops}` — `ops` being the batch AS APPLIED
+    (light nodes, merged meta values), for the caller to broadcast.
+
+    A batch that changes nothing (an idempotent replay — the retry-safety path)
+    writes nothing, broadcasts nothing and keeps `rev`: replaying is free, and a
+    bumped rev with no content would make every mirror re-render for nothing.
+    Returns None if the workspace is unknown (404)."""
+    with locked("workspaces"):
+        _ensure_loaded()
+        conv = _load_body(cid)
+        if conv is None:
+            return None
+        try:
+            res = tree_ops.apply_ops(conv, ops)
+        except tree_ops.OpError as e:
+            return {"rejected": {"index": e.index, "error": e.error}}
+        if not res.changed:
+            return {"rev": _rev_of(conv), "results": res.results, "ops": []}
+        body = res.body
+        body["updated_at"] = _now()
+        _write_blobs(cid, res.blobs)
+        _persist(body)
+        return {"rev": _rev_of(body), "results": res.results, "ops": res.wire_ops}
 
 
 def layout_history(cid: str) -> list[dict]:
