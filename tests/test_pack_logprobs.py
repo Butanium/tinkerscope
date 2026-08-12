@@ -146,8 +146,9 @@ def test_export_omits_logprobs_by_default(backend, monkeypatch):
     seen = {}
 
     class Reader(packmod.StateReader):
-        def workspace_bodies(self, logprobs: bool = False):
+        def workspace_bodies(self, logprobs: bool = False, names=None, blobs: bool = True):
             seen["logprobs"] = logprobs
+            seen["blobs"] = blobs
             return iter(())
 
     packmod.export_pack(state_dir_reader=Reader(), name="x", description=None, models_from="panels")
@@ -156,3 +157,10 @@ def test_export_omits_logprobs_by_default(backend, monkeypatch):
         state_dir_reader=Reader(), name="x", description=None, models_from="panels", include_logprobs=True
     )
     assert seen["logprobs"] is True
+    # A models-only caller (site_export) skips the blob fetch entirely, and asking
+    # for logprobs cannot re-enable it — there is no body to inline them into.
+    packmod.export_pack(
+        state_dir_reader=Reader(), name="x", description=None, models_from="panels",
+        include_logprobs=True, skip_bodies=True,
+    )
+    assert seen["blobs"] is False and seen["logprobs"] is False

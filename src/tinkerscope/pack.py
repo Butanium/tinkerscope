@@ -35,6 +35,7 @@ hand-edited labels/description survive).
 """
 from __future__ import annotations
 
+import copy
 import gzip
 import json
 import re
@@ -590,6 +591,7 @@ def export_pack(
     workspace_names: list[str] | None = None,
     include_defaults: bool = True,
     include_logprobs: bool = False,
+    skip_bodies: bool = False,
     existing: Pack | None = None,
     warn: Callable[[str], None] = lambda _m: None,
 ) -> Pack:
@@ -597,7 +599,13 @@ def export_pack(
     discovery / workspace-store / prefs access). `models_from`:
     panels | workspaces | all | runs. Filters (`include`/`exclude`) match a model's
     label or ref. If `existing` is given, the result MERGES into it (union of models by
-    ref, workspaces by name; existing name/description kept unless overridden)."""
+    ref, workspaces by name; existing name/description kept unless overridden).
+
+    `skip_bodies` gathers the models a workspace's panels USE without preparing the
+    workspace bodies — the resulting Pack carries no workspaces. For `site_export`,
+    which wants only the model list + defaults and re-reads the real bodies itself:
+    preparing them deep-copies every body AND fetches every `raw_meta` blob, which on
+    a ~900 MB store is I/O spent entirely on a value the caller drops."""
     resolve = state_dir_reader.make_resolver(warn)
     gathered: list[PackModel] = []
     ws_out: list[PackWorkspace] = []
@@ -615,8 +623,17 @@ def export_pack(
 
     # Workspaces first (rewriting their panels also surfaces the models they use).
     if workspaces:
-        for wname, body, raw_meta, lps in state_dir_reader.workspace_bodies(logprobs=include_logprobs):
-            if workspace_names and wname not in workspace_names:
+        for wname, body, raw_meta, lps in state_dir_reader.workspace_bodies(
+            logprobs=include_logprobs and not skip_bodies,
+            names=workspace_names,
+            blobs=not skip_bodies,
+        ):
+            if skip_bodies:
+                # Panels only, on a copy — the store's bodies are memoized, so
+                # rewriting one in place would poison the cache for live readers.
+                if models_from in ("workspaces", "all"):
+                    panels = copy.deepcopy(body.get("panels") or [])
+                    gathered.extend(rewrite_panels({"panels": panels}, resolve=resolve))
                 continue
             prepared = _prepare_workspace_body(body, raw_meta, lps)
             used = rewrite_panels(prepared, resolve=resolve)
@@ -727,7 +744,9 @@ class StateReader:
             )
         return resolve
 
-    def workspace_bodies(self, logprobs: bool = False):
+    def workspace_bodies(
+        self, logprobs: bool = False, names: list[str] | None = None, blobs: bool = True
+    ):
         """Yield (name, light_body, raw_meta, token_logprobs) per saved workspace, each
         heavy map being node_id → its stored value fetched from the write-once blobs, so
         export can inline them into the pack.
@@ -735,9 +754,16 @@ class StateReader:
         `logprobs` is off by default because it dominates: the logprob blobs of one real
         workspace are 128 MB on disk against 3.8 MB of tree, so fetching them for a
         caller that will discard them is the difference between a fast export and a slow
-        one."""
+        one. `names` filters HERE rather than in the caller's loop for the same reason —
+        a `--workspace X` export used to fetch every OTHER workspace's blobs and throw
+        them away. `blobs=False` skips the fetch entirely (models-only callers)."""
         want = ("has_raw_meta", "has_token_logprobs") if logprobs else ("has_raw_meta",)
         for body in self._store.list_bodies():
+            if names is not None and (body.get("name") or "workspace") not in names:
+                continue
+            if not blobs:
+                yield (body.get("name") or "workspace", body, {}, {})
+                continue
             cid = body.get("id")
             nids = [
                 nid

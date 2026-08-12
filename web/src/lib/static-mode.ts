@@ -33,6 +33,12 @@ export type StaticManifest = {
    *  what the installer's own URL rewrite would otherwise hand you to share.
    *  Written by `site export --pack-link` (src/tinkerscope/site_export.py). */
   pack_links?: Record<string, string> | null;
+  /** Which turns this site was published WITH token logprobs for: `all` (default),
+   *  `chart`, `last:N` or `none` (`site export --logprobs`). Absent on a site
+   *  exported before the flag existed ⇒ treated as `all`. Only used to explain an
+   *  ABSENCE: without it the chart tells a reader the turn was never captured with
+   *  logprobs, when in fact the export dropped them. */
+  logprobs?: string | null;
 };
 
 declare global {
@@ -55,6 +61,13 @@ export const manifest = MANIFEST;
  * read-only-against-a-live-server mode would set only this one.
  */
 export const readOnly = isStatic;
+
+/** How this site was published re: token logprobs — `null` unless it is a static
+ *  site that TRIMMED them. Consumers use it to attribute a missing distribution to
+ *  the export rather than to the sampler; `all` (and a pre-flag site) reads as null,
+ *  because then an absence really is "this turn never had them". */
+export const trimmedLogprobs: string | null =
+  MANIFEST && MANIFEST.logprobs && MANIFEST.logprobs !== 'all' ? MANIFEST.logprobs : null;
 
 // A trailing slash matters: new URL('state.json', '…/data') would resolve to
 // '…/state.json'. Note a subpath deploy visited WITHOUT its trailing slash

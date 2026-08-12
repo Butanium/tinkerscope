@@ -170,8 +170,8 @@ tinkerscope site export ./site --workspace "the good one"
 ```
 
 Visitors browse the real thing: branches, threads, panels, the chart, token
-probabilities. Per-token logprobs are ~97% of the bytes — export a subset, or
-`--no-logprobs`. A published site also works as a **viewer for anyone's
+probabilities. Per-token logprobs are ~97% of the bytes — export a subset, or narrow
+them with `--logprobs chart` (keeps the turn each chart opens on) / `last:N` / `none`. A published site also works as a **viewer for anyone's
 pack** (`?w=<pack url>`, or drop the file on the page), and its read-only
 badge hands readers the command to run everything locally. Full doc:
 [`docs/STATIC_SITE.md`](docs/STATIC_SITE.md).
