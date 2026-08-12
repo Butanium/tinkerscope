@@ -81,7 +81,6 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 
 - [A send fired mid-fold is silently dropped](send-mid-fold-dropped.md) — no error, no user row, text left in the textarea; should queue or visibly refuse
 - [Token overlay: hovering a word sometimes yields no popover](token-hover-dead-spots.md) — suspect a null-mapped token or an inter-rect gap; uninvestigated
-- [`asTree()` silently swaps a malformed tree for an empty one](astree-silent-emptytree.md) — the blank panel then SAVES over the real tree; now journal-recoverable, but it should refuse loudly instead
 
 ### Docs
 

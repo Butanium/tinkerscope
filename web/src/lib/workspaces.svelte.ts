@@ -1,14 +1,22 @@
-// The workspace/branch-tree store — the frontend owner of the per-panel
-// branch trees and their persistence. See docs/BRANCHING_DESIGN.md §6 and
-// docs/STORAGE_V2.md §2.5.
+// The workspace/branch-tree store — the frontend MIRROR of the server-owned
+// per-panel branch trees (HANDOFF_SERVER_AUTHORITY §4.2; storage detail in
+// docs/STORAGE_V2.md, tree semantics in docs/BRANCHING_DESIGN.md).
 //
 // Division of responsibility: THIS store owns the reactive `trees`, the
-// summaries `list`/`activeId`, persistence (debounced, dirty-panel granular),
-// the chat-ownership token set, and the external-fold reconciliation wired off
-// the live bus. The TREE OPERATIONS (append/fold/regen/edit/delete/cycle) live
-// in branch-ops/+page, which read `treeFor(panel)`, compute a new tree via
-// lib/tree.ts, and commit it with `setTree(panel, …)` — the single entry that
-// mirrors the active path into PlaygroundState.messages AND debounce-saves.
+// summaries `list`/`activeId`, op-based persistence, the chat-ownership token
+// set, and the external-fold reconciliation wired off the live bus. The TREE
+// OPERATIONS (append/fold/regen/edit/delete/cycle) live in branch-ops/+page,
+// which read `treeFor(panel)`, compute a new tree via lib/tree.ts, and commit
+// it with `setTree(panel, …, {ops})` — the single entry that mirrors the active
+// path into PlaygroundState.messages AND persists.
+//
+// Persistence = the ops mirror:
+//   - local mutations apply optimistically and EMIT their ops (fire-and-forget,
+//     ordered, retried — lib/ops.svelte.ts); setTree without ops falls back to
+//     a whole-panel replace_tree, so no call-site can silently not persist.
+//   - bus `ops` events (every accepted batch, own echoes included) apply in
+//     rev order through the same interpreters; any rev gap → refetch the body.
+//   - meta (layout / panel UI / system) debounces into one set_meta op.
 //
 // Storage v2 memory policy (docs/STORAGE_V2.md):
 //   - `list` holds SUMMARIES only; a workspace's light body is fetched on
@@ -16,12 +24,8 @@
 //     cache are dropped on switch.
 //   - `trees` is $state.raw: every mutation is a wholesale per-panel ref
 //     replacement (tree.ts ops are immutable), so deep proxies were pure
-//     overhead — and $state.snapshot on save (which deep-copied a possibly-huge
-//     map) is gone entirely; refs are stringified directly.
-//   - Saves accumulate DIRT (dirty panels / dropped panels / layout flag) and
-//     ship either a partial-upsert PUT (tree bytes for dirty panels only) or a
-//     layout-only PATCH (zero tree bytes — model swap / fold / send-target
-//     toggles never serialize a tree again). See lib/save-plan.ts.
+//     overhead. Nodes are LIGHT from birth — folds seed the blob cache and ship
+//     heavy fields on their add_nodes op, never through a tree serialization.
 
 import { live } from './state.svelte';
 import { api } from './api';

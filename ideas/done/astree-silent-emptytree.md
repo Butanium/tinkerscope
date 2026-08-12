@@ -24,3 +24,11 @@ Cheap (the flag and its plumbing already exist) and it converts a silent data
 loss into a loud refusal.
 
 *(opus-5, 2026-08-06, undo / trash-journal session)*
+
+**Done 2026-08-12**: shipped with the P1 ops cutover (branch p1-browser) — the
+load path now distinguishes present-but-malformed from absent/`{}` (the server's
+create seed), latches the existing `#loadFailed` flag (which gates ALL op
+emission now, the ops-era equivalent of blocking dirt-marking) and shows a
+banner naming the unreadable panel. The failure this preempts had morphed under
+the cutover: the emptiness would have shipped as a `replace_tree` fallback op
+instead of a PUT — same loss, new channel.
