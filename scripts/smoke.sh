@@ -15,11 +15,13 @@
 #     FAIL without the fix. Twice on 2026-07-29 a fresh smoke passed for the wrong
 #     reason (an assertion that could not fail; a "live" update that never fired) —
 #     both would have shipped as green. `--baseline` makes that check one flag.
+#   - A SELF-HOSTING smoke that ignores TSCOPE_APP_DIR turns `--baseline` itself
+#     into a false green. `--baseline` now LINTS for that and refuses to run.
 #
 # Usage:
 #   scripts/smoke.sh                 # token-free set against a state SNAPSHOT
 #   scripts/smoke.sh --fresh         # ... against EMPTY state (chart_rules wants this)
-#   scripts/smoke.sh a b c           # only these smokes (names, no path/extension)
+#   scripts/smoke.sh a b c           # only these smokes (names, or paths to .py)
 #   scripts/smoke.sh --baseline HEAD browser_chart_live_inspect
 #                                    # run TODAY'S smoke against the app at <ref>
 #                                    # (a throwaway worktree) — the A/B half that
@@ -50,7 +52,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --fresh) FRESH="--fresh"; shift ;;
         --baseline) BASELINE="${2:?--baseline needs a git ref (e.g. HEAD)}"; shift 2 ;;
-        -h|--help) sed -n '2,33p' "$0"; exit 0 ;;  # ← the header comment block
+        -h|--help) sed -n '2,35p' "$0"; exit 0 ;;  # ← the header comment block
         *) PICK+=("$1"); shift ;;
     esac
 done
@@ -119,6 +121,54 @@ declare -A STALE=(
 #   baseline it if you need to attribute one.
 
 SMOKES=("${PICK[@]:-${DEFAULT[@]}}")
+
+# Resolve a smoke NAME (browser_foo) or a PATH (tests/…/browser_foo.py, /abs/x.py)
+# to its file. Paths exist so the leakage lint below can be exercised against a
+# throwaway fixture without checking one into the suite.
+smoke_file() {
+    case "$1" in
+        */*|*.py) echo "$1" ;;
+        *)        echo "tests/small-smokes/$1.py" ;;
+    esac
+}
+
+# ── --baseline leakage lint ──────────────────────────────────────────────────
+# A SELF-HOSTING smoke (one that spawns its own server / CLI / site export rather
+# than only driving the --baseline instance over HTTP) must resolve its checkout
+# from TSCOPE_APP_DIR. If it doesn't, it runs the WORKING TREE's app while the
+# report says "baseline" — the result reads as evidence and is worth nothing.
+# That has now bitten twice (browser_pack_big 2026-07-30, browser_state_reprime
+# 2026-08-03), both times as a green checkmark, which is the worst possible
+# failure shape. So: refuse the run rather than produce one.
+#
+# The test is a grep, and grep is crude — it can flag a smoke that shells out for
+# something harmless. That asymmetry is deliberate: a false refusal costs a
+# minute of reading, a false PASS costs a shipped non-fix.
+#
+# Compliance requires an actual env READ (os.environ / os.getenv), not merely the
+# string: the first version of this lint accepted a smoke whose docstring said the
+# words "never reads TSCOPE_APP_DIR" and cleared it. A prose mention is exactly
+# what a leaking smoke written by someone who knew about the trap looks like.
+if [ -n "$BASELINE" ]; then
+    leaky=""
+    for s in "${SMOKES[@]}"; do
+        f="$(smoke_file "$s")"
+        [ -f "$f" ] || continue
+        grep -qE 'subprocess\.(Popen|run|check_call|check_output)|site_export|uv run tinkerscope' "$f" || continue
+        grep -qE '(os\.environ|os\.getenv|environ\.get)[^\n]*TSCOPE_APP_DIR' "$f" && continue
+        leaky="$leaky    $s  ($f)"$'\n'
+    done
+    if [ -n "$leaky" ]; then
+        echo "REFUSING the --baseline run: these smokes SELF-HOST but never read TSCOPE_APP_DIR,"
+        echo "so they would spawn the WORKING TREE's app and pass against a ref that lacks the fix:"
+        printf '%s' "$leaky"
+        echo "  Fix each one with:"
+        echo "      REPO = Path(os.environ.get(\"TSCOPE_APP_DIR\") or Path(__file__).resolve().parents[2])"
+        echo "  and use REPO as the cwd / checkout for every server, CLI or site-export it spawns."
+        echo "  See CLAUDE.md §\"Build / verify\" (the ⚠ self-hosting-smoke note)."
+        exit 1
+    fi
+fi
 
 LOCK=/tmp/tinkerscope-smoke.lock
 exec 9>"$LOCK"
@@ -208,17 +258,18 @@ for s in "${SMOKES[@]}"; do
         printf '  SKIP  %-32s (stale: %s)\n' "$s" "${STALE[$s]}"
         continue
     fi
-    f="tests/small-smokes/$s.py"
+    f="$(smoke_file "$s")"
+    log="$RUN_DIR/$(basename "${s%.py}").log"
     [ -f "$f" ] || { printf '  MISS  %-32s (no such smoke)\n' "$s"; continue; }
     # SELF-CONTAINED smokes (browser_static_site, browser_pack_big) ignore the base
     # URL and build their own site instead — so they must be told which checkout to
     # export from, or `--baseline` silently exercises the WORKING TREE and passes
     # against a ref that lacks the fix. That happened on 2026-07-30 with
     # browser_pack_big; a passing baseline is the one result you must not shrug at.
-    if TSCOPE_APP_DIR="$APP_DIR" timeout 240 uv run python "$f" "http://127.0.0.1:$PORT" > "$RUN_DIR/$s.log" 2>&1; then
+    if TSCOPE_APP_DIR="$APP_DIR" timeout 240 uv run python "$f" "http://127.0.0.1:$PORT" > "$log" 2>&1; then
         printf '  ok    %s\n' "$s"; pass=$((pass+1))
     else
-        printf '  FAIL  %-32s → %s\n' "$s" "$RUN_DIR/$s.log"; fail=$((fail+1)); failed+=("$s")
+        printf '  FAIL  %-32s → %s\n' "$s" "$log"; fail=$((fail+1)); failed+=("$s")
     fi
 done
 
