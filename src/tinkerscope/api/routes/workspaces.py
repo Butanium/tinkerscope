@@ -290,7 +290,14 @@ def save_workspace_tree(workspace_id: str, req: TreeSave) -> dict:
 
 
 @router.delete("/{workspace_id}")
-def delete_workspace(workspace_id: str) -> dict:
+async def delete_workspace(workspace_id: str) -> dict:
     if not store.delete(workspace_id):
         raise HTTPException(404, f"no workspace {workspace_id}")
+    # A mirror holding this workspace open would otherwise keep editing into
+    # the void (its rev line just vanished — no ops event will ever tell it).
+    # The browser half latches op emission + notifies on this. NOTE: pack.py's
+    # replace path calls store.delete() directly and is not covered here —
+    # the store-level hook is ops-server's follow-up; this is the minimal
+    # route-level half the convergence smoke pins.
+    await BUS.broadcast("workspace_deleted", {"workspace": workspace_id})
     return {"status": "ok"}

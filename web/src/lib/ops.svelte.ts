@@ -71,11 +71,27 @@ class OpsEmitter {
 
   async #send(id: string, ops: WorkspaceOp[]): Promise<void> {
     const s = this.#seams!;
-    try {
-      await s.ensureMaterialized(id);
-    } catch (e) {
-      s.onDesync(id, `draft create failed: ${(e as Error)?.message ?? e}`);
-      return;
+    // The materializing CREATE gets the same bounded-retry semantics as the
+    // batches behind it — it IS the first write of the chain, and a single
+    // transport blip here used to drop the whole batch silently (review
+    // finding: the create sat outside the retry loop). Idempotent: create
+    // upserts by the draft's id, so a landed-but-unacked create replays free.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await s.ensureMaterialized(id);
+        break;
+      } catch (e) {
+        if (!retriable(e)) {
+          s.onDesync(id, `draft create rejected: ${(e as Error)?.message ?? e}`);
+          return;
+        }
+        if (attempt >= RETRIES - 1) {
+          s.notice('Server unreachable — the new workspace and its edits are not saved yet.');
+          s.onDesync(id, `draft create retries exhausted: ${(e as Error)?.message ?? e}`);
+          return;
+        }
+        await new Promise((r) => setTimeout(r, BACKOFF_MS * 2 ** attempt));
+      }
     }
     for (let attempt = 0; ; attempt++) {
       try {

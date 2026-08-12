@@ -53,8 +53,12 @@ for (const f of files) {
   try {
     // Routing (README "File shape"): tree-level ops apply to tree_before via
     // applyTreeOp; replace_tree in single-panel form goes through applyPanelOp
-    // on a one-key map (validation included); map-form vectors use trees_before.
+    // on a one-key map (validation included); map-form vectors use trees_before;
+    // BATCH vectors ({ops: [...]}) fold applyPanelOp over the map in order —
+    // each op gets its own claim scope, which is exactly what the batch-claim
+    // vector pins against the server's per-op selected_written.
     const run = () => {
+      if (Array.isArray(v.ops)) return v.ops.reduce((m, op) => applyPanelOp(m, op), v.trees_before);
       if (v.tree_before === undefined) return applyPanelOp(v.trees_before, v.op);
       if (v.op.op === 'replace_tree')
         return applyPanelOp({ [v.op.panel]: v.tree_before }, v.op)[v.op.panel];

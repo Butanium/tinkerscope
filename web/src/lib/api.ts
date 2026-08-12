@@ -227,6 +227,7 @@ export function sse(
     'snapshot',
     'patch',
     'ops',
+    'workspace_deleted',
     'chat_start',
     'delta',
     'sample',
