@@ -2038,7 +2038,9 @@ def cmd_probe(
     That combination is what makes it safe to sample a model the human is not
     looking at. Committing a turn into a panel bound to a DIFFERENT model is
     exactly how a saved tree ends up with turns whose provenance disagrees with
-    the panel label, so an off-workspace probe must never write.
+    the panel label, so an off-workspace probe must never write. It also sends
+    an explicitly EMPTY thread system prompt — a probe never samples under the
+    prompt of whatever thread happens to be open on screen.
 
     Multi-turn: pass a full verbatim transcript via --ancestry-file (same
     provenance rule as `continue` — reuse generated turns, never author them)."""
@@ -2071,10 +2073,14 @@ def cmd_probe(
     run_arg, at_ckpt = _split_run_arg(run)
     body: dict = {
         "messages": ancestry,
-        "panel": "p-1",  # required by the schema; never written to (commit=false), so a
-                         # literal here deliberately mints nothing
+        "panel": "p-1",  # required by the schema; commit=false makes the server
+                         # panel-route NOTHING to it (P3 review fix — before
+                         # that, this literal rebound the real p-1's model)
         "broadcast": False,
         "commit": False,
+        # explicit: a probe must never sample under the OPEN thread's prompt
+        # (belt-and-braces — new servers don't inherit the mirror at all)
+        "thread_system_prompt": "",
         **_call_params(n, temperature, max_tokens, thinking, _resolve_sys(system, no_system)),
     }
     if run_arg.startswith("openrouter:"):

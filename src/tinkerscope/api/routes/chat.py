@@ -128,10 +128,13 @@ class ChatRequest(BaseModel):
     messages: list[ChatMessage]
     system_prompt: str | None = None
     # Thread-level system prompt, composed OVER the global/call system part at
-    # sample time (compose_system: "\n"-join, empty parts skipped) and recorded by
-    # the browser on the thread's ROOT node. Tri-state: None = inherit the target
-    # panel's mirrored thread system (PanelState.thread_system_prompt — the thread
-    # being extended); "" = explicitly no thread part; "X" = X.
+    # sample time (compose_system: "\n"-join, empty parts skipped) and recorded
+    # on the thread's ROOT node. None ≡ "" = no thread part. (Until the P3
+    # review fixes, None inherited the target panel's mirrored
+    # PanelState.thread_system_prompt — retired: every client sends the field
+    # explicitly, and the one omitter was `tinkpg probe`, silently sampling
+    # under the OPEN thread's prompt. The mirror is display state now, never
+    # an input.)
     thread_system_prompt: str | None = None
     temperature: float | None = None
     max_tokens: int | None = None
@@ -196,11 +199,15 @@ class ChatRequest(BaseModel):
     # folding (if any) is the browser's business, exactly the pre-P2 contract.
     parent_node: str | None = None
     broadcast: bool = True                   # mirror samples to the state bus
-    # Commit the representative turn into the panel transcript. TRUE is the
-    # interactive contract (multi-turn memory). FALSE makes the call a pure
-    # read: an off-workspace probe of an arbitrary model that must not leave a
-    # node behind — writing one into a panel bound to a DIFFERENT model is how a
-    # tree ends up with turns whose raw_meta names a model the panel never had.
+    # May this chat WRITE shared state? TRUE is the interactive contract: the
+    # chat_begin patch panel-routes the selection + thread-system mirror into
+    # panels[panel], and `parent_node` (which requires it — a fold IS a commit)
+    # persists the samples. FALSE makes the call a pure READ: nothing
+    # panel-routes into the bus (a probe of model B must not rebind the panel
+    # the human has bound to model A — the saved-layout rewrite chain, review
+    # 2026-08-12), no fold. Combined with broadcast=false (the `tinkpg probe`
+    # shape) the chat is bus-SILENT: no chat_start/chat_end events, `running`
+    # never flips.
     commit: bool = True
     # Detached (fire-and-forget) mode. The browser sets this so its POST returns
     # IMMEDIATELY instead of holding the SSE stream open for the whole generation:
@@ -426,18 +433,14 @@ def resolve_params(req: ChatRequest, st: Any) -> dict:
     MUTED global prompt (state.system_enabled is False — kept text, power off);
     an explicit req.system_prompt applies regardless (per-call wins).
 
-    thread_system_prompt resolves independently of params_scope (it's thread
-    state, not a sampling param): an explicit value wins ("" = explicitly no
-    thread part), None inherits the target panel's mirrored thread system."""
+    thread_system_prompt is the request's or nothing (None ≡ ""): it is NEVER
+    inherited from the panel mirror — see the field's comment on ChatRequest."""
     inherit = req.params_scope == "call"
-    panel = next((p for p in getattr(st, "panels", []) if p.id == req.panel), None)
     system_on = getattr(st, "system_enabled", None) is not False
     return {
         "system_prompt": req.system_prompt if req.system_prompt is not None
         else (st.system_prompt if inherit and system_on else None),
-        "thread_system_prompt": req.thread_system_prompt
-        if req.thread_system_prompt is not None
-        else ((panel.thread_system_prompt if panel else None) or ""),
+        "thread_system_prompt": req.thread_system_prompt or "",
         "temperature": req.temperature if req.temperature is not None
         else (st.temperature if inherit else 1.0),
         "max_tokens": req.max_tokens or (st.max_tokens if inherit else 1024),
@@ -702,34 +705,44 @@ async def chat(req: ChatRequest):
         # across panels) — set at the top level, no per-panel author race — and
         # only a "global"-scope chat (the browser) writes them; a "call"-scope
         # chat (CLI probe) samples with them but leaves the shared state alone.
-        state_patch = {
-            "panel": req.panel,
-            "messages": msgs,
-            # The workspace this chat belongs to. Sent by the browser (which knows
-            # its own `?c=`); absent for a CLI fire, which means "whatever workspace
-            # the bus is on". Stamped into the bus with the rest of the chat's
-            # selection so the bus never claims one workspace while showing another
-            # — see web/src/lib/bus-scope.ts.
-            **({"workspace_id": req.workspace_id} if req.workspace_id else {}),
-            # Panel-routed: the RESOLVED thread part, so a CLI new-thread probe
-            # updates the panel's thread mirror and an inheriting send is a no-op
-            # write-back (thread state, not a sampling param — both scopes).
-            "thread_system_prompt": thread_system,
-            **sel_patch,
-        }
-        if req.params_scope != "call":
-            # system_prompt is deliberately NOT echoed back: the browser (the only
-            # global-scope client) maintains state.system_prompt/system_enabled via
-            # /api/state, and a chat carries only the EFFECTIVE part ("" when the
-            # prompt is muted) — echoing that would clobber a kept-but-muted prompt.
-            state_patch.update({
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "n_samples": n,
-                "thinking": thinking,
-                "top_p": top_p,
-            })
-        chat_id = await BUS.chat_begin(**state_patch)
+        # commit=false empties the patch entirely (pure read — see
+        # ChatRequest.commit): panel-routing the probed selection is how a
+        # `tinkpg probe` used to rebind the panel the human had open, which a
+        # browser tab then adopted into the SAVED layout (review 2026-08-12).
+        # With broadcast=false too, even the lifecycle stays off the bus:
+        # chat_id allocates silently, `running` never flips, no fanout — and
+        # the matching chat_end in _fire is skipped (the _inflight pairing).
+        bus_silent = not req.commit and not req.broadcast
+        state_patch: dict = {}
+        if req.commit:
+            state_patch = {
+                "panel": req.panel,
+                "messages": msgs,
+                # The workspace this chat belongs to. Sent by the browser (which knows
+                # its own `?c=`); absent for a CLI fire, which means "whatever workspace
+                # the bus is on". Stamped into the bus with the rest of the chat's
+                # selection so the bus never claims one workspace while showing another
+                # — see web/src/lib/bus-scope.ts.
+                **({"workspace_id": req.workspace_id} if req.workspace_id else {}),
+                # Panel-routed: the RESOLVED thread part, so a CLI new-thread send
+                # updates the panel's thread mirror and an inheriting send is a no-op
+                # write-back (thread state, not a sampling param — both scopes).
+                "thread_system_prompt": thread_system,
+                **sel_patch,
+            }
+            if req.params_scope != "call":
+                # system_prompt is deliberately NOT echoed back: the browser (the only
+                # global-scope client) maintains state.system_prompt/system_enabled via
+                # /api/state, and a chat carries only the EFFECTIVE part ("" when the
+                # prompt is muted) — echoing that would clobber a kept-but-muted prompt.
+                state_patch.update({
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    "n_samples": n,
+                    "thinking": thinking,
+                    "top_p": top_p,
+                })
+        chat_id = await (BUS.alloc_chat_id() if bus_silent else BUS.chat_begin(**state_patch))
         # Stamp every broadcast with the workspace this chat belongs to. The browser's
         # external-fold hook folds a chat_done onto a panel id ONLY if this id matches
         # the workspace it currently has open; panel ids are re-minted across
@@ -857,7 +870,11 @@ async def chat(req: ChatRequest):
                 # DIFFERENT workspace claimed while this chat streamed (chimera —
                 # 8342e08). Placement chats pin conv_id to fold_ws at request
                 # time, so the fold target and this gate agree by construction.
-                await BUS.chat_end(event, origin_workspace=conv_id, **end_patch)
+                # A bus-silent chat never began on the bus, so it must not end
+                # there either (chat_end's _inflight decrement would release a
+                # concurrent chat's `running` early).
+                if not bus_silent:
+                    await BUS.chat_end(event, origin_workspace=conv_id, **end_patch)
                 if req.broadcast:
                     # workspace_id scopes the browser's external fold (#onExternalDone):
                     # every terminal flavour — done / error / cancelled — carries the stamp.

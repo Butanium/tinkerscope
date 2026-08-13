@@ -111,7 +111,10 @@ def test_chat_composes_thread_over_global_and_mirrors_panel(client, monkeypatch)
     assert by_event["chat_done"]["thread_system_prompt"] == "THREAD"
 
 
-def test_chat_absent_thread_field_inherits_panel_mirror(client, monkeypatch):
+def test_chat_absent_thread_field_never_inherits_panel_mirror(client, monkeypatch):
+    # Inherit RETIRED (P3 review): every client sends the field explicitly; the
+    # one omitter was `tinkpg probe`, which sampled under the OPEN thread's
+    # prompt without a trace on stdout. Absent now means no thread part.
     _lay(client, ids=("primary",))
     client.post("/api/state", json={"system_prompt": "GLOBAL",
                                     "panel_thread_system": {"primary": "MIRROR"}})
@@ -119,7 +122,7 @@ def test_chat_absent_thread_field_inherits_panel_mirror(client, monkeypatch):
 
     r = client.post("/api/chat", json=_chat_body(params_scope="call", broadcast=False))
     assert r.status_code == 200, r.text
-    assert calls[0]["messages"][0] == {"role": "system", "content": "GLOBAL\nMIRROR"}
+    assert calls[0]["messages"][0] == {"role": "system", "content": "GLOBAL"}
 
 
 def test_chat_explicit_empty_thread_suppresses_mirror(client, monkeypatch):

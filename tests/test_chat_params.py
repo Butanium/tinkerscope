@@ -89,10 +89,13 @@ def _st_thread(mirror: "str | None") -> PlaygroundState:
     return st
 
 
-def test_thread_system_absent_inherits_panel_mirror_in_both_scopes():
+def test_thread_system_absent_never_inherits_panel_mirror():
+    # The inherit path is RETIRED (P3 review): its one live consumer was
+    # `tinkpg probe`, silently sampling under the open thread's prompt.
+    # Absent ≡ "" in both scopes; the mirror is display state, not an input.
     for scope in ("global", "call"):
         p = resolve_params(_req(params_scope=scope), _st_thread("thread sys"))
-        assert p["thread_system_prompt"] == "thread sys", scope
+        assert p["thread_system_prompt"] == "", scope
 
 
 def test_thread_system_explicit_value_wins_over_mirror():
