@@ -1973,3 +1973,43 @@ first-declared long opt so the reference teaches `--ws` rather than the
 Every fix shipped with a probe watched FAILING against the pre-fix tree
 (file-swap after committing): tests/test_probe_isolation.py,
 tests/test_cli_echo_retirement.py, tests/test_cli_unification.py.
+
+---
+
+### 2026-08-12 — Server-authority P3 + the CLI unification: the migration completes (v1.1.0)
+
+**P3** (branches `p3-cli` + `p3-echo` + review fixes): the transcript echo is
+GONE — `PanelState` carries selection + thread-system only, `chat_end` is
+bookkeeping (retiring the chimera origin-gate WITH its class), the PUT save
+path and the browser reconcile heuristics are deleted or in `deprecated/`, and
+every echo-era test was re-pinned onto the surviving contract rather than
+dropped. `tinkpg chat/compare` joined send/battery/continue as placement
+writers under the answered design rule: HEADLESS COMMANDS NEVER REWRITE SAVED
+LAYOUTS (trees persist; screen bindings stay ephemeral). Workspace addressing
+complete: `--ws` (foreign workspaces bind models from their OWN saved layout),
+`--new-ws`, auto-create, ws-qualified 3-part handles everywhere.
+
+**Unification**: one Typer app behind `tinkerscope` and `tinkpg` (samplescope's
+pattern; `serve` injected via ctx.info_name so the alias never injects),
+`pack`/`site` as lazy sub-apps, and the command reference GENERATED with
+`tests/test_cli_docs.py` as the staleness gate — it fired twice during its own
+construction, which is the point. Installed console shims freeze their import
+target: `serve.main()` survives as a compat delegate (the review caught the
+live brick — the box's own `tinkerscope` shim ImportError'd while the branch
+was checked out), and entry-point changes still warrant `uv tool install -e .`.
+
+**The joint review** (3 Fable / Opus refuters, 9 confirmed / 5 refuted) earned
+its keep a third time, still on the same axis — consumer surfaces and boundary
+claims, not happy paths: `tinkpg probe` REBOUND the bus panel (which an open
+tab then persisted into the saved layout — violating the phase's own headline
+property) and silently sampled under the open thread's system prompt
+(provenance contamination; the mirror-inherit path's only consumer WAS the
+bug — retired). `tinkpg state --no-link` printed "(0 msgs)" off the dead echo.
+The API_CONTRACT still taught the deleted fold machinery. All fixed with
+per-finding falsification probes.
+
+**Migration totals** (one day, five phases of review): 3 adversarial review
+workflows, 23 confirmed findings fixed, 5 idea files closed structurally,
+~480 pytest + 25 cross-impl vectors + the live disease/cure smokes. The
+recurring lesson, three-for-three: reviews find nothing in the happy path —
+budget them at recovery, reporting, and boundary-claim surfaces.

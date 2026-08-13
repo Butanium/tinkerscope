@@ -8,6 +8,48 @@ WIRE contract, not on the UI (`docs/RELEASING.md`).
 `docs/MIGRATIONS.md` covers every release that moved the wire or on-disk shape;
 `ENGINEERING_LOGS.md` carries the dated narrative behind the decisions.
 
+## [1.1.0] — 2026-08-12
+
+The server-authority migration (`docs/HANDOFF_SERVER_AUTHORITY.md`, all three
+phases) plus the CLI unification, shipped in one day by a reviewed multi-agent
+build. WIRE + DISK moved; `docs/MIGRATIONS.md` has the compat story.
+
+### Changed — the big one
+
+- **The server owns every workspace tree.** All mutation travels as idempotent
+  ops (`POST /api/workspaces/{id}/ops`, per-workspace `rev`, bus `ops` events);
+  the browser is an optimistic always-apply mirror; the two op interpreters
+  (`api/tree_ops.py` / `web/src/lib/tree.ts`) are locked by shared fixture
+  vectors including recorded-broadcast replay.
+- **Chats persist server-side.** Every fire carries its placement
+  (`ChatRequest.parent_node`); the terminal folds ALL n samples + CoT +
+  token_logprob/raw_meta blobs in one locked write — a browserless
+  `tinkpg send -n 8 --thinking` now persists everything, and a fold failure
+  exits non-zero instead of printing `[done]`.
+- **One CLI.** `tinkerscope` and `tinkpg` are the same Typer app (`tinkpg`
+  stays as the short alias); `serve` is a subcommand injected for bare-dirs
+  invocations; `pack`/`site` are lazy sub-apps; the command reference in the
+  cli skill + README is GENERATED with a staleness test. Old installed shims
+  keep working via a compat delegate; re-run `uv tool install -e .` to
+  regenerate them properly.
+- `tinkpg chat`/`compare`/`send`/`battery`/`continue` are placement WRITERS
+  (workspace addressing: `--ws`, `--new-ws`, auto-create; ws-qualified
+  `<ws>:<panel>:<node>` handles everywhere, including the browser copy button).
+
+### Removed
+
+- The bus transcript echo (`PanelState.messages` + the heavy-field strip), the
+  browser's dirty-tree PUT save path + reconcile heuristics, and the
+  cross-workspace chimera class they enabled (three grounded bugs died with
+  it: the no-token-data CLI turns, the n−1 lost samples, the swallowed send).
+
+### Fixed
+
+- `tinkpg probe` no longer rebinds bus panels nor inherits the open thread's
+  system prompt (research-provenance isolation, bus-silent by contract).
+- 23 adversarial-review findings across the three phases (each fixed with a
+  falsification probe; `ENGINEERING_LOGS.md` 2026-08-12 has the narratives).
+
 ## [1.1.0a1] — 2026-08-10
 
 Pre-release. Three new surfaces (loom, undo, cross-workspace search) plus the
