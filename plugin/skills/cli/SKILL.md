@@ -119,7 +119,7 @@ tinkpg send "<prompt>" [opts] [--panel P ...]       # NEW THREAD at the CURRENT 
 tinkpg continue "<follow-up>" [opts] [--panel P] [--thread K] [--turn N] [--node ID] [--ancestry-file FILE]   # LOOM: add a turn to existing thread(s), OR to an explicit external transcript
 tinkpg battery <dir> [--n N] [--pause S] [--out DIR] [--panel P ...] [--no-first-token]   # fire a DIRECTORY of probe *.txt files as sequential sends (one probe = one thread)
 tinkpg url [ws] [--live] [--json]                   # the URL of the server you're driving — what to hand the human when they want a LINK
-tinkpg state [--full] [--width N] [--no-link] [--json] [--include-folded]   # DIGEST of on-screen panels (active path + matched saved conv)
+tinkpg state [--full] [--width N] [--no-link] [--json] [--include-folded]   # DIGEST of on-screen panels (bindings + the open workspace's active paths)
 tinkpg params [--temperature T] [--max-tokens M] [--n N] [--thinking/--no-thinking|--thinking-both] [--top-p P] [--system S|--system-file F|--clear-system]   # show / SET the GLOBAL sampling params (browser sidebar updates live)
 tinkpg ws                                         # list saved WORKSPACES + branch metadata (alias: tinkpg conv)
 tinkpg ws <id|name> [--panel P] [--full] [--tree] [--include-folded] [--thread K] [--deepest] [--json]  # expand one: active branch + fork counts (--tree = all branches; --thread/--deepest = read a NON-active conversation; --json = export the transcript)
@@ -235,13 +235,14 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   whole path, `--json` for the raw untruncated state (escape hatch). Do NOT expect
   branches here. It also names the OPEN workspace up top — `open workspace:
   <name> (id) → tinkpg ws <id>` — because the browser pushes its `?w=`
-  workspace_id onto the state bus, so you can jump straight to its branches. If
-  that id is absent (older browser, or a CLI-only session that never opened a saved
-  workspace), it falls back to a per-panel EXACT active-path match (`← ws:
-  <name>`, or an honest `ambiguous ×N` when a short path is shared). `--no-link`
-  skips the workspaces fetch entirely. Panels the human has FOLDED in the
-  browser print as one-line stubs here too — `--include-folded` expands them
-  (fold info rides the open workspace, so `--no-link` shows every panel).
+  workspace_id onto the state bus, so you can jump straight to its branches. The
+  transcripts themselves come from that workspace's SAVED TREES (the bus carries
+  model bindings only), so with no workspace open there is nothing to show and
+  each panel says `no transcript: no workspace open`. `--no-link` skips the
+  workspaces fetch entirely: bindings only, each panel marked `transcript
+  skipped: --no-link`. Panels the human has FOLDED in the browser print as
+  one-line stubs here too — `--include-folded` expands them (fold info rides
+  the open workspace, so `--no-link` shows every panel).
 - `tinkpg ws` (alias `conv`) reads the **saved workspace trees** (`/api/workspaces`) —
   this is the ONLY place branches live. The tree is opaque to the server; the CLI
   walks it client-side (mirrors `web/src/lib/tree.ts`). List shows per-workspace
@@ -431,12 +432,11 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   models from ITS saved layout) or `--new-ws NAME`. `chat`/`compare` persist
   too when a workspace is open (each invocation = a new thread; their
   `--system` authors the THREAD prompt like `send`'s). The remaining
-  exceptions, each loud or documented: `chat`/`compare` with no workspace stay
-  lockstep-only (the plan line says "not persisted"); a `continue` from a
-  panel with no saved tree falls back to the live transcript and warns; a bare
-  `continue` whose live transcript diverges from the saved tree warns naming
-  both; `--ancestry-file` looms from an external transcript and stays
-  stdout-only.
+  exceptions, each loud: `chat`/`compare` with no workspace are EPHEMERAL (the
+  plan line says "not persisted"); a `continue` from a panel with no saved
+  thread REFUSES — the saved tree is the only transcript source, so there is
+  nothing to continue; `--ancestry-file` looms from an external transcript and
+  stays stdout-only (it warns "NOT persisted" — capture with `--json`).
 - **Sequential waves**: fire → `tinkpg wait [--timeout N]` → read → fire again
   (no sleep/check dances). Reading loop: `tinkpg samples --node <id> --this`
   isolates the one sample a qualified handle names; `samples --export-ancestry
@@ -602,10 +602,10 @@ tinkpg url [selector] [options]
   --live                            link to the workspace the browser currently has open (from the state bus) instead of naming one
   --json                            url + resolved instance (pid, scan roots) + workspace id/name
 tinkpg state [options]
-  # Digest of what's on screen now: one block per panel, first/last-2 of each panel's ACTIVE...
+  # Digest of what's on screen now: one block per panel, first/last-2 of the open workspace's...
   --full                            show every message per panel, not just first/last-2
   --width INTEGER                   per-message truncation width  [default: 160]
-  --link/--no-link                  annotate each panel with the saved workspace its active path matches (`--no-link` skips the workspaces fetch)
+  --link/--no-link                  resolve the open workspace from the saved store — its name, folds and the panel transcripts all come from there (`--no-link` skips that fetch: model bindings only, transcripts marked as skipped)
   --json                            raw state JSON (untruncated escape hatch)
   --include-folded                  also show panels folded in the browser UI (skipped by default)
 tinkpg threads [options]

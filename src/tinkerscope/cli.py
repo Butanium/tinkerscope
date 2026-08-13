@@ -342,7 +342,8 @@ def _fmt_node(tree: dict, node: dict, width: int, full: bool = False) -> str:
 
 
 def _fmt_msg(msg: dict, width: int, full: bool = False) -> str:
-    """One linear message (state echo has no tree, so no fork annotation)."""
+    """One linear message (a flattened active path carries no sibling info, so
+    no fork annotation)."""
     return _fmt_turn(msg.get("role", ""), msg.get("content", ""), msg.get("reasoning"), width, full)
 
 
@@ -1130,9 +1131,9 @@ def _panel_body(
     `messages` is the server's prefill convention (the model extends it).
 
     `thread_system` is the THREAD system prompt (composed over the global part
-    server-side, recorded on the thread's root node by the browser). None = omit
-    from the body → the server inherits the panel's mirrored thread system (the
-    thread being extended); "" = explicitly no thread part."""
+    server-side, recorded on the thread's root node). None = omit from the body,
+    which the server treats as "" — the panel-mirror inherit retired with the P3
+    review fixes; every live caller passes an explicit str."""
     body: dict = {
         "messages": messages,
         "panel": panel["id"],
@@ -1329,8 +1330,8 @@ def _fire_send(
 
     With `conv_id` (the open workspace), each panel's user turn is persisted as an
     op first and the fire carries `workspace_id` + `parent_node`, so the SERVER
-    folds all n replies — durable with no browser attached. Without one, the fire
-    is the legacy lockstep shape (echo-only)."""
+    folds all n replies — durable with no browser attached. Without one, NOTHING
+    persists: the fire is ephemeral (bucket render + stdout only)."""
     parents: dict[str, str] = {}
     if conv_id:
         parents, turn_err = _emit_user_turns(conv_id, targets, prompt, thread_system)
@@ -1517,34 +1518,6 @@ def _find_workspace_holding_node(node: str) -> Optional[dict]:
     return holders[0] if holders else None
 
 
-def _warn_mirror_divergence(panel: dict, ancestry: list[dict]) -> None:
-    """continue's active default reads the SAVED TREE, but the panel's live
-    transcript mirror can hold a LOCKSTEP exchange the tree never saw
-    (`tinkpg chat`/`compare` advance only the mirror). Firing would silently
-    drop that exchange from the ancestry — say so and name both, instead of
-    guessing which one the user means (review finding 3A, 2026-08-12).
-    Explicit --thread/--turn/--node targeting skips this (the user chose)."""
-    mirror = [(m.get("role"), m.get("content"))
-              for m in (panel.get("messages") or []) if m.get("role") != "system"]
-    if not mirror:
-        return
-    tree_path = [(m.get("role"), m.get("content")) for m in ancestry if m.get("role") != "system"]
-    if mirror == tree_path:
-        return
-
-    def _last(pairs: list) -> str:
-        return _oneline(pairs[-1][1] or "", 60) if pairs else "(empty)"
-
-    print(
-        f"⚠ panel {panel.get('id')}: the live transcript ({len(mirror)} turn(s), last: "
-        f"{_last(mirror)!r}) differs from the saved tree's active path ({len(tree_path)} "
-        f"turn(s), last: {_last(tree_path)!r}). Continuing the SAVED TREE — a lockstep "
-        "`tinkpg chat`/`compare` exchange is not in it. Aim with --thread/--turn/--node "
-        "if this is wrong.",
-        file=sys.stderr,
-    )
-
-
 def _continue_messages(ancestry: list[dict], prompt: Optional[str], prefill: Optional[str]) -> list[dict]:
     """Assemble the /api/chat messages from an ancestry (root→target, role/content)
     plus optional appends, and REFUSE invalid sequences up front (the server would
@@ -1554,8 +1527,8 @@ def _continue_messages(ancestry: list[dict], prompt: Optional[str], prefill: Opt
       - ends on a USER turn → NO message (that would be two user turns); we re-sample
         that turn, optionally seeded by --prefill (a thinking opener / truncated-own-
         CoT continuation).
-    Content is answer-only (CoT excluded) so it matches the tree nodes verbatim — the
-    browser's echo-reconcile then EXTENDS the matched branch instead of forking."""
+    Content is answer-only (CoT excluded): the native renderer rebuilds each turn and
+    applies its own history policy. Placement is `parent_node`, never content match."""
     pairs = [{"role": m["role"], "content": m.get("content", "")} for m in ancestry if m.get("role") != "system"]
     if not pairs:
         _die("empty ancestry — nothing to continue from")
@@ -1611,14 +1584,15 @@ def cmd_continue(
 ) -> None:
     """LOOM from an existing branch: rebuild the message history up to a target node
     and sample a continuation, WITHOUT touching the panel layout (the multi-turn twin
-    of `send`). Default target = each panel's ACTIVE leaf (read from the live state,
-    same source `send` uses) — so `tinkpg continue "<follow-up>"` adds a turn to the
-    current threads across all panels; the browser's echo-reconcile extends the
-    matched branch. Aim it elsewhere with --thread/--turn/--node (these read the SAVED
-    workspace tree, so they reach non-active branches), or --ancestry-file to loom from
-    an EXTERNAL full transcript (a raw-log sample that never made a tree — the CLI only
-    folds one representative per n>1 fire — or another model's real conversation grafted
-    in). Provenance rule this enforces: the ancestry is always a model's OWN, COMPLETE,
+    of `send`). Default target = each panel's ACTIVE leaf in the open workspace's
+    saved tree — so `tinkpg continue "<follow-up>"` adds a turn to the current
+    threads across all panels: the user turn persists as the CLI's own op and the
+    server folds every sample under it (the browser mirrors both live). Aim it
+    elsewhere with --thread/--turn/--node (these reach non-active branches), or
+    --ancestry-file to loom from an EXTERNAL full transcript (another model's real
+    conversation grafted in — no tree anchor, so those samples are NOT persisted;
+    stdout/--json is the only copy). Provenance rule this enforces: the ancestry is
+    always a model's OWN, COMPLETE,
     previously-generated content — in-tree, in a log, or another model's transcript — a
     --prefill only ever seeds a tiny thinking opener or a truncated OWN CoT continuation;
     never a fabricated or partial turn."""
@@ -1731,54 +1705,49 @@ def cmd_continue(
     # BEFORE firing any. The thread part rides per-plan: a loomed thread keeps the
     # system prompt it was STARTED with (its root node's), regardless of which
     # thread the panel mirror currently reflects.
-    plans: list[tuple[dict, list[dict], Optional[str], Optional[dict]]] = []
+    plans: list[tuple[dict, list[dict], str, Optional[dict]]] = []
     for p in targets:
         anchor: Optional[dict] = None  # saved-tree node the continuation hangs off
         saved_tree = trees.get(p["id"])
         if fixed_ancestry is not None:
             ancestry = fixed_ancestry
-            thread_system: Optional[str] = ""  # external transcript — never inherit a panel's thread prompt
-        elif tree_mode or foreign or (saved_tree or {}).get("nodes"):
-            # The saved tree is the ancestry source whenever the panel HAS one
-            # (the panel mirror is only the no-workspace fallback, and NEVER an
-            # option for a foreign workspace — the mirror is screen state): a
-            # tree node anchor is what gives the fire its `parent_node`, i.e.
-            # what makes the server fold the replies durably. Active mode is
-            # just _continue_target with no flags — the selected thread's leaf.
-            if saved_tree is None:
+            thread_system = ""  # external transcript — never a panel's thread prompt
+        else:
+            # The saved tree is the ONLY ancestry source (the bus transcript
+            # echo retired with P3): a tree node anchor is what gives the fire
+            # its `parent_node`, i.e. what makes the server fold the replies
+            # durably. Active mode is just _continue_target with no flags —
+            # the selected thread's leaf.
+            if not (saved_tree or {}).get("nodes"):
+                where = (
+                    f"in workspace {c_label!r}" if foreign
+                    else "in the open workspace" if c is not None
+                    else "and no workspace is open"
+                )
                 _die(
-                    f"panel {p['id']} has no saved tree in workspace "
-                    f"{c_label!r} — nothing to continue there"
-                    if foreign else
-                    f"panel {p['id']} has no saved tree in the workspace — can't --thread/--turn/--node it"
+                    f"panel {p['id']} has no saved thread to continue {where} — "
+                    "start one with `tinkpg send`, or graft an external transcript "
+                    "with --ancestry-file"
                 )
             anchor = _continue_target(saved_tree, thread, turn, node)
             ancestry = _ancestry(saved_tree, anchor["id"])
-            if not tree_mode and not foreign:
-                _warn_mirror_divergence(p, ancestry)
             # the targeted thread's OWN prompt (root node) — explicit "", not None,
-            # when absent, so looming a promptless thread can't inherit the ACTIVE
-            # thread's mirrored prompt
+            # when absent, so looming a promptless thread never carries another
+            # thread's prompt
             thread_system = (ancestry[0].get("system_prompt") if ancestry else "") or ""
-        else:
-            ancestry = p.get("messages") or []
-            if not ancestry:
-                _die(f"panel {p['id']} has no active thread — use `tinkpg send` to start one, or --thread/--node")
-            if c is not None:
-                # An open workspace whose panel tree is EMPTY: the fire proceeds
-                # from the live transcript but has no anchor, so NOTHING persists
-                # — the exact opposite of what the skill's headline promises.
-                # Loud, not silent (review finding 3B, 2026-08-12).
-                print(
-                    f"⚠ panel {p['id']} has no saved tree in the open workspace — this fire "
-                    "will NOT persist there (legacy lockstep from the live transcript). "
-                    "Start the thread with `tinkpg send` to persist.",
-                    file=sys.stderr,
-                )
-            thread_system = None  # active thread — inherit the panel mirror
         if no_system:
             thread_system = ""  # --no-system suppresses the thread part too
         plans.append((p, _continue_messages(ancestry, prompt, prefill), thread_system, anchor))
+
+    if fixed_ancestry is not None:
+        # No anchor → no parent_node → the server folds nothing. Same loudness
+        # as chat/compare's "(no workspace open — not persisted)" line: stdout
+        # must never be discovered to have been the only copy.
+        print(
+            "⚠ --ancestry-file fires have no tree anchor — samples stream here but are "
+            "NOT persisted (capture with --json to keep them)",
+            file=sys.stderr,
+        )
 
     # Persist the added user turns (plans whose anchor is an assistant node) as
     # ops BEFORE any fire (§4.3 — a pre-start failure must not lose them), and
@@ -2225,17 +2194,17 @@ def _instance_info() -> dict:
 def cmd_state(
     full: bool = typer.Option(False, "--full", help="show every message per panel, not just first/last-2"),
     width: int = typer.Option(160, "--width", help="per-message truncation width"),
-    link: bool = typer.Option(True, "--link/--no-link", help="annotate each panel with the saved workspace its active path matches (`--no-link` skips the workspaces fetch)"),
+    link: bool = typer.Option(True, "--link/--no-link", help="resolve the open workspace from the saved store — its name, folds and the panel transcripts all come from there (`--no-link` skips that fetch: model bindings only, transcripts marked as skipped)"),
     json_out: bool = typer.Option(False, "--json", help="raw state JSON (untruncated escape hatch)"),
     include_folded: bool = typer.Option(
         False, "--include-folded", help="also show panels folded in the browser UI (skipped by default)"
     ),
 ) -> None:
-    """Digest of what's on screen now: one block per panel, first/last-2 of each
-    panel's ACTIVE path, annotated with the saved workspace it matches (so you
-    can jump straight to its branches via `conv`). Panels folded in the browser
-    UI are skipped (one-line stub) — --include-folded expands them. Branches
-    themselves: see `conv`."""
+    """Digest of what's on screen now: one block per panel, first/last-2 of the
+    open workspace's saved tree ACTIVE path for that panel (the bus carries
+    model bindings only — the tree is the single transcript source). Panels
+    folded in the browser UI are skipped (one-line stub) — --include-folded
+    expands them. Branches themselves: see `ws`."""
     st = _get("/api/state")
     if json_out:
         print(json.dumps(st, indent=2, default=str, ensure_ascii=False))
@@ -2251,9 +2220,10 @@ def cmd_state(
         print(f"system: {_oneline(st['system_prompt'], 200)}{muted}")
     panels = st.get("panels", [])
     conv_id = st.get("workspace_id")
-    # Fetch saved workspaces only when we'll use them: to NAME the open-conv id the
-    # browser pushed, or — when it didn't (older browser / CLI-only) — to match panels.
-    convs = _workspaces() if (link and (conv_id or any(p.get("messages") for p in panels))) else []
+    # The workspaces fetch is what makes transcripts possible AT ALL (P3: the
+    # bus carries model bindings only; the saved tree is the single transcript
+    # source). Nothing to fetch when no workspace is open.
+    convs = _workspaces() if (link and conv_id) else []
     # Fold info lives only in the saved workspace (the state bus has no
     # reduced_panels), so folded-panel skipping needs the browser-pushed
     # workspace_id + the (default) --link fetch; without either, all panels show.
@@ -2272,39 +2242,34 @@ def cmd_state(
     print(f"{len(panels)} panel(s):\n")
     skipped: list[str] = []
     for p in panels:
-        msgs = p.get("messages", [])
-        # The WORKSPACE is the source of truth since P2's server folds: read the
-        # saved tree's active path when the open workspace has one for this
-        # panel. The bus echo (above) survives only as the lockstep fallback —
-        # it retires with P3's web half.
+        # The open workspace's saved tree is the ONLY transcript source (the
+        # bus panel is bindings + thread-system mirror; the echo retired with
+        # P3). msgs=None means "no source", distinct from an empty thread —
+        # printing that as "(0 msgs)" was the review's --no-link lie.
+        msgs: Optional[list[dict]] = None
         if open_conv is not None:
             t = (open_conv.get("trees") or {}).get(p["id"])
-            if t and t.get("nodes"):
-                msgs = [
-                    {"role": nd.get("role"), "content": nd.get("content", ""),
-                     **({"reasoning": nd["reasoning"]} if nd.get("reasoning") else {})}
-                    for nd in _active_path(t)
-                ]
+            msgs = [
+                {"role": nd.get("role"), "content": nd.get("content", ""),
+                 **({"reasoning": nd["reasoning"]} if nd.get("reasoning") else {})}
+                for nd in _active_path(t)
+            ] if t and t.get("nodes") else []
         bind = _short_run(p.get("run_id")) + (f"@{p['checkpoint']}" if p.get("checkpoint") else "")
         if p["id"] in reduced and not include_folded:
             skipped.append(p["id"])
             print(f"▸ {p['id']}  {bind}   (folded — --include-folded to expand)")
             print()
             continue
-        # The exact open-conv id (above) covers every panel; only fall back to the
-        # per-panel path-match heuristic when the browser pushed no workspace_id.
-        tag = ""
-        if convs and not conv_id:
-            hits = _link_panel_to_conv(msgs, convs)
-            if len(hits) == 1:
-                tag = f"   ← ws: {hits[0][0]} ({hits[0][1][:8]})"
-            elif len(hits) > 1:
-                names = ", ".join(f"{n} ({i[:8]})" for (n, i, _) in hits[:3])
-                tag = f"   ← ws: ambiguous ×{len(hits)}: {names} [newest first]"
-        print(f"▸ {p['id']}  {bind}   ({len(msgs)} msgs){tag}")
+        if msgs is None:
+            why = ("transcript skipped: --no-link" if conv_id and not link
+                   else "no transcript: workspace not in saved set" if conv_id
+                   else "no transcript: no workspace open")
+            print(f"▸ {p['id']}  {bind}   ({why})")
+        else:
+            print(f"▸ {p['id']}  {bind}   ({len(msgs)} msgs)")
         if p.get("thread_system_prompt"):
             print(f"   thread system: {_oneline(p['thread_system_prompt'], 200)}")
-        for line in _digest(msgs, _fmt_msg, full, width):
+        for line in _digest(msgs or [], _fmt_msg, full, width):
             print(line)
         print()
     if skipped:
@@ -2318,28 +2283,6 @@ def _workspaces() -> list[dict]:
     `?bodies=1` because every CLI consumer (link-by-active-path, browse, resolve)
     reads the trees; the bare endpoint returns blob-less summaries (storage v2)."""
     return _get("/api/workspaces?bodies=1")
-
-
-def _link_panel_to_conv(panel_msgs: list[dict], convs: list[dict]) -> list[tuple[str, str, str]]:
-    """Saved workspaces whose active path (any panel) EXACTLY equals this
-    panel's live messages → [(name, id, panel_id)], newest-updated first.
-
-    The state bus carries no workspace_id (the open-workspace id lives only
-    in the browser URL `?c=`), so we recover the link heuristically by exact
-    active-path match. Exact-match means no false positives on *content*; the only
-    ambiguity is when two saved workspaces genuinely share an identical path
-    (short prefixes) — surfaced honestly rather than guessed."""
-    if not panel_msgs:
-        return []
-    target = [(m.get("role"), m.get("content")) for m in panel_msgs]
-    hits: list[tuple[str, str, str, str]] = []  # (updated_at, name, id, panel_id)
-    for c in convs:
-        for pid, t in (c.get("trees") or {}).items():
-            ap = [(n["role"], n["content"]) for n in _active_path(t) if n.get("role") != "system"]
-            if ap == target:
-                hits.append((c.get("updated_at") or "", c.get("name") or "?", c.get("id") or "", pid))
-    hits.sort(key=lambda h: h[0], reverse=True)  # most-recently-updated first
-    return [(name, cid, pid) for (_, name, cid, pid) in hits]
 
 
 def _resolve_workspace(sel: str, convs: Optional[list[dict]] = None) -> dict:

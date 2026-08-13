@@ -1919,3 +1919,57 @@ and derived-name creation already exists as the auto-create path. And
 `_DefaultToServe`'s trap is documented rather than engineered away: a scan
 root literally named `pack`/`send` shadows to the command; `tinkerscope serve
 <name>` is the escape hatch.
+
+### 2026-08-12 — P3 review fixes on `p3-cli`: the probe that wrote, and the CLI still reading a dead echo
+
+The joint P3 review (31-agent workflow, 9 confirmed) put seven findings on
+this branch; three commits close them. The two worth a story:
+
+**`tinkpg probe` violated its own headline.** The command's whole reason to
+exist is "off-workspace, nothing written" — and `chat_begin`'s state patch ran
+unconditionally, with `broadcast`/`commit` only gating the *ephemera*. So a
+probe of model B rebound the bus panel's selection: with a tab open,
+`#adoptLayout` adopted the rebind into the SAVED layout (durable damage from a
+read-only command — the exact property P3's "saved layouts never rewritten
+headless" was about), and headless, the next `send` fired at the probed model.
+Worse, `resolve_params` inherited the OPEN thread's mirrored system prompt
+into the probe's samples — silent provenance contamination only `raw_meta`
+could reveal. Fix at the server, not the caller: `commit=false` now empties
+the chat_begin patch (the pure-read contract the field's comment had claimed
+all along), and with `broadcast=false` too the chat is fully bus-silent —
+chat_id allocates via `StateBus.alloc_chat_id`, no fanout, `running` never
+flips, and the `chat_end` skip PAIRS with the begin skip (an unpaired
+decrement would release a concurrent chat's `running`). The thread-prompt
+mirror-inherit is retired outright: every live client sends the field
+explicitly, so the inherit path's only remaining consumer *was* the bug.
+Probes now also send `thread_system_prompt=""` explicitly for older servers.
+
+**The CLI kept reading an echo that no longer exists.** The fork's echo
+retirement (p3-echo) removed `PanelState.messages`; three cli.py sites kept
+reading it: `state --no-link` printed "(0 msgs)" for panels whose threads
+were plainly non-empty (the saved-tree read was gated behind the workspaces
+fetch that `--no-link` skips — the flag's help never promised that), the
+workspace-match heuristic `_link_panel_to_conv` could never fire again (and
+its "the bus carries no workspace_id" premise had been stale since workspace
+scoping), and `continue`'s mirror fallback — with BOTH warnings bolted onto
+it in an earlier review round (3A divergence, 3B not-persisted) — was
+unreachable: the mirror list is always empty. `state` now reads trees as the
+single transcript source and `--no-link` says `transcript skipped: --no-link`
+instead of lying; the heuristic and the fallback are deleted; `continue`
+REFUSES a treeless panel; `--ancestry-file` fires warn "NOT persisted" the
+way chat/compare already did. Lesson for the next retirement: grep the
+CONSUMERS of a field you retire, not just its producers — every one of these
+was a reader kept alive by a fallback comment promising it would "retire with
+P3's web half", written by the same session that then didn't.
+
+Also in the basket: `serve.py` regains a `main()` compat shim (installed
+console scripts freeze `tinkerscope.serve:main` at install time — deleting it
+bricked the live install; entry-point changes need `uv tool install -e .` to
+regenerate shims, now in README §Development), `_gen_cli_ref` prefers the
+first-declared long opt so the reference teaches `--ws` rather than the
+`--conv` alias, and `_DefaultToServe` passes a leading TOP-app option
+(`--base-url`) through instead of rewriting it into a bogus `serve` error.
+
+Every fix shipped with a probe watched FAILING against the pre-fix tree
+(file-swap after committing): tests/test_probe_isolation.py,
+tests/test_cli_echo_retirement.py, tests/test_cli_unification.py.
