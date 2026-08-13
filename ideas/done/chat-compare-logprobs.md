@@ -14,3 +14,7 @@ server was returning them correctly). Adding `--logprobs` to `chat`/`compare`
 looks like plumbing an existing formatter to two more commands.
 
 *(opus-5, 2026-08-03, token-overlay session, found by dogfooding)*
+
+**Done 2026-08-12** (p3-cli): `chat`/`compare` gained `--logprobs` + `--json`,
+wired to the same `_stream_chat` rendering `send`/`continue` use. The writer
+conversion did not moot it — the flag is display-side.

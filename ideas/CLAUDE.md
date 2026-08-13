@@ -37,10 +37,6 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 
 ### CLI (`tinkpg`)
 
-- [`chat` can't print logprobs; `send`/`continue` can](chat-compare-logprobs.md) — found by dogfooding; `send` needs a browser-arranged panel, which defeats a terminal probe
-- [Browserless bare `--node`](browserless-node-lookup.md) — fall back to an all-workspace search so node ids are self-contained references
-- [Isolate one sample by its own node id](isolate-sample-by-node-id.md) — `--this`, so the browser's Copy-node-id → terminal round-trip is one paste
-- [`chat`/`compare` thread-prompt authoring](chat-compare-thread-system.md) — ~2 lines each, deliberately deferred until a use case shows up
 - [Restore a deleted WORKSPACE](restore-a-deleted-workspace.md) — the soft delete sets it aside in `workspaces/.deleted/`, but only a manual directory move gets it back
 
 ### Models: discovery, availability, renderers

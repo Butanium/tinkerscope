@@ -19,6 +19,10 @@ happened.
 - [`asTree()` refuses a malformed stored tree loudly](astree-silent-emptytree.md) — present-but-malformed latches load-failed + banner instead of silently persisting emptiness — **done 2026-08-12** (p1-browser ops cutover)
 - [Finish the icon consolidation](finish-icon-consolidation.md) — HighlightRules' divergent pencil/trash + +page's minus/arrow glyphs folded into `Icon`; chevrons + grips stay inline on purpose — **done 2026-08-12**
 - [A CLI-fired turn persists as content only](cli-commit-drops-cot-and-blobs.md) — closed structurally by P2 server-authored folds: all n samples persist with CoT + blobs, headless (`cli_send_headless.py`); the graft this file sketched was never built — **done 2026-08-12** (p2-folds)
+- [`chat` can't print logprobs; `send`/`continue` can](chat-compare-logprobs.md) — `chat`/`compare` gained `--logprobs`/`--json` — **done 2026-08-12** (p3-cli)
+- [Isolate one sample by its own node id](isolate-sample-by-node-id.md) — `samples --node <id> --this` — **done 2026-08-12** (p3-cli)
+- [Browserless bare `--node`](browserless-node-lookup.md) — all-workspace search in `continue`/`samples`; printers emit qualified `<ws>:<panel>:<node>` handles — **done 2026-08-12** (p3-cli)
+- [`chat`/`compare` thread-prompt authoring](chat-compare-thread-system.md) — landed with the writer conversion; `--system` authors the thread prompt like `send` — **done 2026-08-12** (p3-cli)
 - [`ChartModal.svelte` has a second component inside it](firsttoken-chips-component.md) — extracted `lib/FirstTokenChips.svelte`; the shared legend CSS moved to `app.css` — **done 2026-08-12**
 - [Per-row availability tooltip = the real reason](per-row-availability-reason.md) — the row's title now carries the run's own `unsampleable_reason`; baselined against `browser_model_availability` — **done 2026-08-12**
 - [Show the resolved base model on loose-ckpt panels](loose-ckpt-base-label.md) — `ckpt:` panels probe + show their base, and the Thinking toggle follows it; needed `ensureTinkerCatalog()` (the lazy catalog was empty on load) — **done 2026-08-12**

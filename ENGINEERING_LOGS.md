@@ -1881,3 +1881,41 @@ verified until the sabotage it exists for makes it fail. Same file, second
 lesson: Playwright fires must pump the loop for route handlers; and the fold
 smoke samples DeepSeek-V3.1 because Qwen3.5-4B never closes its think block
 (diagnosed with a synthetic positive control; tinker skill carries the quirk).
+
+---
+
+### 2026-08-12 — P3 CLI half + the tinkpg→tinkerscope unification (one cli.py pass)
+
+Branch `p3-cli`, three commits. The unification (task #4, Clément's greenlight,
+samplescope's b2e1818 pattern): ONE Typer app behind both names —
+`tinkerscope` defaults to `serve` via a `_DefaultToServe` group that injects
+for bare dirs AND leading serve options (`tinkerscope --pack f` is a published
+one-liner and had to keep working; the injection is keyed on `ctx.info_name`,
+so `tinkpg` never injects and an unknown verb stays an error there). serve.py
+shed argparse into `run_server`; pack/site became Typer sub-apps with bodies
+in `publish_cli.py`, all lazy-imported — uvicorn and the state readers stay
+off the driver hot path. That conversion is what made the GENERATED command
+reference possible: `_gen_cli_ref.py` splices a compact table into README and
+the full per-option reference into the cli skill, `tests/test_cli_docs.py`
+fails while either is stale. The doc-drift class dies with the hand-written
+tables.
+
+The P3 CLI half: `chat`/`compare` are placement writers now (task #15's
+answered design — the bus layout they replace stays EPHEMERAL; a headless CLI
+command never rewrites a workspace's saved panel bindings), with `--system`
+authoring the thread prompt like `send`. `send` gained `--ws`/`--new-ws` and
+the §4.4 auto-create (nothing resolvable → a workspace is created, the bus
+claimed, the id printed loudly); `battery` ensures ONE workspace per run.
+`tinkpg state` digests read the open workspace's saved tree, echo as
+lockstep-only fallback. Every node printer emits the qualified
+`<ws>:<panel>:<node>` handle, and the absorbed idea-basket landed: `--this`,
+`--export-ancestry`, browserless `--node` (all-workspace holder search),
+`chat`/`compare` `--logprobs`/`--json`, `tinkpg wait`, the `_node_prefix_hits`
+DRY + the `--node`+`--turn` error.
+
+Two calls worth recording: `--new-ws` takes a REQUIRED name — click's
+optional-value flags would eat the following positional (`--new-ws "prompt"`),
+and derived-name creation already exists as the auto-create path. And
+`_DefaultToServe`'s trap is documented rather than engineered away: a scan
+root literally named `pack`/`send` shadows to the command; `tinkerscope serve
+<name>` is the escape hatch.

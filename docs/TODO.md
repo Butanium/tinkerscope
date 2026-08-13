@@ -330,21 +330,19 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
 
 - [ ] **Night-shift dogfood report (2026-07-18, Fable) — CLI gaps found by using it
   for a full research cycle.** Ranked by how much hand-compensation they cost:
-  1. *(dup of the fold-full-fanout item — PROMOTE IT)* every analysis lived in
-     JSONL logs because `--n K` persists one rep; `samples --node` can't show
-     the fan-outs the CLI itself fired. This was the single biggest tax.
-  2. **`tinkpg workspace new --name X --panel <run>[@ckpt] …`** — workspaces were
-     created twice tonight via raw POST (opus once, me once); a CLI verb would
-     encode the correct shape (real run_ids, seen_panels) and dodge the
-     phantom-panel trap by construction.
+  1. ~~fold-full-fanout~~ — **CLOSED by P2 server-authored folds (2026-08-12)**:
+     all `--n K` samples persist with CoT + blobs; `samples --node` shows them.
+  2. ~~`tinkpg workspace new`~~ — **subsumed 2026-08-12 (p3-cli)**: `send
+     --new-ws NAME` + §4.4 auto-create mint correctly-shaped workspaces (real
+     run_ids, seen_panels, panel_seq) and claim the bus.
   3. **`tinkpg hold <workspace>`** (or a repo script) — the headless holder
      browser is load-bearing for CLI-driven exploration and was hand-rolled
-     from scratch twice. Promote the pattern to a primitive.
-  4. **`samples`/wave-log `--export-ancestry K out.json`** — the core loop of
-     the clean-violation method is elicit → READ → pick sample K → loom from
-     it; extracting K into an ancestry file was a python one-liner each time.
-  5. **`tinkpg wait [--timeout N]`** — block until `running=no`; sequential
-     waves needed a sleep/check dance between every fire.
+     from scratch twice. Promote the pattern to a primitive. (Post-P2 the
+     holder is no longer needed for PERSISTENCE — the server folds — so what
+     remains is the view-pinning use.)
+  4. ~~`--export-ancestry`~~ — **shipped 2026-08-12 (p3-cli)** as `samples
+     --export-ancestry OUT.json` (picks --sample K / --this, else active).
+  5. ~~`tinkpg wait`~~ — **shipped 2026-08-12 (p3-cli)** (`--timeout`, `--poll`).
   6. **Per-panel `running`** (or CLI-side queueing) — the GLOBAL flag blocks
      concurrent fires at different panels for no structural reason.
   Considered and NOT filed: a generic logprob-anchor analyzer verb — the
@@ -364,12 +362,11 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
   external context" hint instead of silently overlaying the wrong thread).
 
 
-- [ ] **CLI small follow-ups (post `continue`/`send`, 2026-07-17):** DRY the
-  node-resolution logic now duplicated between `samples --node` and `continue`'s
-  `_continue_target`; consider erroring on `--node` + `--turn` together
-  (currently `--turn` is silently ignored); consider folding a CLI-fired chat's
-  FULL n-sample fan-out into the open browser's tree (today the echo-reconcile
-  keeps only sample 0 as representative — full fan-outs live in CLI stdout).
+- [x] **CLI small follow-ups — CLOSED 2026-08-12 (p3-cli / P2):** node-prefix
+  matching DRY'd into `_node_prefix_hits` (shared by `samples --node` +
+  `_continue_target`); `--node` + `--thread`/`--turn` now errors instead of
+  silently ignoring; the full-fan-out fold shipped structurally with P2's
+  server-authored folds.
 - [x] **`--logprobs`/`--json` gave nothing at `--n 1`** (filed 2026-07-17,
   RESOLVED 2026-07-20 by the base-parity commit 3716003): n==1 used to stream
   through the OpenAI-compatible `/completions` path (`sample_stream`'s

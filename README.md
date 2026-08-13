@@ -212,6 +212,7 @@ tinkpg grep <pattern>                    # Search EVERY branch of saved workspac
 tinkpg node <node_id>                    # Locate a NODE ID anywhere in the saved workspaces and dump its record — the reverse index...
 tinkpg trash [action] [handle]           # Recover deleted branches.
 tinkpg refresh                           # Rescan the filesystem + re-probe sampling capabilities.
+tinkpg wait                              # Block until no generation is running — the sequential-wave primitive: fire, `tinkpg wait`,...
 tinkerscope serve [dirs...]              # Serve the API + web UI for DIRS (bare `tinkerscope <dir>` is shorthand for this).
 tinkerscope pack export <out>            # Export the current setup to a pack YAML file.
 tinkerscope site export <out>            # Write a self-contained static site into a directory.

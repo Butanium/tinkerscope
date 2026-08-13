@@ -969,6 +969,8 @@ def cmd_chat(
     no_system: bool = typer.Option(False, "--no-system", help="fire with NO system prompt even if the global state carries one"),
     checkpoint: Optional[str] = typer.Option(None, "--checkpoint", help="checkpoint name (overrides @ in the run arg)"),
     prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the model extends; raw `<think>` ok"),
+    show_logprobs: bool = typer.Option(False, "--logprobs", help="print each sample's per-token logprob + top-5 alternatives (native tinker sampling only)"),
+    json_out: bool = typer.Option(False, "--json", help="one JSON object per line instead of human text (includes token_logprobs when present)"),
 ) -> None:
     """Sample from a run's checkpoint; stream completions to stdout and the browser."""
     run_arg, ckpt_arg = _split_run_arg(run)
@@ -1003,7 +1005,7 @@ def cmd_chat(
     print(f"chat {r['id']}" + (f"@{ckpt}" if ckpt else "") + f"  n={n} temp={_fmt_param(temperature)}"
           + (f"  → persists in workspace {conv_id[:8]}" if conv_id else "  (no workspace open — not persisted)"))
     # Single chat: n==1 streams tokens inline; n>1 prints whole samples (no deltas).
-    _stream_chat(body, stream_inline=True)
+    _stream_chat(body, stream_inline=not json_out, logprobs=show_logprobs, json_out=json_out)
 
 
 @app.command("compare")
@@ -1020,6 +1022,8 @@ def cmd_compare(
     system: Optional[str] = typer.Option(None, "--system", help="system prompt for this call; omit = inherit the global one"),
     no_system: bool = typer.Option(False, "--no-system", help="fire with NO system prompt even if the global state carries one"),
     prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the models extend; raw `<think>` ok"),
+    show_logprobs: bool = typer.Option(False, "--logprobs", help="print each sample's per-token logprob + top-5 alternatives (native tinker sampling only)"),
+    json_out: bool = typer.Option(False, "--json", help="one JSON object per line instead of human text (includes token_logprobs when present)"),
 ) -> None:
     """Compare N runs on one prompt — A→primary, B→compare, --run extras→p-2,p-3,…
     all stream concurrently. `compare a b "prompt"` is the 2-run case."""
@@ -1072,7 +1076,8 @@ def cmd_compare(
             body["parent_node"] = parents[pid]
         res = _StreamResult()
         label = f"{pid} {r['id']}" + (f"@{ckpt}" if ckpt else "")
-        t = threading.Thread(target=_stream_chat, args=(body, label, lock, res))
+        t = threading.Thread(target=_stream_chat,
+                             args=(body, label, lock, res, False, show_logprobs, json_out))
         results.append((pid, r, res))
         threads.append(t)
         t.start()
@@ -1446,6 +1451,12 @@ def cmd_send(
         _die("send failed:\n  " + "\n  ".join(failures))
 
 
+def _node_prefix_hits(nodes: dict, node: str) -> list[dict]:
+    """Prefix-match a node handle in one tree's node map (the shared predicate
+    of `samples --node` and `continue --node` — they drifted apart once)."""
+    return [nd for nid, nd in nodes.items() if nid == node or nid.startswith(node)]
+
+
 def _continue_target(tree: dict, thread: Optional[int], turn: Optional[int], node: Optional[str]) -> dict:
     """Resolve the node whose ancestry `continue` loops from, within ONE panel's tree.
     `--node` pinpoints it (id or unique prefix); else walk a root thread's SELECTED
@@ -1454,7 +1465,9 @@ def _continue_target(tree: dict, thread: Optional[int], turn: Optional[int], nod
     ambiguous node."""
     nodes = tree.get("nodes", {})
     if node is not None:
-        hits = [nd for nid, nd in nodes.items() if nid == node or nid.startswith(node)]
+        if thread is not None or turn is not None:
+            _die("--node pinpoints the target directly — drop --thread/--turn (they were silently ignored before)")
+        hits = _node_prefix_hits(nodes, node)
         exact = [nd for nd in hits if nd.get("id") == node]
         if exact:
             return exact[0]
@@ -1482,6 +1495,23 @@ def _continue_target(tree: dict, thread: Optional[int], turn: Optional[int], nod
         _die(f"--turn {turn} out of range (thread has {len(user_idx)} user turn(s) on its selected path)")
     nxt = user_idx[turn] if turn < len(user_idx) else len(path)
     return path[nxt - 1]  # turn N's selected answer (or its user node if unanswered)
+
+
+def _find_workspace_holding_node(node: str) -> Optional[dict]:
+    """Which saved workspace holds a node matching this handle? None when none
+    does; a die listing candidates when SEVERAL do (an id prefix shared across
+    workspaces needs --ws)."""
+    holders: list[dict] = []
+    for cc in _workspaces():
+        if any(
+            any(nid == node or nid.startswith(node) for nid in (t.get("nodes") or {}))
+            for t in (cc.get("trees") or {}).values()
+        ):
+            holders.append(cc)
+    if len(holders) > 1:
+        names = ", ".join(f"{h.get('name')} ({(h.get('id') or '')[:8]})" for h in holders[:5])
+        _die(f"node {node!r} matches in {len(holders)} workspaces — disambiguate with --ws: {names}")
+    return holders[0] if holders else None
 
 
 def _warn_mirror_divergence(panel: dict, ancestry: list[dict]) -> None:
@@ -1631,7 +1661,13 @@ def cmd_continue(
     elif conv_id:
         c = next((x for x in _workspaces() if x.get("id") == conv_id), None)
     if c is None and tree_mode:
-        _die("no workspace to target — open one in the browser or pass --conv (needed for --thread/--turn/--node)")
+        if node is not None:
+            # Browserless bare --node: node ids are self-contained references —
+            # search every saved workspace for it (unique holder wins; the
+            # downstream `foreign` path then binds models from ITS layout).
+            c = _find_workspace_holding_node(node)
+        if c is None:
+            _die("no workspace to target — open one in the browser or pass --ws (needed for --thread/--turn/--node)")
     if c is not None and not include_folded and not panel:
         folded = set(c.get("reduced_panels") or [])
     if c is not None:
@@ -2741,6 +2777,8 @@ def _show_samples(
     json_out: bool = False,
     first_token: bool = False,
     deepest: bool = False,
+    this: bool = False,
+    export_ancestry: Optional[Path] = None,
 ) -> None:
     trees = c.get("trees") or {}
     if not trees:
@@ -2758,9 +2796,7 @@ def _show_samples(
             t0 = trees.get(p)
             if t0 is None:
                 _die(f"no panel {panel!r}; panels: {', '.join(trees) or '(none)'}")
-            for nid_, nd_ in (t0.get("nodes") or {}).items():
-                if nid_ == node or nid_.startswith(node):
-                    found.append((p, nd_))
+            found.extend((p, nd_) for nd_ in _node_prefix_hits(t0.get("nodes") or {}, node))
         exact = [(p, nd_) for p, nd_ in found if nd_.get("id") == node]
         if exact:
             found = exact[:1]
@@ -2813,6 +2849,32 @@ def _show_samples(
     nodes = t.get("nodes", {})
     samples = [nodes[k] for k in unode.get("children", []) if k in nodes]
     active_id = _selected_child(t, unode.get("id", ""))
+
+    if this:
+        # --this: the --node id names one SAMPLE — isolate exactly it.
+        if node is None or nd.get("role") != "assistant":
+            _die("--this needs --node pointing at an ASSISTANT sample id (a user id names the whole fork)")
+        sample_k = next((i for i, s in enumerate(samples, 1) if s.get("id") == nd.get("id")), None)
+        if sample_k is None:
+            _die(f"sample {nd.get('id')} is not among its parent's children — tree inconsistency?")
+
+    if export_ancestry is not None:
+        # The shown sample's full transcript, in --ancestry-file's shape. Picks
+        # --sample K / --this, else the fork's ACTIVE sibling.
+        if sample_k is not None:
+            if not (1 <= sample_k <= len(samples)):
+                _die(f"--sample {sample_k} out of range (this fork has {len(samples)} sample(s))")
+            target_id = samples[sample_k - 1].get("id")
+        else:
+            target_id = active_id
+        if not target_id:
+            _die("nothing to export — this fork has no samples")
+        chain = _ancestry(t, target_id)
+        payload = [{"role": m.get("role"), "content": m.get("content", "")} for m in chain]
+        export_ancestry.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+        print(f"wrote {len(payload)}-turn ancestry ({_qualified_handle(c.get('id'), pid, target_id)}) to {export_ancestry}")
+        print(f'  loom from it: tinkpg continue "<follow-up>" --ancestry-file {export_ancestry}')
+        return
 
     # --first-token: the per-sample position-0 records live server-side as heavy
     # node blobs (storage v2), not in the light tree — fetch them in one batch.
@@ -2910,6 +2972,8 @@ def cmd_samples(
     full: bool = typer.Option(False, "--full", help="each sample's COMPLETE answer + full CoT (default: answer + one-line CoT preview)"),
     width: int = typer.Option(240, "--width", help="per-sample truncation width in the default (non --full) view"),
     sample: Optional[int] = typer.Option(None, "--sample", help="show ONLY sibling K (1-indexed) — read one sample at a time"),
+    this: bool = typer.Option(False, "--this", help="with an ASSISTANT --node id: show only THAT sample (the Copy-node-id → terminal round-trip in one paste, no counting siblings)"),
+    export_ancestry: Optional[Path] = typer.Option(None, "--export-ancestry", metavar="OUT.json", help="write the shown sample's root→sample transcript as a JSON `{role, content}` list — ready for `tinkpg continue --ancestry-file` (picks --sample K / --this, else the active sibling)"),
     slice_spec: Optional[str] = typer.Option(None, "--slice", help="START[:LEN] character window of each shown sample (default LEN 2000) — read long samples in pieces instead of truncating; with --full the same window applies to the CoT"),
     json_out: bool = typer.Option(False, "--json", help="the fork as one JSON object (workspace/panel/thread/prompt/tally/samples) instead of human text — for scripts (--slice is ignored; content is never truncated)"),
     first_token: bool = typer.Option(False, "--first-token", help="the model's probability distribution over the FIRST generated token at this fork (stored top-K + each sample's sampled token — the CLI twin of the chart's first-token mode); with --json, adds per-sample `first` records + the aggregate"),
@@ -2933,18 +2997,23 @@ def cmd_samples(
         c = _resolve_workspace(selector, convs)
     else:
         cid = _get("/api/state").get("workspace_id")
-        if not cid:
-            _die("no workspace open in the browser (state has no workspace_id). pass a workspace id/name — see `tinkpg ws`.")
-        c = next((x for x in convs if x.get("id") == cid), None)
-        if c is None:
-            _die(f"open workspace {cid[:8]} isn't in the saved set yet (unsaved draft?). save it, or pass a saved id — see `tinkpg ws`.")
+        if cid:
+            c = next((x for x in convs if x.get("id") == cid), None)
+            if c is None:
+                _die(f"open workspace {cid[:8]} isn't in the saved set yet (unsaved draft?). save it, or pass a saved id — see `tinkpg ws`.")
+        else:
+            # Browserless bare --node: search every workspace (self-contained ids).
+            c = _find_workspace_holding_node(node) if node is not None else None
+            if c is None:
+                _die("no workspace open in the browser (state has no workspace_id). pass a workspace id/name — see `tinkpg ws`.")
     slice_rng: Optional[tuple[int, int]] = None
     if slice_spec is not None:
         m = re.fullmatch(r"(\d+)(?::(\d+))?", slice_spec)
         if not m:
             _die("--slice takes START[:LEN] character offsets, e.g. `--slice 2000:1500`")
         slice_rng = (int(m.group(1)), int(m.group(2) or 2000))
-    _show_samples(c, panel, turn, full, width, thread, node, sample, slice_rng, json_out, first_token, deepest)
+    _show_samples(c, panel, turn, full, width, thread, node, sample, slice_rng, json_out,
+                  first_token, deepest, this=this, export_ancestry=export_ancestry)
 
 
 def _slice_text(text: str, start: int, ln: int) -> str:
@@ -3260,6 +3329,22 @@ def cmd_trash(
 def cmd_refresh() -> None:
     """Rescan the filesystem + re-probe sampling capabilities."""
     _print_json(_post("/api/models/refresh"))
+
+
+@app.command("wait")
+def cmd_wait(
+    timeout: Optional[float] = typer.Option(None, "--timeout", help="max seconds to wait (default: forever); exit 1 on expiry"),
+    poll: float = typer.Option(1.0, "--poll", help="seconds between checks"),
+) -> None:
+    """Block until no generation is running — the sequential-wave primitive:
+    fire, `tinkpg wait`, read, fire again (replaces the sleep/check dance)."""
+    start = time.time()
+    while True:
+        if not _get("/api/state").get("running"):
+            return
+        if timeout is not None and time.time() - start > timeout:
+            _die(f"still running after {timeout:.0f}s")
+        time.sleep(poll)
 
 
 # ---------- serve / pack / site: the merged `tinkerscope` surface ----------

@@ -9,3 +9,7 @@ to team-lead 2026-07-20 during the toolbar/copy-node-id work; small, unbuilt.
 **See also:** [document-copy-node-id](document-copy-node-id.md).
 
 *(fable, 2026-07-20 — small, unbuilt)*
+
+**Done 2026-08-12** (p3-cli): `tinkpg samples --node <assistant-id> --this`
+isolates exactly that sibling — the Copy-node-id → terminal round-trip is one
+paste, no counting.

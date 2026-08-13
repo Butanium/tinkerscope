@@ -382,3 +382,33 @@ def test_fold_failure_helper():
     msg = cli._fold_failure(body, {"fold_error": "workspace w vanished"}, n_ok=3)
     assert "NOT persisted" in msg and "vanished" in msg
     assert "NOT persisted" in cli._fold_failure(body, {}, n_ok=1)
+
+
+# --------------------------------------------------------------------------- #
+# P3 absorbed ideas: browserless --node, --node+--turn guard, wait.
+# --------------------------------------------------------------------------- #
+def test_continue_browserless_node_finds_the_workspace(wired, monkeypatch):
+    """No open workspace, bare `continue --node <id>`: the holder is found by
+    searching every saved workspace — node ids are self-contained references."""
+    calls, state, ws = wired
+    state["workspace_id"] = None
+    monkeypatch.setattr(cli, "_workspaces", lambda: [WS_B])
+    res = runner.invoke(cli.app, ["continue", "--node", "bu1", "--prefill", "Hmm,"])
+    assert res.exit_code == 0, res.output
+    (fire,) = _fires(calls)
+    assert fire["workspace_id"] == "wsB" and fire["parent_node"] == "bu1"
+    assert fire["run_id"] == "run_bbb", "foreign holder ⇒ models from ITS layout"
+
+
+def test_continue_node_plus_turn_dies(wired):
+    calls, state, ws = wired
+    res = runner.invoke(cli.app, ["continue", "--node", "u1", "--turn", "2"])
+    assert res.exit_code != 0 and "drop --thread/--turn" in res.output
+
+
+def test_wait_returns_when_idle(monkeypatch):
+    seq = iter([{"running": True}, {"running": False}])
+    monkeypatch.setattr(cli, "_get", lambda path, params=None: next(seq))
+    monkeypatch.setattr(cli.time, "sleep", lambda s: None)
+    res = runner.invoke(cli.app, ["wait"])
+    assert res.exit_code == 0

@@ -424,14 +424,26 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   restart. `tinkpg samples` on the fan-out shows all K. The full fan-out also
   streams to stdout as before (capture with `… > log.txt` for a quick `<tag>`
   tally). If the fold FAILS (workspace deleted/replaced mid-fire), the CLI says
-  so and exits non-zero — stdout is then the only copy. The exceptions, each
-  loud or documented: a fire with NO workspace anywhere (pure lockstep) is
-  echo-only; `chat`/`compare` advance only the live transcript, never the tree
-  (a following bare `continue` warns when the two diverge — aim it with
-  `--thread`/`--node`, or use `send` for persisted threads); a `continue` from
-  a panel with no saved tree falls back to the live transcript and warns that
-  nothing will persist; `--ancestry-file` looms from an external transcript
-  and stays stdout-only.
+  so and exits non-zero — stdout is then the only copy. A `send` with NO
+  workspace anywhere AUTO-CREATES one (named from the message; it prints the id
+  + ?w= link — that line is your only pointer to where the samples went); aim
+  elsewhere with `--ws <id|name>` (a workspace that isn't on screen binds
+  models from ITS saved layout) or `--new-ws NAME`. `chat`/`compare` persist
+  too when a workspace is open (each invocation = a new thread; their
+  `--system` authors the THREAD prompt like `send`'s). The remaining
+  exceptions, each loud or documented: `chat`/`compare` with no workspace stay
+  lockstep-only (the plan line says "not persisted"); a `continue` from a
+  panel with no saved tree falls back to the live transcript and warns; a bare
+  `continue` whose live transcript diverges from the saved tree warns naming
+  both; `--ancestry-file` looms from an external transcript and stays
+  stdout-only.
+- **Sequential waves**: fire → `tinkpg wait [--timeout N]` → read → fire again
+  (no sleep/check dances). Reading loop: `tinkpg samples --node <id> --this`
+  isolates the one sample a qualified handle names; `samples --export-ancestry
+  out.json` writes the shown sample's transcript ready for `continue
+  --ancestry-file`. Every printer emits self-contained `<ws>:<panel>:<node>`
+  handles, and `continue`/`samples --node` resolve them with NO open workspace
+  (all-workspace search).
 - **Provenance rule for looming (`continue`/`--ancestry-file`).** OK: a full,
   VERBATIM, previously-generated workspace as ancestry — from a tree, a raw
   log, or another model entirely (grafting a real workspace model A produced
@@ -486,6 +498,8 @@ tinkpg chat <run> <prompt> [options]
   --no-system                       fire with NO system prompt even if the global state carries one
   --checkpoint TEXT                 checkpoint name (overrides @ in the run arg)
   --prefill TEXT                    assistant prefill the model extends; raw `<think>` ok
+  --logprobs                        print each sample's per-token logprob + top-5 alternatives (native tinker sampling only)
+  --json                            one JSON object per line instead of human text (includes token_logprobs when present)
 tinkpg compare <run_a> <run_b> <prompt> [options]
   # Compare N runs on one prompt — A→primary, B→compare, --run extras→p-2,p-3,… all stream...
   --run TEXT (repeatable)           additional run(s) → 3rd, 4th, … panes (repeatable)
@@ -497,6 +511,8 @@ tinkpg compare <run_a> <run_b> <prompt> [options]
   --system TEXT                     system prompt for this call; omit = inherit the global one
   --no-system                       fire with NO system prompt even if the global state carries one
   --prefill TEXT                    assistant prefill the models extend; raw `<think>` ok
+  --logprobs                        print each sample's per-token logprob + top-5 alternatives (native tinker sampling only)
+  --json                            one JSON object per line instead of human text (includes token_logprobs when present)
 tinkpg send [prompt] [options]
   # Fire the prompt as a NEW THREAD at the CURRENT panels of the open workspace — the CLI twin of...
   --n INTEGER                       samples per panel  [default: 1]
@@ -622,6 +638,8 @@ tinkpg samples [selector] [options]
   --full                            each sample's COMPLETE answer + full CoT (default: answer + one-line CoT preview)
   --width INTEGER                   per-sample truncation width in the default (non --full) view  [default: 240]
   --sample INTEGER                  show ONLY sibling K (1-indexed) — read one sample at a time
+  --this                            with an ASSISTANT --node id: show only THAT sample (the Copy-node-id → terminal round-trip in one paste, no counting siblings)
+  --export-ancestry OUT.json        write the shown sample's root→sample transcript as a JSON `{role, content}` list — ready for `tinkpg continue --ancestry-file` (picks --sample K / --this, else the active sibling)
   --slice TEXT                      START[:LEN] character window of each shown sample (default LEN 2000) — read long samples in pieces instead of truncating; with --full the same window applies to the CoT
   --json                            the fork as one JSON object (workspace/panel/thread/prompt/tally/samples) instead of human text — for scripts (--slice is ignored; content is never truncated)
   --first-token                     the model's probability distribution over the FIRST generated token at this fork (stored top-K + each sample's sampled token — the CLI twin of the chart's first-token mode); with --json, adds per-sample `first` records + the aggregate
@@ -650,6 +668,10 @@ tinkpg trash [action] [handle] [options]
   --json                            emit structured JSON
 tinkpg refresh
   # Rescan the filesystem + re-probe sampling capabilities.
+tinkpg wait [options]
+  # Block until no generation is running — the sequential-wave primitive: fire, `tinkpg wait`,...
+  --timeout FLOAT                   max seconds to wait (default: forever); exit 1 on expiry
+  --poll FLOAT                      seconds between checks  [default: 1.0]
 tinkerscope serve [dirs...] [options]
   # Serve the API + web UI for DIRS (bare `tinkerscope <dir>` is shorthand for this).
   --port INTEGER                    port to bind (default: first free port from 8765)

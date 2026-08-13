@@ -8,3 +8,8 @@ out deliberately — no observed need yet, and the semantic change should follow
 use case, not symmetry.
 
 *(fable, 2026-07-21, thread-system session — left out deliberately)*
+
+**Done 2026-08-12** (p3-cli): landed with the chat/compare writer conversion —
+`--system` on both now authors the THREAD prompt (root-node stamp, composed
+over the global) exactly like `send`; the use case arrived when chats became
+persisted threads.
