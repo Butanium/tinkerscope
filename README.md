@@ -240,7 +240,10 @@ throwaway instance.
 Installing as a tool while hacking? Use `uv tool install -e .` (editable) so
 the process runs your checkout. Backend changes need a process restart; web
 changes need `npm run build` (a pre-commit hook runs it on `web/` commits)
-plus a browser refresh.
+plus a browser refresh. When `[project.scripts]` entry points change, editable
+is not enough: the installed shims freeze their import target, so re-run
+`uv tool install -e .` to regenerate them (compat for the pre-unification
+`tinkerscope` shim is kept in `serve.py:main`).
 
 <details>
 <summary><b>Hacking on the skills</b></summary>

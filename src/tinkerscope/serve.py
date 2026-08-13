@@ -123,3 +123,17 @@ def run_server(
         )
     finally:
         instances.unregister()
+
+
+def main() -> None:
+    """Back-compat for console-script shims installed BEFORE the CLI unification
+    retargeted `[project.scripts]` to `tinkerscope.cli:app` (2026-08-12). A shim
+    freezes its import target at install time — editable or not — so every
+    pre-existing install still runs `from tinkerscope.serve import main`; without
+    this, the next restart after a merge bricks it with an ImportError. Delegates
+    to the one Typer app: argv[0] is still the shim path (…/tinkerscope), so
+    ctx.info_name and the serve-injection behave exactly like a fresh install.
+    Import inside the function — cli.py imports THIS module lazily."""
+    from .cli import app
+
+    app()
