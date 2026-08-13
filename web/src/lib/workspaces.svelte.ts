@@ -155,6 +155,8 @@ class ConversationsStore {
   /** Meta (set_meta) debounce — layout toggles come in bursts; tree ops emit
    *  immediately (they're small and order-sensitive). */
   #metaTimer: ReturnType<typeof setTimeout> | null = null;
+  /** System fields explicitly set by the pending meta write (see save()). */
+  #metaExplicit: { system_prompt?: string | null; system_enabled?: boolean | null } = {};
   /** Single-flight guard for the desync refetch, plus the RE-ARM latch: an
    *  event that would have triggered a refetch while one is in flight must not
    *  be swallowed — the finished refetch may have adopted a body from BEFORE
@@ -568,8 +570,17 @@ class ConversationsStore {
    *  selection, send-targets, folds, system prompt, seen bookkeeping. Debounced
    *  into ONE set_meta op (layout toggles come in bursts); tree mutations emit
    *  their own ops at the call site. */
-  save(): void {
+  save(explicit?: Pick<ConvFields, never> & { system_prompt?: string | null; system_enabled?: boolean | null }): void {
     if (!this.activeId || this.#loadFailed) return;
+    // System fields ride ONLY when the calling ACTION owns them, with the
+    // values it just set — never read back off the bus mirror at flush time.
+    // A transient mirror regression (a late claim response wiping
+    // system_prompt) used to be PERSISTED by the next unrelated meta write
+    // (fold/power click → set_meta carrying the nulled mirror), which is the
+    // task-#7 data loss: the typed prompt came back null live AND stored.
+    // set_meta is key-presence-based server-side, so omitting the keys leaves
+    // the stored values untouched.
+    if (explicit) this.#metaExplicit = { ...this.#metaExplicit, ...explicit };
     if (this.#metaTimer) clearTimeout(this.#metaTimer);
     this.#metaTimer = setTimeout(() => this.#flushMeta(), 400);
   }
@@ -579,7 +590,9 @@ class ConversationsStore {
       clearTimeout(this.#metaTimer);
       this.#metaTimer = null;
     } else return; // nothing pending
-    if (!this.#emit([{ op: 'set_meta', fields: this.#fields() }])) return;
+    const explicit = this.#metaExplicit;
+    this.#metaExplicit = {};
+    if (!this.#emit([{ op: 'set_meta', fields: { ...this.#fields(), ...explicit } }])) return;
     // While our own meta write is on the wire, its echo carries the Sets as of
     // EMIT time — applying that over a toggle made during the RTT would revert
     // the toggle on screen and then persist the reversion (the next #fields()
@@ -599,10 +612,8 @@ class ConversationsStore {
    *  exactly how two cross-tab layout clobbers reached disk). system_prompt
    *  stays a mirror read: mergeBusState protects it per-workspace, and the
    *  +page patch flush (#preSwitch) settles it before any transition. */
-  #fields(): ConvFields {
+  #fields(): Omit<ConvFields, 'system_prompt' | 'system_enabled'> {
     return {
-      system_prompt: live.state?.system_prompt ?? null,
-      system_enabled: live.state?.system_enabled ?? null,
       panels: this.layout.map((p) => ({
         id: p.id,
         run_id: p.run_id ?? null,

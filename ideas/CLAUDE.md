@@ -27,7 +27,6 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 - [Make the top-K logprob capture configurable](topk-capture-configurable.md) — `TOPK_LOGPROBS = 5` means Color-by-match only answers "did it make the top *five*?"
 - [Give the surprisal tint the same ramp knob](surprisal-tint-ramp.md) — share the Contrast slider rather than growing a second one
 
-- [System power toggle: rapid off→on can lose flag AND text](system-chip-power-race.md) — pre-existing (fails on main baseline); browser_system_chip flakes ~1/3 on a loaded box; dump instrumentation now in the smoke
 
 ### Chart & sample views
 

@@ -20,3 +20,22 @@ the workspace save that follows reads the regressed mirror. Wants a look at
 +page's patchState flush ordering around `system_enabled`, not at the chip.
 
 *(fable, 2026-08-12, P1 smoke session — from browser_ops_convergence's sweep runs)*
+
+**Done 2026-08-12** (fix-system-chip): mechanism pinned on the wire, two
+compounding halves — and the "suspected shape" above was half right (a flush
+race) but misplaced the writer:
+1. THE WIPE: the workspace-OPEN claim (`#loadTrees`' setState, built from the
+   body) can land AFTER the user already typed a prompt — the typed flush is
+   either stamped `workspace_id: null` (pre-open window) or simply overwritten
+   by the claim's `system_prompt: null` — nulling the MIRROR.
+2. THE AMPLIFIER (the actual data loss): every set_meta read
+   `live.state.system_prompt` at flush time, so the next unrelated meta write
+   (fold/power click) PERSISTED the nulled mirror over the stored text.
+Fix: meta writes ship system fields ONLY when the calling action owns them,
+with explicit values (`ws.save({system_prompt, system_enabled})` — set_meta is
+key-presence-based, so unrelated writes leave stored values untouched), and
+the system editor is disabled until the workspace is open (kills the pre-open
+window; pre-open edits were silently dropped by save() anyway). The smoke —
+deterministic 9/9 red at 258fdac (6 snapshotted + 3 fresh/logged) — passes
+5/5 fresh + snapshotted after. The transient mirror flicker from a truly
+pathological late claim response remains cosmetic: nothing persists it.

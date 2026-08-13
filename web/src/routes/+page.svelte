@@ -391,8 +391,12 @@
     // auto-enables server-side — old-client shim — which would wrongly
     // re-enable a muted draft). empty→non-empty auto-enables, like prefill.
     const autoOn = v.trim().length > 0 && !(s.system_prompt ?? '').trim();
-    patchState({ system_prompt: v || null, system_enabled: systemOn || autoOn });
-    ws.save();
+    const enabled = systemOn || autoOn;
+    patchState({ system_prompt: v || null, system_enabled: enabled });
+    // Explicit values — the store must persist what THIS edit set, never a
+    // flush-time read of the bus mirror (task #7: a late claim response can
+    // transiently null the mirror, and a mirror-read here stored that null).
+    ws.save({ system_prompt: v || null, system_enabled: enabled });
   }
   function setTopP(v: number) { if (Number.isNaN(v)) return; patchState({ top_p: Math.max(0, Math.min(1, v)) }); }
   function setThinking(next: boolean | 'both') {
@@ -565,7 +569,7 @@
   function toggleSystemOn() {
     const next = !systemOn;
     patchState({ system_enabled: next });
-    ws.save();
+    ws.save({ system_enabled: next }); // explicit — see setSystemPrompt
     if (next && !(s.system_prompt ?? '').trim()) showSystem = true;
   }
   function togglePrefillOn() {
@@ -2708,9 +2712,14 @@
           {/if}
         </div>
         {#if showSystem}
+          <!-- disabled until the workspace is OPEN: an edit in the load window
+               would race the open claim (its flush can be stamped null / get
+               wiped by the claim) and ws.save() silently drops pre-open dirt —
+               a sub-second gate beats silent-late loss (task #7's A-half). -->
           <textarea
             class="prefill-textarea"
             class:muted={!systemOn}
+            disabled={!ws.activeId}
             value={s.system_prompt ?? ''}
             oninput={(e) => setSystemPrompt((e.target as HTMLTextAreaElement).value)}
             rows="3"
