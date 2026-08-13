@@ -122,7 +122,8 @@ export type Pin = Record<string, any> & { id: string; created_at: string; note: 
 export type Panel = string;
 
 /** One panel's MODEL selection (no transcript) — the persisted, per-workspace
- *  layout. `live.state.panels` (PanelState) is this plus the messages echo. */
+ *  layout. `live.state.panels` (PanelState) is this plus the thread-system
+ *  mirror. */
 export type PanelLayout = { id: Panel; run_id: string | null; checkpoint: string | null };
 
 /** The runtime projection of a panel's selection used across the workspace UI

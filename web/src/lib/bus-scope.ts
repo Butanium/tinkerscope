@@ -26,7 +26,7 @@ import type { PlaygroundState } from './types.ts';
 
 /** Fields of PlaygroundState that describe the OPEN WORKSPACE (persisted with the
  *  workspace), as opposed to the process-global sampling params / chat lifecycle.
- *  `panels` carries the per-panel run_id/checkpoint AND the transcript echoes, so
+ *  `panels` carries the per-panel run_id/checkpoint + thread-system mirror, so
  *  the whole array is workspace-scoped. */
 export const WORKSPACE_FIELDS = [
   'panels',

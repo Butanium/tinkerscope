@@ -139,14 +139,14 @@ def trees_of(body: Any) -> dict[str, Any]:
 
 
 def normalize_legacy(body: dict) -> tuple[dict, bool]:
-    """Fold a legacy `{tree, compare_tree}` body into `trees` — the same seeding
-    `workspace_store.save_tree` does, applied BEFORE the first op so a partial
+    """Fold a legacy `{tree, compare_tree}` body into `trees` — the seeding the
+    retired PUT save path used to do, applied BEFORE the first op so a partial
     mutation can't drop the un-touched panel. Returns (body, changed); the input
     is never mutated.
 
-    This replaces the browser's `#fullTreeSaveNeeded` full-map first save: under
-    ops nobody ever ships a whole `trees` map, so the normalization has to happen
-    on the side that owns the file."""
+    Under ops nobody ever ships a whole `trees` map (the retired browser-side
+    full-map first save did), so the normalization happens on the side that owns
+    the file."""
     if not isinstance(body, dict):
         return body, False
     has_legacy = any(k in body for k, _ in _LEGACY_PANELS)

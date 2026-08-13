@@ -174,8 +174,8 @@ has_token_logprobs?, has_raw_meta?}`
 "length"` marks a turn cut off by the max-tokens limit (the UI badges it).
 `loom_cut`/`loom_text` mark a loom branch's forced prefix (see the `message`
 event below). The
-linear ACTIVE PATH (root→leaf via `selected`) is what the sampler/CLI read — it is
-mirrored into `PlaygroundState.messages`.
+linear ACTIVE PATH (root→leaf via `selected`) is what the sampler and the CLI
+read — over `/api/workspaces`, since P3: the bus carries no transcript.
 
 **Server-authoritative trees — the op protocol** (`docs/HANDOFF_SERVER_AUTHORITY.md`,
 `api/tree_ops.py`). The tree is no longer opaque to the server: it OWNS it. Every
@@ -457,10 +457,10 @@ zero browsers attached:
   `ops` fan-out every client mutation uses — light nodes + write-once blobs
   (`token_logprobs`/`raw_meta`) in one write, `rev`++, one bus `ops` event a
   mirror replays like any other batch.
-- **Ordering guarantee**: the fold's write + `ops` broadcast happen BEFORE the
-  `chat_end` state patch (which releases `running`) and before the
-  `chat_done`/`chat_error` broadcast — fold data is present before any
-  busy-surface lifts.
+- **Ordering guarantee**: the fold's write + `ops` broadcast happen BEFORE
+  `chat_end` (which releases `running` — bookkeeping only, no state patch) and
+  before the `chat_done`/`chat_error` broadcast — fold data is present before
+  any busy-surface lifts.
 - **The terminal manifest**: the `chat_done` (or `chat_error`, when a partial
   fold happened) bus payload carries `folded: [{sample_index, node_id}, …]` +
   `fold_rev` — how a browser seeds its blob cache from the bucket sample each
@@ -574,10 +574,10 @@ inversion and were verified to fail on the pre-fix build).
 Event names = the message's `type`:
 - `snapshot` → `{type:"snapshot", state}` (full state, sent first on connect)
 - `patch` → `{type:"patch", event, state}` (state changed; e.g. event="chat_start"/"chat_done"/"patch")
-- `chat_start` → `{type:"chat_start", chat_id, panel, n, label, client_token?, workspace_id?, thread_system_prompt?}` (a chat began; clear that panel's samples. `n` = TOTAL expected samples — 2×n_samples on a `thinking:"both"` chat. `workspace_id` = the workspace open when the chat started — the browser folds an external chat only when this matches its active workspace; null = fold anyway, see below. `thread_system_prompt` = the chat's RESOLVED thread part)
+- `chat_start` → `{type:"chat_start", chat_id, panel, n, label, client_token?, workspace_id?, thread_system_prompt?}` (a chat began; clear that panel's samples. `n` = TOTAL expected samples — 2×n_samples on a `thinking:"both"` chat. `workspace_id` = the chat's home workspace, stamped at fire time — a browser uses it only for bucket render hygiene now (a foreign-workspace chat on a reused panel id must not linger as an overlay); nothing folds browser-side. `thread_system_prompt` = the chat's RESOLVED thread part)
 - `delta` → `{type:"delta", chat_id, panel, sample_index, delta, kind}` (streamed token chunk; only a token-streaming producer at n==1 — openrouter, NOT run_id / base_model / loose sampler_path which all render native — accumulate per chat_id/panel/sample_index, then the `sample` event finalizes)
 - `sample` → `{type:"sample", chat_id, panel, sample_index, content, raw_text, finish_reason, reasoning?, thinking?}` (`thinking` only on `thinking:"both"` chats — which half drew this sample)
-- `chat_done` → `{type:"chat_done", chat_id, panel, client_token?, workspace_id?, thread_system_prompt?, folded?, fold_rev?}` (`folded` + `fold_rev` appear iff a server-authored fold landed — the `[{sample_index, node_id}]` manifest + the rev its `ops` event carried; see "Server-authored folds". `workspace_id` scopes the external fold — see `chat_start`. `thread_system_prompt` = the chat's resolved thread part: the external fold reconciles the transcript onto the ROOT carrying the same one — two probe threads sharing a first message under different prompts are distinct — and stamps it on a freshly-minted root)
+- `chat_done` → `{type:"chat_done", chat_id, panel, client_token?, workspace_id?, thread_system_prompt?, folded?, fold_rev?}` (`folded` + `fold_rev` appear iff a server-authored fold landed — the `[{sample_index, node_id}]` manifest (how the firing browser seeds its blob cache from the bucket) + the rev its `ops` event carried; see "Server-authored folds". The fold itself already arrived as that `ops` event — a terminal drives NO tree mutation in any client. A `parent_node`-less chat's terminal means nothing was persisted anywhere: no-placement fires are fully ephemeral (bucket render + caller stream only — the §9.4 accepted default; give a chat a home workspace if you want to keep it))
 - `chat_error` → `{type:"chat_error", chat_id, panel, error, client_token?, workspace_id?, thread_system_prompt?}`
 - `ops` → `{type:"ops", workspace, rev, ops:[…]}` (a workspace TREE changed — see the op protocol above. `ops` is the batch AS APPLIED: light node bodies only (heavy fields went to write-once blobs, nodes carry `has_token_logprobs`/`has_raw_meta` instead) and merged `set_meta` values. A mirror **applies every event in rev order, its own echoes included** — idempotent/LWW ops make replaying your own batch a no-op, and skipping it provably breaks convergence when two tabs contend. Match the `workspace` BEFORE checking the rev gap: gap-checking a foreign event either refetches for nothing or, worse, advances the local rev so the next genuine event looks stale. Any mismatch — a gap forward, or a rev that went BACKWARDS, which a pack install can do — means refetch the light body)
 - `workspace_deleted` → `{type:"workspace_deleted", workspace}` (that workspace is gone — `DELETE /api/workspaces/{id}` succeeded). Its OWN event rather than an `ops` entry, because a deletion has no `rev` to ride: the workspace the rev would belong to no longer exists. A tab holding it open otherwise learns nothing and its next refetch 404s, which is indistinguishable from server trouble. Fires only on a real deletion (a 404 announces nothing). The store's delete is SOFT, so the id can come back via `workspaces/.deleted/`

@@ -166,7 +166,7 @@ class StateBus:
         1. Anti-graft: a patch stamped with a DIFFERENT workspace than the one on
            the bus may only apply workspace-scoped keys if it carries the full
            picture (`panels`) — i.e. it CLAIMS the bus. An incremental write from
-           a non-owner (a second browser tab's transcript echo, a stale client)
+           a non-owner (a second browser tab's per-panel mirror, a stale client)
            would otherwise graft onto the current workspace's panel list. Such a
            patch keeps only its GLOBAL fields (sampling params).
         2. Anti-chimera: a patch may never CHANGE `workspace_id` without bringing

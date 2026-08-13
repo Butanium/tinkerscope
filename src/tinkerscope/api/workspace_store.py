@@ -30,7 +30,7 @@ and add-model's `duplicateTo` CLONES a panel's tree keeping the SAME ids — so 
 panels can share a node id, and the shared blob is written once (identical data).
 
 REVISIONS: every workspace carries a monotonic `rev`, bumped in `_persist` — the
-one choke point every write channel passes through (ops, PATCH, PUT, create, pack
+one choke point every write channel passes through (ops, PATCH, create, pack
 apply, trash restore). Attached clients mirror the tree optimistically and
 converge on the bus `ops` events, so a channel that moved a workspace without
 bumping `rev` would leave them silently stale. 0 = written before revs existed;
@@ -469,7 +469,7 @@ def _record_layout(cid: str, prev: Any, new: Any) -> None:
 _TRASH_MAX_AGE_DAYS = 90
 _TRASH_MAX_BYTES = 32 * 1024 * 1024
 # Above this many nodes vanishing in ONE save, say so loudly: the legitimate ops
-# are big (reset thread, discard 30 samples) but so is a truncated-PUT bug, and
+# are big (reset thread, discard 30 samples) but so is a truncated-write bug, and
 # only the log distinguishes them after the fact.
 _TRASH_LOUD_AT = 200
 
@@ -506,8 +506,9 @@ def _preview(node: Any) -> str:
 
 def _vanished(prev_tree: Any, new_tree: Any) -> dict[str, Any]:
     """Nodes present before and absent after. Presence by ID ONLY — node BODIES
-    legitimately change on a save (#lightenShipped swaps inline heavy fields for
-    `has_*` flags), so a content diff would journal noise."""
+    legitimately differ between writers (an op ships heavy fields inline; the
+    stored light node carries `has_*` flags), so a content diff would journal
+    noise."""
     new_ids = set(_nodes_of(new_tree))
     return {nid: n for nid, n in _nodes_of(prev_tree).items() if nid not in new_ids}
 
@@ -798,7 +799,7 @@ def _persist(light: dict) -> None:
     prev_panels = prev.get("panels") if isinstance(prev, dict) else None
     # Per-workspace monotonic revision (HANDOFF_SERVER_AUTHORITY §4.2). Bumped
     # HERE for the same reason the trash journal diffs here: _persist is the one
-    # choke point EVERY write channel goes through — /ops, PATCH, PUT, create,
+    # choke point EVERY write channel goes through — /ops, PATCH, create,
     # pack apply, trash restore — so no path can move a workspace without the
     # attached mirrors being told. max() of both sides keeps it monotone whichever
     # is fresher: the caller's body wins on a cold cache (post-restart write to a

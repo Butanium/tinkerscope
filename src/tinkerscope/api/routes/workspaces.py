@@ -57,8 +57,9 @@ class WorkspaceCreate(BaseModel):
     # models are shown in which panels. Travels with the workspace so switching
     # restores its model set (and a new workspace can inherit the current one's).
     panels: list[dict[str, Any]] | None = None
-    # Per-workspace panel UI (see TreeSave) — sent when a draft is first persisted
-    # so its folded/send-target state survives even if set before the first save.
+    # Per-workspace panel UI (opaque panel-id lists; see the set_meta op) — sent
+    # when a draft is first persisted so its folded/send-target state survives
+    # even if set before the first write.
     reduced_panels: list[str] = []
     send_targets: list[str] = []
     seen_panels: list[str] = []
