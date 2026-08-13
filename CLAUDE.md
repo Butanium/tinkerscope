@@ -109,13 +109,14 @@ and in this file's reference section; HANDOFF.md itself is retired.
 - **Shared-state bus / live-drive** (the `tinkpg` ↔ browser lockstep): see
   `docs/HANDOFF_BRANCHING.md` §1 + `src/tinkerscope/api/state.py`.
 - **Deletion is recoverable, in two layers** — `workspace_store.py`'s trash
-  journal + `web/src/lib/undo.ts`. The server diffs in **`_persist`**, not
-  `save_tree`: it's the choke point for EVERY write, so `upsert`'s wholesale
-  tree replacement is covered too, and it sees the body AFTER save_tree's legacy
-  `{tree, compare_tree}` seed (diffing before that mass-journals phantom
-  deletions on a legacy workspace's first save). Diff by node **ID only** —
-  bodies legitimately change per save (`#lightenShipped` swaps inline heavy
-  fields for `has_*` flags), so a content diff would journal noise. Entries
+  journal + `web/src/lib/undo.ts`. The server diffs in **`_persist`**: it's the
+  choke point for EVERY write, so ops, `upsert`'s wholesale tree replacement
+  and pack installs are all covered, and it sees the body AFTER the ops path's
+  legacy `{tree, compare_tree}` normalization (diffing before that mass-journals
+  phantom deletions on a legacy workspace's first write). Diff by node **ID
+  only** — a node's body can legitimately differ between writers (an op ships
+  heavy fields the stored light node carries as `has_*` flags), so a content
+  diff would journal noise. Entries
   record each vanished subtree's **sibling index**, or restore silently reorders
   every ‹k/N› cycler. `DELETE /api/workspaces/{id}` is **soft** (moved to
   `workspaces/.deleted/`) because the journal lives *inside* the workspace, so an

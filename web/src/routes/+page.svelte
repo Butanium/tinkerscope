@@ -1224,7 +1224,7 @@
 
   // ── Workspace rendering ────────────────────────────────────────
   // Each column renders from ITS OWN branch TREE's active path (ws.treeFor(p)) —
-  // the single read source (the panel's messages echo is write-only for the CLI).
+  // the single read source (the CLI reads the same trees over /api/workspaces).
   // The per-(chat_id,panel) BUCKET (live.panels[panel]) holds
   // the LATEST turn's N variants + streaming progress; we overlay it on the
   // active leaf's assistant turn so the distribution view replaces — never
@@ -1862,9 +1862,10 @@
     const onFocus = () => void ws.claimBus();
     window.addEventListener('focus', onFocus);
 
-    // Open the ONE live-state stream on load + wire the terminal-fold hooks:
-    // our own detached chats fold from their bus bucket (chat.try*), everything
-    // else reconciles from the transcript echo (ws's foreign path).
+    // Open the ONE live-state stream on load + wire the terminal hooks: our own
+    // detached chats seed the blob cache from their bucket via the fold manifest
+    // (chat.try*); foreign terminals only trigger bucket render hygiene — every
+    // fold arrives as an ops event (server-authored).
     live.start();
     ws.init({
       done: (panel, data) => chat.tryFoldOwnDone(panel, data),

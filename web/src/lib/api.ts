@@ -109,10 +109,10 @@ const httpApi = {
   deletePin: (id: string) =>
     j<{ status: string }>(`/api/pins/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   // workspaces (branchable trees; server adds id/created_at/updated_at).
-  // Storage v2: the LIST is summaries only; a workspace's light body (trees
-  // incl., per-node blobs excl.) is fetched per-id; heavy per-node blobs are
-  // batch-fetched; PUT /tree upserts only the dirty panels; PATCH carries any
-  // layout-only change with zero tree bytes. See docs/STORAGE_V2.md §2.4.
+  // Storage v2 + ops: the LIST is summaries only; a workspace's light body
+  // (trees incl., per-node blobs excl.) is fetched per-id; heavy per-node blobs
+  // are batch-fetched; ALL tree mutation is applyOps; PATCH carries any
+  // layout-only change with zero tree bytes. See docs/API_CONTRACT.md.
   listWorkspaces: () => j<WorkspaceSummary[]>('/api/workspaces'),
   getWorkspace: (id: string) =>
     j<Workspace>(`/api/workspaces/${encodeURIComponent(id)}`),

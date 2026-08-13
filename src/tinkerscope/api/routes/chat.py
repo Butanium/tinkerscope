@@ -38,17 +38,17 @@ Only openrouter still token-streams at n==1.
 Each completed sample is yielded to the caller (CLI stdout) and broadcast to the
 state bus (browser live view), tagged with chat_id + panel. chat_id is allocated
 atomically (BUS.chat_begin); `running` is an in-flight counter (BUS.chat_end) so
-concurrent chats (two compare panels, or CLI + browser) don't collide. The chosen
-sample is committed back into the panel's transcript for multi-turn memory.
+concurrent chats (two compare panels, or CLI + browser) don't collide.
 
 Server-authored folds (HANDOFF_SERVER_AUTHORITY §4.3, P2): a request carrying
 `parent_node` has its completed samples folded into the workspace TREE at
 terminal — assistant siblings under that user node, one `add_nodes` op through
 `workspace_store.apply_ops` (light nodes + write-once blobs, rev++) fanned out as
 a bus `ops` event BEFORE chat_done, with a `folded` manifest on the terminal
-broadcast mapping sample_index → server-minted node id. The transcript echo above
-stays emitted (legacy consumers), but for placement chats it is no longer what
-persistence reads. While the chat runs, its (workspace, panel, parent) placement
+broadcast mapping sample_index → server-minted node id. The fold is the ONLY
+persistence a chat has (P3 removed the bus transcript echo): a no-placement
+fire is fully ephemeral — bucket render + caller stream, nothing stored
+(HANDOFF_SERVER_AUTHORITY §9.4's accepted default). While the chat runs, its (workspace, panel, parent) placement
 is registered (`api/inflight.py`) and a `delete` op pruning the parent's subtree
 is rejected.
 """
@@ -474,7 +474,7 @@ async def chat(req: ChatRequest):
                 "parent_node needs a home workspace: send workspace_id, or open a workspace "
                 "on the bus first (HANDOFF_SERVER_AUTHORITY §4.4)",
             )
-    # `msgs` is the per-panel transcript echo (answer-only, no system prompt). From it:
+    # `msgs` is the request's message list (answer-only, no system prompt). From it:
     #  - sampling_msgs: {role, content} ONLY (+ system) — fed to the OpenAI-style endpoints
     #    (OpenRouter, loose checkpoint), which would choke on an extra `reasoning` key.
     #  - native_msgs: also carries `reasoning` (+ system), fed to the native renderer paths
@@ -697,8 +697,8 @@ async def chat(req: ChatRequest):
             return
 
         # ── chat lifecycle: atomic id + running, reflect into state ──────────
-        # Per-panel: `panel` routes this panel's selection + transcript echo into
-        # panels[panel] (multi-turn memory). Sampling params are GLOBAL (shared
+        # Per-panel: `panel` routes this panel's selection + thread-system mirror
+        # into panels[panel]. Sampling params are GLOBAL (shared
         # across panels) — set at the top level, no per-panel author race — and
         # only a "global"-scope chat (the browser) writes them; a "call"-scope
         # chat (CLI probe) samples with them but leaves the shared state alone.
