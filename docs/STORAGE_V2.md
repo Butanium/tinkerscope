@@ -1,8 +1,12 @@
 # Storage v2 — scaling workspaces past the single-JSON design
 
-STATUS: design approved 2026-07-13 (Clément ✓ "big backend refactor is fine — make the
-codebase right for big workspaces"). This doc is the coordination contract between the
-backend and frontend lanes; `docs/API_CONTRACT.md` gets updated as-built at the end.
+STATUS: SHIPPED 2026-07-13; historical design record. The node split (light
+trees + write-once blobs) and the frontend memory policy are still the live
+architecture. **Wire deltas below partially superseded by the server-authority
+migration (2026-08-12, `HANDOFF_SERVER_AUTHORITY.md`)**: the PUT save path and
+the dirt machinery retired with P1/P3 (all tree writes are ops), and the
+state-bus transcript echo was REMOVED outright in P3 (not just dieted). As-built
+shapes: `docs/API_CONTRACT.md`.
 
 ## 1. Why (measured, not guessed)
 
@@ -84,10 +88,10 @@ partial data. Log progress (16 workspaces, one is 115 MB — a few seconds).
 - `POST /api/workspaces/{id}/node-blobs` body `{"nodes": ["n1", ...]}` →
   `{"n1": {"token_logprobs": [...], "raw_meta": "..."}, ...}` (NEW; POST because node
   lists can be long). Unknown node ids → omitted from the response, not an error.
-- `PUT  /api/workspaces/{id}/tree` — body's `trees` becomes a **partial upsert
-  map** (only dirty panels), plus NEW `dropped_trees: string[]` for panel removals.
-  Nodes in the body MAY carry inline `token_logprobs`/`raw_meta` (fresh folds): the
-  server strips them into blobs and stores light nodes. Response unchanged.
+- ~~`PUT  /api/workspaces/{id}/tree` — partial upsert map + `dropped_trees`~~ —
+  RETIRED (P1 moved the browser off it; P3 removed the endpoint). Tree writes
+  are `POST /{id}/ops` (replace_tree/add_nodes/…); inline heavy fields on op
+  nodes are still stripped into write-once blobs the same way.
 - `PATCH /api/workspaces/{id}` — extended beyond rename to accept any of
   `{name, system_prompt, panels, reduced_panels, send_targets, seen_panels}`:
   layout-only changes stop shipping trees entirely.
@@ -102,11 +106,9 @@ partial data. Log progress (16 workspaces, one is 115 MB — a few seconds).
 - Trees become **`$state.raw`** — all mutation already flows through `tree.ts` →
   `convo.setTree` with wholesale ref replacement, so deep proxies are pure overhead.
   Lane must grep for any in-place node mutation and route it through setTree first.
-- Save machinery: dirty-panel set (+ dropped set, + layout-dirty flag) instead of
-  whole-map snapshot. Debounce + flush-on-switch semantics stay (see
-  BRANCHING_DESIGN §6 — capture/flush ordering was subtle; with `$state.raw` trees
-  are plain immutable objects, so no `$state.snapshot` needed at all, just refs).
-  Layout-only dirt → `PATCH`, no tree bytes.
+- ~~Save machinery: dirty-panel set …~~ — RETIRED with P1 (ops emission;
+  `web/src/lib/deprecated/save-plan.ts`). Flush-on-switch survives as "drain
+  the ops chain before any transition". Layout-only changes are one `set_meta`.
 - NEW `lib/node-blobs.svelte.ts` store: reactive per-node blob cache;
   `ensure(convId, nodeIds[])` batch-fetches missing entries. Seeded locally at fold
   time (fresh samples already have the data in hand). Cleared on workspace
@@ -115,13 +117,12 @@ partial data. Log progress (16 workspaces, one is 115 MB — a few seconds).
   view), the raw_meta disclosure in `ChatMessage.svelte`, ChartModal first-token
   mode (`chartByFirstToken` — needs blobs for all samples of the picked turn),
   `token-search`. Affordances (pills/disabled states) key off the `has_*` flags.
-- State-bus diet: the `panels[].messages` / `panel_messages` transcript mirrors
-  strip `token_logprobs` + `raw_meta` (the CLI renders text; verified it reads
-  nothing else). **Do NOT touch the live sample-stream events** — detached fire
-  delivers streaming samples through the bus and the owning browser folds full
-  data from its bucket. Known accepted limit: a FOREIGN browser reconciling a fold
-  from the echo gets light nodes; its logprob view lazy-fetches blobs once the
-  owner's PUT lands (until then: the ordinary "no token data" pill).
+- ~~State-bus diet: the transcript mirrors strip heavy fields~~ — SUPERSEDED
+  (P3): the transcript mirrors are GONE from the bus entirely; the tree is the
+  transcript. The live sample-stream events are still untouched (the bucket
+  carries full samples), and the foreign-browser limit died with P2: every
+  mirror adopts server-authored folds (all n, blobs server-side) from the
+  `ops` event.
 
 ## 3. Acceptance (the actual repro, as a smoke)
 

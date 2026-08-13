@@ -166,9 +166,9 @@ export type PlaygroundState = {
 };
 
 /** Client-settable patch for PlaygroundState. The patch shape diverges from the
- *  state shape: `panels` full-replaces the list; `panel_messages` mirrors every
- *  panel's transcript at once; `panel`+run_id/checkpoint/messages targets ONE panel;
- *  the rest are global params. */
+ *  state shape: `panels` full-replaces the list; `panel_thread_system` mirrors
+ *  every panel's thread prompt at once; `panel`+run_id/checkpoint targets ONE
+ *  panel; the rest are global params. */
 export type StatePatch = {
   panels?: PanelState[];
   workspace_id?: string | null;

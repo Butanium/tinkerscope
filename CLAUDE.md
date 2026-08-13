@@ -173,8 +173,9 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
   across the app:
   - `lib/state.svelte.ts` → `live` — mirrored shared `PlaygroundState` (selection/
     params) + per-panel **streamed sample buckets**, both driven by the
-    `/api/state/events` SSE. The render bus — but since 2026-08-06 its `panels`
-    are the CLI-visible ECHO only: the authoritative layout lives in
+    `/api/state/events` SSE. The render bus. Its `panels` carry SELECTION +
+    thread-system mirror only (the transcript echo retired with P3 — the
+    workspace tree is the transcript); the authoritative layout lives in
     `ws.layout`, and NOTHING reads `live.state.panels` back for rendering or
     persistence (that read is how two cross-tab layout clobbers reached disk).
     `live.busId` tracks the RAW bus ownership stamp (the mirror's own
@@ -190,7 +191,9 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     never `live.state.panels`; mutations go through `applyLayout`/
     `setPanelModel`, and only bus messages STAMPED with the open workspace may
     drive it — see the 2026-08-06 clobber in `ENGINEERING_LOGS.md`),
-    + persistence + the external-fold reconcile. The workspace model.
+    + persistence. The workspace model. (The external-fold reconcile retired
+    with P3: foreign folds arrive as `ops` events like every mutation;
+    `reconcileExternal` survives in tree.ts only for sendBranchToPanel's graft.)
     Storage v2 (`docs/STORAGE_V2.md`): `list` holds SUMMARIES only (bodies are
     fetched on open); `trees` is **`$state.raw`** (immutable refs — never mutate
     a node in place, nothing would react or save). Persistence is the **ops
@@ -209,9 +212,12 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     seeded at fold time by the chat store, reset on every workspace
     transition. Consumers: ChatMessage's token view + raw-meta disclosure,
     ChartModal first-token mode (fetches the picked turn only).
-  - `lib/chat.svelte.ts` → `chat` — the **generation-fire lifecycle**: POST
-    `/api/chat`, drain, fold under the user node, per-panel abort controllers +
-    the live-bucket prefill color. UI-agnostic — the caller (+page) passes a
+  - `lib/chat.svelte.ts` → `chat` — the **generation-fire lifecycle**: detached
+    POST `/api/chat` carrying `parent_node` (the SERVER folds all n at terminal
+    — P2), rides behind the ops chain so the user-turn op lands first; at the
+    terminal it seeds `nodeBlobs` from the bucket via the `folded` manifest
+    (bucket-folding only as the manifest-less stale-server fallback) + the
+    live-bucket prefill color. UI-agnostic — the caller (+page) passes a
     `ChatParams` bundle + a resolved `ChatModelField`, so it never touches the
     sampling UI. +page keeps thin glue (`paramsBundle`/`resolveModelField`/a
     `fireOne` wrapper) over it. `stopGeneration(panel?)` has always been

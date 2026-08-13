@@ -239,8 +239,8 @@ def main():
             edited = [n for n in stored["trees"]["compare"]["nodes"].values()
                       if n.get("content") == "C1- EDITED-BY-A"]
             assert len(edited) == 1, f"edited node not stored exactly once: {edited}"
-            assert h_a == f"compare:{edited[0]['id']}", \
-                f"stored id {edited[0]['id']} != copied handle {h_a}"
+            assert h_a == f"{w1['id'][:8]}:compare:{edited[0]['id']}", \
+                f"stored id {edited[0]['id']} != copied ws-qualified handle {h_a}"
             # the new sibling shows a ‹2/2› cycler in the FOLLOWER page too
             sib = page_b.locator(f"{cmp_} .message", has_text="C1- EDITED-BY-A") \
                         .last.locator("[data-testid=branch-cycle] .branch-cycle-count")

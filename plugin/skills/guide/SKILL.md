@@ -404,7 +404,7 @@ answer to "which one is that"):
 | copy conversation | the same, with text lines | the whole thread as markdown |
 | send to panel | two crossing arrows | copy this branch's context into another panel |
 | view all samples | eye | spread the turn's sibling branches out as cards (later turns hide while open) |
-| copy node handle | `#` | `<panel>:<node>` — what `tinkpg --node` addresses |
+| copy node handle | `#` | `<ws>:<panel>:<node>` — paste into `tinkpg samples/continue --node …` in any terminal |
 
 Sample cards (an n>1 draw) add: **make active** (circled check — picks that
 branch and drops back to the thread), **continue this sample** (`+`), **discard
@@ -443,7 +443,7 @@ always check what a chord will do before committing to it.
 - **`live` in the top bar** means the browser is connected to the shared state
   bus. Everything on screen can also be driven from a terminal via the `tinkpg`
   CLI, and a chat fired there streams into this view. The `#` button on a row
-  copies its node id, which is how you point a CLI command at one specific
+  copies its fully-qualified node handle, which is how you point a CLI command at one specific
   message.
 - **Two tabs on the same workspace** is last-writer-wins for edits. Two tabs on
   *different* workspaces is safe.
