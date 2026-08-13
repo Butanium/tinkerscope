@@ -30,10 +30,14 @@ and in this file's reference section; HANDOFF.md itself is retired.
 
 ## Working conventions
 
-- **`tinkpg` CLI changes ship with their docs, in the same commit.** Any new
-  command / flag / behavior change updates: README.md §"Bring your agent"
-  (command table ONLY — the README is a human pitch, option notes belong in
-  the skill; Clément 2026-08-05) AND the CLI skill. **The skills live in this repo at
+- **CLI changes ship with their docs, in the same commit — and the command/flag
+  surface is GENERATED.** `tinkpg` and `tinkerscope` are ONE Typer app
+  (`cli.py`, merged 2026-08-12; `tinkerscope` defaults to `serve`). After any
+  command/flag change run `python -m tinkerscope._gen_cli_ref` — it rewrites the
+  marked blocks in README.md §"Bring your agent" (compact table; the README is a
+  human pitch, option notes belong in the skill; Clément 2026-08-05) and the CLI
+  skill's "Command reference"; `tests/test_cli_docs.py` fails while stale.
+  Behavior changes still update the skill's hand-written workflow prose. **The skills live in this repo at
   `plugin/skills/<name>/SKILL.md`** — `plugin/` is a Claude Code plugin
   (`.claude-plugin/marketplace.json` at the repo root makes the repo its own
   marketplace). **The skill's name depends on how it was loaded**, so don't

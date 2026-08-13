@@ -1,15 +1,18 @@
-"""`tinkerscope` entry point: serve the API + built web UI from one process.
+"""Server launch: serve the API + built web UI from one process.
 
-Usage:
-    tinkerscope [DIR ...] [--port PORT] [--host HOST] [--reload]
+Since the CLI unification (2026-08-12) the entry point is the ONE Typer app in
+`cli.py` — `tinkerscope [DIR ...] [--port N]` routes here through its `serve`
+command (bare-dir shorthand via `_DefaultToServe`), and `cli.py` imports this
+module LAZILY so uvicorn stays off the hot path of every driver-verb
+invocation. The old `_pack_command`/`_site_command` argparse handlers became
+Typer sub-apps (`cli.py`) whose bodies live in `publish_cli.py`.
 
-Scan roots default to the current directory. CLI args are translated into the
-`TINKERSCOPE_*` env vars before the app module is imported, so the settings
+Scan roots default to the current directory. Args are translated into the
+`TINKERSCOPE_*` env vars BEFORE the app module is imported, so the settings
 module (and any uvicorn --reload subprocess) sees a consistent config.
 """
 from __future__ import annotations
 
-import argparse
 import atexit
 import os
 import socket
@@ -47,283 +50,40 @@ def _pick_port(host: str, requested: int | None) -> int:
     sys.exit(f"no free port in {DEFAULT_PORT}-{DEFAULT_PORT + PORT_SCAN_SPAN - 1} on {host}")
 
 
-def _pack_command(argv: list[str]) -> None:
-    """`tinkerscope pack <sub>` — author share packs from a live state dir."""
-    parser = argparse.ArgumentParser(
-        prog="tinkerscope pack",
-        description="Author share packs (portable YAML bundles of checkpoints + params + workspaces).",
-    )
-    sub = parser.add_subparsers(dest="cmd", required=True)
-    ex = sub.add_parser("export", help="Export the current setup to a pack YAML file.")
-    ex.add_argument("out", type=Path, help="output pack file (.yaml); if it exists, merges into it unless --overwrite")
-    ex.add_argument("--dir", action="append", type=Path, default=None,
-                    help="scan root(s) whose state to export (default: cwd) — must match how the instance was launched")
-    ex.add_argument("--name", default=None, help="pack name (default: kept from an existing file, else the dir name)")
-    ex.add_argument("--description", default=None)
-    ex.add_argument("--models-from", choices=["panels", "workspaces", "all", "runs"], default="all",
-                    help="where to gather models (default: all = current panels + workspaces + already-registered pack models)")
-    ex.add_argument("--include-model", action="append", default=None, metavar="SUBSTR",
-                    help="keep only models whose label/ref matches (repeatable)")
-    ex.add_argument("--exclude-model", action="append", default=None, metavar="SUBSTR",
-                    help="drop models whose label/ref matches (repeatable)")
-    ex.add_argument("--no-workspaces", action="store_true", help="exclude saved workspaces")
-    ex.add_argument("--no-defaults", action="store_true",
-                    help="omit the defaults block (sampling params + default panel layout) from the pack")
-    ex.add_argument("--workspace", action="append", default=None, metavar="NAME",
-                    help="include only these workspaces by name (repeatable)")
-    ex.add_argument("--overwrite", action="store_true",
-                    help="regenerate from scratch instead of merging into an existing file")
-    ex.add_argument("--logprobs", action="store_true",
-                    help="include per-token logprobs (the token inspector + first-token chart). "
-                         "Large: give `out` a .gz suffix to compress (107 MB -> 30 MB on a real workspace)")
-    args = parser.parse_args(argv)
-    if args.cmd == "export":
-        _pack_export(args)
-
-
-def _pack_export(args) -> None:
-    dirs = [d.expanduser().resolve() for d in (args.dir or [Path.cwd()])]
-    for d in dirs:
-        if not d.is_dir():
-            sys.exit(f"not a directory: {d}")
-    # StateReader / discovery read SETTINGS.scan_roots (resolved from env at import).
-    os.environ["TINKERSCOPE_SCAN_ROOTS"] = ":".join(str(d) for d in dirs)
-    from . import pack as packmod
-
-    existing = None
-    if args.out.exists() and not args.overwrite:
-        existing = packmod.load_pack(str(args.out))
-    default_name = existing.name if existing else dirs[0].name
-
-    warnings: list[str] = []
-    pack = packmod.export_pack(
-        state_dir_reader=packmod.StateReader(),
-        name=args.name or default_name,
-        description=args.description,
-        models_from=args.models_from,
-        include=args.include_model,
-        exclude=args.exclude_model,
-        workspaces=not args.no_workspaces,
-        workspace_names=args.workspace,
-        include_defaults=not args.no_defaults,
-        include_logprobs=args.logprobs,
-        existing=existing,
-        warn=warnings.append,
-    )
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    written = pack.write(args.out)
-    for w in warnings:
-        print(f"  warning: {w}", file=sys.stderr)
-    mb = written / 1e6
-    print(
-        f"wrote {args.out} — {len(pack.models)} model(s), {len(pack.workspaces)} workspace(s), "
-        f"{mb:.1f} MB{' (gzipped)' if args.out.suffix == '.gz' else ''}"
-    )
-    # GitHub rejects a push containing a file over 100 MB outright, and a pack that
-    # can't be hosted can't be linked — which is the whole point of one.
-    if mb > 90 and args.out.suffix != ".gz":
-        print(
-            f"  NOTE: {mb:.0f} MB — GitHub hard-blocks files over 100 MB. Re-run with a\n"
-            "        .gz suffix on the output path (~3.6x smaller); the browser and\n"
-            "        `--pack` both decompress it transparently.",
-            file=sys.stderr,
-        )
-
-
-def _site_command(argv: list[str]) -> None:
-    """`tinkerscope site export <dir>` — publish a read-only static site."""
-    parser = argparse.ArgumentParser(
-        prog="tinkerscope site",
-        description="Export a read-only static site (built SPA + baked JSON) for GitHub Pages or any file host.",
-    )
-    sub = parser.add_subparsers(dest="cmd", required=True)
-    ex = sub.add_parser("export", help="Write a self-contained static site into a directory.")
-    ex.add_argument("out", type=Path, help="output directory (created; its data/ and _app/ are replaced)")
-    ex.add_argument("--dir", action="append", type=Path, default=None,
-                    help="scan root(s) whose state to export (default: cwd) — must match how the instance was launched")
-    ex.add_argument("--title", default=None, help="site title, shown in the read-only badge (default: the dir name)")
-    ex.add_argument("--description", default=None)
-    ex.add_argument("--workspace", action="append", default=None, metavar="NAME",
-                    help="include only these workspaces by name (repeatable)")
-    ex.add_argument("--open", default=None, metavar="WS_ID",
-                    help="workspace id to open by default (default: the first exported one)")
-    ex.add_argument("--pack-url", default=None, metavar="URL",
-                    help="where the same content is published as a share pack — the site's "
-                         "\"open this locally\" panel turns it into a runnable command")
-    ex.add_argument("--pack-link", action="append", default=None, metavar="URL|PATH=URL",
-                    help="a pack this site should be able to INSTALL on demand, so a ?w=<id> "
-                         "link is shareable: a visitor who lacks that workspace fetches the pack "
-                         "instead of falling back to the newest one. Repeatable. Use PATH=URL when "
-                         "the file is local and not yet uploaded (path read for the ids, URL fetched "
-                         "by visitors). Implies --pack-url when given exactly once")
-    ex.add_argument("--logprobs", default=None, metavar="WHICH",
-                    help="which turns keep per-token logprobs: all (default) | chart (only the turn "
-                         "each workspace's saved chart view points at) | last:N (newest N turns per "
-                         "thread) | none. They are ~97%% of a site's bytes, and the token inspector + "
-                         "first-token chart are what they buy")
-    ex.add_argument("--no-logprobs", action="store_true",
-                    help="alias for --logprobs none")
-    # Tri-state. Pins have no workspace id, so a --workspace filter can't scope them:
-    # defaulting them ON would make a curated export ship saved samples (and their
-    # local dataset paths) from the workspaces you filtered OUT.
-    ex.add_argument("--no-pins", dest="pins", action="store_false", default=None,
-                    help="exclude saved pins (default: included, EXCEPT when --workspace filters the export)")
-    ex.add_argument("--pins", dest="pins", action="store_true",
-                    help="include saved pins even in a --workspace-filtered export (they can't be filtered per-workspace)")
-    ex.add_argument("--web-dist", type=Path, default=None,
-                    help="built frontend to publish (default: this install's web/dist, else the packaged copy)")
-    args = parser.parse_args(argv)
-    if args.cmd != "export":
-        return
-
-    dirs = [d.expanduser().resolve() for d in (args.dir or [Path.cwd()])]
-    for d in dirs:
-        if not d.is_dir():
-            sys.exit(f"not a directory: {d}")
-    os.environ["TINKERSCOPE_SCAN_ROOTS"] = ":".join(str(d) for d in dirs)
-
-    from .api.main import _web_dist
-    from . import site_export
-
-    web_dist = args.web_dist.expanduser().resolve() if args.web_dist else _web_dist()
-    if web_dist is None:
-        sys.exit("no built frontend found — run `npm run build` in web/ (or pass --web-dist)")
-
-    try:
-        pack_links = site_export.resolve_pack_links(args.pack_link or [])
-    except Exception as e:  # a bad spec / unreachable pack — say which, don't traceback
-        sys.exit(f"--pack-link: {e}")
-    # One pack link and no explicit --pack-url: it IS the pack this site publishes, so
-    # the "open this locally" command should name it rather than sit empty.
-    pack_url = args.pack_url
-    if pack_url is None and len(args.pack_link or []) == 1 and pack_links:
-        pack_url = next(iter(pack_links.values()))
-
-    # --no-logprobs predates --logprobs and stays an alias, so a scripted export keeps
-    # working. Passing both is a contradiction only when they disagree.
-    logprobs = args.logprobs or ("none" if args.no_logprobs else "all")
-    if args.no_logprobs and args.logprobs and args.logprobs != "none":
-        sys.exit(f"--no-logprobs contradicts --logprobs {args.logprobs} — pass one")
-    try:
-        site_export.parse_logprobs_mode(logprobs)
-    except ValueError as e:
-        sys.exit(str(e))
-
-    warnings: list[str] = []
-    stats = site_export.export_site(
-        args.out.expanduser().resolve(),
-        web_dist=web_dist,
-        title=args.title or dirs[0].name,
-        description=args.description,
-        workspace_names=args.workspace,
-        logprobs=logprobs,
-        include_pins=args.pins,
-        default_workspace=getattr(args, "open"),
-        pack_url=pack_url,
-        pack_links=pack_links,
-        warn=warnings.append,
-    )
-    for w in warnings:
-        print(f"  warning: {w}", file=sys.stderr)
-    mb = stats.bytes_written / 1e6
-    print(
-        f"wrote {args.out} — {stats.workspaces} workspace(s), {stats.models} model(s), "
-        f"{stats.nodes_with_blobs} node blob(s), {mb:.1f} MB of data"
-    )
-    # The ids are the point of --pack-link (they're what you paste after `?w=`), and
-    # they're derived — nothing else on this box tells you what they came out as.
-    if pack_links:
-        print(f"  installable on demand — {len(pack_links)} shareable ?w= link(s):")
-        for wid, url in pack_links.items():
-            print(f"    ?w={wid}\n        from {url}")
-    # Per-token logprobs outweigh everything else by ~40× on a real store, so the
-    # size is named here rather than left to be discovered by a failed `git push`.
-    if len(stats.per_workspace) > 1:
-        print("  heaviest workspaces:")
-        for name, b in stats.heaviest():
-            print(f"    {b / 1e6:8.1f} MB  {name}")
-    # What a narrowed --logprobs actually did. Reported in NODES (turn-samples) because
-    # the dropped blobs are never read, so their bytes are unknown by construction —
-    # and reported at all because "the chart still works" is the thing being traded.
-    if stats.logprobs_mode != "all":
-        total = stats.logprob_nodes_kept + stats.logprob_nodes_dropped
-        print(
-            f"  logprobs ({stats.logprobs_mode}): kept {stats.logprob_nodes_kept} of {total} "
-            f"turn-sample(s) with stored logprobs"
-        )
-        if stats.logprobs_unnarrowed:
-            names = ", ".join(stats.logprobs_unnarrowed[:5])
-            more = f" (+{len(stats.logprobs_unnarrowed) - 5} more)" if len(stats.logprobs_unnarrowed) > 5 else ""
-            print(f"    kept ALL for {len(stats.logprobs_unnarrowed)} workspace(s) with no saved chart view: {names}{more}")
-    # Pins are saved SAMPLES — they carry the question, the response, and the
-    # dataset_path they came from. Naming that at export time beats a visitor
-    # discovering it in a published data/pins.json.
-    if stats.pins:
-        print(f"  including {stats.pins} pin(s) — these carry saved responses and their dataset paths")
-    elif args.workspace and args.pins is None:
-        print("  pins excluded (a --workspace filter can't scope them; pass --pins to include anyway)")
-    if mb > 100:
-        print(
-            f"  NOTE: {mb:.0f} MB is large for a static host (GitHub Pages soft-limits a\n"
-            "        site at 1 GB and recommends staying under 100 MB). Nearly all of it\n"
-            "        is per-token logprobs. Publish a subset with --workspace NAME\n"
-            "        (repeatable), or narrow them: --logprobs chart keeps the turn each\n"
-            "        workspace's chart opens on (so the chart page still works),\n"
-            "        --logprobs last:3 the newest turns, --logprobs none nothing.",
-            file=sys.stderr,
-        )
-    print(f"  preview: python -m http.server -d {args.out} 8080")
-
-
-def main() -> None:
-    if sys.argv[1:2] == ["pack"]:
-        return _pack_command(sys.argv[2:])
-    if sys.argv[1:2] == ["site"]:
-        return _site_command(sys.argv[2:])
-    parser = argparse.ArgumentParser(
-        prog="tinkerscope",
-        description="Auto-discover Tinker training runs and sample their checkpoints in the browser.",
-    )
-    parser.add_argument(
-        "dirs",
-        nargs="*",
-        type=Path,
-        help="directories to scan for Tinker runs (default: cwd, or $TINKERSCOPE_SCAN_ROOTS)",
-    )
-    parser.add_argument("--port", type=int, default=None, help=f"port to bind (default: first free port from {DEFAULT_PORT})")
-    parser.add_argument("--host", default=os.environ.get("TINKERSCOPE_HOST", "127.0.0.1"), help="host to bind (default: 127.0.0.1)")
-    parser.add_argument("--reload", action="store_true", help="dev mode: auto-reload on source change")
-    parser.add_argument("--pack", default=None, metavar="FILE_OR_URL",
-                        help="apply a share pack (local path or http(s) URL) to this folder's state before serving")
-    parser.add_argument("--force", action="store_true",
-                        help="with --pack: also overwrite existing default params/layout (default: keep them if the folder was already used)")
-    parser.add_argument("--reseed", action="store_true",
-                        help="with --pack: fully rebuild the pack's workspaces (delete + re-import, so re-exported raw_meta/logprob blobs refresh and dropped nodes are removed) and overwrite default params — for iterating on a pack you keep re-exporting (implies --force)")
-    args = parser.parse_args()
-
-    if args.dirs:
-        dirs = [d.expanduser().resolve() for d in args.dirs]
+def run_server(
+    dirs: list[Path] | None,
+    *,
+    host: str,
+    port: int | None,
+    reload: bool = False,
+    pack: str | None = None,
+    force: bool = False,
+    reseed: bool = False,
+) -> None:
+    """The old `tinkerscope` main(), minus argparse (that's `cli.py`'s now)."""
+    if dirs:
+        resolved = [d.expanduser().resolve() for d in dirs]
     elif os.environ.get("TINKERSCOPE_SCAN_ROOTS"):
-        dirs = [
+        resolved = [
             Path(p).expanduser().resolve()
             for p in os.environ["TINKERSCOPE_SCAN_ROOTS"].split(":")
             if p
         ]
     else:
-        dirs = [Path.cwd()]
-    for d in dirs:
+        resolved = [Path.cwd()]
+    for d in resolved:
         if not d.is_dir():
             sys.exit(f"not a directory: {d}")
 
     # Set the scan roots in the env NOW (before apply / the app import) so both the
     # pack apply and the served app resolve the same per-set state dir.
-    os.environ["TINKERSCOPE_SCAN_ROOTS"] = ":".join(str(d) for d in dirs)
+    os.environ["TINKERSCOPE_SCAN_ROOTS"] = ":".join(str(d) for d in resolved)
 
-    if args.pack:
+    if pack:
         from . import pack as packmod
 
-        p = packmod.load_pack(args.pack)
-        s = packmod.apply_pack(p, force=args.force, reseed=args.reseed)
+        p = packmod.load_pack(pack)
+        s = packmod.apply_pack(p, force=force, reseed=reseed)
         print(f"applied pack '{s['pack']}': {s['models']} model(s), {s['openrouter']} openrouter, "
               f"{s['workspaces']} workspace(s), default params {s['params']}")
 
@@ -331,39 +91,35 @@ def main() -> None:
     # discovered runs. A second server would just duplicate; be idempotent.
     existing = [
         i for i in instances.list_instances()
-        if sorted(i.scan_roots) == sorted(str(d) for d in dirs)
+        if sorted(i.scan_roots) == sorted(str(d) for d in resolved)
     ]
     if existing:
         print(f"already serving these directories: {existing[0].base_url} (pid {existing[0].pid})")
-        if args.pack:
+        if pack:
             print("  note: a running instance won't show newly-installed workspaces until restarted")
         return
 
     env_port = os.environ.get("TINKERSCOPE_PORT")
-    requested = args.port if args.port is not None else (int(env_port) if env_port else None)
-    port = _pick_port(args.host, requested)
+    requested = port if port is not None else (int(env_port) if env_port else None)
+    bound = _pick_port(host, requested)
 
     # The app module reads these at import time (incl. in --reload children).
     # TINKERSCOPE_SCAN_ROOTS was already set above (before the pack apply).
-    os.environ["TINKERSCOPE_HOST"] = args.host
-    os.environ["TINKERSCOPE_PORT"] = str(port)
+    os.environ["TINKERSCOPE_HOST"] = host
+    os.environ["TINKERSCOPE_PORT"] = str(bound)
 
-    instances.register(args.host, port, tuple(dirs))
+    instances.register(host, bound, tuple(resolved))
     # finally + atexit both fire on graceful paths (idempotent); a SIGKILL'd
     # entry is pruned lazily by the next registry read.
     atexit.register(instances.unregister)
-    print(f"tinkerscope serving {', '.join(str(d) for d in dirs)}")
-    print(f"  → http://{args.host}:{port}")
+    print(f"tinkerscope serving {', '.join(str(d) for d in resolved)}")
+    print(f"  → http://{host}:{bound}")
     try:
         uvicorn.run(
             "tinkerscope.api.main:app",
-            host=args.host,
-            port=port,
-            reload=args.reload,
+            host=host,
+            port=bound,
+            reload=reload,
         )
     finally:
         instances.unregister()
-
-
-if __name__ == "__main__":
-    main()

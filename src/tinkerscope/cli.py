@@ -19,13 +19,14 @@ the run@checkpoint separator (`tinkpg chat foo/bar/run@final "hi"`) or the
 
 Doc surfaces — any command/flag/behavior change updates ALL of these, in the
 same commit (they have drifted before):
-  - README.md, "Bring your agent" section — command table ONLY; the README is
-    a human pitch, per-flag notes belong in the skill below
-  - plugin/skills/cli/SKILL.md — the CLI skill other Claude sessions read to
-    drive tinkpg (loaded as `tinkerscope-cli` here, `tinkerscope:cli` for
-    plugin consumers). It lives IN THIS REPO and ships as the tinkerscope
-    plugin; ~/.claude/skills/tinkerscope-cli/SKILL.md symlinks to it, so edits
-    here are live in every session with no reinstall.
+  - The COMMAND/FLAG surface itself is GENERATED: run
+    `python -m tinkerscope._gen_cli_ref` after any command/flag change — it
+    rewrites the marked blocks in README.md (compact table) and the cli skill
+    (full reference), and `tests/test_cli_docs.py` fails while they're stale.
+  - plugin/skills/cli/SKILL.md — the hand-written WORKFLOW prose around that
+    generated block still updates by hand (loaded as `tinkerscope-cli` here,
+    `tinkerscope:cli` for plugin consumers; ~/.claude/skills/tinkerscope-cli/
+    SKILL.md symlinks to it, so edits are live with no reinstall).
   - docs/API_CONTRACT.md, only if the HTTP surface itself changed.
 """
 from __future__ import annotations
@@ -58,10 +59,33 @@ from .api.tree_ops import selected_child as _selected_child
 from .api.tree_ops import siblings as _siblings
 from .api.tree_ops import thread_path as _thread_path
 
+class _DefaultToServe(typer.core.TyperGroup):
+    """One app, two names (`[project.scripts]`): as **tinkerscope** it defaults
+    to `serve` — bare `tinkerscope` serves cwd, `tinkerscope ~/runs --port N`
+    means `serve ~/runs --port N`, and a leading serve option (`tinkerscope
+    --pack f`, the documented pack-consume one-liner) routes there too, since
+    the top app has no options of its own. As **tinkpg** (the driver alias)
+    nothing is injected: bare `tinkpg` keeps showing help, and an unknown verb
+    stays an error instead of becoming a scan-root.
+
+    Trap this creates, by design: `tinkerscope <name>` where <name> collides
+    with a command (`pack`, `send`, …) runs the COMMAND — a scan root that
+    happens to be named like one needs the explicit escape hatch,
+    `tinkerscope serve <name>`."""
+
+    def parse_args(self, ctx, args):
+        if ctx.info_name == "tinkerscope" and (
+            not args or (args[0] not in self.commands and args[0] not in ("--help", "-h"))
+        ):
+            args = ["serve", *args]
+        return super().parse_args(ctx, args)
+
+
 app = typer.Typer(
+    cls=_DefaultToServe,
     add_completion=False,
     no_args_is_help=True,
-    help="Drive tinkerscope over its HTTP API.",
+    help="tinkerscope: serve Tinker training runs in the browser, and drive the playground from the terminal (the driver verbs are also installed as `tinkpg`).",
 )
 
 
@@ -3110,6 +3134,160 @@ def cmd_trash(
 def cmd_refresh() -> None:
     """Rescan the filesystem + re-probe sampling capabilities."""
     _print_json(_post("/api/models/refresh"))
+
+
+# ---------- serve / pack / site: the merged `tinkerscope` surface ----------
+# One binary since 2026-08-12 (Clément's call; samplescope's b2e1818 pattern).
+# Everything below LAZY-IMPORTS its machinery — serve pulls uvicorn, pack/site
+# pull the state readers — so the driver verbs above stay fast.
+
+
+@app.command("serve")
+def cmd_serve(
+    dirs: Optional[list[Path]] = typer.Argument(
+        None, help="directories to scan for Tinker runs (default: cwd, or $TINKERSCOPE_SCAN_ROOTS)"
+    ),
+    port: Optional[int] = typer.Option(None, "--port", help="port to bind (default: first free port from 8765)"),
+    host: str = typer.Option(
+        os.environ.get("TINKERSCOPE_HOST", "127.0.0.1"), "--host", help="host to bind"
+    ),
+    reload: bool = typer.Option(False, "--reload", help="dev mode: auto-reload on source change"),
+    pack: Optional[str] = typer.Option(
+        None, "--pack", metavar="FILE_OR_URL",
+        help="apply a share pack (local path or http(s) URL) to this folder's state before serving",
+    ),
+    force: bool = typer.Option(
+        False, "--force",
+        help="with --pack: also overwrite existing default params/layout (default: keep them if the folder was already used)",
+    ),
+    reseed: bool = typer.Option(
+        False, "--reseed",
+        help="with --pack: fully rebuild the pack's workspaces (delete + re-import, so re-exported raw_meta/logprob blobs refresh and dropped nodes are removed) and overwrite default params — for iterating on a pack you keep re-exporting (implies --force)",
+    ),
+) -> None:
+    """Serve the API + web UI for DIRS (bare `tinkerscope <dir>` is shorthand for this)."""
+    from .serve import run_server  # lazy: keeps uvicorn off the driver-verb hot path
+
+    run_server(dirs or None, host=host, port=port, reload=reload,
+               pack=pack, force=force, reseed=reseed)
+
+
+pack_app = typer.Typer(
+    add_completion=False, no_args_is_help=True,
+    help="Author share packs (portable YAML bundles of checkpoints + params + workspaces).",
+)
+app.add_typer(pack_app, name="pack")
+
+
+@pack_app.command("export")
+def cmd_pack_export(
+    out: Path = typer.Argument(..., help="output pack file (.yaml); if it exists, merges into it unless --overwrite"),
+    dir: Optional[list[Path]] = typer.Option(
+        None, "--dir",
+        help="scan root(s) whose state to export (default: cwd) — must match how the instance was launched",
+    ),
+    name: Optional[str] = typer.Option(None, "--name", help="pack name (default: kept from an existing file, else the dir name)"),
+    description: Optional[str] = typer.Option(None, "--description"),
+    models_from: str = typer.Option(
+        "all", "--models-from", metavar="panels|workspaces|all|runs",
+        help="where to gather models (default: all = current panels + workspaces + already-registered pack models)",
+    ),
+    include_model: Optional[list[str]] = typer.Option(
+        None, "--include-model", metavar="SUBSTR", help="keep only models whose label/ref matches (repeatable)"
+    ),
+    exclude_model: Optional[list[str]] = typer.Option(
+        None, "--exclude-model", metavar="SUBSTR", help="drop models whose label/ref matches (repeatable)"
+    ),
+    no_workspaces: bool = typer.Option(False, "--no-workspaces", help="exclude saved workspaces"),
+    no_defaults: bool = typer.Option(
+        False, "--no-defaults", help="omit the defaults block (sampling params + default panel layout) from the pack"
+    ),
+    workspace: Optional[list[str]] = typer.Option(
+        None, "--workspace", metavar="NAME", help="include only these workspaces by name (repeatable)"
+    ),
+    overwrite: bool = typer.Option(
+        False, "--overwrite", help="regenerate from scratch instead of merging into an existing file"
+    ),
+    logprobs: bool = typer.Option(
+        False, "--logprobs",
+        help="include per-token logprobs (the token inspector + first-token chart). "
+             "Large: give `out` a .gz suffix to compress (107 MB -> 30 MB on a real workspace)",
+    ),
+) -> None:
+    """Export the current setup to a pack YAML file."""
+    if models_from not in ("panels", "workspaces", "all", "runs"):
+        _die(f"--models-from must be one of panels|workspaces|all|runs, got {models_from!r}")
+    from .publish_cli import run_pack_export  # lazy: keeps state readers off the hot path
+
+    run_pack_export(
+        out, dirs=dir, name=name, description=description, models_from=models_from,
+        include=include_model, exclude=exclude_model, workspaces=not no_workspaces,
+        workspace_names=workspace, include_defaults=not no_defaults,
+        include_logprobs=logprobs, overwrite=overwrite,
+    )
+
+
+site_app = typer.Typer(
+    add_completion=False, no_args_is_help=True,
+    help="Export a read-only static site (built SPA + baked JSON) for GitHub Pages or any file host.",
+)
+app.add_typer(site_app, name="site")
+
+
+@site_app.command("export")
+def cmd_site_export(
+    out: Path = typer.Argument(..., help="output directory (created; its data/ and _app/ are replaced)"),
+    dir: Optional[list[Path]] = typer.Option(
+        None, "--dir",
+        help="scan root(s) whose state to export (default: cwd) — must match how the instance was launched",
+    ),
+    title: Optional[str] = typer.Option(None, "--title", help="site title, shown in the read-only badge (default: the dir name)"),
+    description: Optional[str] = typer.Option(None, "--description"),
+    workspace: Optional[list[str]] = typer.Option(
+        None, "--workspace", metavar="NAME", help="include only these workspaces by name (repeatable)"
+    ),
+    open_ws: Optional[str] = typer.Option(
+        None, "--open", metavar="WS_ID", help="workspace id to open by default (default: the first exported one)"
+    ),
+    pack_url: Optional[str] = typer.Option(
+        None, "--pack-url", metavar="URL",
+        help='where the same content is published as a share pack — the site\'s "open this locally" panel turns it into a runnable command',
+    ),
+    pack_link: Optional[list[str]] = typer.Option(
+        None, "--pack-link", metavar="URL|PATH=URL",
+        help="a pack this site should be able to INSTALL on demand, so a ?w=<id> link is shareable: "
+             "a visitor who lacks that workspace fetches the pack instead of falling back to the newest "
+             "one. Repeatable. Use PATH=URL when the file is local and not yet uploaded (path read for "
+             "the ids, URL fetched by visitors). Implies --pack-url when given exactly once",
+    ),
+    logprobs: Optional[str] = typer.Option(
+        None, "--logprobs", metavar="WHICH",
+        help="which turns keep per-token logprobs: all (default) | chart (only the turn each "
+             "workspace's saved chart view points at) | last:N (newest N turns per thread) | none. "
+             "They are ~97% of a site's bytes, and the token inspector + first-token chart are what they buy",
+    ),
+    no_logprobs: bool = typer.Option(False, "--no-logprobs", help="alias for --logprobs none"),
+    # Tri-state. Pins have no workspace id, so a --workspace filter can't scope them:
+    # defaulting them ON would make a curated export ship saved samples (and their
+    # local dataset paths) from the workspaces you filtered OUT.
+    pins: Optional[bool] = typer.Option(
+        None, "--pins/--no-pins",
+        help="--no-pins excludes saved pins (default: included, EXCEPT when --workspace filters the "
+             "export); --pins includes them even then (they can't be filtered per-workspace)",
+    ),
+    web_dist: Optional[Path] = typer.Option(
+        None, "--web-dist",
+        help="built frontend to publish (default: this install's web/dist, else the packaged copy)",
+    ),
+) -> None:
+    """Write a self-contained static site into a directory."""
+    from .publish_cli import run_site_export  # lazy: keeps state readers off the hot path
+
+    run_site_export(
+        out, dirs=dir, title=title, description=description, workspace_names=workspace,
+        open_ws=open_ws, pack_url=pack_url, pack_link=pack_link, logprobs=logprobs,
+        no_logprobs=no_logprobs, pins=pins, web_dist=web_dist,
+    )
 
 
 def main() -> None:

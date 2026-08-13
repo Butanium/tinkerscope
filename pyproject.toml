@@ -53,7 +53,10 @@ Documentation = "https://github.com/Butanium/tinkerscope/blob/main/README.md"
 Issues = "https://github.com/Butanium/tinkerscope/issues"
 
 [project.scripts]
-tinkerscope = "tinkerscope.serve:main"
+# ONE unified Typer app, two names (samplescope's b2e1818 pattern, greenlit
+# 2026-08-12): as `tinkerscope` it defaults to `serve` (bare-dir shorthand via
+# cli._DefaultToServe); `tinkpg` is the driver alias with no injection.
+tinkerscope = "tinkerscope.cli:app"
 tinkpg = "tinkerscope.cli:app"
 
 [tool.uv.sources]

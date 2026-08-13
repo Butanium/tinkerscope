@@ -22,11 +22,15 @@ tinkerscope <dirs> --port N        # scan <dirs> for runs (checkpoints.jsonl + c
 - Run the server in the background; it stays up. Default port = first free from
   8765. Relaunching on the SAME scan roots points you at the existing instance
   instead of starting a twin (so pass a different `--port` for a new root set).
+- `tinkerscope <dirs>` is shorthand for `tinkerscope serve <dirs>` — a scan root
+  named like a command (`pack`, `send`, …) needs the explicit `serve` form.
 - Give the human the printed URL (e.g. http://127.0.0.1:8809).
 - `tinkpg` auto-targets the running instance whose scan root contains your cwd.
   Outside any scan root: set `TINKERSCOPE_BASE_URL` or pass `--base-url`.
 
-**Share packs (reproduce a setup) — these are `tinkerscope` subcommands, NOT `tinkpg`.**
+**Share packs (reproduce a setup).** (`tinkpg` and `tinkerscope` are the same
+binary since 2026-08-12 — these work under either name; they're documented as
+`tinkerscope` because they touch the state dir, not a running server.)
 `tinkerscope --pack <file|url>` seeds this folder from a portable YAML bundle (public
 checkpoints + default params + workspaces) then serves — hand a collaborator a
 reproducible setup with no local run dirs. `tinkerscope pack export <out.yaml> --dir
@@ -451,3 +455,232 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   paste into a dataset viewer. **Ctrl+⇧-click opens it in samplescope** directly
   (new tab; starts a viewer if none is running) — the `sscope view` commands in
   the `samplescope` skill then drive that same view from your terminal.
+
+## Command reference
+
+Generated from the Typer app (same help strings `--help` shows) — do not edit
+by hand; `python -m tinkerscope._gen_cli_ref` refreshes it, and
+`tests/test_cli_docs.py` fails when it is stale. `tinkpg` and `tinkerscope`
+are the SAME binary — the driver verbs answer to both names; `serve`/`pack`/
+`site` are shown under `tinkerscope` (as `tinkerscope`, a bare directory
+defaults to `serve`).
+
+<!-- BEGIN GENERATED: tinkerscope-cli-reference (python -m tinkerscope._gen_cli_ref) -->
+```
+tinkpg ls [options]
+  # List discovered training runs.
+  --filter TEXT                     case-insensitive substring on id/name
+  --sampleable-only                 only runs whose base model tinker still serves
+tinkpg checkpoints <run>
+  # List a run's checkpoints (name, step, whether it has a sampler).
+tinkpg open <run>
+  # Select a run in single mode; the browser switches live.
+tinkpg chat <run> <prompt> [options]
+  # Sample from a run's checkpoint; stream completions to stdout and the browser.
+  --n INTEGER                       number of samples to draw  [default: 1]
+  --temperature FLOAT               this call only; omit = inherit the global param (see `tinkpg params`)
+  --max-tokens INTEGER              this call only; omit = inherit the global param
+  --thinking/--no-thinking          force the thinking renderer on/off for this call; omit = inherit the global param
+  --thinking-both                   draw n samples WITHOUT thinking + n WITH (2n total; overrides --thinking)
+  --system TEXT                     system prompt for this call; omit = inherit the global one
+  --no-system                       fire with NO system prompt even if the global state carries one
+  --checkpoint TEXT                 checkpoint name (overrides @ in the run arg)
+  --prefill TEXT                    assistant prefill the model extends; raw `<think>` ok
+tinkpg compare <run_a> <run_b> <prompt> [options]
+  # Compare N runs on one prompt — A→primary, B→compare, --run extras→p-2,p-3,… all stream...
+  --run TEXT (repeatable)           additional run(s) → 3rd, 4th, … panes (repeatable)
+  --n INTEGER                       number of samples per side  [default: 1]
+  --temperature FLOAT               this call only; omit = inherit the global param
+  --max-tokens INTEGER              this call only; omit = inherit the global param
+  --thinking/--no-thinking          force thinking on/off for this call; omit = inherit
+  --thinking-both                   n samples WITHOUT thinking + n WITH, per run (overrides --thinking)
+  --system TEXT                     system prompt for this call; omit = inherit the global one
+  --no-system                       fire with NO system prompt even if the global state carries one
+  --prefill TEXT                    assistant prefill the models extend; raw `<think>` ok
+tinkpg send [prompt] [options]
+  # Fire the prompt as a NEW THREAD at the CURRENT panels of the open workspace — the CLI twin of...
+  --n INTEGER                       samples per panel  [default: 1]
+  --temperature FLOAT               this call only; omit = inherit the global param (see `tinkpg params`)
+  --max-tokens INTEGER              this call only; omit = inherit the global param
+  --thinking/--no-thinking          force thinking on/off for this call; omit = inherit the global param
+  --thinking-both                   n samples WITHOUT thinking + n WITH, per panel (overrides --thinking)
+  --system TEXT                     system prompt for this call; omit = inherit the global one
+  --no-system                       fire with NO system prompt even if the global state carries one
+  --prefill TEXT                    assistant prefill the models extend; raw `<think>` ok
+  --file TEXT                       read the user message from a file (a probe template — mutually exclusive with the positional prompt)
+  --prefill-file TEXT               read the assistant prefill from a file (mutually exclusive with --prefill)
+  --panel TEXT (repeatable)         target only these panel ids (repeatable); overrides folding
+  --include-folded                  also fire at browser-folded panels
+  --force                           fire even while a generation is in flight
+  --logprobs                        print each sample's per-token logprob + top-5 alternatives (native tinker sampling only; none for OpenRouter)
+  --json                            one JSON object per line (JSONL) instead of human text — for scripts; always includes token_logprobs when present, independent of --logprobs
+  --first-token                     after the fire, print each panel's probability distribution over the FIRST generated token (from the captured token_logprobs); with --json, appended as first_token_summary JSONL lines
+tinkpg continue [prompt] [options]
+  # LOOM from an existing branch: rebuild the message history up to a target node and sample a...
+  --n INTEGER                       samples per panel  [default: 1]
+  --temperature FLOAT               this call only; omit = inherit the global param (see `tinkpg params`)
+  --max-tokens INTEGER              this call only; omit = inherit the global param
+  --thinking/--no-thinking          force thinking on/off for this call; omit = inherit the global param
+  --thinking-both                   n samples WITHOUT thinking + n WITH, per panel (overrides --thinking)
+  --system TEXT                     system prompt for this call; omit = inherit the global one
+  --no-system                       fire with NO system prompt even if the global state carries one
+  --file TEXT                       read the user message from a file (mutually exclusive with the positional prompt)
+  --prefill TEXT                    assistant prefill the model extends — a thinking opener ('Hmm,') or its own truncated CoT; raw `<think>` ok
+  --prefill-file TEXT               read the prefill from a file (mutually exclusive with --prefill) — e.g. the model's own truncated CoT
+  --prefill-scope TEXT              all|think|non_think — which half(s) a thinking-both prefill applies to (default all)
+  --panel TEXT (repeatable)         target only these panel ids (repeatable); default = all unfolded panels
+  --thread INTEGER                  1-indexed root thread to continue (per panel); default = the panel's active thread
+  --turn INTEGER                    1-indexed user turn on the thread's path to loom from; default = the leaf
+  --node TEXT                       target node handle — `<node>`, `<panel>:<node>` or `<ws>:<panel>:<node>` (the browser's Copy-node-id button gives the middle form); pinpoints the loom point in ONE panel's tree
+  --conv TEXT                       workspace for --thread/--turn/--node targeting (id-prefix/name); default = the one open in the browser
+  --ancestry-file TEXT              loom from an EXPLICIT full transcript instead of a tree/panel: a JSON list of {role, content} dicts (role: user|assistant|system). The SAME transcript is used for every target panel — this is how you graft a real, verbatim conversation generated by one model into another model's context (sanctioned: FULL transcripts only, never an authored/partial answer). Mutually exclusive with --thread/--turn/--node/--conv.
+  --include-folded                  also fire at browser-folded panels
+  --force                           fire even while a generation is in flight
+  --logprobs                        print each sample's per-token logprob + top-5 alternatives (native tinker sampling only; none for OpenRouter)
+  --json                            one JSON object per line (JSONL) instead of human text — for scripts; always includes token_logprobs when present, independent of --logprobs
+  --first-token                     after the fire, print each panel's probability distribution over the FIRST generated token (from the captured token_logprobs); with --json, appended as first_token_summary JSONL lines
+tinkpg battery <probes_dir> [options]
+  # Fire a DIRECTORY of probe files as sequential `send`s — the reusable probe battery.
+  --out TEXT                        output dir for per-probe JSONL streams (default: <probes_dir>/results)
+  --n INTEGER                       default samples per panel (front-matter `n:` overrides)  [default: 1]
+  --temperature FLOAT               default for probes without `temperature:`; omit = inherit the global param
+  --max-tokens INTEGER              default for probes without `max-tokens:`; omit = inherit the global param
+  --thinking/--no-thinking          default thinking mode; omit = inherit the global param
+  --system TEXT                     default system prompt for probes without `system:`; omit = inherit the global one
+  --no-system                       default to NO system prompt (front-matter `system:`/`no-system:` overrides)
+  --panel TEXT (repeatable)         default target panels (repeatable); front-matter `panel:` overrides
+  --include-folded                  also fire at browser-folded panels
+  --force                           fire even while a generation is in flight
+  --first-token/--no-first-token    print each panel's first-token distribution after every probe (default on)
+  --pause FLOAT                     seconds to wait between probes  [default: 3.0]
+tinkpg probe <run> [prompt] [options]
+  # Sample ANY discovered model WITHOUT touching the browser or any workspace.
+  --n INTEGER                       samples to draw  [default: 1]
+  --temperature FLOAT
+  --max-tokens INTEGER
+  --thinking/--no-thinking          thinking renderer (default: inherit the global)
+  --system TEXT                     system prompt for this call
+  --no-system                       fire with NO system prompt at all
+  --file TEXT                       read the user message from a file
+  --ancestry-file TEXT              JSON list of {role, content} dicts to sample a continuation of — the multi-turn form (a trailing assistant entry acts as a prefill)
+  --prefill TEXT                    assistant prefill the model extends
+  --full                            print each sample's complete answer + CoT
+  --json                            JSONL to stdout, one object per sample (carries raw_meta)
+tinkpg params [options]
+  # Show or SET the GLOBAL sampling params (system prompt, temperature, max tokens, n, thinking,...
+  --temperature FLOAT
+  --max-tokens INTEGER
+  --n INTEGER                       default sample count
+  --thinking/--no-thinking
+  --thinking-both                   set the global thinking mode to 'both'
+  --top-p FLOAT
+  --system TEXT                     global system prompt
+  --system-file TEXT                read the global system prompt from a file (mutually exclusive with --system)
+  --clear-system                    remove the global system prompt
+  --json                            print the resulting global params as JSON
+tinkpg url [selector] [options]
+  # Print the URL of the server this CLI is driving — the thing to hand the human when they ask...
+  --conv TEXT                       same as the positional selector
+  --live                            link to the workspace the browser currently has open (from the state bus) instead of naming one
+  --json                            url + resolved instance (pid, scan roots) + workspace id/name
+tinkpg state [options]
+  # Digest of what's on screen now: one block per panel, first/last-2 of each panel's ACTIVE...
+  --full                            show every message per panel, not just first/last-2
+  --width INTEGER                   per-message truncation width  [default: 160]
+  --link/--no-link                  annotate each panel with the saved workspace its active path matches (`--no-link` skips the workspaces fetch)
+  --json                            raw state JSON (untruncated escape hatch)
+  --include-folded                  also show panels folded in the browser UI (skipped by default)
+tinkpg threads [options]
+  # Cross-workspace index of every root THREAD — the find primitive for "where are my multi-turn...
+  --min-turns INTEGER               only threads whose DEEPEST branch has ≥N user turns (2+ = multi-turn)  [default: 1]
+  --ws TEXT                         restrict to one workspace (id-prefix or name substring)
+  --model TEXT                      only panels whose model/checkpoint contains this substring
+  --grep TEXT                       only threads whose FIRST message contains this text (case-insensitive)
+  --width INTEGER                   first-message truncation width  [default: 72]
+  --include-folded/--no-folded      include panels folded in the browser (default: yes — folding is a view choice, not a filter)
+  --json                            emit rows as JSON (untruncated first messages)
+tinkpg ws [selector] [options]
+  # Browse saved WORKSPACES (multi-panel, branchable; `conv` is a back-compat alias).
+  --conv TEXT                       same as the positional selector, for symmetry with `grep`/`node`/`threads` (which can only take it as an option)
+  --panel TEXT                      restrict to one panel id (p-1/p-2/… — older workspaces also have primary/compare); overrides folding
+  --full                            show the whole active path, not just first/last-2
+  --tree                            show the full branch tree (all branches), `*` = active
+  --width INTEGER                   per-message truncation width  [default: 160]
+  --include-folded                  also expand panels folded in the browser UI (skipped by default)
+  --thread INTEGER                  walk root thread K (the `threads:` index / `tinkpg threads`) instead of the active one
+  --deepest                         walk the thread's LONGEST branch instead of its selected one
+  --json                            emit the selected transcript(s) as structured JSON (untruncated content + CoT + node ids)
+tinkpg samples [selector] [options]
+  # Show every sibling response (the n-sample fan-out) at ONE fork, each with its CoT, plus a...
+  --conv TEXT                       same as the positional selector, for symmetry with `grep`/`node`/`threads` (which can only take it as an option)
+  --panel TEXT                      panel id (p-1/p-2/… — older workspaces also have primary/compare); default = the LEFTMOST non-folded panel (layout order, i.e. the column order on screen). Explicit --panel overrides folding
+  --thread INTEGER                  1-indexed root thread (branch-from-start sibling) to walk; default = the active one. Thread numbers: the `threads:` index in `tinkpg ws <id>`
+  --turn INTEGER                    1-indexed user turn on the thread's path whose responses to show; default = the last one
+  --node TEXT                       node handle — `<node>`, `<panel>:<node>` or `<ws>:<panel>:<node>` (the browser's Copy-node-id button gives the middle form; `tinkpg grep` prints ids). Pinpoints the fork directly, reaching NON-selected branches --thread/--turn can't. An assistant id shows the fan-out it belongs to
+  --full                            each sample's COMPLETE answer + full CoT (default: answer + one-line CoT preview)
+  --width INTEGER                   per-sample truncation width in the default (non --full) view  [default: 240]
+  --sample INTEGER                  show ONLY sibling K (1-indexed) — read one sample at a time
+  --slice TEXT                      START[:LEN] character window of each shown sample (default LEN 2000) — read long samples in pieces instead of truncating; with --full the same window applies to the CoT
+  --json                            the fork as one JSON object (workspace/panel/thread/prompt/tally/samples) instead of human text — for scripts (--slice is ignored; content is never truncated)
+  --first-token                     the model's probability distribution over the FIRST generated token at this fork (stored top-K + each sample's sampled token — the CLI twin of the chart's first-token mode); with --json, adds per-sample `first` records + the aggregate
+  --deepest                         resolve --turn against the thread's LONGEST branch instead of its selected one — reaches forks deeper than the selection goes
+tinkpg grep <pattern> [options]
+  # Search EVERY branch of saved workspaces — message content, thinking (`reasoning`) and thread...
+  --conv TEXT                       restrict to one workspace (id-prefix or name substring)
+  --regex                           treat PATTERN as a Python regex
+  --ignore-case
+  --width INTEGER                   snippet width around each match  [default: 160]
+  --max-hits INTEGER                stop printing after this many hits (count continues)  [default: 200]
+  --json                            hits as a JSON array (full match text, not a snippet) instead of human text — for scripts
+  --link                            append a clickable deep link per hit (?w=…&node=… opens the browser AT the match)
+tinkpg node <node_id> [options]
+  # Locate a NODE ID anywhere in the saved workspaces and dump its record — the reverse index...
+  --conv TEXT                       restrict the search to one workspace (id-prefix or name substring)
+  --logprobs                        fetch + print the stored per-token logprob blob (index, token, lp, top-K alternatives)
+  --meta                            fetch + print the stored raw_meta blob (the request & response record)
+  --raw                             print the node's raw_text (tags preserved)
+  --full                            full content / thinking / prefill instead of one-line previews
+  --json                            the matches as one JSON object (blobs included when --logprobs/--meta; content never truncated) — for scripts
+  --link                            append a clickable deep link (?w=…&node=… opens the browser AT this node)
+tinkpg trash [action] [handle] [options]
+  # Recover deleted branches.
+  --workspace TEXT                  workspace id-prefix or name substring (default: every workspace, for list)
+  --json                            emit structured JSON
+tinkpg refresh
+  # Rescan the filesystem + re-probe sampling capabilities.
+tinkerscope serve [dirs...] [options]
+  # Serve the API + web UI for DIRS (bare `tinkerscope <dir>` is shorthand for this).
+  --port INTEGER                    port to bind (default: first free port from 8765)
+  --host TEXT                       host to bind  [default: 127.0.0.1]
+  --reload                          dev mode: auto-reload on source change
+  --pack FILE_OR_URL                apply a share pack (local path or http(s) URL) to this folder's state before serving
+  --force                           with --pack: also overwrite existing default params/layout (default: keep them if the folder was already used)
+  --reseed                          with --pack: fully rebuild the pack's workspaces (delete + re-import, so re-exported raw_meta/logprob blobs refresh and dropped nodes are removed) and overwrite default params — for iterating on a pack you keep re-exporting (implies --force)
+tinkerscope pack export <out> [options]
+  # Export the current setup to a pack YAML file.
+  --dir PATH (repeatable)           scan root(s) whose state to export (default: cwd) — must match how the instance was launched
+  --name TEXT                       pack name (default: kept from an existing file, else the dir name)
+  --description TEXT
+  --models-from panels|workspaces|all|runswhere to gather models (default: all = current panels + workspaces + already-registered pack models)  [default: all]
+  --include-model SUBSTR (repeatable)keep only models whose label/ref matches (repeatable)
+  --exclude-model SUBSTR (repeatable)drop models whose label/ref matches (repeatable)
+  --no-workspaces                   exclude saved workspaces
+  --no-defaults                     omit the defaults block (sampling params + default panel layout) from the pack
+  --workspace NAME (repeatable)     include only these workspaces by name (repeatable)
+  --overwrite                       regenerate from scratch instead of merging into an existing file
+  --logprobs                        include per-token logprobs (the token inspector + first-token chart). Large: give `out` a .gz suffix to compress (107 MB -> 30 MB on a real workspace)
+tinkerscope site export <out> [options]
+  # Write a self-contained static site into a directory.
+  --dir PATH (repeatable)           scan root(s) whose state to export (default: cwd) — must match how the instance was launched
+  --title TEXT                      site title, shown in the read-only badge (default: the dir name)
+  --description TEXT
+  --workspace NAME (repeatable)     include only these workspaces by name (repeatable)
+  --open WS_ID                      workspace id to open by default (default: the first exported one)
+  --pack-url URL                    where the same content is published as a share pack — the site's "open this locally" panel turns it into a runnable command
+  --pack-link URL|PATH=URL (repeatable)a pack this site should be able to INSTALL on demand, so a ?w=<id> link is shareable: a visitor who lacks that workspace fetches the pack instead of falling back to the newest one. Repeatable. Use PATH=URL when the file is local and not yet uploaded (path read for the ids, URL fetched by visitors). Implies --pack-url when given exactly once
+  --logprobs WHICH                  which turns keep per-token logprobs: all (default) | chart (only the turn each workspace's saved chart view points at) | last:N (newest N turns per thread) | none. They are ~97% of a site's bytes, and the token inspector + first-token chart are what they buy
+  --no-logprobs                     alias for --logprobs none
+  --pins/--no-pins                  --no-pins excludes saved pins (default: included, EXCEPT when --workspace filters the export); --pins includes them even then (they can't be filtered per-workspace)
+  --web-dist PATH                   built frontend to publish (default: this install's web/dist, else the packaged copy)
+```
+<!-- END GENERATED: tinkerscope-cli-reference -->

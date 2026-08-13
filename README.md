@@ -191,24 +191,32 @@ playground a place you and your AI agent work in together:
   morning of browser sampling turns into an eval design or a report without
   re-running anything.
 
+<!-- BEGIN GENERATED: tinkerscope-cli-table (python -m tinkerscope._gen_cli_ref) -->
 ```bash
-tinkpg ws [<id|name>]                  # browse saved workspaces / read one
-tinkpg samples [<id|name>]             # the full n-sample fan-out at a fork
-tinkpg grep "<text>"                   # search every branch of every workspace
-tinkpg threads                         # index root threads across workspaces
-tinkpg node <handle>                   # look up <panel>:<node> → record + logprobs
-tinkpg trash list / restore <handle>   # recover a deleted branch
-tinkpg send "prompt"                   # fire a new thread at the current panels
-tinkpg continue "follow-up"            # add a turn to the current threads
-tinkpg battery <dir>                   # fire a directory of probe files
-tinkpg probe <run> "prompt"            # sample off-workspace (no broadcast)
-tinkpg ls / checkpoints <run>          # discovered runs / a run's checkpoints
-tinkpg open <run>[@<checkpoint>]       # switch the browser to this model, live
-tinkpg chat <run> "prompt" --n 50      # one-shot: select + sample + stream
-tinkpg compare <runA> <runB> "..."     # one-shot: two panels + a first turn
-tinkpg params / state / refresh        # sampling params / shared state / rescan
-tinkpg url [<id|name>]                 # this server's URL, or a link that opens a workspace
+tinkpg ls                                # List discovered training runs.
+tinkpg checkpoints <run>                 # List a run's checkpoints (name, step, whether it has a sampler).
+tinkpg open <run>                        # Select a run in single mode; the browser switches live.
+tinkpg chat <run> <prompt>               # Sample from a run's checkpoint; stream completions to stdout and the browser.
+tinkpg compare <run_a> <run_b> <prompt>  # Compare N runs on one prompt — A→primary, B→compare, --run extras→p-2,p-3,… all stream...
+tinkpg send [prompt]                     # Fire the prompt as a NEW THREAD at the CURRENT panels of the open workspace — the CLI twin of...
+tinkpg continue [prompt]                 # LOOM from an existing branch: rebuild the message history up to a target node and sample a...
+tinkpg battery <probes_dir>              # Fire a DIRECTORY of probe files as sequential `send`s — the reusable probe battery.
+tinkpg probe <run> [prompt]              # Sample ANY discovered model WITHOUT touching the browser or any workspace.
+tinkpg params                            # Show or SET the GLOBAL sampling params (system prompt, temperature, max tokens, n, thinking,...
+tinkpg url [selector]                    # Print the URL of the server this CLI is driving — the thing to hand the human when they ask...
+tinkpg state                             # Digest of what's on screen now: one block per panel, first/last-2 of each panel's ACTIVE...
+tinkpg threads                           # Cross-workspace index of every root THREAD — the find primitive for "where are my multi-turn...
+tinkpg ws [selector]                     # Browse saved WORKSPACES (multi-panel, branchable; `conv` is a back-compat alias).
+tinkpg samples [selector]                # Show every sibling response (the n-sample fan-out) at ONE fork, each with its CoT, plus a...
+tinkpg grep <pattern>                    # Search EVERY branch of saved workspaces — message content, thinking (`reasoning`) and thread...
+tinkpg node <node_id>                    # Locate a NODE ID anywhere in the saved workspaces and dump its record — the reverse index...
+tinkpg trash [action] [handle]           # Recover deleted branches.
+tinkpg refresh                           # Rescan the filesystem + re-probe sampling capabilities.
+tinkerscope serve [dirs...]              # Serve the API + web UI for DIRS (bare `tinkerscope <dir>` is shorthand for this).
+tinkerscope pack export <out>            # Export the current setup to a pack YAML file.
+tinkerscope site export <out>            # Write a self-contained static site into a directory.
 ```
+<!-- END GENERATED: tinkerscope-cli-table -->
 
 Param flags on a fire are per-call — they never clobber your browser sidebar.
 The `tinkerscope:cli` skill teaches your agent all of it, flags included
