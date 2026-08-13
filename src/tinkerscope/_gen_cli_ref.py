@@ -61,10 +61,13 @@ def _fmt_option(p: TyperOption) -> str | None:
     """One reference line for an option, or None for --help."""
     if "--help" in p.opts:
         return None
-    decl = max(p.opts, key=len)
+    # First-declared long spelling: p.opts is declaration order, and the canonical
+    # name is declared first (`--ws, --conv`) — max-by-length taught the alias.
+    decl = next((o for o in p.opts if o.startswith("--")), p.opts[0])
     # A --x/--no-x pair reads best spelled out.
     if p.secondary_opts:
-        decl = f"{decl}/{max(p.secondary_opts, key=len)}"
+        sec = next((o for o in p.secondary_opts if o.startswith("--")), p.secondary_opts[0])
+        decl = f"{decl}/{sec}"
     head = decl if p.is_flag else f"{decl} {_metavar(p)}"
     if p.multiple:
         head += " (repeatable)"

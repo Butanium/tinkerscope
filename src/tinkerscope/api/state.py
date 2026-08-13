@@ -229,6 +229,18 @@ class StateBus:
         async with self._lock:
             self._fanout({"type": event, "event": event, **payload})
 
+    async def alloc_chat_id(self) -> int:
+        """chat_id allocation WITHOUT the chat lifecycle: no patch, no fanout,
+        no `running` flip, no _inflight bump. For bus-SILENT chats
+        (commit=false + broadcast=false — the `tinkpg probe` shape): the id
+        keeps the cancel endpoint working while subscribers never learn the
+        chat existed. Pairing rule: a chat allocated here must NOT call
+        chat_end — the _inflight decrement would release a CONCURRENT chat's
+        `running` early."""
+        async with self._lock:
+            self.state.chat_id += 1
+            return self.state.chat_id
+
     async def chat_begin(self, **patch: Any) -> int:
         """Atomically: allocate a fresh chat_id, mark running, apply the
         selection/workspace/params patch, and broadcast the chat_start state.

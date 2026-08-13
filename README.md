@@ -204,7 +204,7 @@ tinkpg battery <probes_dir>              # Fire a DIRECTORY of probe files as se
 tinkpg probe <run> [prompt]              # Sample ANY discovered model WITHOUT touching the browser or any workspace.
 tinkpg params                            # Show or SET the GLOBAL sampling params (system prompt, temperature, max tokens, n, thinking,...
 tinkpg url [selector]                    # Print the URL of the server this CLI is driving — the thing to hand the human when they ask...
-tinkpg state                             # Digest of what's on screen now: one block per panel, first/last-2 of each panel's ACTIVE...
+tinkpg state                             # Digest of what's on screen now: one block per panel, first/last-2 of the open workspace's...
 tinkpg threads                           # Cross-workspace index of every root THREAD — the find primitive for "where are my multi-turn...
 tinkpg ws [selector]                     # Browse saved WORKSPACES (multi-panel, branchable; `conv` is a back-compat alias).
 tinkpg samples [selector]                # Show every sibling response (the n-sample fan-out) at ONE fork, each with its CoT, plus a...
@@ -240,7 +240,10 @@ throwaway instance.
 Installing as a tool while hacking? Use `uv tool install -e .` (editable) so
 the process runs your checkout. Backend changes need a process restart; web
 changes need `npm run build` (a pre-commit hook runs it on `web/` commits)
-plus a browser refresh.
+plus a browser refresh. When `[project.scripts]` entry points change, editable
+is not enough: the installed shims freeze their import target, so re-run
+`uv tool install -e .` to regenerate them (compat for the pre-unification
+`tinkerscope` shim is kept in `serve.py:main`).
 
 <details>
 <summary><b>Hacking on the skills</b></summary>

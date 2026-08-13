@@ -309,9 +309,10 @@ def test_continue_foreign_ws_unbound_layout_dies_loudly(wired, monkeypatch):
 # --------------------------------------------------------------------------- #
 # Review finding 3: the mixed-mode seam must be LOUD, never silent.
 # --------------------------------------------------------------------------- #
-def test_continue_warns_when_mirror_diverges_from_tree(wired):
-    """A lockstep `tinkpg chat` advanced the panel MIRROR past the saved tree;
-    a bare `continue` follows the TREE — it must say so, naming both."""
+def test_continue_ignores_any_panel_messages_residue(wired):
+    """P3 review: the bus echo is retired — even if a stale client leaves a
+    `messages` residue on a panel dict, a bare `continue` reads the SAVED TREE
+    and only the saved tree."""
     calls, state, ws = wired
     state["panels"][0]["messages"] = [
         {"role": "user", "content": "lockstep q1"},
@@ -319,23 +320,21 @@ def test_continue_warns_when_mirror_diverges_from_tree(wired):
     ]
     res = runner.invoke(cli.app, ["continue", "q2", "--panel", "p-1"])
     assert res.exit_code == 0, res.output
-    assert "differs from the saved tree" in res.output
     (fire,) = _fires(calls)
     assert fire["messages"][0]["content"] == "hi", "the SAVED TREE's ancestry fires"
 
 
-def test_continue_mirror_fallback_warns_it_wont_persist(wired):
-    """Open workspace, panel with NO saved tree: the mirror fallback fires
-    legacy — loudly, since the skill promises full persistence."""
+def test_continue_refuses_a_panel_with_no_saved_tree(wired):
+    """Open workspace, panel with NO saved tree: post-P3 there is no other
+    transcript source — refuse loudly instead of firing an unpersisted legacy
+    shape (the old mirror fallback + its warning were dead code: bus panels
+    carry no messages)."""
     calls, state, ws = wired
-    state["panels"].append({"id": "p-2", "run_id": "run_c", "checkpoint": None,
-                            "messages": [{"role": "user", "content": "m-q"},
-                                         {"role": "assistant", "content": "m-a"}]})
+    state["panels"].append({"id": "p-2", "run_id": "run_c", "checkpoint": None})
     res = runner.invoke(cli.app, ["continue", "q2", "--panel", "p-2"])
-    assert res.exit_code == 0, res.output
-    assert "will NOT persist" in res.output
-    (fire,) = _fires(calls)
-    assert "parent_node" not in fire
+    assert res.exit_code != 0
+    assert "no saved thread" in res.output
+    assert not _fires(calls)
 
 
 # --------------------------------------------------------------------------- #

@@ -119,7 +119,7 @@ tinkpg send "<prompt>" [opts] [--panel P ...]       # NEW THREAD at the CURRENT 
 tinkpg continue "<follow-up>" [opts] [--panel P] [--thread K] [--turn N] [--node ID] [--ancestry-file FILE]   # LOOM: add a turn to existing thread(s), OR to an explicit external transcript
 tinkpg battery <dir> [--n N] [--pause S] [--out DIR] [--panel P ...] [--no-first-token]   # fire a DIRECTORY of probe *.txt files as sequential sends (one probe = one thread)
 tinkpg url [ws] [--live] [--json]                   # the URL of the server you're driving — what to hand the human when they want a LINK
-tinkpg state [--full] [--width N] [--no-link] [--json] [--include-folded]   # DIGEST of on-screen panels (active path + matched saved conv)
+tinkpg state [--full] [--width N] [--no-link] [--json] [--include-folded]   # DIGEST of on-screen panels (bindings + the open workspace's active paths)
 tinkpg params [--temperature T] [--max-tokens M] [--n N] [--thinking/--no-thinking|--thinking-both] [--top-p P] [--system S|--system-file F|--clear-system]   # show / SET the GLOBAL sampling params (browser sidebar updates live)
 tinkpg ws                                         # list saved WORKSPACES + branch metadata (alias: tinkpg conv)
 tinkpg ws <id|name> [--panel P] [--full] [--tree] [--include-folded] [--thread K] [--deepest] [--json]  # expand one: active branch + fork counts (--tree = all branches; --thread/--deepest = read a NON-active conversation; --json = export the transcript)
@@ -235,13 +235,14 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   whole path, `--json` for the raw untruncated state (escape hatch). Do NOT expect
   branches here. It also names the OPEN workspace up top — `open workspace:
   <name> (id) → tinkpg ws <id>` — because the browser pushes its `?w=`
-  workspace_id onto the state bus, so you can jump straight to its branches. If
-  that id is absent (older browser, or a CLI-only session that never opened a saved
-  workspace), it falls back to a per-panel EXACT active-path match (`← ws:
-  <name>`, or an honest `ambiguous ×N` when a short path is shared). `--no-link`
-  skips the workspaces fetch entirely. Panels the human has FOLDED in the
-  browser print as one-line stubs here too — `--include-folded` expands them
-  (fold info rides the open workspace, so `--no-link` shows every panel).
+  workspace_id onto the state bus, so you can jump straight to its branches. The
+  transcripts themselves come from that workspace's SAVED TREES (the bus carries
+  model bindings only), so with no workspace open there is nothing to show and
+  each panel says `no transcript: no workspace open`. `--no-link` skips the
+  workspaces fetch entirely: bindings only, each panel marked `transcript
+  skipped: --no-link`. Panels the human has FOLDED in the browser print as
+  one-line stubs here too — `--include-folded` expands them (fold info rides
+  the open workspace, so `--no-link` shows every panel).
 - `tinkpg ws` (alias `conv`) reads the **saved workspace trees** (`/api/workspaces`) —
   this is the ONLY place branches live. The tree is opaque to the server; the CLI
   walks it client-side (mirrors `web/src/lib/tree.ts`). List shows per-workspace
@@ -433,12 +434,11 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   models from ITS saved layout) or `--new-ws NAME`. `chat`/`compare` persist
   too when a workspace is open (each invocation = a new thread; their
   `--system` authors the THREAD prompt like `send`'s). The remaining
-  exceptions, each loud or documented: `chat`/`compare` with no workspace stay
-  lockstep-only (the plan line says "not persisted"); a `continue` from a
-  panel with no saved tree falls back to the live transcript and warns; a bare
-  `continue` whose live transcript diverges from the saved tree warns naming
-  both; `--ancestry-file` looms from an external transcript and stays
-  stdout-only.
+  exceptions, each loud: `chat`/`compare` with no workspace are EPHEMERAL (the
+  plan line says "not persisted"); a `continue` from a panel with no saved
+  thread REFUSES — the saved tree is the only transcript source, so there is
+  nothing to continue; `--ancestry-file` looms from an external transcript and
+  stays stdout-only (it warns "NOT persisted" — capture with `--json`).
 - **Sequential waves**: fire → `tinkpg wait [--timeout N]` → read → fire again
   (no sleep/check dances). Reading loop: `tinkpg samples --node <id> --this`
   isolates the one sample a qualified handle names; `samples --export-ancestry
@@ -528,7 +528,7 @@ tinkpg send [prompt] [options]
   --file TEXT                       read the user message from a file (a probe template — mutually exclusive with the positional prompt)
   --prefill-file TEXT               read the assistant prefill from a file (mutually exclusive with --prefill)
   --panel TEXT (repeatable)         target only these panel ids (repeatable); overrides folding
-  --conv TEXT                       workspace to fire into (id-prefix/name); when it isn't the open one, models bind from ITS saved layout. Default = the open workspace, auto-created if none
+  --ws TEXT                         workspace to fire into (id-prefix/name); when it isn't the open one, models bind from ITS saved layout. Default = the open workspace, auto-created if none
   --new-ws NAME                     create a fresh workspace with this name (seeded with the current panels), claim the bus, and fire into it
   --include-folded                  also fire at browser-folded panels
   --force                           fire even while a generation is in flight
@@ -552,8 +552,8 @@ tinkpg continue [prompt] [options]
   --thread INTEGER                  1-indexed root thread to continue (per panel); default = the panel's active thread
   --turn INTEGER                    1-indexed user turn on the thread's path to loom from; default = the leaf
   --node TEXT                       target node handle — `<node>`, `<panel>:<node>` or `<ws>:<panel>:<node>` (the browser's Copy-node-id button gives the middle form); pinpoints the loom point in ONE panel's tree
-  --conv TEXT                       workspace for --thread/--turn/--node targeting (id-prefix/name); default = the one open in the browser
-  --ancestry-file TEXT              loom from an EXPLICIT full transcript instead of a tree/panel: a JSON list of {role, content} dicts (role: user|assistant|system). The SAME transcript is used for every target panel — this is how you graft a real, verbatim conversation generated by one model into another model's context (sanctioned: FULL transcripts only, never an authored/partial answer). Mutually exclusive with --thread/--turn/--node/--conv.
+  --ws TEXT                         workspace for --thread/--turn/--node targeting (id-prefix/name); default = the one open in the browser
+  --ancestry-file TEXT              loom from an EXPLICIT full transcript instead of a tree/panel: a JSON list of {role, content} dicts (role: user|assistant|system). The SAME transcript is used for every target panel — this is how you graft a real, verbatim conversation generated by one model into another model's context (sanctioned: FULL transcripts only, never an authored/partial answer). Mutually exclusive with --thread/--turn/--node/--ws.
   --include-folded                  also fire at browser-folded panels
   --force                           fire even while a generation is in flight
   --logprobs                        print each sample's per-token logprob + top-5 alternatives (native tinker sampling only; none for OpenRouter)
@@ -600,14 +600,14 @@ tinkpg params [options]
   --json                            print the resulting global params as JSON
 tinkpg url [selector] [options]
   # Print the URL of the server this CLI is driving — the thing to hand the human when they ask...
-  --conv TEXT                       same as the positional selector
+  --ws TEXT                         same as the positional selector
   --live                            link to the workspace the browser currently has open (from the state bus) instead of naming one
   --json                            url + resolved instance (pid, scan roots) + workspace id/name
 tinkpg state [options]
-  # Digest of what's on screen now: one block per panel, first/last-2 of each panel's ACTIVE...
+  # Digest of what's on screen now: one block per panel, first/last-2 of the open workspace's...
   --full                            show every message per panel, not just first/last-2
   --width INTEGER                   per-message truncation width  [default: 160]
-  --link/--no-link                  annotate each panel with the saved workspace its active path matches (`--no-link` skips the workspaces fetch)
+  --link/--no-link                  resolve the open workspace from the saved store — its name, folds and the panel transcripts all come from there (`--no-link` skips that fetch: model bindings only, transcripts marked as skipped)
   --json                            raw state JSON (untruncated escape hatch)
   --include-folded                  also show panels folded in the browser UI (skipped by default)
 tinkpg threads [options]
@@ -621,7 +621,7 @@ tinkpg threads [options]
   --json                            emit rows as JSON (untruncated first messages)
 tinkpg ws [selector] [options]
   # Browse saved WORKSPACES (multi-panel, branchable; `conv` is a back-compat alias).
-  --conv TEXT                       same as the positional selector, for symmetry with `grep`/`node`/`threads` (which can only take it as an option)
+  --ws TEXT                         same as the positional selector, for symmetry with `grep`/`node`/`threads` (which can only take it as an option)
   --panel TEXT                      restrict to one panel id (p-1/p-2/… — older workspaces also have primary/compare); overrides folding
   --full                            show the whole active path, not just first/last-2
   --tree                            show the full branch tree (all branches), `*` = active
@@ -632,7 +632,7 @@ tinkpg ws [selector] [options]
   --json                            emit the selected transcript(s) as structured JSON (untruncated content + CoT + node ids)
 tinkpg samples [selector] [options]
   # Show every sibling response (the n-sample fan-out) at ONE fork, each with its CoT, plus a...
-  --conv TEXT                       same as the positional selector, for symmetry with `grep`/`node`/`threads` (which can only take it as an option)
+  --ws TEXT                         same as the positional selector, for symmetry with `grep`/`node`/`threads` (which can only take it as an option)
   --panel TEXT                      panel id (p-1/p-2/… — older workspaces also have primary/compare); default = the LEFTMOST non-folded panel (layout order, i.e. the column order on screen). Explicit --panel overrides folding
   --thread INTEGER                  1-indexed root thread (branch-from-start sibling) to walk; default = the active one. Thread numbers: the `threads:` index in `tinkpg ws <id>`
   --turn INTEGER                    1-indexed user turn on the thread's path whose responses to show; default = the last one
@@ -648,7 +648,7 @@ tinkpg samples [selector] [options]
   --deepest                         resolve --turn against the thread's LONGEST branch instead of its selected one — reaches forks deeper than the selection goes
 tinkpg grep <pattern> [options]
   # Search EVERY branch of saved workspaces — message content, thinking (`reasoning`) and thread...
-  --conv TEXT                       restrict to one workspace (id-prefix or name substring)
+  --ws TEXT                         restrict to one workspace (id-prefix or name substring)
   --regex                           treat PATTERN as a Python regex
   --ignore-case
   --width INTEGER                   snippet width around each match  [default: 160]
@@ -657,7 +657,7 @@ tinkpg grep <pattern> [options]
   --link                            append a clickable deep link per hit (?w=…&node=… opens the browser AT the match)
 tinkpg node <node_id> [options]
   # Locate a NODE ID anywhere in the saved workspaces and dump its record — the reverse index...
-  --conv TEXT                       restrict the search to one workspace (id-prefix or name substring)
+  --ws TEXT                         restrict the search to one workspace (id-prefix or name substring)
   --logprobs                        fetch + print the stored per-token logprob blob (index, token, lp, top-K alternatives)
   --meta                            fetch + print the stored raw_meta blob (the request & response record)
   --raw                             print the node's raw_text (tags preserved)
