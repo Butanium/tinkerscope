@@ -510,6 +510,8 @@ tinkpg send [prompt] [options]
   --file TEXT                       read the user message from a file (a probe template — mutually exclusive with the positional prompt)
   --prefill-file TEXT               read the assistant prefill from a file (mutually exclusive with --prefill)
   --panel TEXT (repeatable)         target only these panel ids (repeatable); overrides folding
+  --conv TEXT                       workspace to fire into (id-prefix/name); when it isn't the open one, models bind from ITS saved layout. Default = the open workspace, auto-created if none
+  --new-ws NAME                     create a fresh workspace with this name (seeded with the current panels), claim the bus, and fire into it
   --include-folded                  also fire at browser-folded panels
   --force                           fire even while a generation is in flight
   --logprobs                        print each sample's per-token logprob + top-5 alternatives (native tinker sampling only; none for OpenRouter)

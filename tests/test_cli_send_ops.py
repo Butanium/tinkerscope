@@ -47,6 +47,8 @@ def wired(monkeypatch):
 
     def fake_post(path, body=None):
         calls.append(("post", path, body))
+        if path == "/api/workspaces":  # auto-create returns the new body
+            return {"id": "ws-new", "rev": 0, **(body or {})}
         return {"rev": 7, "results": []}
 
     def fake_stream(body, label=None, lock=None, result=None, *a, **kw):
@@ -76,6 +78,7 @@ def wired(monkeypatch):
     monkeypatch.setattr(cli, "_post", fake_post)
     monkeypatch.setattr(cli, "_client", lambda: FakeClient())
     monkeypatch.setattr(cli, "_stream_chat", fake_stream)
+    monkeypatch.setattr(cli, "_base_url", lambda: "http://test")  # auto-create prints a ?w= link
     return calls, state, ws
 
 
@@ -114,14 +117,98 @@ def test_send_emits_user_ops_before_firing_with_parent(wired):
         assert f["n_samples"] == 2
 
 
-def test_send_without_workspace_stays_legacy(wired):
+def test_send_without_workspace_auto_creates(wired):
+    """§4.4 (P3): a placement send with NO resolvable workspace creates one —
+    never silently unpersisted (this replaces the P2 'stays legacy' contract)."""
     calls, state, ws = wired
     state["workspace_id"] = None
-    res = runner.invoke(cli.app, ["send", "hello"])
+    res = runner.invoke(cli.app, ["send", "hello world probe"])
     assert res.exit_code == 0, res.output
-    assert _ops_posts(calls) == [], "no workspace ⇒ no ops"
+    creates = [c for c in calls if c[0] == "post" and c[1] == "/api/workspaces"]
+    assert len(creates) == 1
+    body = creates[0][2]
+    assert body["name"].startswith("hello world probe")
+    assert [r["id"] for r in body["panels"]] == ["p-1", "p-2"], "layout seeded from the targets"
+    claims = [c for c in calls if c[0] == "post" and c[1] == "/api/state"
+              and (c[2] or {}).get("workspace_id") == "ws-new"]
+    assert claims and claims[0][2].get("panels"), "bus claimed with the anti-chimera pair"
+    (post,) = _ops_posts(calls)
+    assert post[1] == "/api/workspaces/ws-new/ops"
     for f in _fires(calls):
-        assert "parent_node" not in f and "workspace_id" not in f
+        assert f["workspace_id"] == "ws-new" and f.get("parent_node")
+
+
+def test_send_new_ws_creates_named_workspace(wired):
+    calls, state, ws = wired
+    res = runner.invoke(cli.app, ["send", "hello", "--new-ws", "my probe run"])
+    assert res.exit_code == 0, res.output
+    creates = [c for c in calls if c[0] == "post" and c[1] == "/api/workspaces"]
+    assert len(creates) == 1 and creates[0][2]["name"] == "my probe run"
+    for f in _fires(calls):
+        assert f["workspace_id"] == "ws-new"
+
+
+def test_send_foreign_ws_binds_models_from_its_layout(wired, monkeypatch):
+    """send --ws <other>: same coherence rule as continue — models from THAT
+    workspace's saved layout, ops + fires into it."""
+    calls, state, ws = wired
+    monkeypatch.setattr(cli, "_workspaces", lambda: [ws, WS_B])
+    monkeypatch.setattr(cli, "_resolve_workspace", lambda sel, convs=None: WS_B)
+    res = runner.invoke(cli.app, ["send", "hello", "--ws", "wsB"])
+    assert res.exit_code == 0, res.output
+    (fire,) = _fires(calls)
+    assert fire["run_id"] == "run_bbb" and fire["workspace_id"] == "wsB"
+    (post,) = _ops_posts(calls)
+    assert post[1] == "/api/workspaces/wsB/ops"
+
+
+RUNS = [{"id": "runs/alpha", "name": "alpha", "sampleable": True, "base_model": "b",
+         "checkpoints": [{"name": "final", "sampler_path": "tinker://a/sampler_weights/final"}]}]
+
+
+def test_chat_is_a_placement_writer_with_workspace_open(wired, monkeypatch):
+    """chat with a workspace open persists: user-turn op first (root stamps the
+    thread system prompt), fire carries workspace_id + parent_node (task #15)."""
+    calls, state, ws = wired
+    monkeypatch.setattr(cli, "_models", lambda: RUNS)
+    res = runner.invoke(cli.app, ["chat", "alpha", "the question", "--system", "probe sys"])
+    assert res.exit_code == 0, res.output
+    (post,) = _ops_posts(calls)
+    node = post[2]["ops"][0]["nodes"][0]
+    assert node["content"] == "the question" and node["parent"] is None
+    assert node["system_prompt"] == "probe sys", "--system authors the THREAD prompt now"
+    (fire,) = _fires(calls)
+    assert fire["workspace_id"] == "ws1" and fire["parent_node"] == node["id"]
+    assert fire["thread_system_prompt"] == "probe sys"
+    assert "system_prompt" not in fire, "the global part inherits — X composes, not replaces"
+    # the saved layout is NEVER rewritten by a headless CLI command
+    assert not any(c[1].startswith("/api/workspaces/ws1") and c[1].endswith("ws1")
+                   for c in calls if c[0] == "post"), "no workspace-layout PATCH/PUT"
+
+
+def test_chat_without_workspace_stays_lockstep(wired, monkeypatch):
+    calls, state, ws = wired
+    state["workspace_id"] = None
+    monkeypatch.setattr(cli, "_models", lambda: RUNS)
+    res = runner.invoke(cli.app, ["chat", "alpha", "q"])
+    assert res.exit_code == 0, res.output
+    assert _ops_posts(calls) == []
+    (fire,) = _fires(calls)
+    assert "parent_node" not in fire
+    assert "not persisted" in res.output
+
+
+def test_compare_is_a_placement_writer_with_workspace_open(wired, monkeypatch):
+    calls, state, ws = wired
+    runs = RUNS + [{"id": "runs/beta", "name": "beta", "sampleable": True, "base_model": "b",
+                    "checkpoints": [{"name": "final", "sampler_path": "tinker://b/sampler_weights/final"}]}]
+    monkeypatch.setattr(cli, "_models", lambda: runs)
+    res = runner.invoke(cli.app, ["compare", "alpha", "beta", "same q"])
+    assert res.exit_code == 0, res.output
+    (post,) = _ops_posts(calls)
+    assert len(post[2]["ops"]) == 2, "one user-turn op per panel, one batch"
+    fires = _fires(calls)
+    assert len(fires) == 2 and all(f.get("parent_node") and f["workspace_id"] == "ws1" for f in fires)
 
 
 def test_continue_adds_user_turn_under_assistant_anchor(wired):

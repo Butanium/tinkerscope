@@ -980,10 +980,28 @@ def cmd_chat(
     pid = _layout_panel_ids(1)[0]
     _post("/api/state", {"panels": [_panel_obj(pid, r["id"], ckpt)]})
     think: "bool | str | None" = "both" if thinking_both else thinking
-    body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, think, _resolve_sys(system, no_system), pid, prefill)
+    # Like `send`, --system authors the THREAD prompt (recorded on the root node,
+    # composed over the global) — a `chat` is a new thread now, so its prompt is
+    # thread identity, not a call-scoped global override.
+    system, thread_system = _new_thread_system(_resolve_sys(system, no_system))
+    body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, think, system, pid, prefill)
+    if thread_system is not None:
+        body["thread_system_prompt"] = thread_system
+    # Placement writer (P3, task #15's answered design): with a workspace open,
+    # chat persists — its user turn as our own op, the replies server-folded
+    # under it. The bus layout we just replaced stays EPHEMERAL: the workspace's
+    # SAVED panel bindings are never rewritten by a headless CLI command.
+    conv_id = _get("/api/state").get("workspace_id")
+    if conv_id:
+        parents, turn_err = _emit_user_turns(conv_id, [{"id": pid}], prompt, thread_system)
+        if turn_err is not None:
+            _die(turn_err)
+        body["workspace_id"] = conv_id
+        body["parent_node"] = parents[pid]
     if prefill:
         print(f"prefill: {prefill!r}")
-    print(f"chat {r['id']}" + (f"@{ckpt}" if ckpt else "") + f"  n={n} temp={_fmt_param(temperature)}")
+    print(f"chat {r['id']}" + (f"@{ckpt}" if ckpt else "") + f"  n={n} temp={_fmt_param(temperature)}"
+          + (f"  → persists in workspace {conv_id[:8]}" if conv_id else "  (no workspace open — not persisted)"))
     # Single chat: n==1 streams tokens inline; n>1 prints whole samples (no deltas).
     _stream_chat(body, stream_inline=True)
 
@@ -1005,7 +1023,8 @@ def cmd_compare(
 ) -> None:
     """Compare N runs on one prompt — A→primary, B→compare, --run extras→p-2,p-3,…
     all stream concurrently. `compare a b "prompt"` is the 2-run case."""
-    system = _resolve_sys(system, no_system)
+    # Thread-authoring --system + placement writing: same contract as `chat`.
+    system, thread_system = _new_thread_system(_resolve_sys(system, no_system))
     catalog = _models()
     # Resolve every run (A, B, then each --run) to (run, checkpoint, panel_id). Runs
     # are resolved BEFORE minting so an unresolvable arg doesn't burn panel numbers.
@@ -1023,7 +1042,19 @@ def cmd_compare(
     # One /api/state replace sets the whole panel layout at once.
     _post("/api/state", {"panels": [_panel_obj(pid, r["id"], ckpt) for (r, ckpt, pid) in specs]})
 
-    print(f"compare  n={n} temp={_fmt_param(temperature)}")
+    # Placement writer with a workspace open (see cmd_chat) — one ops batch
+    # persists every panel's user turn before any fire.
+    conv_id = _get("/api/state").get("workspace_id")
+    parents: dict[str, str] = {}
+    if conv_id:
+        parents, turn_err = _emit_user_turns(
+            conv_id, [{"id": pid} for (_r, _ck, pid) in specs], prompt, thread_system
+        )
+        if turn_err is not None:
+            _die(turn_err)
+
+    print(f"compare  n={n} temp={_fmt_param(temperature)}"
+          + (f"  → persists in workspace {conv_id[:8]}" if conv_id else "  (no workspace open — not persisted)"))
     for (r, ckpt, pid) in specs:
         print(f"  {pid}: {r['id']}" + (f"@{ckpt}" if ckpt else ""))
     print()
@@ -1034,6 +1065,11 @@ def cmd_compare(
     think: "bool | str | None" = "both" if thinking_both else thinking
     for (r, ckpt, pid) in specs:
         body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, think, system, pid, prefill)
+        if thread_system is not None:
+            body["thread_system_prompt"] = thread_system
+        if conv_id and pid in parents:
+            body["workspace_id"] = conv_id
+            body["parent_node"] = parents[pid]
         res = _StreamResult()
         label = f"{pid} {r['id']}" + (f"@{ckpt}" if ckpt else "")
         t = threading.Thread(target=_stream_chat, args=(body, label, lock, res))
@@ -1124,25 +1160,42 @@ def _panel_chat_body(
 
 
 def _send_targets(
-    panel: list[str], include_folded: bool, force: bool
+    panel: list[str], include_folded: bool, force: bool, ws: Optional[str] = None
 ) -> tuple[list[dict], str, Optional[str]]:
     """Resolve the live panels a `send`-style fire targets (shared with `battery`):
     read the state bus, refuse mid-generation (unless force), honor browser folds
     unless an explicit --panel overrides. Returns (targets, skipped-description,
-    open-workspace-id) — the workspace id (None when the bus has none) is where a
-    send persists its user turns + folded replies (server-authored folds; without
-    one the fire is legacy lockstep, browser-folded only)."""
+    workspace-id) — the workspace id (None when nothing resolves) is where a
+    send persists its user turns + folded replies (server-authored folds).
+
+    `ws` targets a NAMED workspace. When it is not the open one, the MODEL
+    bindings come from that workspace's own saved layout — same coherence rule
+    as `continue --ws` (the screen's bindings are the open workspace's state)."""
     st = _get("/api/state")
     if st.get("running") and not force:
         _die("a generation is in flight (running=yes) — wait for it, or pass --force")
-    panels = st.get("panels", [])
-    if not panels:
-        _die("no panels on screen — `tinkpg open <run>` or add panels in the browser first")
+    conv_id = st.get("workspace_id")
+    c: Optional[dict] = None
+    if ws is not None:
+        c = _resolve_workspace(ws)
+    foreign = c is not None and c.get("id") != conv_id
+    if c is not None:
+        conv_id = c.get("id")
+    if foreign:
+        panels = [r for r in (c.get("panels") or []) if isinstance(r, dict) and r.get("id")]
+        if not panels:
+            _die(
+                f"workspace {(c.get('name') or (c.get('id') or '')[:8])!r} has no saved panel "
+                "layout to bind models from — open it in the browser once, or target the open workspace"
+            )
+    else:
+        panels = st.get("panels", [])
+        if not panels:
+            _die("no panels on screen — `tinkpg open <run>` or add panels in the browser first")
     by_id = {p["id"]: p for p in panels}
     folded: set[str] = set()
-    conv_id = st.get("workspace_id")
     if conv_id and not include_folded and not panel:
-        c = next((x for x in _workspaces() if x.get("id") == conv_id), None)
+        c = c if c is not None else next((x for x in _workspaces() if x.get("id") == conv_id), None)
         folded = set((c or {}).get("reduced_panels") or [])
     if panel:
         missing = [pid for pid in panel if pid not in by_id]
@@ -1175,6 +1228,42 @@ def _new_thread_system(resolved: Optional[str]) -> tuple[Optional[str], str]:
     if resolved == "":
         return "", ""
     return None, resolved
+
+
+def _create_send_workspace(name: str, targets: list[dict]) -> str:
+    """§4.4 auto-create: a placement fire with no resolvable workspace CREATES
+    one — never silently unpersisted — seeded with the target panels as its
+    layout, then CLAIMS the bus (workspace_id + panels together, the
+    anti-chimera pair) so the rest of the session lands in it too. Prints the
+    id prominently: headless, this line is the only pointer to where the
+    samples went."""
+    rows = [{"id": p["id"], "run_id": p.get("run_id"), "checkpoint": p.get("checkpoint")}
+            for p in targets]
+    seq = max((int(m.group(1)) for p in targets
+               if (m := re.match(r"p-(\d+)$", p["id"] or ""))), default=0)
+    ws = _post("/api/workspaces", {
+        "name": name,
+        "trees": {p["id"]: {} for p in targets},
+        "panels": rows,
+        "seen_panels": [p["id"] for p in targets],
+        "panel_seq": seq,
+    })
+    _post("/api/state", {"workspace_id": ws["id"], "panels": rows})
+    print(f"created workspace {name!r} ({ws['id'][:8]}) — open: {_base_url()}/?w={ws['id']}",
+          file=sys.stderr)
+    return ws["id"]
+
+
+def _derived_ws_name(prompt: str) -> str:
+    return " ".join(prompt.split())[:48] or "untitled probe"
+
+
+def _qualified_handle(ws_id: Optional[str], panel: str, node_id: str) -> str:
+    """The paste-ready `<ws>:<panel>:<node>` handle every printer emits (P3
+    §4.4): self-contained, so `--node` resolves it with NO open-workspace
+    context. The ws part is an 8-char id prefix — `_split_node_handle` +
+    `_resolve_workspace` take prefixes."""
+    return f"{(ws_id or '')[:8]}:{panel}:{node_id}" if ws_id else f"{panel}:{node_id}"
 
 
 def _emit_user_turns(
@@ -1299,6 +1388,8 @@ def cmd_send(
     file: Optional[str] = typer.Option(None, "--file", help="read the user message from a file (a probe template — mutually exclusive with the positional prompt)"),
     prefill_file: Optional[str] = typer.Option(None, "--prefill-file", help="read the assistant prefill from a file (mutually exclusive with --prefill)"),
     panel: list[str] = typer.Option([], "--panel", help="target only these panel ids (repeatable); overrides folding"),
+    ws: Optional[str] = typer.Option(None, "--ws", "--conv", help="workspace to fire into (id-prefix/name); when it isn't the open one, models bind from ITS saved layout. Default = the open workspace, auto-created if none"),
+    new_ws: Optional[str] = typer.Option(None, "--new-ws", metavar="NAME", help="create a fresh workspace with this name (seeded with the current panels), claim the bus, and fire into it"),
     include_folded: bool = typer.Option(False, "--include-folded", help="also fire at browser-folded panels"),
     force: bool = typer.Option(False, "--force", help="fire even while a generation is in flight"),
     show_logprobs: bool = typer.Option(False, "--logprobs", help="print each sample's per-token logprob + top-5 alternatives (native tinker sampling only; none for OpenRouter)"),
@@ -1309,14 +1400,25 @@ def cmd_send(
     — the CLI twin of the browser's ⑂ branch-from-start. Unlike `chat`/`compare`
     this never touches the panel layout: it reads the live panels (skipping
     browser-folded ones), fires one chat per panel with a FRESH history, and the
-    browser folds each reply in as a sibling first message. Existing threads are
-    untouched; aim it with --panel (repeatable). The message / prefill can come from
-    a file (--file / --prefill-file) so probe templates aren't retyped."""
+    SERVER folds each reply in as a sibling first message. No workspace anywhere?
+    One is auto-created (named from the message) so the fan-out is never silently
+    unpersisted; aim elsewhere with --ws / --new-ws. Existing threads are
+    untouched; aim panels with --panel (repeatable). The message / prefill can come
+    from a file (--file / --prefill-file) so probe templates aren't retyped."""
     prompt = _arg_or_file(prompt, file, "message", "--file")
     prefill = _arg_or_file(prefill, prefill_file, "prefill", "--prefill-file")
     if prompt is None:
         _die("no message — pass it inline or via --file")
-    targets, skipped, conv_id = _send_targets(panel, include_folded, force)
+    if ws is not None and new_ws is not None:
+        _die("--ws and --new-ws are mutually exclusive")
+    targets, skipped, conv_id = _send_targets(panel, include_folded, force, ws=ws)
+    if new_ws is not None:
+        conv_id = _create_send_workspace(new_ws, targets)
+    elif conv_id is None:
+        # §4.4: a placement send with no resolvable workspace auto-creates one —
+        # never silently unpersisted (the pre-P3 behavior fired lockstep and the
+        # fan-out evaporated with the process).
+        conv_id = _create_send_workspace(_derived_ws_name(prompt), targets)
     think: "bool | str | None" = "both" if thinking_both else thinking
     system, thread_system = _new_thread_system(_resolve_sys(system, no_system))
     plan_out = sys.stderr if json_out else sys.stdout  # JSON mode: keep stdout pure JSONL
@@ -1806,6 +1908,16 @@ def cmd_battery(
     defaults = {"system": system, "no_system": no_system, "prefill": None, "n": n,
                 "temperature": temperature, "max_tokens": max_tokens,
                 "thinking": thinking, "panel": panel}
+
+    # ONE workspace per battery run (§4.4): with nothing open, create it up
+    # front (named after the probe dir) and claim the bus — every probe's
+    # _send_targets then resolves it, instead of minting one per probe.
+    st = _get("/api/state")
+    if not st.get("workspace_id"):
+        bound = [p for p in st.get("panels", []) if p.get("run_id")]
+        if bound:
+            _create_send_workspace(f"battery {pdir.name}", bound)
+
     summary: list[tuple[str, int, list[str]]] = []  # (stem, ok-samples, failures)
     for k, probe in enumerate(probes, 1):
         try:
@@ -2101,6 +2213,7 @@ def cmd_state(
     # reduced_panels), so folded-panel skipping needs the browser-pushed
     # workspace_id + the (default) --link fetch; without either, all panels show.
     reduced: set[str] = set()
+    open_conv: Optional[dict] = None
     if conv_id:
         open_conv = next((c for c in convs if c.get("id") == conv_id), None)
         if open_conv:
@@ -2115,6 +2228,18 @@ def cmd_state(
     skipped: list[str] = []
     for p in panels:
         msgs = p.get("messages", [])
+        # The WORKSPACE is the source of truth since P2's server folds: read the
+        # saved tree's active path when the open workspace has one for this
+        # panel. The bus echo (above) survives only as the lockstep fallback —
+        # it retires with P3's web half.
+        if open_conv is not None:
+            t = (open_conv.get("trees") or {}).get(p["id"])
+            if t and t.get("nodes"):
+                msgs = [
+                    {"role": nd.get("role"), "content": nd.get("content", ""),
+                     **({"reasoning": nd["reasoning"]} if nd.get("reasoning") else {})}
+                    for nd in _active_path(t)
+                ]
         bind = _short_run(p.get("run_id")) + (f"@{p['checkpoint']}" if p.get("checkpoint") else "")
         if p["id"] in reduced and not include_folded:
             skipped.append(p["id"])
@@ -2760,7 +2885,7 @@ def _show_samples(
         _die(f"--sample {sample_k} out of range (this fork has {len(samples)} sample(s))")
     for i, s in shown:
         active = "*" if s.get("id") == active_id else " "
-        print(f"{active}--- sample {i}/{len(samples)} ---")
+        print(f"{active}--- sample {i}/{len(samples)} · {_qualified_handle(c.get('id'), pid, s.get('id', '?'))} ---")
         if slice_rng is not None:
             start, ln = slice_rng
             if full and s.get("reasoning"):
@@ -2897,8 +3022,8 @@ def cmd_grep(
         if link:
             print(f"   ↳ {wh['link']}")
     for h in out["hits"]:
-        loc = (f"{h['workspace_name']} ({(h['workspace_id'] or '')[:8]}) · {h['panel']}"
-               f" · thread {h['thread'] or '?'} · {h['role']} · {h['node_id']}")
+        loc = (f"{h['workspace_name']} · thread {h['thread'] or '?'} · {h['role']} · "
+               f"{_qualified_handle(h['workspace_id'], h['panel'], h['node_id'])}")
         tag = {"reasoning": " [thinking]", "system_prompt": " [system]"}.get(h["field"], "")
         print(f"{loc}{tag}")
         print(f"   {h['before']}{h['match_display']}{h['after']}")
@@ -2997,7 +3122,8 @@ def cmd_node(
         bind = _short_run(lay.get("run_id")) + (f"@{lay['checkpoint']}" if lay.get("checkpoint") else "")
         roots = t.get("rootChildren", [])
         print(f"workspace: {c.get('name')}  ({(c.get('id') or '')[:8]})  ·  panel {pid}  ← {bind}")
-        loc = f"node {nid}  ·  {nd.get('role', '?')}  ·  thread {thread_k or '?'}/{len(roots)}"
+        loc = (f"node {_qualified_handle(c.get('id'), pid, nid)}  ·  {nd.get('role', '?')}"
+               f"  ·  thread {thread_k or '?'}/{len(roots)}")
         if sib_k is not None and len(sibs) > 1:
             loc += f"  ·  sibling {sib_k}/{len(sibs)}"
         loc += f"  ·  parent {nd.get('parent') or '(root)'}  ·  {len(nd.get('children') or [])} child(ren)"
