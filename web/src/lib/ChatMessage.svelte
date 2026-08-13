@@ -16,6 +16,7 @@
   import { thinkingView } from '$lib/thinking-view.svelte';
   import { reveal } from '$lib/reveal.svelte';
   import { nodeBlobs } from '$lib/node-blobs.svelte';
+  import { workspaces as ws } from '$lib/workspaces.svelte';
   import ActionMenu from '$lib/ActionMenu.svelte';
   import Icon from '$lib/Icon.svelte';
   import OverflowRow from '$lib/OverflowRow.svelte';
@@ -624,15 +625,19 @@
 <!-- Copy this node's handle — the CLI's addressing currency (`tinkpg
      samples/continue/node --node <handle>`).
 
-     `<panel>:<node>`, not a bare node id: a tree cloned into another panel keeps
-     its node ids, so one id names the same turn in N panels — the write commands
-     (`continue --node`) then refuse until you add --panel by hand. The panel is
-     also what makes the handle mean "this column's turn", i.e. bound to THIS
-     model. Safe to join with a colon: no panel id or node id contains one, and
-     the CLI still accepts a bare id. -->
+     `<ws-prefix>:<panel>:<node>` (§4.4, fully qualified since P3): the ws part
+     makes the handle paste-able into ANY terminal — no dependence on which
+     workspace happens to be open there (the CLI resolves an id-prefix). The
+     panel part disambiguates clones: a tree cloned into another panel keeps
+     its node ids, so one id names the same turn in N panels, and the panel is
+     what binds the handle to THIS column's model. Colon is safe: no workspace
+     id, panel id or node id contains one, and the CLI still accepts the
+     shorter forms. Ready-to-paste commands live in the ? modal (tooltips stay
+     one line). -->
 {#snippet copyIdBtn(id: string | null | undefined)}
   {#if id}
-    {@const handle = panelId ? `${panelId}:${id}` : id}
+    {@const wsPrefix = ws.activeId?.slice(0, 8)}
+    {@const handle = [wsPrefix, panelId, id].filter(Boolean).join(':')}
     <button
       class="btn-act"
       class:copied={copiedId}

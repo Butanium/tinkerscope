@@ -25,29 +25,27 @@ class StatePatch(BaseModel):
 
     Two ways to set the per-panel selection:
       - `panels`: full-replace the panel list (the browser sends this on every
-        selection change — one `{id, run_id, checkpoint, messages}` per panel).
-      - `panel` + `run_id`/`checkpoint`/`messages`: a targeted sub-patch of ONE
-        panel by id (the CLI / single-panel drivers). Routed to an EXISTING panel
-        only — an unknown id is dropped, never auto-created (see state.py
-        `_patch_panel`: the `panels` full-replace is the sole panel-existence source,
-        so a stale `messages` echo can't resurrect a removed panel).
+        selection change — one `{id, run_id, checkpoint}` per panel).
+      - `panel` + `run_id`/`checkpoint`: a targeted sub-patch of ONE panel by id
+        (the CLI / single-panel drivers). Routed to an EXISTING panel only — an
+        unknown id is dropped, never auto-created (see state.py `_patch_panel`).
+    The per-panel transcript echo (`messages` / `panel_messages`) retired with
+    P3 — the workspace tree is the transcript; an old client still sending the
+    keys gets them silently dropped here (pydantic), which is the compatible
+    thing: they were write-only mirrors.
     Sampling params are global (shared across panels)."""
 
     panels: list[dict] | None = None
     # id of the saved workspace the browser currently has open (its `?c=`), so the
     # CLI can name what's on screen. Global (one workspace spans all panels).
     workspace_id: str | None = None
-    # per-panel active-path echo {panel_id: messages} — mirrors transcripts for all
-    # panels in one patch without touching their run_id/checkpoint.
-    panel_messages: dict[str, list[dict]] | None = None
-    # per-panel active-THREAD system-prompt echo {panel_id: str|None} — mirrored
-    # like panel_messages (the thread part a CLI send inherits by omission).
+    # per-panel active-THREAD system-prompt mirror {panel_id: str|None} — the
+    # thread part a CLI send inherits by omission.
     panel_thread_system: dict[str, str | None] | None = None
     # targeted single-panel sub-patch
     panel: str | None = None
     run_id: str | None = None
     checkpoint: str | None = None
-    messages: list[dict] | None = None
     thread_system_prompt: str | None = None
     # global params
     system_prompt: str | None = None

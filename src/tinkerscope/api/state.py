@@ -44,20 +44,21 @@ DEFAULT_PANEL_ID = "p-1"
 
 @dataclass
 class PanelState:
-    """One comparison panel: its model selection + its OWN active-path transcript
-    echo. The echo is write-only (the browser's branch tree is the read source); it
-    exists so the CLI and external-fold reconcile can see/replay each panel's path.
-    `id` is a stable string ('p-1','p-2',… — and 'primary'/'compare' on workspaces
-    saved before ids became monotonic), never an array index."""
+    """One comparison panel: its model SELECTION + thread-system mirror. The
+    per-panel transcript echo retired with P3 (HANDOFF_SERVER_AUTHORITY §4.5):
+    the workspace TREE is the transcript now — the CLI reads it over
+    /api/workspaces and folds arrive as ops events, so the bus no longer
+    carries message text at all. `id` is a stable string ('p-1','p-2',… — and
+    'primary'/'compare' on workspaces saved before ids became monotonic),
+    never an array index."""
 
     id: str = DEFAULT_PANEL_ID
     run_id: str | None = None
     checkpoint: str | None = None         # checkpoint name, e.g. "final"
-    messages: list[dict] = field(default_factory=list)   # [{role, content}]
     # The ACTIVE thread's system prompt (composed OVER the global one at sample
-    # time — see routes/chat.py compose_system). Mirrored by the browser like
-    # `messages`, so a CLI send that doesn't say otherwise extends the thread
-    # under the prompt it was started with. None/"" = no thread part.
+    # time — see routes/chat.py compose_system). Mirrored by the browser so a
+    # CLI send that doesn't say otherwise extends the thread under the prompt
+    # it was started with. None/"" = no thread part.
     thread_system_prompt: str | None = None
 
 
@@ -124,7 +125,7 @@ class StateBus:
 
     # Fields that live on a PanelState, not the top-level state. A patch carrying a
     # `panel` id routes these to that panel; without `panel` they're ignored.
-    _PANEL_FIELDS = ("run_id", "checkpoint", "messages", "thread_system_prompt")
+    _PANEL_FIELDS = ("run_id", "checkpoint", "thread_system_prompt")
 
     # Everything that describes the OPEN WORKSPACE rather than the process. These are
     # persisted per-workspace by the browser and restored on open; the bus holds them
@@ -132,26 +133,9 @@ class StateBus:
     # web/src/lib/bus-scope.ts WORKSPACE_FIELDS + the panel-routing keys.
     _WORKSPACE_KEYS = (
         "panels", "workspace_id", "system_prompt", "system_enabled",
-        "panel_messages", "panel_thread_system",
+        "panel_thread_system",
         "panel", *_PANEL_FIELDS,
     )
-
-    # Storage-v2 diet: the per-panel transcript echoes are text mirrors the CLI reads
-    # (role/content only — verified it reads nothing else); the heavy per-node fields
-    # never belong on the bus. Strip them defensively on ingest so a snapshot can't
-    # carry megabytes of logprobs, regardless of what a client echoes. Does NOT touch
-    # the live sample-stream events (detached fire delivers full samples through the
-    # bucket; that path is untouched — see docs/STORAGE_V2.md §2.5).
-    _HEAVY_MSG_FIELDS = ("token_logprobs", "raw_meta")
-
-    @classmethod
-    def _light_msgs(cls, msgs: Any) -> list[dict]:
-        return [
-            {k: v for k, v in m.items() if k not in cls._HEAVY_MSG_FIELDS}
-            if isinstance(m, dict)
-            else m
-            for m in (msgs or [])
-        ]
 
     @classmethod
     def _as_panel(cls, p: Any) -> PanelState:
@@ -161,17 +145,14 @@ class StateBus:
             id=p["id"],
             run_id=p.get("run_id"),
             checkpoint=p.get("checkpoint"),
-            messages=cls._light_msgs(p.get("messages")),
             thread_system_prompt=p.get("thread_system_prompt"),
         )
 
     def _patch_panel(self, panel_id: str, key: str, value: Any) -> None:
-        """Route a per-panel field (run_id/checkpoint/messages) to an EXISTING panel.
-        Never creates a panel: the `panels` field (full replace) is the sole source of
-        truth for which panels exist, and every chat path (browser + CLI) registers its
-        panel layout with a `panels` patch before it routes any messages here. Auto-
-        creating used to let a stale `panel_messages` echo (the store mirrors a tree that
-        outlived its panel) resurrect a removed panel with run_id=None — the phantom
+        """Route a per-panel field (run_id/checkpoint/thread_system_prompt) to an
+        EXISTING panel. Never creates one: the `panels` field (full replace) is the
+        sole source of truth for which panels exist. Auto-creating once let a stale
+        per-panel echo resurrect a removed panel with run_id=None — the phantom
         4th panel. Drop the update for an unknown id instead."""
         panel = next((p for p in self.state.panels if p.id == panel_id), None)
         if panel is None:
@@ -211,7 +192,7 @@ class StateBus:
 
     def _apply_patch(self, patch: dict[str, Any]) -> None:
         """Apply a patch: `panels` full-replaces the list (browser/CLI selection);
-        a `panel` id routes run_id/checkpoint/messages to that panel (chat.py);
+        a `panel` id routes run_id/checkpoint/thread_system_prompt to that panel;
         everything else is a global setattr. Workspace-scoped keys are dropped when
         the patch belongs to a workspace that isn't the one on the bus and doesn't
         claim it — see _drop_foreign_workspace_keys."""
@@ -222,21 +203,14 @@ class StateBus:
                 continue
             if k == "panels":
                 self.state.panels = [self._as_panel(p) for p in v]
-            elif k == "panel_messages":
-                # {panel_id: messages} — the store's active-path echo for every panel,
-                # mirrored in one patch without touching run_id/checkpoint.
-                for pid, msgs in (v or {}).items():
-                    self._patch_panel(pid, "messages", self._light_msgs(msgs))
             elif k == "panel_thread_system":
                 # {panel_id: str|None} — the store's active-thread system-prompt
-                # echo, bulk-mirrored like panel_messages.
+                # mirror, bulk-updated in one patch.
                 for pid, ts in (v or {}).items():
                     self._patch_panel(pid, "thread_system_prompt", ts)
             elif k in self._PANEL_FIELDS:
                 if panel_id is not None:
-                    self._patch_panel(
-                        panel_id, k, self._light_msgs(v) if k == "messages" else v
-                    )
+                    self._patch_panel(panel_id, k, v)
             elif hasattr(self.state, k):
                 setattr(self.state, k, v)
 
@@ -271,31 +245,15 @@ class StateBus:
             self._fanout({"type": "patch", "event": "chat_start", "state": self.state.to_dict()})
         return cid
 
-    async def chat_end(
-        self, event: str = "chat_done", origin_workspace: str | None = None, **patch: Any
-    ) -> None:
-        """Atomically: decrement the in-flight count, apply any patch, clear
-        running only when no chat is still streaming, and broadcast.
-
-        `origin_workspace` = the workspace the chat belonged to at FIRE time.
-        The transcript commit in `patch` is dropped when the bus has since been
-        claimed by a DIFFERENT workspace: applying it would write the origin's
-        turns into the new owner's panel echo — a bus stamped one workspace
-        while echoing another (the 2026-07-24 chimera shape), which the next
-        reconnect reconcile would graft into the WRONG workspace's tree as
-        persisted nodes. The origin's own tab never needed this echo (it folds
-        from the stamped chat_done + its bucket); None (fired with no workspace
-        open — lockstep mode) keeps today's same-owner behavior."""
+    async def chat_end(self, event: str = "chat_done") -> None:
+        """Atomically: decrement the in-flight count, clear running when no chat
+        is still streaming, and broadcast. The transcript commit that used to
+        ride this call retired with the echo (P3): folds land in the workspace
+        TREE via the ops path before this runs, so the bus has nothing left to
+        remember about a finished chat — which also closes the whole class of
+        cross-workspace commit bugs the origin_workspace gate existed for."""
         async with self._lock:
             self._inflight = max(0, self._inflight - 1)
-            if (
-                patch
-                and origin_workspace is not None
-                and self.state.workspace_id is not None
-                and self.state.workspace_id != origin_workspace
-            ):
-                patch = {}
-            self._apply_patch(patch)
             if self._inflight == 0:
                 self.state.running = False
             self.state.last_event = event

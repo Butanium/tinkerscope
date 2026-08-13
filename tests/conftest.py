@@ -170,3 +170,23 @@ def client(backend) -> TestClient:
     _discovery, main_mod = backend
     with TestClient(main_mod.app) as c:
         yield c
+
+
+def ops_tree_write(client, cid, body):
+    """The retired `PUT /{id}/tree` TreeSave body, replayed as the ops batch a
+    post-P3 writer actually sends (wholesale replace_tree per panel + one
+    set_meta) — the journal/store tests keep their wholesale-writer vehicle
+    without the endpoint. Unlike the PUT, replace_tree VALIDATES tree shape,
+    so fixtures must be real trees."""
+    ops = [
+        {"op": "replace_tree", "panel": p, "tree": t}
+        for p, t in (body.get("trees") or {}).items()
+    ]
+    ops += [
+        {"op": "replace_tree", "panel": p, "tree": None}
+        for p in body.get("dropped_trees", [])
+    ]
+    meta = {k: v for k, v in body.items() if k not in ("trees", "dropped_trees")}
+    if meta:
+        ops.append({"op": "set_meta", "fields": meta})
+    return client.post(f"/api/workspaces/{cid}/ops", json={"ops": ops})

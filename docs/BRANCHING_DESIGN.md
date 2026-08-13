@@ -1,15 +1,12 @@
-# Branching — design spec v2 (resolved after adversarial critique)
+# Branching — the tree model + as-built persistence (ops world)
 
-> ⚠️ **Partially superseded by the server-authority migration P1 (2026-08-12,
-> `HANDOFF_SERVER_AUTHORITY.md`):** persistence is no longer tree-snapshot saves
-> — all mutation travels as idempotent ops (`POST /api/workspaces/{id}/ops`,
-> per-workspace `rev`, bus `ops` events, always-apply mirror). Invariant §0.2
-> (browser sole writer) is FALSE now; §0.3/3b's fold-scoping and §3's
-> own-vs-external folding still hold until P2 (server-authored folds); §6's
-> save machinery (dirt/save-plan/PUT) is retired —
-> `web/src/lib/deprecated/save-plan.ts`. Full rewrite lands with P3; until
-> then read this file for the TREE MODEL and interaction semantics, and
-> `API_CONTRACT.md` + `tree_ops.py`/`tree.ts` docstrings for persistence.
+> Rewritten to as-built truth at the server-authority migration's P3
+> (2026-08-12, `HANDOFF_SERVER_AUTHORITY.md`). §1/§2/§2b/§4/§5 (the TREE MODEL
+> and interaction semantics) are the original v2 design and still exact; §0,
+> §3 and §6 describe the OPS-WORLD persistence that replaced the
+> browser-sole-writer design. Wire shapes: `docs/API_CONTRACT.md`; the two op
+> interpreters: `api/tree_ops.py` + `web/src/lib/tree.ts` (kept in lockstep by
+> `tests/fixtures/tree_vectors/`).
 
 Implementation contract for workspace branching. v2 folds in the fixes from
 the 3-lens design critique (2026-06-22). Folds into `HANDOFF_BRANCHING.md` when
@@ -18,63 +15,30 @@ the SSE snapshot); `messages`/`compare_messages` are the linear ACTIVE PATH;
 edit/regen/n-samples FORK; ‹k/N› cycling; delete prunes subtree; named
 workspaces via a dropdown.
 
-## 0. The load-bearing invariants (v2)
+## 0. The load-bearing invariants (ops world, as built)
 
-1. **The tree is the single READ source.** `panelView`, the send context,
-   `lastUserQuestion`, and the distribution chart all derive from
-   `activeMessages(tree)` — **never** from `s.messages`. `s.messages` /
-   `s.compare_messages` are a WRITE-ONLY echo channel: the browser patches them
-   (so the CLI/sampler see the active path) and the backend overwrites them
-   transiently per chat, but the frontend never reads them for logic/render.
-   This neutralizes the backend's `chat_begin`/`chat_done` clobber (chat.py:240-277)
-   and the CLI's reset-to-`[user]`.
-2. **Own turns fold from the request's OWN response stream**, not the shared
-   render bucket. `fireChat` parses its `/api/chat` SSE response, collects the
-   `message` samples, and folds them into the tree under the user node it was
-   given. So a CLI / second-tab chat landing on the same panel mid-stream (it
-   clobbers the single-slot bucket) can NEVER corrupt or drop an own fold.
-3. **Chat ownership is by an explicit client token**, not chat_start ordering.
-   `fireChat` mints a token, registers it in `ownTokens`, and sends it on the
-   `/api/chat` body; the backend echoes it on the `chat_start`/`chat_done`/
-   `chat_error` bus broadcasts. The external-fold hook skips any chat whose
-   token is in `ownTokens`. Tokens are removed when `fireChat` finishes.
-3b. **External folds are workspace-scoped.** Panel ids (`compare`, `p-2`…) are
-   re-minted across workspaces and `PlaygroundState` is a process-wide singleton
-   (shared by every tab + the CLI), so a `chat_done` for one workspace must NOT
-   graft onto a freshly-reused panel id of another (the "new panel loads a weird
-   random workspace" bug). Each chat broadcast is stamped with `workspace_id`
-   = the workspace open **when the chat started** (chat.py snapshots
-   `state.workspace_id` right after `chat_begin` — race-free, no await between;
-   preferred over a request field because tinkpg has no per-chat workspace of its
-   own to send, and the browser's own chats bypass the gate via the ownership token
-   anyway — a request field would be a second, racier source of truth for the same
-   fact). `#onExternalDone` folds a `chat_done` only when its stamp == `convo.activeId`.
-
-   **The null-stamp hole (deliberate).** The stamp is null when NO workspace was
-   open in shared state at chat start — i.e. a pure-CLI/headless session with no
-   browser pushing its id, or a legacy browser that never writes `workspace_id`,
-   or the split-second on first load before the browser's opening push lands. A null
-   stamp is **folded, not dropped** — the conservative choice. Rationale: a graft
-   requires a *different, non-null* origin colliding with the open workspace; null
-   cannot express that, so folding a null-stamped chat can't reproduce the bug. What
-   it CAN do is break a legitimate CLI/legacy live-drive turn the user is waiting to
-   see. So folding-on-null trades a bug that null can't cause for a feature it would
-   otherwise break — the lesser evil. (The day tinkpg learns to set `workspace_id`,
-   tighten this to reject null.)
-
-   **Asymmetry — only `#onExternalDone` is origin-gated, `#afterLoad` is not.** The
-   `chat_done` event carries an origin stamp, so `#onExternalDone` can scope by it.
-   `#afterLoad` instead reads the panel `messages` echoes in shared state, which
-   carry **no** origin — but it's structurally safe without a gate: `#loadTrees`
-   clears every echo to `[]` synchronously (no await) before `#afterLoad` runs, so
-   its reconcile loop is dormant at load and cannot graft a foreign turn. Gating it
-   on the live (non-stamped) `state.workspace_id` would be a near-no-op (the
-   browser continuously pushes its own activeId into that single field) and could
-   even skip a legitimate same-workspace reconcile during a switch lag, so it's
-   deliberately left ungated.
-4. **Backend + CLI logic unchanged** except: `chat.py` accepts an optional
-   `client_token` and echoes it on the three chat broadcasts (additive); the
-   workspaces store backs up a corrupt file instead of silently resetting.
+1. **The tree is the single READ source.** `panelView`, the send context and the
+   distribution chart all derive from `activeMessages(tree)`. The old per-panel
+   bus echo (`PanelState.messages`) is GONE (P3): the CLI reads trees over
+   `/api/workspaces`, and the bus carries selection + thread-system mirror only.
+2. **The SERVER owns every tree; all mutation is idempotent ops.** Clients apply
+   optimistically, POST the batch (`/api/workspaces/{id}/ops`), and ALWAYS-apply
+   the bus `ops` echoes in `rev` order — their own included (skip-own provably
+   breaks LWW convergence). Any rev mismatch (gap, or BACKWARDS after a pack
+   replace) → refetch the light body. The op vocabulary + confluence guard:
+   `API_CONTRACT.md`; the §4.1 table's browser call-site map: ENGINEERING_LOGS
+   2026-08-12.
+3. **Chats carry their placement; the server folds.** Every fire sends
+   `parent_node` (the user turn was already persisted as the writer's own
+   `add_nodes` op), and at terminal the server folds ALL n samples + writes
+   blobs in one locked op — broadcast BEFORE `chat_done`, so fold data is
+   present before any busy-surface lifts. `client_token` still marks a
+   browser's own chats, but only for blob-cache seeding (the terminal's
+   `folded` manifest) and busy-latching — ownership no longer gates any fold.
+   Delete-vs-in-flight is a server-side rejection (the placement registry).
+4. **A workspace is deleted loudly** (`workspace_deleted` broadcast → open tabs
+   freeze + notice) and every write channel bumps `rev` at the store's
+   `_persist` choke point — pack installs included.
 
 ## 1. Data model (`web/src/lib/tree.ts`, PURE — no svelte/browser imports)
 
@@ -162,30 +126,33 @@ system-prompt part, composed over the workspace's global one **server-side**
   `threadSystemAt(tree, userParentId)` and sends it explicitly (`''` = none), so
   regen/continue/edit deep in a probe thread composes the probe's prompt and the
   server never falls back to a stale mirror for a browser chat. The mirror
-  (`PanelState.thread_system_prompt`, echoed by `#mirror` next to
-  `panel_messages`) exists for the CLI's mid-thread inherit + the
-  reconnect/on-load reconcile.
+  (`PanelState.thread_system_prompt`, the one per-panel field `#mirror` still
+  ships) exists for the CLI's mid-thread inherit.
 
-## 3. Folding — own vs external
+## 3. Folding — server-authored, adopted by every mirror
 
-- **Own** (browser-initiated): `fireChat(panelSel, userParentId, messages, signal)`
-  mints `token`, adds to `ownTokens`, POSTs `/api/chat` with `client_token:token`,
-  parses the SSE response collecting `message` samples, then
-  `store.foldAssistant(panel, userParentId, samples)`; removes `token` from
-  `ownTokens` in a `finally`. On abort/error: remove token, do NOT fold a partial
-  (the user node keeps no reply; user can regenerate).
-- **External** (CLI / other tab): the live store forwards `chat_done`/`chat_error`
-  to an `onChatDone(panel, run)` hook carrying `run.client_token`. The hook:
-  if `client_token ∈ ownTokens` → **skip** (own path handles it). Else →
-  `reconcileExternal(panel, live.state.messages)` (reliable `[user, assistant0]`
-  for the CLI; extra n>1 siblings folded from the bucket samples best-effort).
-  `chat_error` only clears any state; never folds a partial.
+The server folds every `parent_node` chat at terminal (all non-error samples as
+assistant siblings, sample-index order, first selected — content byte-identical
+to `_committed_turn`'s commit, prefill merge included). The fold IS an
+`add_nodes` op: one locked write (light nodes + write-once blobs), `rev`++, one
+bus `ops` event that every mirror — the firing tab, other tabs, a reloaded
+page — replays like any other batch. Nothing folds browser-side anymore:
 
-Ordering note: chat.py broadcasts `chat_done` on the bus BEFORE yielding `done`
-to the caller stream, so the hook sees the token still in `ownTokens` (fireChat
-hasn't reached its `finally`) → correctly skips. No race.
+- **Own chats** (`client_token` match): the terminal's `folded` manifest
+  (`[{sample_index, node_id}]` + `fold_rev`) maps each server-minted node to
+  the bucket sample it came from — the browser seeds `nodeBlobs` from it (no
+  fetch for this session's own turns) and releases the busy token. `fold_rev`
+  is the ordering backstop: local rev behind it ⇒ the ops event was missed ⇒
+  refetch. A manifest-less terminal (stale server) falls back to the legacy
+  bucket fold.
+- **External chats**: nothing to do — the ops event already landed the fold; a
+  foreign-WORKSPACE chat completing on a reused panel id only triggers bucket
+  render hygiene (`live.dropBucket`).
+- **Partials are real data**: cancel/error with ≥1 completed sample folds what
+  completed (`chat_error` carries the manifest too); 0 samples folds nothing.
 
-The bucket (`live.panels`) is **render-only**; never the source of an own fold.
+The bucket (`live.panels`) is **render-only** — the streaming overlay until the
+ops event lands, and the blob source for the manifest seeding.
 
 ## 4. Rendering (`panelView`)
 
@@ -217,56 +184,45 @@ live bucket while first streaming — so the chart and ‹k/N› never disagree.
 - n>1 cards: replace "Use this" with click-card-selects-branch; highlight the selected.
 - `$effect` tracks `msg.nodeId` (edit/raw reset on node change even at identical content).
 
-## 6. Workspaces store + persistence
+## 6. Workspaces store + persistence (ops mirror)
 
-**Frontend** `web/src/lib/workspaces.svelte.ts` — `list`, `activeId`,
-reactive `tree`/`compareTree`, plus `ownTokens` + `foldAssistant`/external-fold
-glue. Methods: `load()`, `switchTo(id)`, `create(name?)`, `rename(id,name)`,
-`remove(id)`, debounced `save()`.
+**Frontend** `web/src/lib/workspaces.svelte.ts` — `list` (summaries), `activeId`,
+`trees` (`$state.raw`, per-panel immutable refs), the authoritative panel
+`layout`, per-workspace `rev`, and the mirror protocol:
 
-- ~~`save()` captures `(activeId, structuredClone({tree, compareTree, system_prompt}))`
-  at SCHEDULE time and PUTs that~~ — SUPERSEDED by storage v2 (see
-  `docs/STORAGE_V2.md`): trees are `$state.raw` immutable refs, so the capture is
-  the REF at mark time (zero copy); saves accumulate dirty-panel/dropped/layout
-  dirt and ship a partial-upsert PUT or a layout-only PATCH (`lib/save-plan.ts`).
-  Flush-on-switch semantics below are unchanged.
-- `switchTo`/`create`/`remove` **flush** any pending save first, **clear both
-  buckets**, set the new trees, restore `system_prompt`, then run the load steps.
-- All of `switchTo`/`create`/`remove`/cycle/edit/delete/regenerate are gated on
-  `!anyRunning` (mirror the existing toolbar guards).
-- **`newConversation`/`enableCompare`/`disableCompare` reset the TREE(s)** (to
-  empty ConvTree), not just `messages` — since render reads the tree.
-- Last-workspace delete = **reset in place** (same id, empty tree, default
-  name); never a window with zero workspaces.
+- **Local mutations apply optimistically and EMIT their ops** (`setTree(panel,
+  next, {ops})` → `lib/ops.svelte.ts`: one ordered chain, bounded retry on
+  transport/5xx — idempotent replay is safe — desync→refetch on 4xx). A
+  `setTree` without ops falls back to a whole-panel `replace_tree`, so no
+  call-site can silently skip persistence (undo restores use it on purpose).
+- **Bus `ops` events always-apply in rev order, own echoes included**, through
+  the same interpreters the server and the fixture vectors use
+  (`applyTreeOp`/`applyPanelOp`). Workspace filter BEFORE the rev-gap check;
+  equal rev drops; anything else refetches (single-flight with a re-arm latch
+  + a seen-rev map so an event raced by the refetch GET is never swallowed).
+- **Meta** (layout / panel-UI sets / system) debounces into one `set_meta` op;
+  own-echo application is churn-guarded (value-compared Sets, claims-in-flight
+  counters) so an echo never reverts a toggle made during the RTT.
+- **Drafts**: a new workspace exists only in `list` until its first op batch —
+  the emitter materializes it (POST create, retried like any batch) then
+  replays the batch idempotently over what the create shipped.
+- `switchTo`/`create`/`remove` flush the ops chain first, clear buckets, reset
+  `rev` from the fetched body, and never leave zero workspaces (last delete =
+  reset in place). A body whose stored tree is present-but-malformed latches
+  op emission off loudly (`#loadFailed`) instead of persisting emptiness.
 
-**load()/switchTo() sequence** (after `live.state` is guaranteed non-null —
-sequence it after the onMount `getState()` fallback):
-1. set `tree`/`compareTree` from the workspace (or empty).
-2. IF `live.state.messages` non-empty AND NOT `state.running` AND it diverges
-   from `activeMessages(tree)` → `reconcileExternal` (fold a stray CLI turn once).
-   Same for `compare_messages`.
-3. **UNCONDITIONALLY** patch `messages`/`compare_messages` = the active paths
-   (so a fresh backend after restart still learns the loaded workspace).
+**Backend** `api/workspace_store.py` + `api/tree_ops.py`: the authoritative
+apply under the workspaces flock — validation, blob splitting (write-once),
+`rev`++ in `_persist` (EVERY write channel), the trash journal diff, and the
+`ops` broadcast. `PATCH /{id}` is set_meta sugar. The PUT /tree save path is
+GONE (P3) — wholesale writes are `replace_tree` ops, shape-validated.
 
-**Workspace type** (`types.ts`):
-`{ id, name, system_prompt: string|null, tree: ConvTree, compare_tree: ConvTree|null, created_at, updated_at }`.
-`system_prompt` travels with the workspace (each conv = one experiment);
-restored into `state.system_prompt` on switch. (mode + model selection stay
-GLOBAL in v1 — documented limitation; a workspace continues with whatever
-models are currently selected.)
-
-**Backend** `routes/workspaces.py` (built; see §store): LIST/CREATE/PATCH-rename/
-PUT-tree/DELETE, flock-wrapped. ADD: on `json.JSONDecodeError`, rename the file
-to `conversations.json.corrupt-<ts>` BEFORE returning `[]` (don't let the next
-save cement total loss). `settings.py`: `legacy_conversations_path` (done). `main.py`:
-router registered (done). `api.ts`: 5 `j<T>` methods. `chat.py`: optional
-`client_token` echoed on chat_start/chat_done/chat_error (additive).
-
-**Known limitations (documented, not fixed in v1):** two browser tabs editing the
-SAME workspace simultaneously = last-writer-wins (flock prevents file
-corruption + sibling-entry clobber, not same-id logical merge). Per-workspace
-mode/model-selection not restored. CLI external turns lack `reasoning` (backend
-commits only content to `messages`).
+**Multi-tab semantics:** contended edits CONVERGE (idempotent-structural +
+LWW ops under rev-ordered replay — the confluence invariant); the old
+last-writer-wins whole-tree clobber class is structurally impossible (nobody
+sends whole trees on the hot path). Genuine simultaneous edits of one FIELD
+remain LWW. CLI turns persist all n samples with CoT + blobs (P2) — the
+"CLI external turns lack reasoning" limitation is dead.
 
 ## 7. Verification
 - `tree.ts`: `node web/src/lib/tree.test.ts` (Node 22 strip-types; no dep). Cover
@@ -274,12 +230,11 @@ commits only content to `messages`).
   sibling, shift-copy chain + selected entries, reconcile idempotency, the
   selected-key invariant.
 - backend: pytest (done) + a corrupt-file-backup test.
-- browser smoke `tests/small-smokes/browser_branching.py`: seed via `/api/state`;
-  shift-edit a user msg (fork+copy, 0 tokens) → assert `[data-testid=branch-cycle]`
-  shows `2`; cycle → text toggles + path re-derives; delete fork → count drops,
-  selection falls back; open editor then cycle to identical-content sibling →
-  draft cleared (edit-leak); no console/pageerror; oracle = `GET /api/workspaces`
-  + `GET /api/state`. One real n=3 call exercises assistant-sibling cycling (flagged).
+- browser smokes (the live set): `browser_ops_convergence.py` (cross-tab
+  convergence, contended LWW, retry durability, workspace isolation, restart,
+  delete/reborn), `browser_send_adopt.py` (server-authored folds adopted by a
+  composer send, exactly-n siblings, blobs), `browser_undo.py`, and the
+  token-free sweep via `scripts/smoke.sh`.
 
 ## 8. Edge cases to defend (tests)
 delete earlier sibling → active branch unchanged (selection-by-id); delete active

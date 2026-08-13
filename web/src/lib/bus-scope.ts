@@ -70,12 +70,11 @@ export function mergeBusState(
 
 /** True when `patch` writes any workspace-scoped field, i.e. it must carry a
  *  `workspace_id` stamp so other clients can tell whose workspace it describes.
- *  The per-panel sub-patch keys (`panel`+run_id/checkpoint/messages/…) and the
- *  bulk echo maps count — they all mutate `panels`. */
+ *  The per-panel sub-patch keys (`panel`+run_id/checkpoint/…) and the bulk
+ *  thread-system mirror count — they all mutate `panels`. */
 export function touchesWorkspace(patch: Record<string, unknown>): boolean {
   return (
     'panels' in patch ||
-    'panel_messages' in patch ||
     'panel_thread_system' in patch ||
     'system_prompt' in patch ||
     'system_enabled' in patch ||

@@ -302,7 +302,9 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   stream + top-K alts, `--meta` the request/response record, `--raw` the raw
   stream text. Reach for it BEFORE grepping state files or hand-parsing
   workspace JSON — it replaces both.
-- **Node handles are `<panel>:<node>`.** An id is unique per WORKSPACE, not per
+- **Node handles are `<ws>:<panel>:<node>`** (the browser's copy button emits
+  the full three-part form since P3 — paste-able into any terminal, no
+  dependence on the open workspace). An id is unique per WORKSPACE, not per
   panel — a tree cloned into another panel keeps its ids — so one id often names
   the same turn in several panels. The browser's Copy-node-id button therefore
   hands out `p-4:nt03f1`, and every `--node` (plus `tinkpg node <handle>`) takes

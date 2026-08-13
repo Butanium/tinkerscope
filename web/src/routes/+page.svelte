@@ -169,7 +169,7 @@
   // PlaygroundState) — the snapshot replaces DEFAULTS on connect, so a mismatch
   // makes the pre-snapshot flash look like a param reset.
   const DEFAULTS: PlaygroundState = {
-    panels: [{ id: FIRST_PANEL_ID, run_id: null, checkpoint: null, messages: [] }],
+    panels: [{ id: FIRST_PANEL_ID, run_id: null, checkpoint: null, thread_system_prompt: null }],
     workspace_id: null,
     system_prompt: null, temperature: 1.0, max_tokens: 1024, n_samples: 1,
     thinking: false, top_p: null, chat_id: 0, running: false, last_event: null, last_event_ts: 0

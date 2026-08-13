@@ -9,7 +9,7 @@ read-only into a throwaway XDG_STATE_HOME and the migration runs entirely on the
 What it checks: timing + peak RSS; the split output shapes; an INDEPENDENT from-disk
 re-materialization deep-compared to the legacy bytes (catches disk-serialization bugs
 the in-memory verify can't); a second boot is an idempotent no-op; and — the clincher
-for the legacy-shape convs — a primary-only save_tree on a real {tree,compare_tree}
+for the legacy-shape convs — a primary-only replace_tree op on a real {tree,compare_tree}
 workspace preserves its compare tree into trees['compare'] with the legacy keys
 healed.
 
@@ -134,10 +134,9 @@ if legacy_shape:
     before = store2.get_body(cid)
     assert "trees" not in before and ("tree" in before or "compare_tree" in before)
     compare_before = json.loads(json.dumps(before.get("compare_tree")))  # deep copy (may be None)
-    ok = store2.save_tree(cid, trees_partial={"primary": {"nodes": {}, "rootChildren": [], "selected": {}}},
-                          dropped_trees=[], system_prompt=before.get("system_prompt"),
-                          panels=[], reduced_panels=[], send_targets=[], seen_panels=[])
-    assert ok
+    ok = store2.apply_ops(cid, [{"op": "replace_tree", "panel": "primary",
+                                  "tree": {"nodes": {}, "rootChildren": [], "selected": {}}}])
+    assert ok is not None
     after = store2.get_body(cid)
     assert "tree" not in after and "compare_tree" not in after, "legacy keys not healed"
     if compare_before:

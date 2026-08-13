@@ -15,7 +15,7 @@ opens it, then KILLS and RELAUNCHES the server and asserts:
   1. before the kill, the bus knows the open workspace + both panels + the
      params a CLI-style POST set;
   2. within the EventSource retry window after relaunch, the bus is re-primed:
-     same workspace_id, both panels (selections + transcript echoes), params;
+     same workspace_id, both panels (selections + thread-system mirrors), params;
   3. the page never collapsed to the default single panel;
   4. the topbar dot tracks the outage: "live" pre-kill, "offline" within
      seconds of the kill (EventSource onerror — not a page-load latch), and
@@ -174,9 +174,10 @@ def main():
                 f"panel list not restored: {st['panels']}"
             assert [pl["run_id"] for pl in st["panels"]] == [FREE, FREE], \
                 f"panel selections not restored: {st['panels']}"
-            assert any("PROMPT-ONE" in (m.get("content") or "")
-                       for m in st["panels"][0]["messages"]), \
-                f"primary transcript echo not restored: {st['panels'][0]}"
+            # P3: the bus carries no transcript — the reprime claim restores
+            # selection + thread-system only; the tree itself is the record.
+            assert "messages" not in st["panels"][0], \
+                f"echo resurrected on the bus: {st['panels'][0]}"
             assert st["temperature"] == 0.31 and st["max_tokens"] == 777, \
                 f"params not restored: temp={st['temperature']} max_tokens={st['max_tokens']}"
 

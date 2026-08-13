@@ -132,7 +132,6 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
 | POST | `/api/workspaces` | `{id?, name?, system_prompt?, system_enabled?, trees?, panels?, tree?, compare_tree?, reduced_panels?, send_targets?, seen_panels?, panel_seq?}` | the saved light Workspace (`id`,`created_at`,`updated_at` added; inline heavy node fields stripped into blobs). 400 on a crafted (non-filename-safe) `id` |
 | POST | `/api/workspaces/{id}/ops` | `{ops: Op[]}` | `{rev, results}` — **the tree mutation path** (op table under "Workspace" below). Applied atomically under the workspaces flock; ANY rejection discards the whole batch → 409 `{detail:{index, error}}` with nothing written. On success, one bus `ops` event carries the batch as applied. 404 if unknown |
 | PATCH | `/api/workspaces/{id}` | any subset of `{name, system_prompt, system_enabled, panels, reduced_panels, send_targets, seen_panels, panel_seq}` | the updated **WorkspaceSummary** (layout-only — NO tree bytes shipped either way); 404 if unknown. Sugar over the `set_meta` op: same locked apply, same `rev` bump, same `ops` broadcast, so other tabs converge on metadata live |
-| PUT | `/api/workspaces/{id}/tree` | `{trees, dropped_trees?, system_prompt?, system_enabled?, panels?, reduced_panels?, send_targets?, seen_panels?, panel_seq?}` | `{status, id}` (the hot save path). `trees` is a **partial upsert** (dirty panels only, merged over stored); `dropped_trees` removes panels; inline heavy node fields are stripped into write-once blobs. 404 if unknown |
 | DELETE | `/api/workspaces/{id}` | — | `{status}`. **Soft**: the light file, blobs dir, layout history and trash journal are MOVED to `workspaces/.deleted/<id>-<ts>/`, not unlinked (aged out after 90 days). The one deletion the trash journal can't cover is the workspace's own, since the journal lives inside it |
 | GET | `/api/workspaces/{id}/trash` | — | `[{id, ts, panel, kind, count, roots, selected, layout?, layout_index?}]` NEWEST-first — one entry per save that made nodes disappear. Node BODIES excluded (a listing is for choosing; bodies can be MBs). `roots` = the deleted subtree anchors `{id, parent, index, role, preview}`. `kind` is `"nodes"` (branches vanished) or `"panel"` (the whole column did) — a `"panel"` entry also carries `layout`, that panel's layout row, and `layout_index`, its position in `panels`, so the column can come back bound to its model and in its old slot. Both absent on entries journaled before they were recorded. `[]` for unknown / never-deleted (never 404, same convention as node-blobs) |
 | POST | `/api/workspaces/{id}/trash/restore` | `{handle}` | `{ok, restored, panel, recreated_panel, unbound_panel, entry}` — splices a journaled subtree back at its recorded sibling `index`. `handle` = an entry id, a subtree-root node id, or any node id inside an entry. Blobs need no work (write-once, never removed), so logprobs come back too. `recreated_panel` = this restore re-added a whole column; its tree and its layout row are checked SEPARATELY because they drift (a stale tab's save wipes the row while the partial tree upsert keeps the tree), which is also what keeps restore re-runnable. `unbound_panel` = the re-added row binds no model, so the browser's phantom filter will drop it on load — the caller should say so rather than promise a re-bind. `{ok: false, error}` with **200** when nothing matches — that's an answer, not a transport failure |
@@ -248,13 +247,12 @@ per instance dir:
   server strips them into blobs the same way as migration — **idempotently** (the
   write-once skip means the re-shipped values don't overwrite the stored blob).
   Accepted, harmless.
-- **Partial-upsert PUT** merges only the dirty panels in `trees` over the stored
-  trees and removes `dropped_trees`; a layout-only change goes through **PATCH**
-  (no tree bytes). **Legacy-seeding:** on the first save of a migrated
-  `{tree, compare_tree}` workspace (no `trees` yet), the server seeds the merge
-  base with `primary←tree` / `compare←compare_tree` (truthy-checked) BEFORE applying
-  the partial and dropping the legacy keys, so a one-panel first save can't lose the
-  other tree.
+- **All tree writes are ops** (`POST /{id}/ops`) since P3 closed the PUT
+  transition window; a layout-only change goes through **PATCH** (set_meta
+  sugar, no tree bytes). **Legacy-seeding:** on the FIRST op against a migrated
+  `{tree, compare_tree}` workspace (no `trees` yet), the server folds the legacy
+  keys into `trees` (`primary`/`compare`) before applying, so a one-panel write
+  can't lose the other tree.
 - **Migration** (boot): if legacy `conversations.json` exists and `conversations/`
   doesn't, every workspace is split AND re-materialized (blobs folded back) and
   deep-compared to the legacy object in memory; ANY mismatch **refuses startup**
@@ -360,8 +358,9 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
                           // open workspace → else 400. Also 400 with commit:false (a fold
                           // IS a commit). A parent that doesn't exist / isn't a user node
                           // is a pre-start `error` (SSE + bus chat_error), like an
-                          // unsampleable run. null = legacy fire: echo-only commit,
-                          // folding (if any) is the browser's business. See
+                          // unsampleable run. null = legacy fire: nothing is
+                          // persisted anywhere (P3 removed the echo commit too) —
+                          // ephemeral lockstep, kept for bare param probes. See
                           // "Server-authored folds" below for the terminal sequence.
   "broadcast": true,       // also mirror samples to the state bus (browser)
   "detached": false,       // fire-and-forget: the POST returns immediately ({"status":
@@ -371,9 +370,9 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
                            // broadcast. Stop reaches it via the cancel endpoint.
   "client_token": null     // optional opaque ownership token, echoed verbatim on the
                            // chat_start/chat_done/chat_error bus events; lets a client
-                           // tell its OWN chats (which it folds from the bus bucket on
-                           // chat_done) apart from external (CLI / other-tab) ones it
-                           // reconciles from the transcript echo.
+                           // tell its OWN chats (blob-cache seeding via the terminal's
+                           // `folded` manifest) apart from external ones (whose folds
+                           // it adopts from the `ops` event, like any mutation).
 }
 ```
 
@@ -486,11 +485,11 @@ zero browsers attached:
                                     // mints any extra above the workspace's
                                     // panel_seq — see cli.py::_layout_panel_ids
      "run_id": null, "checkpoint": null,
-     "messages": [{role,content}],  // this panel's active-path transcript ECHO (write-only;
-                                    // the browser's branch tree is the read source)
-     "thread_system_prompt": null}  // the active THREAD's system prompt, mirrored like
-                                    // `messages` — read by a mid-thread CLI send (inherit)
-                                    // and by the echo-reconcile (stamp a recovered root)
+     "thread_system_prompt": null}  // the active THREAD's system prompt, mirrored by the
+                                    // browser — read by a mid-thread CLI send (inherit).
+                                    // The per-panel transcript ECHO retired with P3: the
+                                    // workspace TREE is the transcript (GET /api/workspaces),
+                                    // and folds arrive as `ops` events
   ],
   "workspace_id": null,          // the workspace open in the browser (its ?c=)
   "system_prompt": null,            // the GLOBAL system-prompt part
@@ -508,9 +507,9 @@ zero browsers attached:
 StatePatch = any subset of the *settable* fields (everything except
 chat_id/running/last_event*). POST `/api/state` with a subset to drive selection
 / workspace / params. Panel routing: `panels` full-replaces the list;
-`panel_messages: {panel_id: msgs}` / `panel_thread_system: {panel_id: str|null}`
+`panel_thread_system: {panel_id: str|null}`
 bulk-mirror per-panel fields without touching selection; `panel` + one of
-`run_id`/`checkpoint`/`messages`/`thread_system_prompt` targets a single
+`run_id`/`checkpoint`/`thread_system_prompt` targets a single
 EXISTING panel (never auto-creates one).
 
 ### Workspace scoping on the state bus
@@ -521,7 +520,7 @@ load-bearing:
 
 | scope | fields | why |
 |---|---|---|
-| **workspace** | `panels` (incl. per-panel `run_id`/`checkpoint`/`messages`/`thread_system_prompt`), `workspace_id`, `system_prompt`, `system_enabled` | persisted **with the workspace** and restored on open — a workspace IS its panel layout |
+| **workspace** | `panels` (incl. per-panel `run_id`/`checkpoint`/`thread_system_prompt`), `workspace_id`, `system_prompt`, `system_enabled` | persisted **with the workspace** and restored on open — a workspace IS its panel layout |
 | **global** | `temperature`, `max_tokens`, `n_samples`, `thinking`, `top_p`, `chat_id`, `running`, `last_event*` | one knob for every panel and every client — the point of a shared bus |
 
 The bus holds exactly **one workspace's** worth of the first group at a time,
@@ -598,10 +597,10 @@ a held `/api/chat` SSE per panel would exhaust the browser's ~6 per-host HTTP/1.
 connections (1 is the permanent `/api/state/events` EventSource), so a send to ≥5
 panels used to leave the excess POSTs queued inside the browser — no `chat_start`,
 no placeholder, panel silently idle. Detached removes that ceiling (N short POSTs
-+ one bus). On `chat_done` the browser folds the panel's reply from its bus BUCKET
-(all n samples → n sibling branches; the transcript echo carries only ONE
-representative, which the chart/‹k/N› cycler read from tree siblings can't lose).
-An in-flight chat is told apart from an external one by `client_token`.
++ one bus). Every browser fire carries `parent_node`, so the SERVER folds all n
+samples at terminal (the `ops` event, before `chat_done`); the browser's terminal
+job is seeding its blob cache from the bucket via the `folded` manifest. An
+in-flight chat is told apart from an external one by `client_token`.
 
 Two consequences of detached:
 - **A closed tab no longer cancels a browser-fired generation** — it runs to
@@ -610,20 +609,14 @@ Two consequences of detached:
 - The fold is now **deterministic on the single bus `chat_done`** (no drain racing
   it), so an aborted chat's already-completed partials fold reliably.
 
-**Reload mid-generation.** The fold registration (client_token → fold context) is
-browser-session-scoped, so a page reload loses it. The in-flight detached chats keep
-running server-side; the reloaded page sees each `chat_done` as EXTERNAL (no
-registration) and folds it from the transcript echo — a SINGLE representative sample,
-like a legacy tinkpg chat (an n>1 distribution collapses to one branch; that's the
-accepted recovery). For a **`parent_node` chat** none of this lossiness applies: the
-server folds ALL n via the `ops` event before that `chat_done`, so the reloaded page
-adopts the full fan-out like any other mirror — the echo fold is legacy recovery
-only (the CLI already fires `parent_node`; browser sends move over in P2's browser
-half). A reply that completes during the brief EventSource reconnect GAP (old
-page gone, new stream not yet up) has its `chat_done` missed, but its committed turn
-is in the echo; the reconnect `snapshot` handler (`convo.reconcileOnReconnect`) folds
-any such straggler and un-latches `busy` when the server reports nothing running. Net:
-no stuck placeholders, no double-fold; whatever content lands is coherent. Smoke:
+**Reload mid-generation.** The in-flight detached chats keep running server-side;
+their folds land via `ops` events regardless of which pages exist (server-authored
+folds carry no browser dependency). A reloaded page adopts the full n-sample
+fan-out like any other mirror; a terminal missed during the brief EventSource
+reconnect GAP is recovered by the reconnect rev-compare (summaries GET → body
+refetch when the store moved), and the `snapshot` handler un-latches `busy` when
+the server reports nothing running. Net: no stuck placeholders, no double-fold,
+nothing lost. Smoke:
 `tests/small-smokes/browser_detached_reload.py`.
 
 ## Reference implementations to mirror (do NOT reinvent)

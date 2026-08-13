@@ -4,6 +4,7 @@ No remote calls (conftest `client`). Exercises the engine THROUGH the route so
 the unit cache's updated_at keying is tested against real store writes.
 """
 from __future__ import annotations
+from conftest import ops_tree_write
 
 ROOT = "__root__"
 
@@ -129,7 +130,7 @@ def test_recently_touched_workspace_ranks_first_and_cache_invalidates(client):
     # touching A reorders it first AND its new content is immediately searchable
     tree = _branchy_tree()
     tree["nodes"]["a2"]["content"] = "The capital is Paris, aka LUTETIA"
-    r = client.put(f"/api/workspaces/{cid_a}/tree", json={"trees": {"primary": tree}})
+    r = ops_tree_write(client, cid_a, {"trees": {"primary": tree}})
     assert r.status_code == 200, r.text
     out = _hits(client, "Paris")
     assert out["hits"][0]["workspace_id"] == cid_a

@@ -8,7 +8,8 @@ that the columns sit at their 280px min-width, then checks the fold behavior:
      clipped lines, a chevron toggle appears, nothing overflows horizontally
      and nothing below the first button line is visible;
   2. expanding reveals the tail BELOW as real tool buttons (1+ extra lines) —
-     among them "Copy node handle", whose click puts the row's `<panel>:<node>`
+     among them "Copy node handle", whose click puts the row's fully-qualified
+     `<ws-prefix>:<panel>:<node>`
      on the clipboard (the CLI's `--node` addressing currency; the clipboard is
      monkeypatched so the assert is deterministic and headless-safe) — and the
      send-branch-to-panel popover still opens/closes;
@@ -153,13 +154,14 @@ def main():
         bad = page.evaluate(OVERFLOW_PROBE)
         assert not bad, f"horizontal overflow while expanded: {bad}"
 
-        # copy node handle → `<panel>:<node>` lands on the clipboard. The panel part is
-        # what makes the handle unambiguous: a tree cloned into another panel keeps its
-        # node ids, so a bare id names the same turn in several columns.
+        # copy node handle → the fully-qualified `<ws-prefix>:<panel>:<node>` lands
+        # on the clipboard (P3): the ws prefix makes it paste-able into any
+        # terminal; the panel part disambiguates clones (shared node ids).
         asst_row.locator("[data-testid=copy-node-id]").click()
         copied = page.evaluate("() => window.__copied")
-        assert copied == "primary:Pa1", \
-            f"copied handle should be '<panel>:<node>' = 'primary:Pa1' (this smoke seeds a 'primary' panel), got {copied!r}"
+        expected = f"{conv['id'][:8]}:primary:Pa1"
+        assert copied == expected, \
+            f"copied handle should be '<ws-prefix>:<panel>:<node>' = {expected!r}, got {copied!r}"
 
         # send-branch-to-panel popover (ActionMenu) still works from the fold
         asst_row.locator("[data-testid=send-to]").click()

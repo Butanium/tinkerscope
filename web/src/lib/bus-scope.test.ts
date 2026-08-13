@@ -28,7 +28,7 @@ function ok(cond: boolean, msg = 'expected true'): void {
 }
 
 function panel(id: string, run: string | null): PanelState {
-  return { id, run_id: run, checkpoint: 'final', messages: [] };
+  return { id, run_id: run, checkpoint: 'final' };
 }
 function state(convId: string | null, panels: PanelState[], over: Partial<PlaygroundState> = {}): PlaygroundState {
   return {
@@ -123,7 +123,6 @@ test('WORKSPACE_FIELDS is exactly what merge protects', () => {
 // ── stamping predicate ─────────────────────────────────────────────────
 test('touchesWorkspace: workspace writes are detected', () => {
   ok(touchesWorkspace({ panels: [] }), 'panels');
-  ok(touchesWorkspace({ panel_messages: {} }), 'panel_messages');
   ok(touchesWorkspace({ panel_thread_system: {} }), 'panel_thread_system');
   ok(touchesWorkspace({ system_prompt: 'x' }), 'system_prompt');
   ok(touchesWorkspace({ system_enabled: false }), 'system_enabled');

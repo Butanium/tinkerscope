@@ -192,8 +192,8 @@ def main():
             row = page.locator(".message", has_text="ASSISTANT").first
             row.locator("[data-testid=copy-node-id]").click()
             handle = page.evaluate("window.__copied")
-            assert handle in [f"primary:{s}" for s in sibs], \
-                f"copied handle {handle} is not a stored server-minted sibling {sibs}"
+            assert handle in [f"{ws['id'][:8]}:primary:{s}" for s in sibs], \
+                f"copied handle {handle} is not a ws-qualified stored sibling {sibs}"
             # item-3 pin: the reload ran #afterLoad against the LIVE panel echo
             # (still carrying turn 1's representative). With the fold already in
             # the tree, that reconcile must be a content-matching NO-OP — a
