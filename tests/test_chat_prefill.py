@@ -241,14 +241,13 @@ def test_chat_deprecated_bool_still_strips_nonthinking_half(client, monkeypatch)
     assert by_think[False]["has_prefill"] is False
 
 
-def test_chat_think_scope_both_commits_unprefixed_turn(client, monkeypatch):
-    """End-to-end regression: scope='think' + thinking='both' — the representative
-    sample (index 0 = the non-thinking half, which had the prefill dropped) must be
-    committed to the panel transcript WITHOUT the prefill re-prepended."""
+def test_chat_both_mode_bus_stays_echo_free(client, monkeypatch):
+    """P3: the panel transcript echo is gone — a both-mode fire leaves NO message
+    text on the bus (the prefill-merge regression this test used to pin on the
+    echo commit now lives on the FOLD: test_chat_fold.py::
+    test_fold_both_mode_one_sided_scope_splits_prefill_per_half)."""
 
     async def fake_one(*, model, messages, thinking, **kw):
-        # the thinking half still sees the prefill, the non-thinking half doesn't —
-        # but both return continuation-only "cont" (openrouter path, not incorporated)
         return {"content": "cont", "raw_text": "cont"}
 
     monkeypatch.setattr("tinkerscope.api.openrouter.sample_one", fake_one)
@@ -265,9 +264,5 @@ def test_chat_think_scope_both_commits_unprefixed_turn(client, monkeypatch):
         },
     )
     assert r.status_code == 200, r.text
-    # The committed panel transcript (via BUS.chat_end) must store the fresh
-    # completion alone — NOT "PREFILLcont" — because sample 0's half dropped it.
     panels = {p["id"]: p for p in client.get("/api/state").json()["panels"]}
-    committed = panels[DEFAULT_PANEL_ID]["messages"]
-    assert committed[-1] == {"role": "assistant", "content": "cont"}, committed
-    assert committed[-1]["content"] != "PREFILLcont"
+    assert "messages" not in panels[DEFAULT_PANEL_ID]

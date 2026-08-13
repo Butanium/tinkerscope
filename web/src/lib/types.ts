@@ -130,17 +130,15 @@ export type PanelLayout = { id: Panel; run_id: string | null; checkpoint: string
  *  shared `panels[]`; consumed by the model-catalog + branch-ops stores. */
 export type PanelSel = { panel: Panel; run_id: string | null; checkpoint: string | null };
 
-/** One comparison panel's selection + its active-path transcript echo. The echo is
- *  write-only (the branch tree in lib/tree.ts is the read source); it exists so the
- *  CLI and external-fold reconcile can see/replay each panel's path. */
+/** One comparison panel's selection + thread-system mirror. The per-panel
+ *  transcript echo retired with P3: the workspace TREE is the transcript (the
+ *  CLI reads it over /api/workspaces; folds arrive as ops events). */
 export type PanelState = {
   id: Panel;
   run_id: string | null;
   checkpoint: string | null;
-  messages: ChatMessage[];
-  /** The active thread's system prompt — mirrored like `messages` (write-mostly;
-   *  the tree's root node is the read source). Lets a mid-thread CLI send inherit
-   *  the thread's prompt and the echo-reconcile stamp a recovered root. */
+  /** The active thread's system prompt (write-mostly; the tree's root node is
+   *  the read source). Lets a mid-thread CLI send inherit the thread's prompt. */
   thread_system_prompt?: string | null;
 };
 
@@ -174,13 +172,11 @@ export type PlaygroundState = {
 export type StatePatch = {
   panels?: PanelState[];
   workspace_id?: string | null;
-  panel_messages?: Record<string, ChatMessage[]>;
-  /** {panel_id: thread system prompt} — mirrored alongside panel_messages. */
+  /** {panel_id: thread system prompt} — the surviving per-panel mirror. */
   panel_thread_system?: Record<string, string | null>;
   panel?: Panel;
   run_id?: string | null;
   checkpoint?: string | null;
-  messages?: ChatMessage[];
   system_prompt?: string | null;
   /** Explicit power state for the global system prompt. The browser ALWAYS sends
    *  it alongside system_prompt — a text patch without it auto-enables server-side

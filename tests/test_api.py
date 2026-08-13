@@ -66,22 +66,27 @@ def test_state_get_default_shape(client):
     state = client.get("/api/state").json()
     for key in ("panels", "temperature", "chat_id", "running"):
         assert key in state
-    # default = one panel carrying its own selection + transcript echo. Its id is
-    # minted, not reserved (panel ids are monotonic p-<n> and never reused).
+    # default = one panel carrying its SELECTION + thread-system mirror. The
+    # transcript echo retired with P3 (the workspace tree is the transcript) —
+    # a bus panel carrying `messages` again would be a regression.
     p0 = state["panels"][0]
     assert p0["id"] == DEFAULT_PANEL_ID
-    for key in ("run_id", "checkpoint", "messages"):
+    for key in ("run_id", "checkpoint", "thread_system_prompt"):
         assert key in p0
+    assert "messages" not in p0
 
 
 def test_state_patch_round_trips(client):
-    # Targeted single-panel sub-patch (panel + run/checkpoint/messages) + a GLOBAL param.
+    # Targeted single-panel sub-patch (panel + run/checkpoint/thread system) + a
+    # GLOBAL param. A legacy `messages` key rides along and must be silently
+    # dropped (StatePatch no longer knows it — P3 echo retirement).
     patched = client.post(
         "/api/state",
         json={
             "panel": DEFAULT_PANEL_ID,
             "run_id": "good_run",
             "checkpoint": "final",
+            "thread_system_prompt": "be terse",
             "messages": [{"role": "user", "content": "hello"}],
             "temperature": 0.3,
         },
@@ -89,7 +94,8 @@ def test_state_patch_round_trips(client):
     p0 = next(p for p in patched["panels"] if p["id"] == DEFAULT_PANEL_ID)
     assert p0["run_id"] == "good_run"
     assert p0["checkpoint"] == "final"
-    assert p0["messages"][0]["content"] == "hello"
+    assert p0["thread_system_prompt"] == "be terse"
+    assert "messages" not in p0
     assert patched["temperature"] == 0.3  # global, not per-panel
 
     # The change persists on the next GET (shared server-side state bus).
@@ -167,66 +173,59 @@ def test_dual_merges_tags_and_offsets():
 
 
 def test_state_panels_round_trip(client):
-    # N-panel replacement for the old compare_messages: each panel keeps its OWN run
-    # + transcript. Full-replace via `panels`, then mirror all via `panel_messages`.
+    # N-panel full-replace: each panel keeps its own selection + thread-system
+    # mirror. A panel entry smuggling a legacy `messages` list must come back
+    # WITHOUT it (P3: the bus carries no message text, from any client).
     client.post(
         "/api/state",
         json={
             "panels": [
                 {"id": "primary", "run_id": "good_run", "checkpoint": "final",
+                 "thread_system_prompt": "probe-A",
                  "messages": [{"role": "user", "content": "A"}]},
-                {"id": "compare", "run_id": "good_run", "checkpoint": "final",
-                 "messages": [{"role": "user", "content": "B"}]},
+                {"id": "compare", "run_id": "good_run", "checkpoint": "final"},
             ]
         },
     )
     by_id = {p["id"]: p for p in client.get("/api/state").json()["panels"]}
-    assert by_id["primary"]["messages"][0]["content"] == "A"
-    assert by_id["compare"]["messages"][0]["content"] == "B"
-    # panel_messages mirrors every panel's transcript in one patch (the store #mirror),
-    # without touching run_id/checkpoint.
-    client.post("/api/state", json={"panel_messages": {"primary": [], "compare": []}})
-    cleared = {p["id"]: p for p in client.get("/api/state").json()["panels"]}
-    assert cleared["primary"]["messages"] == [] and cleared["compare"]["messages"] == []
-    assert cleared["primary"]["run_id"] == "good_run"  # untouched by panel_messages
+    assert by_id["primary"]["thread_system_prompt"] == "probe-A"
+    assert "messages" not in by_id["primary"] and "messages" not in by_id["compare"]
+    # panel_thread_system bulk-mirrors the surviving per-panel field without
+    # touching run_id/checkpoint (the shape panel_messages used to have).
+    client.post("/api/state", json={"panel_thread_system": {"primary": None, "compare": "probe-B"}})
+    after = {p["id"]: p for p in client.get("/api/state").json()["panels"]}
+    assert after["primary"]["thread_system_prompt"] is None
+    assert after["compare"]["thread_system_prompt"] == "probe-B"
+    assert after["primary"]["run_id"] == "good_run"  # untouched by the mirror
 
 
-def test_panel_messages_never_resurrects_a_removed_panel(client):
-    # Regression: a `panel_messages` echo (or any `panel`-routed message patch) for an id
-    # that isn't in the panel list must NOT create a panel. The `panels` field is the sole
-    # source of truth for which panels exist; a stale tree echo used to resurrect a removed
-    # panel as a run_id=null phantom (the "4th empty model" bug).
+def test_panel_routed_patch_never_resurrects_a_removed_panel(client):
+    # Regression (the "4th empty model" bug, kept alive on the surviving panel
+    # field): a per-panel patch for an id that isn't in the panel list must NOT
+    # create a panel — `panels` full-replace is the sole existence source.
     client.post("/api/state", json={"panels": [{"id": "primary", "run_id": "good_run", "checkpoint": "final"}]})
-    # Echo a transcript for a ghost panel that was never registered.
-    client.post("/api/state", json={"panel_messages": {"primary": [], "p-3": [{"role": "user", "content": "ghost"}]}})
+    client.post("/api/state", json={"panel_thread_system": {"primary": None, "p-3": "ghost"}})
     ids = [p["id"] for p in client.get("/api/state").json()["panels"]]
     assert ids == ["primary"], f"ghost panel resurrected: {ids}"
-    # Same for a single `panel`-routed message patch.
-    client.post("/api/state", json={"panel": "p-9", "messages": [{"role": "user", "content": "ghost"}]})
+    client.post("/api/state", json={"panel": "p-9", "thread_system_prompt": "ghost"})
     ids = [p["id"] for p in client.get("/api/state").json()["panels"]]
     assert ids == ["primary"], f"ghost panel resurrected via panel route: {ids}"
 
 
-def test_state_bus_strips_heavy_msg_fields(client):
-    """Storage-v2 diet: the per-panel transcript echoes on the bus are text mirrors —
-    a client that echoes token_logprobs/raw_meta on a message gets them stripped, so a
-    snapshot never carries megabytes of logprobs. content/role/reasoning survive."""
-    heavy = [{"role": "assistant", "content": "hi", "reasoning": "think",
+def test_state_bus_rejects_every_legacy_message_channel(client):
+    """P3 hardening of the old storage-v2 diet: the bus carries NO message text
+    at all now. Every channel a pre-P3 client used to echo transcripts through —
+    `panels[].messages`, `panel_messages`, `panel`+`messages` — must be silently
+    dropped (never a 422: old tabs keep working, their echoes just vanish)."""
+    heavy = [{"role": "assistant", "content": "hi",
               "token_logprobs": [{"t": "hi", "tid": 1, "lp": -0.1}], "raw_meta": "{...}"}]
-    # via `panels` full-replace
-    client.post("/api/state", json={"panels": [{"id": "primary", "run_id": "good_run",
-                                                 "checkpoint": "final", "messages": heavy}]})
-    msg = client.get("/api/state").json()["panels"][0]["messages"][0]
-    assert msg["content"] == "hi" and msg["reasoning"] == "think"
-    assert "token_logprobs" not in msg and "raw_meta" not in msg
-    # via `panel_messages` mirror
-    client.post("/api/state", json={"panel_messages": {"primary": heavy}})
-    msg = client.get("/api/state").json()["panels"][0]["messages"][0]
-    assert "token_logprobs" not in msg and "raw_meta" not in msg
-    # via single `panel`-routed message patch
-    client.post("/api/state", json={"panel": "primary", "messages": heavy})
-    msg = client.get("/api/state").json()["panels"][0]["messages"][0]
-    assert "token_logprobs" not in msg and "raw_meta" not in msg
+    r1 = client.post("/api/state", json={"panels": [{"id": "primary", "run_id": "good_run",
+                                                     "checkpoint": "final", "messages": heavy}]})
+    r2 = client.post("/api/state", json={"panel_messages": {"primary": heavy}})
+    r3 = client.post("/api/state", json={"panel": "primary", "messages": heavy})
+    assert r1.status_code == r2.status_code == r3.status_code == 200
+    p0 = client.get("/api/state").json()["panels"][0]
+    assert "messages" not in p0
 
 
 # --------------------------------------------------------------------------- #
@@ -658,7 +657,7 @@ async def test_chat_disconnect_commits_partial_and_fires_one_terminal(chat_mod, 
     assert terminals[0]["type"] == "chat_done"
     assert terminals[0]["client_token"] == "ct-own"
     prim = next(p for p in bus.state.panels if p.id == DEFAULT_PANEL_ID)
-    assert prim.messages[-1] == {"role": "assistant", "content": "partial answer"}
+    assert not hasattr(prim, "messages")  # P3: the bus carries no transcript — the fold/ops path is the record
 
 
 async def test_chat_cancel_endpoint_zero_samples_is_error_terminal(chat_mod, monkeypatch):
@@ -703,7 +702,7 @@ async def test_chat_cancel_endpoint_zero_samples_is_error_terminal(chat_mod, mon
     assert terminals[0]["type"] == "chat_error"
     assert terminals[0]["error"] == "cancelled"
     prim = next(p for p in bus.state.panels if p.id == DEFAULT_PANEL_ID)
-    assert prim.messages[-1]["role"] == "user"  # nothing committed
+    assert not hasattr(prim, "messages")  # P3: the bus carries no transcript — the fold/ops path is the record
     assert (await chat_route.cancel_chat(999999))["status"] == "not_found"
 
 
@@ -727,7 +726,7 @@ async def test_chat_normal_completion_fires_exactly_one_terminal(chat_mod, monke
     terminals = [m for m in await _drain(sub) if m["type"] in ("chat_done", "chat_error")]
     assert len(terminals) == 1 and terminals[0]["type"] == "chat_done"
     prim = next(p for p in bus.state.panels if p.id == DEFAULT_PANEL_ID)
-    assert prim.messages[-1] == {"role": "assistant", "content": "done answer"}
+    assert not hasattr(prim, "messages")  # P3: the bus carries no transcript — the fold/ops path is the record
 
 
 async def test_chat_detached_returns_immediately_and_completes(chat_mod, monkeypatch):
@@ -754,7 +753,7 @@ async def test_chat_detached_returns_immediately_and_completes(chat_mod, monkeyp
     assert len(terminals) == 1 and terminals[0]["type"] == "chat_done"
     assert terminals[0]["client_token"] == "ct-det"
     prim = next(p for p in bus.state.panels if p.id == DEFAULT_PANEL_ID)
-    assert prim.messages[-1] == {"role": "assistant", "content": "detached answer"}
+    assert not hasattr(prim, "messages")  # P3: the bus carries no transcript — the fold/ops path is the record
 
 
 async def test_chat_detached_cancel_endpoint_is_the_only_stop_path(chat_mod, monkeypatch):
@@ -891,7 +890,7 @@ async def test_chat_cancel_mid_terminal_still_completes_terminal(chat_mod, monke
     assert len(terminals) == 1, terminals
     assert terminals[0]["type"] == "chat_done"
     prim = next(p for p in bus.state.panels if p.id == DEFAULT_PANEL_ID)
-    assert prim.messages[-1] == {"role": "assistant", "content": "answer"}
+    assert not hasattr(prim, "messages")  # P3: the bus carries no transcript — the fold/ops path is the record
 
 
 def test_write_json_survives_concurrent_writers(tmp_path):

@@ -777,24 +777,16 @@ async def chat(req: ChatRequest):
                 return
             terminated = True
             if error is not None:
-                event, err_msg, commit = "chat_error", error, False
+                event, err_msg = "chat_error", error
             elif produced:
-                event, err_msg, commit = "chat_done", None, True
+                event, err_msg = "chat_done", None
             elif cancelled:
-                event, err_msg, commit = "chat_error", "cancelled", False
+                event, err_msg = "chat_error", "cancelled"
             else:
-                event, err_msg, commit = "chat_done", None, False
-            # multi-turn memory: commit the representative assistant turn (sample 0)
-            # into THIS panel's transcript so the next turn carries it. _committed_turn
-            # merges the trailing-assistant prefill into ONE turn when it reached this
-            # sample's half (a one-sided prefill_scope may have dropped it — then the
-            # prefill node is dropped instead of falsely prepended).
-            end_patch: dict = {}
-            if commit and req.commit:
-                idx0 = 0 if 0 in produced else min(produced)
-                reached = _prefill_reaches_sample(scope, thinking, n, idx0)
-                turn = _committed_turn(msgs, produced[idx0], incorporated.get(idx0, False), reached)
-                end_patch = {"panel": req.panel, "messages": turn}
+                event, err_msg = "chat_done", None
+            # The transcript echo commit that used to happen here retired with
+            # P3: the fold below IS the multi-turn memory (the workspace tree),
+            # and the CLI reads it over /api/workspaces.
             async def _apply_fold() -> "tuple[list[dict] | None, int | None, str | None]":
                 """Fold every completed sample under `parent_node` — ONE
                 `add_nodes` op through the SAME locked apply + bus fan-out every
@@ -853,11 +845,11 @@ async def chat(req: ChatRequest):
                     else:
                         fold_outcome["fold_error"] = fold_err or "fold produced no manifest"
                 _release_placement()
-                # origin_workspace: the echo commit must not land on a bus that a
-                # DIFFERENT workspace claimed while this chat streamed (chimera —
-                # 8342e08). Placement chats pin conv_id to fold_ws at request
-                # time, so the fold target and this gate agree by construction.
-                await BUS.chat_end(event, origin_workspace=conv_id, **end_patch)
+                # No state patch rides the terminal anymore: the fold above IS
+                # the durable record, and retiring the echo commit retired the
+                # cross-workspace chimera class its origin gate (8342e08)
+                # existed for.
+                await BUS.chat_end(event)
                 if req.broadcast:
                     # workspace_id scopes the browser's external fold (#onExternalDone):
                     # every terminal flavour — done / error / cancelled — carries the stamp.

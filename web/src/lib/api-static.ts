@@ -104,13 +104,10 @@ async function ensureState(): Promise<PlaygroundState> {
   return stateCache;
 }
 
-function lightMsgs(msgs: unknown): ChatMessage[] {
-  return Array.isArray(msgs) ? (msgs as ChatMessage[]) : [];
-}
-
 // Mirrors api/state.py `_PANEL_FIELDS` — `thread_system_prompt` included, or a
 // single-panel patch of it would be silently dropped here but not on a live instance.
-const PANEL_FIELDS = new Set(['run_id', 'checkpoint', 'messages', 'thread_system_prompt']);
+// (`messages` retired with the P3 echo removal, both sides.)
+const PANEL_FIELDS = new Set(['run_id', 'checkpoint', 'thread_system_prompt']);
 
 /** Mirror of api/state.py `_apply_patch`. The cross-workspace guard
  *  (`_drop_foreign_workspace_keys`) is deliberately absent: it protects a
@@ -125,14 +122,8 @@ function applyPatch(state: PlaygroundState, patch: StatePatch): void {
         id: p.id,
         run_id: p.run_id ?? null,
         checkpoint: p.checkpoint ?? null,
-        messages: lightMsgs(p.messages),
         thread_system_prompt: p.thread_system_prompt ?? null
       }));
-    } else if (k === 'panel_messages') {
-      for (const [pid, msgs] of Object.entries(v || {})) {
-        const p = byId(pid);
-        if (p) p.messages = lightMsgs(msgs);
-      }
     } else if (k === 'panel_thread_system') {
       for (const [pid, ts] of Object.entries(v || {})) {
         const p = byId(pid);
@@ -141,7 +132,7 @@ function applyPatch(state: PlaygroundState, patch: StatePatch): void {
     } else if (PANEL_FIELDS.has(k)) {
       if (panelId != null) {
         const p = byId(panelId);
-        if (p) (p as any)[k] = k === 'messages' ? lightMsgs(v) : v;
+        if (p) (p as any)[k] = v;
       }
     } else if (k in state) {
       (state as any)[k] = v;
@@ -396,18 +387,6 @@ const impl: ApiClient = {
     const next: Workspace = { ...body, ...(patch as Partial<Workspace>), updated_at: nowIso() };
     saveOverlayBody(next);
     return summaryOf(next);
-  },
-  saveWorkspaceTree: async (id: string, body) => {
-    const cur = overlayBody(id);
-    if (!cur) return { status: 'static-readonly', id }; // baked: dropped, see module header
-    const [light, blobs] = splitTrees(body.trees ?? {});
-    const trees = { ...cur.trees, ...light };
-    for (const pid of body.dropped_trees ?? []) delete trees[pid];
-    const { trees: _t, dropped_trees: _d, ...fields } = body as any;
-    saveOverlayBody({ ...cur, ...fields, trees, updated_at: nowIso() });
-    const existing = readOverlay<Record<string, NodeBlobs>>(K.blobs(id), {});
-    writeOverlay(K.blobs(id), { ...blobs, ...existing });
-    return { status: 'ok', id };
   },
   // Ops on a BAKED workspace are accepted and dropped (immutability rule, module
   // header) — cycling through a published tree's branches is a select op now, and

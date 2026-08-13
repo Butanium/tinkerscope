@@ -21,7 +21,6 @@ owns the on-disk layout, the boot migration, the in-memory summary cache, and th
   POST   /api/workspaces            → create (unchanged shape; server strips blobs)
   POST   /api/workspaces/{id}/ops   → apply an op batch atomically → {rev, results}
   PATCH  /api/workspaces/{id}       → layout-only metadata (sugar over the set_meta op)
-  PUT    /api/workspaces/{id}/tree  → PARTIAL tree upsert (dirty panels) + dropped_trees
   DELETE /api/workspaces/{id}       → remove light file + blobs dir
 """
 from __future__ import annotations
@@ -79,32 +78,6 @@ class WorkspacePatch(BaseModel):
     send_targets: list[str] | None = None
     seen_panels: list[str] | None = None
     panel_seq: int | None = None
-
-
-class TreeSave(BaseModel):
-    # PARTIAL upsert map: only DIRTY panels (merged over the stored trees). Nodes MAY
-    # carry inline token_logprobs/raw_meta (fresh folds) — the server strips them into
-    # write-once blobs and stores light nodes.
-    trees: dict[str, Any]
-    # Panels removed since the last save — dropped from the stored trees.
-    dropped_trees: list[str] = []
-    system_prompt: str | None = None
-    system_enabled: bool | None = None  # see WorkspaceCreate
-    # Per-workspace panel UI (all OPAQUE panel-id lists; the browser owns the
-    # semantics — see web/src/lib/workspaces.svelte.ts):
-    #   reduced_panels — panels folded out of view
-    #   send_targets   — panels the composer fires a send to
-    #   seen_panels    — defaulting bookkeeping (a panel is defaulted into
-    #                    send_targets exactly once, when first seen). Persisted so
-    #                    a restart restores the exact deselected/folded state.
-    reduced_panels: list[str] = []
-    send_targets: list[str] = []
-    seen_panels: list[str] = []
-    #   panel_seq      — monotonic panel-id counter; ids are p-<n> and never reused
-    #                    within a workspace, so a panel:node handle can't re-point.
-    panel_seq: int = 0
-    # Per-workspace panel LAYOUT — see WorkspaceCreate.panels.
-    panels: list[dict[str, Any]] = []
 
 
 class NodeBlobsRequest(BaseModel):
@@ -266,27 +239,6 @@ async def patch_workspace(workspace_id: str, req: WorkspacePatch) -> dict:
         raise HTTPException(404, f"no workspace {workspace_id}")
     await _broadcast_ops(workspace_id, out)
     return out["summary"]
-
-
-@router.put("/{workspace_id}/tree")
-def save_workspace_tree(workspace_id: str, req: TreeSave) -> dict:
-    """Hot path: persist a workspace's DIRTY panel tree(s) after a branch edit.
-    `trees` is a partial upsert (dirty panels only) + `dropped_trees` for removals."""
-    ok = store.save_tree(
-        workspace_id,
-        trees_partial=req.trees,
-        dropped_trees=req.dropped_trees,
-        system_prompt=req.system_prompt,
-        system_enabled=req.system_enabled,
-        panels=req.panels,
-        reduced_panels=req.reduced_panels,
-        send_targets=req.send_targets,
-        seen_panels=req.seen_panels,
-        panel_seq=req.panel_seq,
-    )
-    if not ok:
-        raise HTTPException(404, f"no workspace {workspace_id}")
-    return {"status": "ok", "id": workspace_id}
 
 
 @router.delete("/{workspace_id}")

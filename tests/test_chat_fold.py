@@ -225,6 +225,30 @@ async def test_fold_content_incorporated_prefill_not_doubled(fold_env, monkeypat
     assert tree["nodes"][nid]["prefill"] == "PRE"
 
 
+async def test_fold_both_mode_one_sided_scope_splits_prefill_per_half(fold_env, monkeypatch):
+    """thinking='both' + prefill_scope='think' (the case the retired echo test
+    pinned): the NON-thinking half (sample_index 0..n-1) dropped the prefill —
+    its folded nodes must be the bare completion; the thinking half keeps it."""
+    chat_route, bus, store, ws_id = fold_env
+
+    async def fanout_stub(*, model, messages, **kw):
+        return {"content": "cont", "raw_text": "cont"}
+
+    monkeypatch.setattr("tinkerscope.api.openrouter.sample_one", fanout_stub)
+    msgs = [{"role": "user", "content": "q"}, {"role": "assistant", "content": "PREFILL"}]
+    await _run_to_done(chat_route, _req(
+        chat_route, ws_id, messages=msgs, n_samples=1, thinking="both", prefill_scope="think",
+    ))
+    tree = _tree(store, ws_id)
+    kids = tree["nodes"]["u1"]["children"]
+    assert len(kids) == 2  # one per half
+    by_mode = {tree["nodes"][nid].get("thinking"): tree["nodes"][nid] for nid in kids}
+    assert by_mode[False]["content"] == "cont", "non-thinking half must not re-prepend"
+    assert "prefill" not in by_mode[False]
+    assert by_mode[True]["content"] == "PREFILLcont"
+    assert by_mode[True]["prefill"] == "PREFILL"
+
+
 async def test_fold_one_sided_prefill_scope_drops_prefill(fold_env, monkeypatch):
     """prefill_scope='think' on a thinking=False fire: the prompt never carried
     the prefill, so the folded node must not claim it did."""

@@ -137,16 +137,6 @@ const httpApi = {
       method: 'PATCH',
       body: JSON.stringify(patch)
     }),
-  /** @deprecated the ops cutover replaced the PUT save path (HANDOFF_SERVER_AUTHORITY
-   *  §4.5); kept one transition window for the server's stale-tab endpoint parity. */
-  saveWorkspaceTree: (
-    id: string,
-    body: ConvFields & { trees: Record<string, ConvTree>; dropped_trees: string[] }
-  ) =>
-    j<{ status: string; id: string }>(`/api/workspaces/${encodeURIComponent(id)}/tree`, {
-      method: 'PUT',
-      body: JSON.stringify(body)
-    }),
   // The ops protocol: one atomic batch of small idempotent mutations. 409 = some
   // op was structurally invalid (nothing applied — refetch); 5xx/transport = the
   // batch may never have arrived (idempotent replay is safe — retry).

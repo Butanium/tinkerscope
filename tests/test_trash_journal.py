@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 
 from tinkerscope.api import workspace_store as store
+from conftest import ops_tree_write
 
 
 def _tree(nodes: dict, roots: list[str], selected: dict | None = None) -> dict:
@@ -54,7 +55,7 @@ def _create(client, name="W", trees=None) -> str:
 
 
 def _save(client, cid: str, trees: dict, dropped: list[str] | None = None):
-    r = client.put(f"/api/workspaces/{cid}/tree", json={
+    r = ops_tree_write(client, cid, {
         "trees": trees, "dropped_trees": dropped or [],
         "system_prompt": None, "system_enabled": False,
         "panels": [{"id": "primary", "run_id": "run-a", "checkpoint": "final"}],
@@ -249,7 +250,7 @@ def test_set_aside_workspaces_are_not_listed_as_live_ones(client):
 # workaround is gone and restore has to rebuild the column itself.
 def test_closing_a_panel_journals_the_layout_row_too(client):
     cid = _create(client, trees={"primary": _fan(1), "p-2": _fan(2)})
-    r = client.put(f"/api/workspaces/{cid}/tree", json={
+    r = ops_tree_write(client, cid, {
         "trees": {"primary": _fan(1)}, "dropped_trees": ["p-2"],
         "system_prompt": None, "system_enabled": False,
         "panels": [{"id": "primary", "run_id": "run-a", "checkpoint": "final"}],
@@ -264,7 +265,7 @@ def test_closing_a_panel_journals_the_layout_row_too(client):
 
 def test_restoring_a_closed_panel_rebuilds_the_column(client):
     cid = _create(client, trees={"primary": _fan(1), "p-2": _fan(2)})
-    client.put(f"/api/workspaces/{cid}/tree", json={
+    ops_tree_write(client, cid, {
         "trees": {"primary": _fan(1)}, "dropped_trees": ["p-2"],
         "system_prompt": None, "system_enabled": False,
         "panels": [{"id": "primary", "run_id": "run-a", "checkpoint": "final"}],
@@ -295,7 +296,7 @@ def test_a_pre_layout_entry_restores_into_an_unbound_panel(client):
     """Entries journaled before `layout` was recorded still have to restore — the
     column comes back present but with no model, for the human to re-bind."""
     cid = _create(client, trees={"primary": _fan(1), "p-2": _fan(2)})
-    client.put(f"/api/workspaces/{cid}/tree", json={
+    ops_tree_write(client, cid, {
         "trees": {"primary": _fan(1)}, "dropped_trees": ["p-2"],
         "system_prompt": None, "system_enabled": False,
         "panels": [{"id": "primary", "run_id": "run-a", "checkpoint": "final"}],
@@ -320,7 +321,7 @@ def test_a_pre_layout_entry_restores_into_an_unbound_panel(client):
 
 def _drop_p2(client, cid, *, seen=("primary", "p-2")):
     """Close panel p-2 the way the browser does: tree dropped, row gone from layout."""
-    r = client.put(f"/api/workspaces/{cid}/tree", json={
+    r = ops_tree_write(client, cid, {
         "trees": {"primary": _fan(1)}, "dropped_trees": ["p-2"],
         "system_prompt": None, "system_enabled": False,
         "panels": [{"id": "primary", "run_id": "run-a", "checkpoint": "final"}],
@@ -341,7 +342,7 @@ def test_a_stale_tab_can_wipe_the_restored_row_and_restore_still_fixes_it(client
     assert _restore(client, cid, entry["id"])["recreated_panel"] is True
 
     # A stale tab saves: same trees it still knows about, layout WITHOUT p-2.
-    client.put(f"/api/workspaces/{cid}/tree", json={
+    ops_tree_write(client, cid, {
         "trees": {"primary": _fan(1)}, "dropped_trees": [],
         "system_prompt": None, "system_enabled": False,
         "panels": [{"id": "primary", "run_id": "run-a", "checkpoint": "final"}],
@@ -367,7 +368,7 @@ def test_a_writer_that_omits_panel_seq_cannot_reset_it(client):
     client.patch(f"/api/workspaces/{cid}", json={"panel_seq": 7})
     assert _body(client, cid)["panel_seq"] == 7
 
-    client.put(f"/api/workspaces/{cid}/tree", json={
+    ops_tree_write(client, cid, {
         "trees": {"primary": _fan(1)}, "dropped_trees": [],
         "system_prompt": None, "system_enabled": False,
         "panels": [{"id": "primary", "run_id": "run-a", "checkpoint": "final"}],
@@ -375,7 +376,7 @@ def test_a_writer_that_omits_panel_seq_cannot_reset_it(client):
     })  # no panel_seq → defaults to 0
     assert _body(client, cid)["panel_seq"] == 7, "a write may only RAISE the counter"
 
-    client.put(f"/api/workspaces/{cid}/tree", json={
+    ops_tree_write(client, cid, {
         "trees": {"primary": _fan(1)}, "dropped_trees": [], "panel_seq": 9,
         "system_prompt": None, "system_enabled": False,
         "panels": [{"id": "primary", "run_id": "run-a", "checkpoint": "final"}],
@@ -391,7 +392,7 @@ def test_seen_panels_is_a_union_so_a_short_writer_cannot_shrink_the_ledger(clien
     _drop_p2(client, cid, seen=("primary", "p-2"))
     assert _body(client, cid)["seen_panels"] == ["primary", "p-2"]
 
-    client.put(f"/api/workspaces/{cid}/tree", json={
+    ops_tree_write(client, cid, {
         "trees": {"primary": _fan(1)}, "dropped_trees": [],
         "system_prompt": None, "system_enabled": False,
         "panels": [{"id": "primary", "run_id": "run-a", "checkpoint": "final"}],
@@ -457,7 +458,7 @@ def test_a_restored_column_goes_back_to_its_old_position(client):
     cid = _create(client, trees={"primary": _fan(1), "p-2": _fan(2), "p-3": _fan(1)})
     rows = [{"id": "primary", "run_id": "run-a", "checkpoint": "final"},
             {"id": "p-3", "run_id": "run-c", "checkpoint": "final"}]
-    r = client.put(f"/api/workspaces/{cid}/tree", json={
+    r = ops_tree_write(client, cid, {
         "trees": {}, "dropped_trees": ["p-2"],        # close the MIDDLE column
         "system_prompt": None, "system_enabled": False, "panels": rows,
         "reduced_panels": [], "send_targets": [], "seen_panels": ["primary", "p-2", "p-3"],

@@ -8,6 +8,7 @@ in-memory summary cache). See `docs/STORAGE_V2.md` for the wire contract.
 from __future__ import annotations
 
 from tinkerscope.api.state import DEFAULT_PANEL_ID
+from conftest import ops_tree_write
 
 # A node carrying the two heavy fields that storage v2 splits into a write-once blob.
 HEAVY_LOGPROBS = [{"t": "Hi", "tid": 5, "lp": -0.1, "top": [["Hi", 5, -0.1], ["Yo", 9, -2.0]]}]
@@ -30,6 +31,16 @@ def _heavy_tree(nid: str = "n1", content: str = "hi") -> dict:
 
 
 # ── summaries vs bodies ──────────────────────────────────────────────────────
+
+def _mark_tree(mark):
+    """Minimal VALID tree distinguished by one node id/content — replaces the
+    opaque {"mark": …} fixtures: post-P3 every write is a shape-validated op
+    (the opaque-tree store contract retired with the PUT)."""
+    return {"nodes": {mark: {"id": mark, "role": "user", "content": mark,
+                             "parent": None, "children": []}},
+            "rootChildren": [mark], "selected": {}}
+
+
 def test_starts_empty(client):
     assert client.get("/api/workspaces").json() == []
 
@@ -143,31 +154,31 @@ def test_blob_write_once_idempotent(client):
     # Re-save n1 with different logprobs — must be ignored (file already exists).
     changed = _heavy_tree()
     changed["nodes"]["n1"]["token_logprobs"] = [{"t": "X", "tid": 1, "lp": -9.9, "top": []}]
-    client.put(f"/api/workspaces/{cid}/tree", json={"trees": {"primary": changed}})
+    ops_tree_write(client, cid, {"trees": {"primary": changed}})
     got = client.post(f"/api/workspaces/{cid}/node-blobs", json={"nodes": ["n1"]}).json()
     assert got["n1"]["token_logprobs"] == HEAVY_LOGPROBS  # original, not the changed one
 
 
 # ── partial tree upsert + drop ─────────────────────────────────────────────────
-def test_partial_tree_upsert_leaves_other_panels(client):
-    """PUT /tree is a PARTIAL upsert: a save of only the primary panel must not touch
-    the compare panel's stored tree."""
+def test_single_panel_write_leaves_other_panels(client):
+    """Ops are per-panel by construction: replacing the primary panel's tree
+    must not touch the compare panel's stored one (the invariant the PUT's
+    partial upsert used to carry)."""
     cid = client.post("/api/workspaces", json={
         "name": "multi",
-        "trees": {"primary": {"mark": "P0"}, "compare": {"mark": "C0"}},
+        "trees": {"primary": _mark_tree("P0"), "compare": _mark_tree("C0")},
     }).json()["id"]
-    client.put(f"/api/workspaces/{cid}/tree", json={"trees": {"primary": {"mark": "P1"}}})
+    ops_tree_write(client, cid, {"trees": {"primary": _mark_tree("P1")}})
     trees = client.get(f"/api/workspaces/{cid}").json()["trees"]
-    assert trees["primary"] == {"mark": "P1"}
-    assert trees["compare"] == {"mark": "C0"}  # untouched
+    assert trees["primary"]["rootChildren"] == ["P1"]
+    assert trees["compare"]["rootChildren"] == ["C0"]  # untouched
 
 
 def test_dropped_trees_removes_panels(client):
     cid = client.post("/api/workspaces", json={
-        "name": "drop", "trees": {"primary": {"mark": "P"}, "compare": {"mark": "C"}},
+        "name": "drop", "trees": {"primary": _mark_tree("P"), "compare": _mark_tree("C")},
     }).json()["id"]
-    client.put(f"/api/workspaces/{cid}/tree",
-               json={"trees": {"primary": {"mark": "P"}}, "dropped_trees": ["compare"]})
+    ops_tree_write(client, cid, {"trees": {"primary": _mark_tree("P")}, "dropped_trees": ["compare"]})
     trees = client.get(f"/api/workspaces/{cid}").json()["trees"]
     assert set(trees) == {"primary"}
 
@@ -176,7 +187,7 @@ def test_save_tree_strips_fresh_fold_blobs(client):
     """A PUT whose node carries inline heavy fields (a fresh fold) stores a light node
     + a write-once blob, exactly like create."""
     cid = client.post("/api/workspaces", json={"name": "f"}).json()["id"]
-    client.put(f"/api/workspaces/{cid}/tree", json={"trees": {"primary": _heavy_tree("n7")}})
+    ops_tree_write(client, cid, {"trees": {"primary": _heavy_tree("n7")}})
     node = client.get(f"/api/workspaces/{cid}").json()["trees"]["primary"]["nodes"]["n7"]
     assert node["has_token_logprobs"] is True and "token_logprobs" not in node
     assert client.post(f"/api/workspaces/{cid}/node-blobs", json={"nodes": ["n7"]}).json()["n7"]["raw_meta"] == HEAVY_RAW_META
@@ -187,7 +198,7 @@ def test_save_tree_unicode_survives(client):
     tree = {"nodes": {"n": {"id": "n", "role": "assistant",
                             "content": "café — 日本語 → ✓", "parent": None, "children": []}},
             "rootChildren": ["n"], "selected": {}}
-    client.put(f"/api/workspaces/{cid}/tree", json={"trees": {"primary": tree}})
+    ops_tree_write(client, cid, {"trees": {"primary": tree}})
     assert client.get(f"/api/workspaces/{cid}").json()["trees"]["primary"] == tree
 
 
@@ -204,11 +215,13 @@ def test_save_tree_self_heals_migrated_legacy_shape_without_losing_compare(clien
     body["compare_tree"] = {"mark": "B"}
     del body["trees"]  # a real migrated legacy entry has NO `trees` key
     store._persist(body)
-    # First save touches only the primary panel...
-    client.put(f"/api/workspaces/{cid}/tree", json={"trees": {"primary": {"mark": "A2"}}})
+    # First WRITE touches only the primary panel...
+    ops_tree_write(client, cid, {"trees": {"primary": _mark_tree("A2")}})
     healed = client.get(f"/api/workspaces/{cid}").json()
-    # ...but the compare tree (from compare_tree) survives, and legacy keys are gone.
-    assert healed["trees"] == {"primary": {"mark": "A2"}, "compare": {"mark": "B"}}
+    # ...but the compare tree (from compare_tree) survives — the ops path seeds
+    # the legacy keys into `trees` before applying — and legacy keys are gone.
+    assert healed["trees"]["primary"]["rootChildren"] == ["A2"]
+    assert healed["trees"]["compare"] == {"mark": "B"}  # stored legacy stays as-is
     assert "tree" not in healed and "compare_tree" not in healed
 
 
@@ -254,7 +267,7 @@ def test_system_enabled_travels_with_the_conversation(client):
     assert client.get(f"/api/workspaces/{cid}").json()["system_enabled"] is False
     client.patch(f"/api/workspaces/{cid}", json={"system_enabled": True})
     assert client.get(f"/api/workspaces/{cid}").json()["system_enabled"] is True
-    client.put(f"/api/workspaces/{cid}/tree", json={
+    ops_tree_write(client, cid, {
         "trees": {"primary": {}}, "system_prompt": "sp", "system_enabled": False,
     })
     assert client.get(f"/api/workspaces/{cid}").json()["system_enabled"] is False
@@ -266,15 +279,14 @@ def test_system_enabled_travels_with_the_conversation(client):
 def test_system_prompt_travels_with_the_conversation(client):
     cid = client.post("/api/workspaces", json={"name": "exp", "system_prompt": "You are a pirate."}).json()["id"]
     assert client.get(f"/api/workspaces/{cid}").json()["system_prompt"] == "You are a pirate."
-    client.put(f"/api/workspaces/{cid}/tree",
-               json={"trees": {"primary": {"nodes": {}, "rootChildren": [], "selected": {}}},
+    ops_tree_write(client, cid, {"trees": {"primary": {"nodes": {}, "rootChildren": [], "selected": {}}},
                      "system_prompt": "You are a poet."})
     assert client.get(f"/api/workspaces/{cid}").json()["system_prompt"] == "You are a poet."
 
 
 def test_panel_ui_round_trips(client):
     cid = client.post("/api/workspaces", json={"name": "c"}).json()["id"]
-    client.put(f"/api/workspaces/{cid}/tree", json={
+    ops_tree_write(client, cid, {
         "trees": {"primary": {"nodes": {}, "rootChildren": [], "selected": {}}},
         "reduced_panels": ["compare"], "send_targets": ["primary"],
         "seen_panels": ["primary", "compare"],
@@ -300,10 +312,10 @@ def test_delete_removes_file_and_blobs(client):
 def test_multiple_conversations_are_independent(client):
     a = client.post("/api/workspaces", json={"name": "A"}).json()["id"]
     b = client.post("/api/workspaces", json={"name": "B"}).json()["id"]
-    client.put(f"/api/workspaces/{a}/tree", json={"trees": {"primary": {"mark": "A"}}})
-    client.put(f"/api/workspaces/{b}/tree", json={"trees": {"primary": {"mark": "B"}}})
-    assert client.get(f"/api/workspaces/{a}").json()["trees"]["primary"] == {"mark": "A"}
-    assert client.get(f"/api/workspaces/{b}").json()["trees"]["primary"] == {"mark": "B"}
+    ops_tree_write(client, a, {"trees": {"primary": _mark_tree("A")}})
+    ops_tree_write(client, b, {"trees": {"primary": _mark_tree("B")}})
+    assert client.get(f"/api/workspaces/{a}").json()["trees"]["primary"]["rootChildren"] == ["A"]
+    assert client.get(f"/api/workspaces/{b}").json()["trees"]["primary"]["rootChildren"] == ["B"]
 
 
 def test_corrupt_conversation_file_is_quarantined_not_fatal(client):
@@ -322,7 +334,7 @@ def test_corrupt_conversation_file_is_quarantined_not_fatal(client):
 
 def test_missing_conversation_404s(client):
     assert client.patch("/api/workspaces/nope", json={"name": "x"}).status_code == 404
-    assert client.put("/api/workspaces/nope/tree", json={"trees": {}}).status_code == 404
+    assert client.post("/api/workspaces/nope/ops", json={"ops": []}).status_code == 404
     assert client.delete("/api/workspaces/nope").status_code == 404
 
 

@@ -106,22 +106,13 @@ def test_new_leaves_the_existing_workspace_untouched(client, tmp_path):
     src = _write_pack(tmp_path)
     client.post("/api/pack/apply", json={"source": str(src), "on_conflict": "overwrite"})
     # Give the installed workspace some content of its own.
-    workspace_store.save_tree(
+    workspace_store.apply_ops(
         "pack-demo-w-one",
-        trees_partial={
-            "primary": {
-                "nodes": {"n0": {"id": "n0", "role": "user", "content": "mine", "parent": None, "children": []}},
-                "rootChildren": ["n0"],
-                "selected": {},
-            }
-        },
-        dropped_trees=[],
-        system_prompt=None,
-        system_enabled=None,
-        panels=[{"id": "primary", "run_id": "ckpt:" + GOOD_FINAL, "checkpoint": None}],
-        reduced_panels=[],
-        send_targets=["primary"],
-        seen_panels=["primary"],
+        [{"op": "replace_tree", "panel": "primary", "tree": {
+            "nodes": {"n0": {"id": "n0", "role": "user", "content": "mine", "parent": None, "children": []}},
+            "rootChildren": ["n0"],
+            "selected": {},
+        }}],
     )
     client.post("/api/pack/apply", json={"source": str(src), "on_conflict": "new"})
     body = workspace_store.get_body("pack-demo-w-one")

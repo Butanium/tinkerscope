@@ -291,8 +291,8 @@ def test_rev_is_monotonic_across_every_write_channel(client):
                              _add("primary", "u1", "user", "hi", None),
                              _add("primary", "a1", "assistant", "hello", "u1")))
     bump("PATCH", lambda: client.patch(f"/api/workspaces/{cid}", json={"name": "renamed"}))
-    bump("PUT /tree", lambda: client.put(f"/api/workspaces/{cid}/tree", json={
-        "trees": {"primary": {"nodes": {}, "rootChildren": [], "selected": {}}}}))
+    # (the PUT /tree channel retired with P3 — its wholesale semantics ride
+    # replace_tree ops now, already covered by the "ops" row above)
     # create-by-id IS the upsert the pack-apply path uses.
     bump("upsert (pack apply)", lambda: client.post("/api/workspaces", json={
         "id": cid, "name": "from a pack", "trees": {"primary": {"nodes": {}, "rootChildren": [], "selected": {}}}}))

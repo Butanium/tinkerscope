@@ -12,6 +12,7 @@ No remote calls — the `client` fixture stubs discovery and points state at a t
 from __future__ import annotations
 
 from tinkerscope.api import workspace_store as store
+from conftest import ops_tree_write
 
 TREE = {"nodes": {}, "rootChildren": [], "selected": {}}
 
@@ -52,7 +53,7 @@ def test_non_layout_saves_record_nothing(client):
     panels = _panels(("primary", "run-a"))
     cid = _create(client, "W", panels)
     before = len(_history(client, cid))
-    client.put(f"/api/workspaces/{cid}/tree", json={"trees": {"primary": TREE}, "panels": panels})
+    ops_tree_write(client, cid, {"trees": {"primary": TREE}, "panels": panels})
     client.patch(f"/api/workspaces/{cid}", json={"name": "renamed"})  # rename ≠ layout change
     client.patch(f"/api/workspaces/{cid}", json={"panels": panels})   # same layout re-sent
     assert len(_history(client, cid)) == before
@@ -61,7 +62,7 @@ def test_non_layout_saves_record_nothing(client):
 def test_tree_save_that_changes_the_layout_is_recorded(client):
     """A PUT carries `panels` too — a model swap can land through the tree path."""
     cid = _create(client, "W", _panels(("primary", "run-a")))
-    client.put(f"/api/workspaces/{cid}/tree", json={
+    ops_tree_write(client, cid, {
         "trees": {"primary": TREE}, "panels": _panels(("primary", "run-z"))})
     assert [h["panels"][0]["run_id"] for h in _history(client, cid)] == ["run-a", "run-z"]
 

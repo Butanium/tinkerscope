@@ -457,11 +457,11 @@ def _record_layout(cid: str, prev: Any, new: Any) -> None:
 # covers everything after that: another session, another tab, a browser crash,
 # and the cross-tab last-write-wins clobber that BRANCHING_DESIGN §6 documents.
 #
-# It hooks `_persist` rather than `save_tree` deliberately: _persist is the single
-# choke point for EVERY workspace write, so the diff also catches `upsert`'s
-# wholesale tree replacement, and it sees the body AFTER save_tree's legacy
-# {tree, compare_tree} seed (diffing before that would mass-journal phantom
-# deletions on a legacy workspace's first save).
+# It hooks `_persist` deliberately: _persist is the single choke point for EVERY
+# workspace write, so the diff also catches `upsert`'s wholesale tree replacement
+# and the ops path's legacy {tree, compare_tree} normalization alike (diffing
+# before that normalization would mass-journal phantom deletions on a legacy
+# workspace's first write).
 #
 # Append-only `<cid>.trash.jsonl`. Restore is exact — light nodes verbatim, blobs
 # still on disk under the same ids (write-once), sibling INDEX recorded so a
@@ -909,67 +909,9 @@ def upsert(
     return light
 
 
-def save_tree(
-    cid: str,
-    *,
-    trees_partial: dict[str, Any],
-    dropped_trees: list[str],
-    system_prompt: str | None,
-    system_enabled: bool | None,
-    panels: list[dict],
-    reduced_panels: list[str],
-    send_targets: list[str],
-    seen_panels: list[str],
-    panel_seq: int = 0,
-) -> bool:
-    """PUT /{id}/tree — PARTIAL upsert. `trees_partial` carries only dirty panels
-    (merged over the stored trees); `dropped_trees` removes panels. Inline heavy
-    fields on fresh-fold nodes are stripped into write-once blobs. Returns False if
-    the workspace is unknown (404). Blobs for dropped panels are NOT deleted
-    (write-once invariant — cleaned only on workspace delete)."""
-    with locked("workspaces"):
-        _ensure_loaded()
-        conv = _load_body(cid)
-        if conv is None:
-            return False
-        light_partial, blobs = split_workspace({"trees": trees_partial})
-        trees = dict(conv.get("trees") or {})
-        # A migrated legacy {tree, compare_tree} workspace has no `trees` yet.
-        # Seed the merge base with its reserved-id panels BEFORE the partial upsert so
-        # a first save carrying only one dirty panel can't drop the other — then the
-        # self-heal pop below is always safe regardless of what the client sends. The
-        # frontend maps tree→'primary', compare_tree→'compare' (truthy-checked); we
-        # mirror that here so the backend defends the data on its own.
-        if not trees:
-            if conv.get("tree"):
-                trees["primary"] = conv["tree"]
-            if conv.get("compare_tree"):
-                trees["compare"] = conv["compare_tree"]
-        trees.update(light_partial["trees"])
-        for pid in dropped_trees or []:
-            trees.pop(pid, None)
-        conv = dict(conv)
-        conv["trees"] = trees
-        conv["system_prompt"] = system_prompt
-        conv["system_enabled"] = system_enabled
-        conv["panels"] = tree_ops.normalize_panels(panels, trees)
-        conv["reduced_panels"] = reduced_panels
-        conv["send_targets"] = send_targets
-        conv["seen_panels"] = _merge_seen_panels(conv.get("seen_panels"), seen_panels)
-        conv["panel_seq"] = _merge_panel_seq(conv.get("panel_seq"), panel_seq)
-        conv["updated_at"] = _now()
-        # self-heal a migrated legacy {tree, compare_tree} entry on its first save
-        # (its trees are now folded into `trees` above, so dropping the keys is safe).
-        conv.pop("tree", None)
-        conv.pop("compare_tree", None)
-        _write_blobs(cid, blobs)
-        _persist(conv)
-    return True
-
-
 # The meta-merge rules live with the op vocabulary they implement (`set_meta`),
-# so the PUT/create paths and the op path can't drift apart. Aliased here because
-# these two names are the ones the save paths below have always used.
+# so the create path and the op path can't drift apart. Aliased because these
+# names are the ones the save paths have always used.
 _merge_panel_seq = tree_ops.merge_panel_seq
 _merge_seen_panels = tree_ops.merge_seen_panels
 

@@ -35,8 +35,6 @@ import { opsEmitter } from './ops.svelte';
 import { FIRST_PANEL_ID, highestPanelSeq, legacyLayout, mintPanelId as mintId } from './panel-id';
 import {
   emptyTree,
-  activeMessages,
-  reconcileExternal,
   selectedChildId,
   applyPanelOp,
   ROOT,
@@ -72,14 +70,6 @@ function treeUnreadable(x: unknown): boolean {
   if (!Object.keys(x as object).length) return false;
   const t = x as Partial<ConvTree>;
   return !(t.nodes && Array.isArray(t.rootChildren));
-}
-
-function msgsEqual(a: Msg[], b: Msg[]): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (a[i].role !== b[i].role || a[i].content !== b[i].content) return false;
-  }
-  return true;
 }
 
 function newest(list: WorkspaceSummary[]): WorkspaceSummary | undefined {
@@ -287,8 +277,9 @@ class ConversationsStore {
     return live.busId === this.activeId;
   }
 
-  /** This workspace's full picture for the bus: OUR layout + per-panel
-   *  active-path echo + thread system. A patch carrying this is a CLAIM — after
+  /** This workspace's full picture for the bus: OUR layout + per-panel thread
+   *  system. (The transcript echo retired with P3 — the tree IS the transcript,
+   *  read over /api/workspaces.) A patch carrying this is a CLAIM — after
    *  it, the bus coherently describes us (see bus-scope.ts on why a partial
    *  write from a non-owner would leave the bus a chimera). Built from the
    *  store-owned `layout`, never from `live.state.panels`: claiming with the
@@ -300,7 +291,6 @@ class ConversationsStore {
       id: p.id,
       run_id: p.run_id ?? null,
       checkpoint: p.checkpoint ?? null,
-      messages: activeMessages(this.treeFor(p.id)),
       thread_system_prompt: this.#threadSystem(p.id)
     }));
   }
@@ -415,28 +405,21 @@ class ConversationsStore {
   }
 
   #mirror(): void {
-    // Echo each OPEN panel's active path into PlaygroundState (one patch, messages
-    // only — never clobbers per-panel run_id/checkpoint). Restricted to panels in
-    // OUR layout: a tree that outlived its panel (a removed/replaced panel whose
-    // tree lingers in `this.trees`) must NOT echo, or it would re-register the panel
-    // server-side as a run_id=null phantom on every send. (The backend also refuses
-    // to auto-create from a message patch now — this is the matching client-side
-    // guard, and it also avoids the wasted POST.)
+    // Mirror each OPEN panel's active-THREAD system prompt into PlaygroundState
+    // (a mid-thread CLI send inherits it server-side). This is all that's left
+    // of the old per-panel transcript echo (P3): message text lives in the
+    // workspace tree, which the CLI reads directly. Restricted to panels in OUR
+    // layout — a tree that outlived its panel must not re-register it.
     const liveIds = new Set(this.layout.map((p) => p.id));
-    const panel_messages: Record<string, Msg[]> = {};
     const panel_thread_system: Record<string, string | null> = {};
-    for (const [pid, tree] of Object.entries(this.trees)) {
+    for (const pid of Object.keys(this.trees)) {
       if (liveIds.size && !liveIds.has(pid)) continue;
-      panel_messages[pid] = activeMessages(tree);
-      // The active THREAD's system prompt rides with the echo: a mid-thread CLI
-      // send inherits it server-side, and the reconnect reconcile reads it back.
       panel_thread_system[pid] = this.#threadSystem(pid);
     }
-    // A non-owner's echo-only write would be dropped server-side (it can't be
-    // applied to another workspace's panel list) — fold in the claim so the
-    // mirror lands either way.
+    // A non-owner's per-panel write would be dropped server-side — fold in the
+    // claim so the mirror lands either way.
     api
-      .setState(this.#ownPatch({ ...this.claimFields(), panel_messages, panel_thread_system }))
+      .setState(this.#ownPatch({ ...this.claimFields(), panel_thread_system }))
       .catch(() => {});
   }
 
@@ -573,7 +556,6 @@ class ConversationsStore {
     return api
       .setState(
         this.#ownPatch({
-          panel_messages: Object.fromEntries(ids.map((id) => [id, []])),
           panel_thread_system: Object.fromEntries(ids.map((id) => [id, null]))
         })
       )
@@ -699,7 +681,7 @@ class ConversationsStore {
           if (this.activeId !== id) return;
           const lastAdopted = this.#rev;
           await this.#loadTrees(conv);
-          this.#afterLoad();
+          this.#mirror();
           // The GET may have raced newer writes: events seen on the stream
           // above the adopted rev mean the body is already stale — go again.
           // Unless the body rev did NOT move between rounds: then the seen-rev
@@ -750,7 +732,7 @@ class ConversationsStore {
     nodeBlobs.reset(active.id);
     this.#setActive(active.id);
     await this.#loadTrees(conv);
-    this.#afterLoad();
+    this.#mirror();
     return !!preferred;
   }
 
@@ -805,7 +787,7 @@ class ConversationsStore {
     nodeBlobs.reset(id);
     this.#setActive(id);
     await this.#loadTrees(conv);
-    this.#afterLoad();
+    this.#mirror();
   }
 
   /** Create + switch to a new workspace. `panels` is the layout it opens with:
@@ -867,8 +849,7 @@ class ConversationsStore {
     const next = await api
       .setState(
         this.#ownPatch({
-          panels: layout.map((p) => ({ id: p.id, run_id: p.run_id, checkpoint: p.checkpoint, messages: [] })),
-          panel_messages: Object.fromEntries(ids.map((id) => [id, []])),
+          panels: layout.map((p) => ({ id: p.id, run_id: p.run_id, checkpoint: p.checkpoint })),
           panel_thread_system: Object.fromEntries(ids.map((id) => [id, null]))
         })
       )
@@ -951,7 +932,7 @@ class ConversationsStore {
         return;
       }
       await this.#loadTrees(conv);
-      this.#afterLoad();
+      this.#mirror();
     }
   }
 
@@ -1046,11 +1027,9 @@ class ConversationsStore {
     }
     // system_prompt + the panel LAYOUT travel with the workspace (each conv =
     // one experiment). This patch is a full CLAIM — panels + our stamp — in
-    // BOTH branches: it re-points the bus at this workspace, and the empty
-    // `messages` reset every echo so #afterLoad (whose contract is "echoes are
-    // cleared before it runs") can't reconcile a previous workspace's turns
-    // into the fresh trees. The response is adopted so #afterLoad mirrors
-    // against the fresh panel list rather than the previous workspace's.
+    // BOTH branches: it re-points the bus at this workspace. The response is
+    // adopted so the follow-up #mirror runs against the fresh panel list
+    // rather than the previous workspace's.
     const patch: StatePatch = {
       system_prompt: conv.system_prompt ?? null,
       // Explicit derive for flag-less legacy bodies (text present ⇒ enabled), so
@@ -1059,37 +1038,11 @@ class ConversationsStore {
       panels: this.layout.map((p) => ({
         id: p.id,
         run_id: p.run_id ?? null,
-        checkpoint: p.checkpoint ?? null,
-        messages: []
+        checkpoint: p.checkpoint ?? null
       }))
     };
     const next = await api.setState(this.#ownPatch(patch)).catch(() => null);
     live.adopt(next);
-  }
-
-  /** After loading a workspace: fold a stray external turn into each panel (once,
-   *  if not running), then UNCONDITIONALLY mirror the active paths so a fresh/
-   *  restarted backend still learns the loaded workspace. */
-  #afterLoad(): void {
-    // NB: unlike #onExternalDone, this is NOT origin-scoped by workspace_id — the
-    // panel `messages` echoes it reads carry no origin stamp, and #loadTrees clears
-    // every echo to [] synchronously before this runs (no await between), so the loop
-    // is structurally dormant at load and can't graft a foreign turn. See
-    // docs/BRANCHING_DESIGN.md §3b for why the two fold paths are scoped differently.
-    if (!live.anyRunning) {
-      for (const ps of live.state?.panels ?? []) {
-        const echo = (ps.messages ?? []) as Msg[];
-        const cur = this.trees[ps.id];
-        if (cur && echo.length && !msgsEqual(echo, activeMessages(cur))) {
-          // The panel mirror's thread system travels with the echo (same patch),
-          // so the stray turn folds under the right probe root.
-          const r = reconcileExternal(cur, echo, ps.thread_system_prompt);
-          this.trees = { ...this.trees, [ps.id]: r.tree };
-          if (r.ops.length) this.#emit(r.ops.map((o): WorkspaceOp => ({ ...o, panel: ps.id })));
-        }
-      }
-    }
-    this.#mirror();
   }
 
   // ── external-fold hooks (wired in init) ──────────────────────────
@@ -1102,8 +1055,13 @@ class ConversationsStore {
     error: (panel: Panel, data: any) => boolean;
   }): void {
     live.onChatDone = (panel, data) => {
-      if (own?.done(panel, data)) return; // our detached chat folded from its bucket
-      this.#onExternalDone(panel, data);
+      if (own?.done(panel, data)) return; // our chat: blobs seeded from the manifest
+      // FOREIGN chat (CLI / another tab): its fold arrived as an ops event —
+      // nothing to reconcile anymore (the echo-fold path retired with P3).
+      // What survives is render hygiene: a chat for a DIFFERENT workspace
+      // completing on a panel id this workspace reuses must not linger as a
+      // bucket overlay on our column.
+      if (data?.workspace_id != null && data.workspace_id !== this.activeId) live.dropBucket(panel);
     };
     live.onChatError = (panel, data) => {
       if (own?.error(panel, data)) return; // our chat: token released, bucket shows the error
@@ -1154,80 +1112,14 @@ class ConversationsStore {
     );
   }
 
-  #onExternalDone(
-    panel: Panel,
-    data: { client_token?: string | null; workspace_id?: string | null; thread_system_prompt?: string | null }
-  ): void {
-    // Own chats fold from their bus bucket (routed to the chat store before this) —
-    // skip here too as defense in case an own terminal ever reaches this path.
-    if (data?.client_token && this.#ownTokens.has(data.client_token)) return;
-    // Workspace-scoped fold. Panel ids ('compare', 'p-2'…) are re-minted across
-    // workspaces and PlaygroundState is a process-wide singleton (shared by every
-    // tab + the CLI), so a chat_done stamped with a DIFFERENT workspace than the
-    // one open must NOT graft onto a freshly-reused panel id (the "new panel loads a
-    // weird workspace" bug). A null stamp (CLI/legacy that never set
-    // workspace_id) folds — conservative, keeps the live-drive lockstep alive.
-    if (data?.workspace_id != null && data.workspace_id !== this.activeId) {
-      // Foreign chat completed on a panel id this workspace now reuses: don't
-      // fold it, and drop its live bucket so the foreign stream doesn't linger as a
-      // render overlay on our panel.
-      live.dropBucket(panel);
-      return;
-    }
-    const ps = (live.state?.panels ?? []).find((p) => p.id === panel);
-    const msgs = ps?.messages as Msg[] | undefined;
-    if (!msgs || !msgs.length) return;
-    const cur = this.treeFor(panel);
-    // The terminal event stamps the chat's resolved thread system prompt so the
-    // fold lands on (or mints) the RIGHT root — same-content roots under
-    // different prompts are distinct threads. Absent (legacy server) = unknown.
-    const { tree: next, ops } = reconcileExternal(cur, msgs, data?.thread_system_prompt);
-    if (next === cur) return; // idempotent — already represented + selected
-    // Only a genuinely NEW root branch (divergent reset) hides the prior thread;
-    // an in-place extend / re-select keeps it visible, so no notice for those.
-    const newRoot = next.rootChildren.length > cur.rootChildren.length && cur.rootChildren.length > 0;
-    this.setTree(panel, next, { ops });
-    if (newRoot)
-      this.#flashNotice('Terminal started a new workspace — your previous thread is at ‹1/N› on the first message.');
-  }
-
-  /** On a bus RECONNECT (a fresh snapshot after an EventSource drop): recover any
-   *  chat terminal we missed during the gap, and un-latch busy if the server has
-   *  nothing in flight. Two failure modes this closes:
-   *   - Reload / drop mid-generation: a detached chat completes server-side while we
-   *     weren't listening; its chat_done never reached us, so its reply sits in the
-   *     echo (`ps.messages`) unfolded. We reconcile each non-running panel's tree
-   *     from the echo (single representative — same recovery a reload gets), idempotent.
-   *   - Busy-latch: an own chat's terminal missed in the gap would leave its token in
-   *     #ownTokens forever (New/switch stuck disabled). If the server reports nothing
-   *     running, every lingering token is from a missed terminal → release them.
-   *  Scoped to OUR open workspace (the echo is a process-wide singleton; a
-   *  CLI/other-tab workspace switch must not graft foreign turns). */
+  /** On a bus RECONNECT (a fresh snapshot after an EventSource drop): un-latch
+   *  busy and ask the summaries whether the store moved without us. The
+   *  echo-reconcile that used to run here retired with P3 — a terminal missed
+   *  during the gap is recovered by the RE V compare below (the fold is an ops
+   *  batch; a moved rev refetches the body), not by grafting from a transcript
+   *  mirror that no longer exists. */
   reconcileOnReconnect(): void {
     if (!this.activeId) return;
-    // live.busId, not the mirror's workspace_id (which mergeBusState pins to
-    // ours): when the reconnect snapshot says the bus belongs to ANOTHER
-    // workspace, our echo view predates the drop and has nothing to recover.
-    const serverConv = live.busId;
-    const sameConv = serverConv == null || serverConv === this.activeId;
-    if (sameConv && !live.anyRunning) {
-      let changed = false;
-      for (const ps of live.state?.panels ?? []) {
-        const echo = (ps.messages ?? []) as Msg[];
-        const cur = this.trees[ps.id];
-        if (cur && echo.length && !msgsEqual(echo, activeMessages(cur))) {
-          const r = reconcileExternal(cur, echo, ps.thread_system_prompt);
-          this.trees = { ...this.trees, [ps.id]: r.tree };
-          if (r.ops.length) this.#emit(r.ops.map((o): WorkspaceOp => ({ ...o, panel: ps.id })));
-          changed = true;
-        }
-      }
-      // Only re-mirror when we actually folded something. A blind #mirror here would
-      // echo the (still user-only) trees back and OVERWRITE the server's committed
-      // turns — right after a reload, where #loadTrees has cleared the local echo,
-      // that would destroy the very data a later reconcile needs.
-      if (changed) this.#mirror();
-    }
     // Un-latch busy: server `running` is the in-flight COUNTER — 0 means every chat
     // fired its terminal, so any token still held is one we missed. (TODO: when the
     // server IS still running some OTHER chat, a token whose own terminal we missed
