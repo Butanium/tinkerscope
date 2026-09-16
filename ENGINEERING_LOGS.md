@@ -2213,3 +2213,41 @@ the leak (bob's Samples reach alice's input, `workspace_id` follows the last
 open, headerless `tinkpg state` is accepted). That second leg is what proves
 the first leg's assertions can fail; both passed on the first run, which is
 exactly when a falsification leg earns its keep.
+
+### 2026-09-16 — v1.2.0 on PyPI, and the `tinker` floor now tracks what the SERVICE accepts
+
+Cut 1.2.0 (minor: vLLM as a model kind + `--multi-user`, both additive — disk
+untouched, single-user wire byte-identical to 1.1.0). The restart it shipped on
+is what exposed the real finding.
+
+**A cached `available: true` was hiding a dead SDK.** `/api/health` on the live
+:8767 said `available: true` with 33 models right up to the restart; the fresh
+process came back `available: false, supported_models: []` and
+`BadRequestError: 400 — Your Tinker SDK version is no longer supported`.
+Nothing changed in the code: `discovery.get_capabilities` caches its first
+answer for the life of the process (`_caps_cache`, failures included), and the
+old process had probed back when 0.23 was still served. So the instance had
+been running on a credential-valid but retired SDK, and the only event that
+could reveal it was a restart. Anything that samples would have failed; nobody
+had sampled tinker since.
+
+**The floor is a liveness statement, not an import constraint.** `tinker>=0.23`
+was satisfiable and useless — tinker retires SDKs server-side, so an
+old-enough client imports fine and 400s every call. Probed the boundary rather
+than guessing: 0.23.0 rejected, 0.25.0 and 0.27.2 both answer
+`get_server_capabilities` with 33 models. Floor moved to `>=0.25`, lock
+0.23.0 → 0.27.2 (the 7-day supply-chain gate blocks 0.28/0.29 — same cap a
+weird-personas session hit on 2026-08-11 bumping 0.22.3 → 0.24.0). 507 tests
+pass on 0.27.2; `tinkpg probe` returns a real sample end-to-end.
+
+`uv tool upgrade tinkerscope` (editable requirement preserved) re-resolved the
+:8767 env: tinker 0.23.0 → 0.27.2, plus three weeks of churn the frozen env had
+missed — torch 2.13 → 2.14, openai 2.46 → **3.11** (a major), starlette
+1.3 → 1.6, fastapi 0.139 → 0.141. The live sample probe is what makes that
+churn a verified deploy rather than a hope; nothing about the openai major has
+been exercised beyond it (the OpenRouter path is untested since the upgrade).
+
+**The lesson worth keeping:** a process-lifetime cache over an external
+capability check means the health endpoint reports the world as it was at boot.
+Health that can only go stale in the optimistic direction is health that lies
+on the day it matters.
