@@ -44,6 +44,10 @@ class Settings:
     port: int
     openrouter_api_key: str | None
     tinker_api_key: str | None
+    # A vLLM (OpenAI-compatible) server whose served models join the picker as
+    # `vllm:<name>` — see api/vllm_sampler.py. None = backend off.
+    vllm_url: str | None
+    vllm_api_key: str | None
 
     @property
     def base_url(self) -> str:
@@ -114,6 +118,8 @@ def load_settings() -> Settings:
         port=int(os.environ.get("TINKERSCOPE_PORT", "8765")),
         openrouter_api_key=os.environ.get("OPENROUTER_API_KEY"),
         tinker_api_key=os.environ.get("TINKER_API_KEY"),
+        vllm_url=os.environ.get("TINKERSCOPE_VLLM_URL") or None,
+        vllm_api_key=os.environ.get("TINKERSCOPE_VLLM_API_KEY") or None,
     )
 
 

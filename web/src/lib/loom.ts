@@ -48,7 +48,14 @@ export function thinkResumeCut(tlp: TokenLogprob[], hasAnswer: boolean): number 
 
 /** The model + renderer a native turn was sampled with, as recorded in its
  *  raw_meta request block. */
-export type RawMetaModel = { base_model?: string; sampler_path?: string; renderer?: string };
+export type RawMetaModel = {
+  base_model?: string;
+  sampler_path?: string;
+  renderer?: string;
+  /** A vLLM-served turn (api/vllm_sampler.py) records the served name instead of
+   *  a tinker base/sampler pair; no renderer — the server's template is the one. */
+  vllm_model?: string;
+};
 
 /** Recover the producing model from a turn's raw_meta. The blob is the
  *  pretty-printed request/response dump (api/raw_view.py): top-level request
@@ -72,6 +79,7 @@ export function parseRawMetaModel(raw: string | undefined): RawMetaModel | null 
   const base_model = grab('base_model');
   const sampler_path = grab('sampler_path');
   const renderer = grab('renderer');
-  if (base_model == null && sampler_path == null) return null;
-  return { base_model, sampler_path, renderer };
+  const vllm_model = grab('vllm_model');
+  if (base_model == null && sampler_path == null && vllm_model == null) return null;
+  return { base_model, sampler_path, renderer, vllm_model };
 }

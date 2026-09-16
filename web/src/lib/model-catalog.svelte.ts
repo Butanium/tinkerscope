@@ -18,12 +18,13 @@
 
 import { api } from './api';
 import {
-  OR_PREFIX, BASE_PREFIX, CKPT_PREFIX,
+  OR_PREFIX, BASE_PREFIX, CKPT_PREFIX, VLLM_PREFIX,
   isOpenrouterSel, openrouterId,
   isBaseSel, baseModelId,
-  isCkptSel, samplerPathOf
+  isCkptSel, samplerPathOf,
+  isVllmSel, vllmModelId
 } from './model-sel';
-import type { Run, OpenRouterModel, TinkerModel } from './types';
+import type { Run, OpenRouterModel, TinkerModel, VllmModel } from './types';
 
 /** Recently-used raw base models + loose checkpoints (localStorage) so a picked
  *  tinker model stays visible in the panel dropdown across reloads even though
@@ -52,6 +53,11 @@ class ModelCatalog {
   // loaded catalogs). Both drive the panel dropdown + the resolvers below.
   runs = $state<Run[]>([]);
   openrouterModels = $state<OpenRouterModel[]>([]);
+  // What the configured vLLM server serves (`$TINKERSCOPE_VLLM_URL`) — empty
+  // with `vllmUrl` null when there is none; `vllmError` = configured but down.
+  vllmModels = $state<VllmModel[]>([]);
+  vllmUrl = $state<string | null>(null);
+  vllmError = $state<string | null>(null);
 
   // Typeahead catalogs (lazy-loaded when their picker opens).
   tinkerModels = $state<TinkerModel[]>([]);
@@ -106,6 +112,22 @@ class ModelCatalog {
       this.openrouterModels = await api.openrouterModels();
     } catch (e: any) {
       onError(`Failed to load OpenRouter models: ${e?.message ?? e}`);
+    }
+  }
+
+  /** The vLLM server's model list. Always loaded with the runs (it IS a panel-
+   *  picker source); an unconfigured server is silent, an unreachable one goes to
+   *  the banner — the user pointed tinkerscope at it, so its absence is news. */
+  async loadVllmModels(onError: (msg: string) => void, refresh = false) {
+    try {
+      const res = await api.vllmModels(refresh);
+      this.vllmModels = res.models ?? [];
+      this.vllmUrl = res.url ?? null;
+      this.vllmError = res.available === false && res.error ? res.error : null;
+      if (this.vllmError) onError(`vLLM server ${res.url}: ${this.vllmError}`);
+    } catch (e: any) {
+      this.vllmError = `${e?.message ?? e}`;
+      onError(`Failed to load vLLM models: ${this.vllmError}`);
     }
   }
 
@@ -188,6 +210,22 @@ class ModelCatalog {
     const m = this.tinkerModels.find((t) => t.sampler_path === sp) ?? this.recentCheckpoints.find((t) => t.sampler_path === sp);
     return m?.label || sp;
   }
+  vllmBySel(id: string | null | undefined): VllmModel | undefined {
+    const vm = vllmModelId(id);
+    if (vm == null) return undefined;
+    return this.vllmModels.find((m) => m.vllm_model === vm);
+  }
+  vllmLabel(id: string | null | undefined): string {
+    const vm = vllmModelId(id);
+    if (vm == null) return '';
+    return this.vllmBySel(id)?.label || vm;
+  }
+  /** Thinking support for a `vllm:` pick — the backend read it off the chat
+   *  template (`enable_thinking`); undefined when it couldn't, or the model isn't
+   *  in the list (server restarted with another model) → caller defaults to true. */
+  vllmSupportsThinking(id: string | null | undefined): boolean | undefined {
+    return this.vllmBySel(id)?.supports_thinking;
+  }
 
   /** Whether a `base:` pick supports the thinking toggle, per the tinker catalog's
    *  `supports_thinking`. Undefined when the catalog isn't loaded yet or the base
@@ -245,20 +283,27 @@ class ModelCatalog {
     if (!sel.run_id) return '';
     if (isBaseSel(sel.run_id)) return `◆ ${this.baseLabel(sel.run_id)}`;
     if (isCkptSel(sel.run_id)) return `◇ ${this.ckptLabel(sel.run_id)}`;
+    if (isVllmSel(sel.run_id)) return `⚙ ${this.vllmLabel(sel.run_id)}`;
     if (isOpenrouterSel(sel.run_id)) return `↗ ${this.openrouterLabel(sel.run_id)}`;
     const r = this.runById(sel.run_id);
     if (r) return `${r.sampleable === false ? '⚠ ' : r.sampleable === null ? '? ' : ''}${this.runLabel(r)}`;
     return sel.run_id;
   }
 
-  /** Build one panel's dropdown item list (runs + base/ckpt recents + OpenRouter),
-   *  keyed off the panel's currently-selected `runId` so a CLI/shared-state
-   *  selection that isn't in recents yet still gets an entry. */
+  /** Build one panel's dropdown item list (runs + vLLM-served models + base/ckpt
+   *  recents + OpenRouter), keyed off the panel's currently-selected `runId` so a
+   *  CLI/shared-state selection that isn't in recents yet still gets an entry.
+   *  vLLM entries sit right after the runs: like a run they are the models YOU
+   *  are serving, not a reference catalog. A `vllm:` pick the server no longer
+   *  lists (restarted with another model) still gets a row, so the panel's label
+   *  survives and a resend surfaces the backend's error rather than a blank. */
   modelItems(runId: string | null): ModelItem[] {
     const baseM = baseModelId(runId);
     const sp = samplerPathOf(runId);
+    const vm = vllmModelId(runId);
     const baseInRecents = baseM != null && this.recentBaseModels.some((t) => t.base_model === baseM);
     const ckptInRecents = sp != null && this.recentCheckpoints.some((t) => t.sampler_path === sp);
+    const vllmListed = vm != null && this.vllmModels.some((m) => m.vllm_model === vm);
     return [
       ...this.runs.map((r) => ({
         id: r.id,
@@ -269,6 +314,8 @@ class ModelCatalog {
         reason: r.sampleable === false ? (r.unsampleable_reason ?? undefined) : undefined,
         search: [r.id, r.base_model, r.wandb_project, r.renderer_name].filter(Boolean).join(' ')
       })),
+      ...this.vllmModels.map((m) => ({ id: VLLM_PREFIX + m.vllm_model, label: `⚙ ${m.label || m.vllm_model}`, search: [m.vllm_model, m.root].filter(Boolean).join(' ') })),
+      ...(vm != null && !vllmListed ? [{ id: VLLM_PREFIX + vm, label: `⚙ ${vm}`, unavailable: true, reason: this.vllmUrl ? `not served by ${this.vllmUrl} right now` : 'no vLLM server configured (TINKERSCOPE_VLLM_URL)' }] : []),
       ...(baseM != null && !baseInRecents ? [{ id: BASE_PREFIX + baseM, label: `◆ ${this.baseLabel(runId)}` }] : []),
       ...this.recentBaseModels.map((t) => ({ id: BASE_PREFIX + t.base_model, label: `◆ ${t.label || t.base_model}`, search: t.base_model })),
       ...(sp != null && !ckptInRecents ? [{ id: CKPT_PREFIX + sp, label: `◇ ${this.ckptLabel(runId)}` }] : []),

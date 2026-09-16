@@ -110,6 +110,20 @@ and in this file's reference section; HANDOFF.md itself is retired.
   docstrings are thorough and current. tinkerscope calls the **tinker SDK
   directly** now; the old latteries path is gone (its renderer-cache and
   thinking-parse *lessons* carried over into this file).
+- **vLLM backend** (`src/tinkerscope/api/vllm_sampler.py` — module docstring): a
+  self-hosted OpenAI-compatible server (`$TINKERSCOPE_VLLM_URL` / `--vllm-url`)
+  whose models join the picker as `vllm:<name>` (⚙) and sample NATIVE-shaped —
+  the prompt is rendered by the server's own `/tokenize` (its chat template,
+  `continue_final_message` for prefill) and sent to `/v1/completions` as token
+  ids, `return_tokens_as_token_ids` + `logprobs=5` give ids + top-K back in the
+  same call, `prompt_logprobs` scores a loom's forced prefix, `raw_meta`'s request
+  block is keyed `vllm_model` (what `loom.ts:parseRawMetaModel` anchors on).
+  Token text needs a decoder: the HF tokenizer for the served model's `root` when
+  this box can load it (also answers `supports_thinking` off the template), else
+  `/detokenize` per id, cached. Token-streams at n==1. Tests run against a FAKE
+  vLLM app through the module's `_transport` seam (`tests/test_vllm_sampler.py`
+  — the response shapes there were probed live on vllm 0.19.1). Read-only
+  catalog: `/api/vllm-models`, ~30 s cache.
 - **Shared-state bus / live-drive** (the `tinkpg` ↔ browser lockstep): see
   `docs/HANDOFF_BRANCHING.md` §1 + `src/tinkerscope/api/state.py`.
 - **Deletion is recoverable, in two layers** — `workspace_store.py`'s trash
@@ -235,7 +249,8 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     `.samples-progress.running` sticky. The sidebar `.btn-stop-sidebar` stays the
     all-panels one. Smoke: `browser_stop_generation.py` scenario C.
   - `lib/model-catalog.svelte.ts` → `modelCatalog` — the **model catalogs +
-    labels**: `runs` / `openrouterModels` / the lazy tinker + OR typeahead
+    labels**: `runs` / `openrouterModels` / `vllmModels` (+ `vllmUrl`/`vllmError`;
+    loaded with the runs, refreshed by the sidebar ↻) / the lazy tinker + OR typeahead
     catalogs (+ their loading/error flags) / the localStorage recents; the
     loaders (`loadRuns`/`loadOpenrouterModels` take an `onError` callback for
     +page's shared banner; `loadOrCatalog`/`loadTinkerCatalog` own their error
@@ -337,8 +352,8 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     no-ops on bucket rows / off-path turns / <2 siblings). **Has
     `panel-view.test.ts`**; browser smoke
     `tests/small-smokes/browser_samples_view.py`.
-  - `lib/model-sel.ts` — the `openrouter:`/`base:`/`ckpt:` sentinel encoding
-    (prefixes, predicates, id extractors) for a panel's model selection, plus
+  - `lib/model-sel.ts` — the `openrouter:`/`base:`/`ckpt:`/`vllm:` sentinel encoding
+    (prefixes, predicates, id extractors, `isRefSel` = any of them) for a panel's model selection, plus
     `runSamplerPath(checkpoints, name)` — what the copy-id button hands out for a
     DISCOVERED-run panel. It duplicates `routes/chat.py:_resolve_checkpoint`'s
     rule (named ckpt must exist AND have a sampler path; no pick ⇒ `final`, else

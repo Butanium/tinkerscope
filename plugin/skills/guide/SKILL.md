@@ -42,8 +42,8 @@ someone through the screen, or to answer a specific "what does this do".
 
 The sidebar splits in two. **Sampling params** is what the next send draws:
 temperature, max tokens, samples, the thinking Off/On/Both toggle, and an
-**Advanced…** popup for top_p and the OpenRouter-only knobs (top_k, presence /
-repetition penalty). **View** is how replies that already exist are shown:
+**Advanced…** popup for top_p and the OpenRouter / vLLM knobs (top_k, presence /
+repetition penalty — Tinker models take temperature and top_p only). **View** is how replies that already exist are shown:
 *Layout* (all samples stacked vs one at a time), whether thinking blocks start
 folded, and token probabilities. Changing anything under View re-renders what's
 on screen; it never re-samples.
@@ -81,7 +81,10 @@ the `+` for a blank one. Each workspace has its own URL (`?w=<id>`), so you can
 bookmark or share a link to it.
 
 **Panel** — one column, one model. A model is either a *discovered run
-checkpoint* (from the scanned directory), a *raw base model*, or an *OpenRouter
+checkpoint* (from the scanned directory), a *raw base model*, a model served by
+*your own vLLM server* (marked `⚙` — only when tinkerscope was started with
+`--vllm-url` / `TINKERSCOPE_VLLM_URL`; it samples like a native model: token
+probabilities, the loom, raw view), or an *OpenRouter
 reference model* for comparison against something known. Sending a message fires
 it into every panel at once, so the columns are the same prompt answered by
 different models. Drag a column header to reorder; the sidebar pickers and the

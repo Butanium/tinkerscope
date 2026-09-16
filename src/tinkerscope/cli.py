@@ -1108,6 +1108,8 @@ def _bind_panel_model(body: dict, panel: dict) -> None:
         body["base_model"] = rid[len("base:"):]
     elif rid.startswith("ckpt:"):
         body["sampler_path"] = rid[len("ckpt:"):]
+    elif rid.startswith("vllm:"):
+        body["vllm_model"] = rid[len("vllm:"):]
     else:
         body["run_id"] = rid
         if panel.get("checkpoint"):
@@ -1979,7 +1981,7 @@ def cmd_battery(
 
 @app.command("probe")
 def cmd_probe(
-    run: str = typer.Argument(..., help="run id / unique substring, `run@checkpoint`, `base:<model>`, or `ckpt:<sampler_path>`"),
+    run: str = typer.Argument(..., help="run id / unique substring, `run@checkpoint`, `base:<model>`, `ckpt:<sampler_path>`, or `vllm:<model>` (a model the configured vLLM server lists)"),
     prompt: Optional[str] = typer.Argument(None, help="the user message; omit when using --ancestry-file"),
     n: int = typer.Option(1, "--n", help="samples to draw"),
     temperature: Optional[float] = typer.Option(None, "--temperature"),
@@ -2058,6 +2060,8 @@ def cmd_probe(
         body["base_model"] = run_arg[len("base:"):]
     elif run_arg.startswith("ckpt:"):
         body["sampler_path"] = run_arg[len("ckpt:"):]
+    elif run_arg.startswith("vllm:"):
+        body["vllm_model"] = run_arg[len("vllm:"):]
     else:
         r = _resolve_run(run_arg)
         _guard_sampleable(r)
@@ -3327,12 +3331,16 @@ def cmd_serve(
         False, "--reseed",
         help="with --pack: fully rebuild the pack's workspaces (delete + re-import, so re-exported raw_meta/logprob blobs refresh and dropped nodes are removed) and overwrite default params — for iterating on a pack you keep re-exporting (implies --force)",
     ),
+    vllm_url: Optional[str] = typer.Option(
+        None, "--vllm-url", metavar="URL",
+        help="a vLLM (OpenAI-compatible) server whose served models join the picker as `vllm:<name>` — sampled natively (token ids, logprobs, loom); same as $TINKERSCOPE_VLLM_URL",
+    ),
 ) -> None:
     """Serve the API + web UI for DIRS (bare `tinkerscope <dir>` is shorthand for this)."""
     from .serve import run_server  # lazy: keeps uvicorn off the driver-verb hot path
 
     run_server(dirs or None, host=host, port=port, reload=reload,
-               pack=pack, force=force, reseed=reseed)
+               pack=pack, force=force, reseed=reseed, vllm_url=vllm_url)
 
 
 pack_app = typer.Typer(

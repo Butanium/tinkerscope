@@ -19,7 +19,11 @@ tinkerscope ~/my-training-runs # scans the tree, auto-picks a port, prints the U
 
 Open the printed URL and you're in. `tinkerscope DIR1 DIR2 …` scans several
 trees at once. Set `OPENROUTER_API_KEY` too if you want OpenRouter reference
-models next to your checkpoints. Lost in the UI? The **`?` button** in the
+models next to your checkpoints. Serving weights yourself? `tinkerscope
+--vllm-url http://host:8000` (or `TINKERSCOPE_VLLM_URL`) lists every model a
+[vLLM](https://docs.vllm.ai) server serves in the picker (`⚙`) and samples it
+like a native model — token probabilities, the loom, the works
+(`TINKERSCOPE_VLLM_API_KEY` if the server has `--api-key`). Lost in the UI? The **`?` button** in the
 sidebar explains every control and keyboard shortcut — or just ask your agent
 (guide skill below).
 

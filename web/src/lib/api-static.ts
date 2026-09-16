@@ -251,6 +251,9 @@ const impl: ApiClient = {
     error: 'static site — no OpenRouter catalog',
     models: []
   }),
+  // A published site has no vLLM server behind it; a baked `vllm:` panel keeps
+  // its id as the label.
+  vllmModels: async () => ({ available: false, error: null, url: null, models: [] }),
   // A published site has no tinker credentials and cannot reach the API from a
   // browser (no CORS headers), so the probe reports unavailable rather than
   // pretending. The picker that would call it is hidden in read-only mode anyway.

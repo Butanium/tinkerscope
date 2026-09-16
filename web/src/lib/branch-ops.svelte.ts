@@ -78,7 +78,8 @@ export type BranchOpsDeps = {
 function metaModelKey(meta: RawMetaModel | null): string | null {
   if (!meta) return null;
   return meta.sampler_path ? 'sp:' + meta.sampler_path
-    : meta.base_model ? 'base:' + meta.base_model : null;
+    : meta.base_model ? 'base:' + meta.base_model
+      : meta.vllm_model ? 'vllm:' + meta.vllm_model : null;
 }
 
 class BranchOps {
@@ -407,7 +408,9 @@ class BranchOps {
       ? { sampler_path: meta.sampler_path }
       : meta?.base_model
         ? { base_model: meta.base_model }
-        : undefined; // fall back to the panel's selection (native turns always carry raw_meta)
+        : meta?.vllm_model
+          ? { vllm_model: meta.vllm_model }
+          : undefined; // fall back to the panel's selection (native turns always carry raw_meta)
     // Re-read after the awaits: the node could have been pruned/cycled meanwhile.
     const tree = ws.treeFor(panel);
     const node = tree.nodes[nodeId];

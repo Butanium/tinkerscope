@@ -7,6 +7,7 @@ import type {
   TinkerModelsResponse,
   TinkerProbe,
   OpenRouterAvailableResponse,
+  VllmModelsResponse,
   Health,
   PlaygroundState,
   StatePatch,
@@ -61,6 +62,9 @@ const httpApi = {
     j<OpenRouterAvailableResponse>(
       `/api/openrouter-models/available${refresh ? '?refresh' : ''}`
     ),
+  // The configured vLLM server's served models (empty + available:false when none).
+  vllmModels: (refresh = false) =>
+    j<VllmModelsResponse>(`/api/vllm-models${refresh ? '?refresh=1' : ''}`),
   addOpenrouterModel: (openrouter_model: string, label?: string) =>
     j<OpenRouterModel[]>('/api/openrouter-models', {
       method: 'POST',

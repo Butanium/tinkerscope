@@ -71,6 +71,29 @@ export type TinkerProbe = { available: boolean; base_model: string | null; error
 
 /** Response shape for the two typeahead-catalog endpoints. */
 export type TinkerModelsResponse = { available: boolean; error: string | null; models: TinkerModel[] };
+
+/** One model the configured vLLM server serves (`/api/vllm-models`). `id ===
+ *  vllm_model` (the served name); `root` is what vLLM loaded (HF id or a path on
+ *  the GPU box). `supports_thinking` comes from the chat template when the
+ *  backend could read it (absent ⇒ assume true, like a loose ckpt). */
+export type VllmModel = {
+  kind: 'vllm';
+  id: string;
+  label: string;
+  vllm_model: string;
+  root?: string | null;
+  parent?: string | null;
+  max_model_len?: number | null;
+  supports_thinking?: boolean;
+};
+/** `available:false` + `error:null` = no server configured; with an error =
+ *  configured but unreachable. */
+export type VllmModelsResponse = {
+  available: boolean;
+  error: string | null;
+  url: string | null;
+  models: VllmModel[];
+};
 export type OpenRouterAvailableResponse = {
   available: boolean;
   error: string | null;
@@ -83,6 +106,8 @@ export type Health = {
   scan_roots?: string[];
   tinker_key?: boolean;
   openrouter_key?: boolean;
+  /** The configured vLLM server (normalized URL), or null. */
+  vllm_url?: string | null;
   available?: boolean;
   supported_models?: string[];
   error?: string | null;

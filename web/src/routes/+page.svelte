@@ -17,7 +17,8 @@
     OR_PREFIX, BASE_PREFIX, CKPT_PREFIX,
     isOpenrouterSel, openrouterId,
     isBaseSel, baseModelId,
-    isCkptSel, samplerPathOf, runSamplerPath
+    isCkptSel, samplerPathOf, runSamplerPath,
+    isVllmSel, vllmModelId, isRefSel
   } from '$lib/model-sel';
   import { looksLikeSamplerPath, shortPathLabel } from '$lib/tinker-path';
   import { thinkingView } from '$lib/thinking-view.svelte';
@@ -213,6 +214,7 @@
         isOpenrouterSel(p.run_id) ||
         (isBaseSel(p.run_id) && (modelCatalog.baseSupportsThinking(p.run_id) ?? true)) ||
         (isCkptSel(p.run_id) && (modelCatalog.ckptSupportsThinking(p.run_id) ?? true)) ||
+        (isVllmSel(p.run_id) && (modelCatalog.vllmSupportsThinking(p.run_id) ?? true)) ||
         modelCatalog.runById(p.run_id)?.supports_thinking
     )
   );
@@ -300,7 +302,7 @@
     // prefer the last one whose weights still exist on tinker, so a run whose final
     // is gone but an earlier step is live defaults to something samplable.
     // (offline/unknown → servable is null → falls back to the plain last.)
-    if (isOpenrouterSel(runId) || isBaseSel(runId) || isCkptSel(runId)) return null;
+    if (isRefSel(runId)) return null;
     const r = modelCatalog.runById(runId);
     if (!r?.checkpoints.length) return null;
     const lastServable = [...r.checkpoints].reverse().find((c) => c.servable === true);
@@ -426,7 +428,7 @@
    *  purpose — it's a warning, not a block (the sidebar warns + a failed send
    *  surfaces the backend error), consistent with base/OR "always eligible". */
   function panelCanChat(p: PanelSel): boolean {
-    if (isOpenrouterSel(p.run_id) || isBaseSel(p.run_id) || isCkptSel(p.run_id)) return true;
+    if (isRefSel(p.run_id)) return true;
     const r = panelRun(p);
     return !!(r && r.base_model && r.checkpoints.length > 0);
   }
@@ -715,6 +717,8 @@
     if (bm != null) return { base_model: bm };
     const sp = samplerPathOf(pSel.run_id);
     if (sp != null) return { sampler_path: sp };
+    const vm = vllmModelId(pSel.run_id);
+    if (vm != null) return { vllm_model: vm };
     const r = panelRun(pSel);
     return r ? { run_id: r.id, checkpoint: pSel.checkpoint } : null;
   }
@@ -731,6 +735,7 @@
     if ('openrouter_model' in m) return 'or:' + m.openrouter_model;
     if ('base_model' in m) return 'base:' + m.base_model;
     if ('sampler_path' in m) return 'sp:' + m.sampler_path;
+    if ('vllm_model' in m) return 'vllm:' + m.vllm_model;
     const sp = runSamplerPath(panelRun(pSel)?.checkpoints, m.checkpoint);
     return sp ? 'sp:' + sp : null;
   }
@@ -1511,6 +1516,7 @@
     try {
       await api.refreshModels();
       await modelCatalog.loadRuns(setBackendError);
+      await modelCatalog.loadVllmModels(setBackendError, true); // a restarted vLLM server
       // Also re-sweep tinker checkpoints (only if the picker's been opened this session,
       // else the next open loads them fresh anyway) so a just-created checkpoint appears.
       if (modelCatalog.tinkerCatalogLoaded) await modelCatalog.loadTinkerCatalog(true);
@@ -1673,7 +1679,8 @@
     const orId = openrouterId(p?.run_id);
     const bm = baseModelId(p?.run_id);
     const sp = samplerPathOf(p?.run_id);
-    const isRef = orId != null || bm != null || sp != null;
+    const vm = vllmModelId(p?.run_id);
+    const isRef = isRefSel(p?.run_id);
     const r = !isRef ? panelRun(p ?? panelSels[0]) : undefined;
     try {
       const entry = await api.createPin({
@@ -1682,7 +1689,9 @@
         // round-trips; checkpoint is null for OR / base / loose-checkpoint.
         run_id: isRef ? p?.run_id : (r?.id ?? null),
         checkpoint: isRef ? null : (p?.checkpoint ?? null),
-        base_model: orId != null ? orId : bm != null ? bm : (r?.base_model ?? null),
+        // A reference pick records its own id here (OR id / base id / vLLM served
+        // name) — the pin has no dedicated field per backend.
+        base_model: orId ?? bm ?? vm ?? (r?.base_model ?? null),
         sampler_path: sp,
         dataset_path: r?.dataset_path ?? null,
         question: lastUserQuestion(),
@@ -1747,6 +1756,7 @@
     if (isOpenrouterSel(p.run_id)) return modelCatalog.openrouterLabel(p.run_id);
     if (isBaseSel(p.run_id)) return modelCatalog.baseLabel(p.run_id);
     if (isCkptSel(p.run_id)) return modelCatalog.ckptLabel(p.run_id);
+    if (isVllmSel(p.run_id)) return modelCatalog.vllmLabel(p.run_id);
     const r = modelCatalog.runById(p.run_id);
     const name = r?.name ?? p.run_id ?? '?';
     return p.checkpoint ? `${name}@${p.checkpoint}` : name;
@@ -1887,6 +1897,7 @@
       try { health = await api.health(); } catch (e: any) { backendError = `Backend not reachable: ${e?.message ?? e}`; }
       await modelCatalog.loadRuns(setBackendError);
       await modelCatalog.loadOpenrouterModels(setBackendError);
+      await modelCatalog.loadVllmModels(setBackendError);
       // A static site's panels reference `ckpt:`/`base:` sentinels, whose LABELS
       // live in the tinker catalog — normally loaded lazily when the picker opens,
       // which read-only mode never does. Baked file, so eager-loading is free, and
@@ -2152,18 +2163,20 @@
           {@const isOr = isOpenrouterSel(p.run_id)}
           {@const isBase = isBaseSel(p.run_id)}
           {@const isCkpt = isCkptSel(p.run_id)}
+          {@const isVllm = isVllmSel(p.run_id)}
           {@const orModel = modelCatalog.openrouterBySel(p.run_id)}
           {@const baseM = baseModelId(p.run_id)}
           {@const sp = samplerPathOf(p.run_id)}
+          {@const vllmM = vllmModelId(p.run_id)}
           <!-- The one string this panel is worth copying: a checkpoint's sampler path
                (loose `ckpt:` panel or the checkpoint picked under a discovered run) or
                a base model's id. null ⇒ no button (see the row below). -->
           {@const copyable =
-            (isCkpt ? sp : isBase ? baseM : isOr ? null : runSamplerPath(pr?.checkpoints, p.checkpoint)) ?? null}
+            (isCkpt ? sp : isBase ? baseM : isVllm ? vllmM : isOr ? null : runSamplerPath(pr?.checkpoints, p.checkpoint)) ?? null}
           <!-- ⇧ on that same button copies the run's training JSONL instead (absolute
                path, straight into a dataset viewer). Only a DISCOVERED run knows one —
-               a loose checkpoint / base / OpenRouter panel has no config.json. -->
-          {@const dsPath = (isCkpt || isBase || isOr ? null : pr?.dataset_path) ?? null}
+               a loose checkpoint / base / vLLM / OpenRouter panel has no config.json. -->
+          {@const dsPath = (isRefSel(p.run_id) ? null : pr?.dataset_path) ?? null}
           <!-- The dropdown item list (runs + base/ckpt recents + OpenRouter, plus
                a CLI/shared-state selection not yet in recents) is built by the
                modelCatalog store — see its `modelItems`. -->
@@ -2256,6 +2269,18 @@
               <div class="run-meta or-meta">↗ {orModel?.openrouter_model ?? openrouterId(p.run_id)}</div>
               {#if health && health.openrouter_key === false && !readOnly}
                 <div class="unsampleable-note">Set OPENROUTER_API_KEY to sample this model.</div>
+              {/if}
+            {:else if isVllm}
+              <!-- vLLM-served model: the server it comes from (a served name means
+                   nothing without it), and the loaded weights when they differ. -->
+              {@const vmEntry = modelCatalog.vllmBySel(p.run_id)}
+              <div class="run-meta or-meta">⚙ {modelCatalog.vllmUrl ?? 'vLLM'}{vmEntry?.root && vmEntry.root !== vllmM ? ` · ${vmEntry.root}` : ''}</div>
+              {#if !readOnly && !modelCatalog.vllmUrl}
+                <div class="unsampleable-note">No vLLM server configured — start tinkerscope with --vllm-url (or TINKERSCOPE_VLLM_URL).</div>
+              {:else if !readOnly && modelCatalog.vllmError}
+                <div class="unavailable-warn">⚠ vLLM server unreachable: {modelCatalog.vllmError}</div>
+              {:else if !readOnly && !vmEntry}
+                <div class="unavailable-warn">⚠ Not served by {modelCatalog.vllmUrl} right now — a send will fail.</div>
               {/if}
             {:else}
               {#if pr && pr.checkpoints.length > 0 && !readOnly}
@@ -2460,15 +2485,15 @@
                 <input type="range" min="0" max="1" step="0.05" value={s.top_p ?? 0.8} oninput={(e) => setTopP(parseFloat((e.target as HTMLInputElement).value))} class="sidebar-slider" />
               </div>
               <div class="advanced-param-row">
-                <label>top_k (OpenRouter only)</label>
+                <label>top_k (OpenRouter / vLLM)</label>
                 <input type="number" bind:value={topK} min="-1" max="200" class="sidebar-input" style="width: 70px;" class:param-limited={true} />
               </div>
               <div class="advanced-param-row">
-                <label>presence_penalty: {presencePenalty.toFixed(1)} (OpenRouter only)</label>
+                <label>presence_penalty: {presencePenalty.toFixed(1)} (OpenRouter / vLLM)</label>
                 <input type="range" min="0" max="2" step="0.1" bind:value={presencePenalty} class="sidebar-slider param-limited" />
               </div>
               <div class="advanced-param-row">
-                <label>repetition_penalty: {repetitionPenalty.toFixed(1)} (OpenRouter only)</label>
+                <label>repetition_penalty: {repetitionPenalty.toFixed(1)} (OpenRouter / vLLM)</label>
                 <input type="range" min="1" max="2" step="0.1" bind:value={repetitionPenalty} class="sidebar-slider param-limited" />
               </div>
               <p class="tinker-note">Tinker models only support temperature and top_p. Other parameters apply to OpenRouter reference models only.</p>

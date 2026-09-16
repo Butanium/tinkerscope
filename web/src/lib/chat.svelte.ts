@@ -51,6 +51,7 @@ export type ChatModelField =
   | { openrouter_model: string }
   | { base_model: string }
   | { sampler_path: string }
+  | { vllm_model: string }
   | { run_id: string; checkpoint: string | null };
 
 /** What a fired-but-not-yet-terminal detached chat needs to fold itself when its

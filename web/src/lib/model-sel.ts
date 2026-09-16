@@ -3,11 +3,12 @@
 // `run_id`/`compare_run_id` field in shared state (so the choice round-trips
 // through PlaygroundState and is visible to the CLI).
 //
-// Three sentinels share that one field; the chat builder (fireChat) detects the
+// Four sentinels share that one field; the chat builder (fireChat) detects the
 // prefix and sends the matching id shape to /api/chat:
 //   openrouter:<id>   → { openrouter_model }   OpenRouter reference model
 //   base:<model>      → { base_model }         raw tinker base model (no LoRA)
 //   ckpt:<path>       → { sampler_path }        loose tinker sampler checkpoint
+//   vllm:<name>       → { vllm_model }          a model the configured vLLM server lists
 // A bare value (no prefix) is a discovered Run id → { run_id, checkpoint }.
 //
 // Everything here is PURE string work (no reactive/catalog reads). The LABEL
@@ -17,6 +18,7 @@
 export const OR_PREFIX = 'openrouter:';
 export const BASE_PREFIX = 'base:';
 export const CKPT_PREFIX = 'ckpt:';
+export const VLLM_PREFIX = 'vllm:';
 
 export function isOpenrouterSel(id: string | null | undefined): boolean {
   return typeof id === 'string' && id.startsWith(OR_PREFIX);
@@ -37,6 +39,19 @@ export function isCkptSel(id: string | null | undefined): boolean {
 }
 export function samplerPathOf(id: string | null | undefined): string | null {
   return isCkptSel(id) ? (id as string).slice(CKPT_PREFIX.length) : null;
+}
+
+export function isVllmSel(id: string | null | undefined): boolean {
+  return typeof id === 'string' && id.startsWith(VLLM_PREFIX);
+}
+export function vllmModelId(id: string | null | undefined): string | null {
+  return isVllmSel(id) ? (id as string).slice(VLLM_PREFIX.length) : null;
+}
+
+/** Any of the non-run sentinels — the picks that have no checkpoint selector,
+ *  are always chat-eligible, and copy their own id rather than a sampler path. */
+export function isRefSel(id: string | null | undefined): boolean {
+  return isOpenrouterSel(id) || isBaseSel(id) || isCkptSel(id) || isVllmSel(id);
 }
 
 /** The `tinker://…/sampler_weights/…` path a discovered RUN panel is pointed at —

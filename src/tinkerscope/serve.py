@@ -59,8 +59,13 @@ def run_server(
     pack: str | None = None,
     force: bool = False,
     reseed: bool = False,
+    vllm_url: str | None = None,
 ) -> None:
     """The old `tinkerscope` main(), minus argparse (that's `cli.py`'s now)."""
+    if vllm_url:
+        # Same rule as host/port: the flag becomes the env var the settings module
+        # reads at import (and a --reload child re-reads).
+        os.environ["TINKERSCOPE_VLLM_URL"] = vllm_url
     if dirs:
         resolved = [d.expanduser().resolve() for d in dirs]
     elif os.environ.get("TINKERSCOPE_SCAN_ROOTS"):
@@ -114,6 +119,8 @@ def run_server(
     atexit.register(instances.unregister)
     print(f"tinkerscope serving {', '.join(str(d) for d in resolved)}")
     print(f"  → http://{host}:{bound}")
+    if os.environ.get("TINKERSCOPE_VLLM_URL"):
+        print(f"  vLLM models from {os.environ['TINKERSCOPE_VLLM_URL']}")
     try:
         uvicorn.run(
             "tinkerscope.api.main:app",

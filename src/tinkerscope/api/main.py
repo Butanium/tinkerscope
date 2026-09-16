@@ -18,7 +18,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import workspace_store
+from . import vllm_sampler, workspace_store
 from .discovery import get_capabilities
 from .routes import (
     chat,
@@ -32,6 +32,7 @@ from .routes import (
     samplescope,
     search,
     state,
+    vllm_models,
 )
 from .settings import SETTINGS
 
@@ -71,6 +72,7 @@ app.add_middleware(
 
 app.include_router(models.router)
 app.include_router(openrouter_models.router)
+app.include_router(vllm_models.router)
 app.include_router(chat.router)
 app.include_router(state.router)
 app.include_router(highlights.router)
@@ -91,6 +93,9 @@ def health() -> dict:
         "scan_roots": [str(r) for r in SETTINGS.scan_roots],
         "tinker_key": bool(SETTINGS.tinker_api_key),
         "openrouter_key": bool(SETTINGS.openrouter_api_key),
+        # The configured vLLM server (normalized), or null — its models are on
+        # /api/vllm-models and sample via /api/chat's `vllm_model`.
+        "vllm_url": vllm_sampler.base_url(),
         # caps: {"available": bool, "supported_models": [str, ...], "error": str|None}
         **caps,
     }

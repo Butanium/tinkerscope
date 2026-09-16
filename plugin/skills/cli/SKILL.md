@@ -371,10 +371,16 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   use it for "what does this model *usually* say to X". With `--thinking`,
   reasoning streams first, before the answer (dimmed in a real terminal,
   prefixed `[thinking]` when piped/captured).
-- **The browser has model kinds the CLI doesn't drive.** `tinkpg` targets LoRA
-  training runs by id. The browser's "+ Tinker model" typeahead additionally
-  offers raw base models (no LoRA) and loose sampler checkpoints (UUID-only,
-  picked by id/UUID) — those are browser-only selections for now.
+- **The browser has model kinds the CLI drives only partly.** `tinkpg chat` /
+  `compare` target LoRA training runs by id. The browser's "+ Tinker model"
+  typeahead additionally offers raw base models (no LoRA) and loose sampler
+  checkpoints (UUID-only), and a server started with `--vllm-url` lists every
+  model its vLLM serves (`⚙`). `tinkpg probe` takes any of them as a selector —
+  `base:<model>`, `ckpt:<sampler_path>`, `openrouter:<id>`, `vllm:<name>` — and
+  `send` fires into whatever the panels are bound to, so a panel the human
+  pointed at a ⚙ model is driven like any run. `vllm:` samples natively (token
+  logprobs, loom, raw view), the model names being whatever
+  `GET /api/vllm-models` lists.
 
 ## Collaboration patterns
 
@@ -682,6 +688,7 @@ tinkerscope serve [dirs...] [options]
   --pack FILE_OR_URL                apply a share pack (local path or http(s) URL) to this folder's state before serving
   --force                           with --pack: also overwrite existing default params/layout (default: keep them if the folder was already used)
   --reseed                          with --pack: fully rebuild the pack's workspaces (delete + re-import, so re-exported raw_meta/logprob blobs refresh and dropped nodes are removed) and overwrite default params — for iterating on a pack you keep re-exporting (implies --force)
+  --vllm-url URL                    a vLLM (OpenAI-compatible) server whose served models join the picker as `vllm:<name>` — sampled natively (token ids, logprobs, loom); same as $TINKERSCOPE_VLLM_URL
 tinkerscope pack export <out> [options]
   # Export the current setup to a pack YAML file.
   --dir PATH (repeatable)           scan root(s) whose state to export (default: cwd) — must match how the instance was launched

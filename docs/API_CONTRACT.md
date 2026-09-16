@@ -98,7 +98,7 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
 
 | Method | Path | Body / params | Returns |
 |---|---|---|---|
-| GET | `/api/health` | — | `{ok, root, scan_roots[], tinker_key, openrouter_key, available, supported_models[], error}` |
+| GET | `/api/health` | — | `{ok, root, scan_roots[], tinker_key, openrouter_key, vllm_url, available, supported_models[], error}` — `vllm_url` = the configured vLLM server (normalized, `$TINKERSCOPE_VLLM_URL` / `--vllm-url`) or null |
 | GET | `/api/models` | — | `Run[]` (with `supports_thinking`) |
 | POST | `/api/models/refresh` | — | `{status, count}` (rescans fs + capabilities) |
 | GET | `/api/tinker-models` | `?refresh` | `{available, error, models:[…]}` — everything sampleable through tinker, one filterable list. Each entry has `kind` + unified `id` + `label`. `kind:"base"` (+`base_model`, +`supports_thinking`) = raw base models from `get_server_capabilities` (no LoRA); `supports_thinking` = the family exposes a binary thinking toggle (so the composer can hide its thinking control for base picks with none). `kind:"checkpoint"` (+`sampler_path`,`created`) = every sampler checkpoint the account still has (the REST `list_user_checkpoints` sweep — not the 20-capped oai /v1/models), newest first, UUID-only (no `supports_thinking` — base/renderer unknown ⇒ the UI assumes thinking-capable). Base models first, then checkpoints. Entries a **share pack** injected (see `docs/PACK.md`) are appended with `pack:true` and deduped by `id` against the sweep — these carry explicit sampler paths / base models the account sweep won't list (public checkpoints trained elsewhere), so they appear even offline / cross-account. A registry label **OVERRIDES** a sweep entry's derived one (same `id` ⇒ one row, not two) and sets `named:true`; an entry with no registry label has no `named` flag, which is how the UI knows its label is derived and offers to name it. |
@@ -108,6 +108,7 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
 | POST | `/api/openrouter-models` | `{openrouter_model, label?}` | the updated saved list (upsert) |
 | DELETE | `/api/openrouter-models?model=<id>` | — | the updated saved list (model id in query; ids have slashes) |
 | GET | `/api/openrouter-models/available` | `?refresh` | `{available, error, models:[{openrouter_model, label}]}` — full OpenRouter catalog (their `/v1/models`) for typeahead |
+| GET | `/api/vllm-models` | `?refresh` | `{available, error, url, models:[{kind:"vllm", id, label, vllm_model, root, parent, max_model_len, supports_thinking?}]}` — what the configured vLLM server serves (its `/v1/models`), as panel-picker entries (`vllm:<id>` sentinel; `id === vllm_model`, the served name). `available:false` + `error:null` = no server configured; with an error = configured but unreachable. `root` = what vLLM loaded (HF id or a path on the GPU box); `supports_thinking` is read off the chat template (`enable_thinking`) when the tinkerscope box can load the tokenizer for `root`, absent otherwise (⇒ assume true). Cached ~30 s server-side; `?refresh=1` re-fetches now. Read-only — the list IS the `vllm serve` invocation. Sampling: `/api/chat` with `vllm_model` (`api/vllm_sampler.py`). |
 | POST | `/api/chat` | ChatRequest (below) | **SSE** (below) |
 | POST | `/api/chat/{chat_id}/cancel` | — | `{status, chat_id}` — cancel an in-flight chat by id (`status`: `"cancelling"` or `"not_found"`). How the browser's "Stop all" reaches a chat it doesn't own (fired by tinkpg / another tab, so no local AbortController): drives the SAME guaranteed terminal a client disconnect would — `chat_end` fires (`running` clears for every subscriber), any already-completed samples are still committed, and a cancel with 0 completed samples fires the **error**-flavored terminal so nothing folds an empty branch. Idempotent (already-ended chats are `not_found`). Best-effort remote-side: the tinker SDK runs sample calls on its own loop, so cancel stops us listening, never the remote compute in flight. |
 | POST | `/api/close` | — | `{status}` (drops cached sampling clients) |
@@ -273,7 +274,14 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
   "checkpoint": "final",  // checkpoint NAME; omitted ⇒ last checkpoint with a sampler
   "base_model": null,     // OR a raw tinker base model id (no LoRA) from /api/tinker-models
   "sampler_path": null,   // OR a "loose" tinker sampler path (kind:"checkpoint" from /api/tinker-models)
-  "openrouter_model": null,// OR an OpenRouter model id. Exactly one of run_id/base_model/sampler_path/openrouter_model.
+  "openrouter_model": null,// OR an OpenRouter model id.
+  "vllm_model": null,     // OR a model the configured vLLM server lists (/api/vllm-models).
+                          // Exactly one of run_id/base_model/sampler_path/openrouter_model/vllm_model.
+                          // vllm_model samples like a NATIVE model: token-id prompts rendered by
+                          // the server's own chat template, token_logprobs + top-5 from the
+                          // sampling call, raw_meta (request block keyed `vllm_model`),
+                          // continue_tokens (loom) honored; top_k / presence_penalty /
+                          // repetition_penalty forwarded. Token-streams at n==1.
   "messages": [{"role":"user","content":"…"}],   // required
   "system_prompt": null,  // optional; the GLOBAL system-prompt part.
                           // "" = EXPLICITLY none (never inherits — see params_scope).
@@ -383,7 +391,8 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
 ### /api/chat SSE (the caller's stream — what the CLI prints)
 - `event: delta` → `data: {sample_index, delta, kind}` — a streamed token chunk
   (`kind` = `"content"` | `"reasoning"`). Emitted **only for a token-streaming
-  producer at n_samples==1**: `openrouter_model`. `run_id`, `base_model`, and loose
+  producer at n_samples==1**: `openrouter_model` and `vllm_model` (whose final
+  `message` still carries `token_logprobs` + `raw_meta`). `run_id`, `base_model`, and loose
   `sampler_path` always sample native (whole samples, no deltas — see "Streaming
   model" below), and n>1 sends whole samples for every producer. A consumer that
   saw deltas for a sample uses the later `message` event to *finalize* (clean
@@ -425,7 +434,9 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
   run; a mid-stream producer fault after ≥1 completed sample also carries the
   fold-outcome fields above — partial data is real data and folds)
 
-**Streaming model:** at n==1 only `openrouter_model` streams tokens; n>1 keeps the
+**Streaming model:** at n==1 only `openrouter_model` and `vllm_model` stream tokens
+(vLLM streams the same ids + logprobs its whole-sample path returns, so nothing is
+traded for the deltas); n>1 keeps the
 native batched fan-out (whole samples). tinker's native SamplingClient has no token
 streaming — that's why the streaming n==1 path routes through the oai endpoint.
 **`run_id`, `base_model`, and loose `sampler_path` always sample native for ALL n**

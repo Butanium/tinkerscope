@@ -2013,3 +2013,67 @@ workflows, 23 confirmed findings fixed, 5 idea files closed structurally,
 ~480 pytest + 25 cross-impl vectors + the live disease/cure smokes. The
 recurring lesson, three-for-three: reviews find nothing in the happy path —
 budget them at recovery, reporting, and boundary-claim surfaces.
+
+### 2026-09-16 — vLLM backend: a self-hosted server as a NATIVE model kind (`vllm:<name>`, ⚙)
+
+**What.** `tinkerscope --vllm-url http://host:port` (or `TINKERSCOPE_VLLM_URL`)
+lists every model a vLLM server serves (`GET /v1/models`) in the panel picker
+and samples it through a new `api/vllm_sampler.py`. Clément's framing set the
+design: vLLM "can return logprobs and can take tokens as input, which makes it
+closer to tinker than openrouter" — so this is NOT an OpenRouter clone (a chat
+JSON call we can't see inside) but a second native path. Per-sample dicts match
+`tinker_sampler.sample_stream`'s shape exactly: `raw_text` / `raw_meta` /
+`token_logprobs` (`{t, tid, lp, top}`) / `prefill_incorporated` / `loom_cut` +
+`loom_text`. New sentinel `vllm:` in `model-sel.ts` (+ `isRefSel` folding the four
+non-run kinds — `+page` had three copies of that disjunction), `ChatRequest.vllm_model`,
+`/api/vllm-models`, `health.vllm_url`, `tinkpg probe vllm:<name>`.
+
+**How the native shape is reproduced without a local renderer.** Rendering goes
+through the server's own `POST /tokenize` (`return_token_strs`, `chat_template_kwargs:
+{enable_thinking}`, and `continue_final_message` for a trailing-assistant prefill)
+— the template is exactly the one `vllm serve` runs, including a `--chat-template`
+override. Sampling is `POST /v1/completions` with the prompt as a LIST OF IDS,
+`return_tokens_as_token_ids` (tokens come back as `token_id:N` strings, in
+`top_logprobs` keys too) and `logprobs=5` — ids + own logprob + top-K in the one
+call, where tinker needs a second prefill-only pass (`_token_logprobs`). A loom
+fire appends `continue_tokens` to the id prompt and asks `prompt_logprobs=5`, whose
+last len(forced) entries (`{id: {logprob, rank, decoded_token}}`, keyed by
+id-string) score the forced prefix teacher-forced in the same request. n>1 =
+n single-sample requests so samples arrive as they finish (prefix caching makes
+the shared prompt free); n==1 rides `stream:true` (chunks carry the same
+per-token logprob blocks; accumulated, think-split at the end) — so vLLM joins
+OpenRouter as a token-streaming producer without giving anything up.
+
+**Decoding token TEXT.** Ids need a decoder for `t`, `raw_text`, the loom's
+display prefix. Preferred: `AutoTokenizer.from_pretrained(root)` where `root` is
+what vLLM loaded (from `/v1/models`) — `transformers` is already here via
+tinker-cookbook — which also answers `supports_thinking` (`enable_thinking` in
+the chat template; Zero's has none, so the composer hides the toggle).
+Fallback when that can't load (a local path on the GPU box, a gated repo):
+vLLM's `POST /detokenize`, per id with a cache — the tests run THIS path (the
+HF one is a plain `decode`). Stop-token stripping before a loom replay uses the
+tokenizer's `all_special_ids`, or a `<|…|>` text match in the fallback.
+
+**Probed live, not assumed** (vllm 0.19.1 serving `movingcastles/zero` on the
+mats L40 node, 2026-09-16): the EOS id IS in the returned `tokens` (and in the
+logprob lists) while `text` excludes it; `prompt_logprobs[0]` is `None`; a
+`stop_token_ids` stop reports `stop_reason`; the streaming chunk shape. The
+fake server in `tests/test_vllm_sampler.py` reproduces those shapes and the
+backend is wired to it through an `httpx.ASGITransport` seam (`_transport`),
+so the suite never touches a network.
+
+**Reachability gotcha (mats).** The compute node firewalls everything but 22
+from the login node: `ssh -L 8100:l40-worker:8100 mats` opens a local port that
+dead-ends (a READ timeout, not a refusal — ssh accepts the local connect and the
+remote connect just hangs). The tunnel that works hops INTO the node:
+`ssh -J mats -N -L 8100:127.0.0.1:8100 l40-worker` (SSH to the worker is
+allowed; the shared home gives it the same authorized_keys). Recorded in the
+project that serves Zero (`~/projects2/movingcastles-zero/serve/tunnel.sh`).
+
+**Known limits.** History `reasoning` isn't forwarded (role/content only, like
+OpenRouter); a "thinking" send to a template without `enable_thinking` is a
+no-op; a text prefill on the THINK side of a thinking model gets no special
+framing (the tinker path's `_continue_prompt` has per-renderer logic; here the
+template does what it does with `continue_final_message`). Packs don't carry
+vLLM models (a served name means nothing without the server) — a `vllm:` panel
+in an exported workspace keeps its id as its label.

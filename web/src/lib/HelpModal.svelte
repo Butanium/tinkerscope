@@ -215,9 +215,10 @@ codex plugin add tinkerscope@tinkerscope</pre>
       <h3>Workspaces and panels</h3>
       <p>
         A <b>workspace</b> is one saved conversation setup: its message tree, its system prompt, and the set of
-        <b>panels</b> it shows. One panel = one model (a run checkpoint, a raw base model, or an OpenRouter
-        reference model). Sending a message fires it into <em>every</em> panel, so the columns are the same
-        prompt answered by different models.
+        <b>panels</b> it shows. One panel = one model (a run checkpoint, a raw base model, a model your own
+        vLLM server serves — <b>⚙</b>, when tinkerscope was started with <code>--vllm-url</code> — or an
+        OpenRouter reference model). Sending a message fires it into <em>every</em> panel, so the columns are
+        the same prompt answered by different models.
       </p>
       <p class="help-note">
         Switching workspaces restores its models too. {@render chip('plus')} makes a new workspace that
@@ -252,7 +253,7 @@ codex plugin add tinkerscope@tinkerscope</pre>
       </p>
       <p class="help-note">
         <b>Sampling params</b> is what the next send draws: temperature, max tokens, samples and the
-        thinking Off/On/Both toggle, plus an <b>Advanced…</b> popup for top_p and the OpenRouter-only knobs
+        thinking Off/On/Both toggle, plus an <b>Advanced…</b> popup for top_p and the OpenRouter / vLLM knobs
         (top_k, presence and repetition penalty — Tinker models take temperature and top_p only).
       </p>
       <p class="help-note">

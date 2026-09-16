@@ -32,8 +32,11 @@ stream and ALWAYS sample native, for response fidelity the oai wire can't give:
                             fallback (if the base can't resolve, tinker can't serve the
                             ckpt either — that's an error, not a degraded path).
   - openrouter_model     -> OpenRouter /chat/completions
+  - vllm_model           -> the configured vLLM server (api/vllm_sampler.py): native-
+                            shaped samples (token ids, logprobs + top-K, loom) via its
+                            /tokenize + /v1/completions; token-streams at n==1.
 
-Only openrouter still token-streams at n==1.
+Only openrouter and vllm_model token-stream at n==1.
 
 Each completed sample is yielded to the caller (CLI stdout) and broadcast to the
 state bus (browser live view), tagged with chat_id + panel. chat_id is allocated
@@ -65,7 +68,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from .. import discovery, inflight, openrouter, tinker_oai, tree_ops, workspace_store
+from .. import discovery, inflight, openrouter, tinker_oai, tree_ops, vllm_sampler, workspace_store
 from ..state import DEFAULT_PANEL_ID, BUS
 from ..tinker_sampler import get_sampler, select_renderer_name
 from .models import ckpt_label
@@ -123,6 +126,10 @@ class ChatRequest(BaseModel):
     sampler_path: str | None = None
     # OpenRouter selection (alternative)
     openrouter_model: str | None = None
+    # A model served by the configured vLLM server ($TINKERSCOPE_VLLM_URL; the ids
+    # are on /api/vllm-models). Sampled like a NATIVE model — token-id prompts,
+    # per-token logprobs + top-K, loom `continue_tokens` — see api/vllm_sampler.py.
+    vllm_model: str | None = None
     # workspace + params (numeric params tolerate None → server defaults, so a
     # transiently-empty UI input can't 422 the request)
     messages: list[ChatMessage]
@@ -174,9 +181,9 @@ class ChatRequest(BaseModel):
     # LOOM (exact token-level continue): token ids appended VERBATIM after the
     # rendered prompt — a stored sample's generated prefix + a picked alternative,
     # so the model continues from that exact token state (no re-tokenization).
-    # Native tinker paths only; invalid with openrouter_model (no token-level
-    # control) and with thinking="both" (two renderer modes can't share one token
-    # prefix). See tinker_sampler.sample_stream.
+    # Native tinker paths + vllm_model only; invalid with openrouter_model (no
+    # token-level control) and with thinking="both" (two renderer modes can't share
+    # one token prefix). See tinker_sampler.sample_stream / vllm_sampler.
     continue_tokens: list[int] | None = None
     # Exact renderer override for the native paths. Loom fires send the renderer
     # recorded in the source turn's raw_meta, so the re-rendered prompt is the one
@@ -529,7 +536,9 @@ async def chat(req: ChatRequest):
     #     families like gpt-oss leak thinking into `content` with thinking off) and
     #     returns no raw_meta / token_logprobs; the native path gives all three.
     # A loose sampler_path now ALSO renders native (resolve_base_model → local render,
-    # same fidelity + thinking toggle), so only openrouter still token-streams at n==1.
+    # same fidelity + thinking toggle), so only openrouter and vllm_model (whose
+    # stream carries the same ids + logprobs as its whole-sample path) token-stream
+    # at n==1.
     # TODO(tinker-feedback#125): when fixed, drop `req.run_id is None` to restore token
     # streaming for single samples from LoRA runs (base_model stays native).
     stream = (
@@ -585,6 +594,35 @@ async def chat(req: ChatRequest):
                         lambda i: openrouter.sample_one(**or_kwargs(bool(thinking))), n
                     )
                 sel_patch: dict = {}
+            elif req.vllm_model:
+                # A vLLM-served model: native-shaped samples (token ids in and out,
+                # logprobs + top-K in the sampling call, loom replay) rendered by the
+                # server's own chat template. Token-streams at n==1 like OpenRouter
+                # — vLLM streams the same completions it scores, nothing is lost.
+                label = req.vllm_model
+
+                def vllm_kwargs(think: bool) -> dict:
+                    return dict(
+                        model=req.vllm_model,
+                        messages=sampling_msgs if think else sampling_off,
+                        temperature=temperature, max_tokens=max_tokens, top_p=top_p,
+                        top_k=req.top_k, presence_penalty=req.presence_penalty,
+                        repetition_penalty=req.repetition_penalty, logprobs=req.logprobs,
+                        think=think, continue_tokens=req.continue_tokens,
+                    )
+
+                if both:
+                    total = 2 * n
+                    produce_iter = _dual(
+                        vllm_sampler.sample_stream(n=n, **vllm_kwargs(False)),
+                        vllm_sampler.sample_stream(n=n, **vllm_kwargs(True)),
+                        n,
+                    )
+                elif stream:
+                    produce_iter = vllm_sampler.sample_one_stream(**vllm_kwargs(bool(thinking)))
+                else:
+                    produce_iter = vllm_sampler.sample_stream(n=n, **vllm_kwargs(bool(thinking)))
+                sel_patch = {}  # frontend tracks the selection (vllm: sentinel)
             elif req.sampler_path:
                 label = ckpt_label(req.sampler_path, None)
                 # A loose ckpt has no local config.json, but tinker knows the base
@@ -649,7 +687,7 @@ async def chat(req: ChatRequest):
                 sel_patch = {}  # frontend tracks the base-model selection (sentinel)
             else:
                 if not req.run_id:
-                    raise ValueError("one of run_id / base_model / sampler_path / openrouter_model is required")
+                    raise ValueError("one of run_id / base_model / sampler_path / openrouter_model / vllm_model is required")
                 run = await asyncio.to_thread(discovery.find_run, req.run_id)
                 if run is None:
                     raise ValueError(f"unknown run: {req.run_id}")
