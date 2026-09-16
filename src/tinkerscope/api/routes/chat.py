@@ -598,7 +598,9 @@ async def chat(req: ChatRequest):
                 # A vLLM-served model: native-shaped samples (token ids in and out,
                 # logprobs + top-K in the sampling call, loom replay) rendered by the
                 # server's own chat template. Token-streams at n==1 like OpenRouter
-                # — vLLM streams the same completions it scores, nothing is lost.
+                # — vLLM streams the same completions it scores, nothing is lost —
+                # except a continue_tokens fire, which sample_one_stream routes
+                # whole (vLLM refuses prompt_logprobs on a stream).
                 label = req.vllm_model
 
                 def vllm_kwargs(think: bool) -> dict:

@@ -125,10 +125,25 @@ def client() -> httpx.AsyncClient:
             transport=_transport,
             # A 1k-token sample on a busy server can take minutes; connect fast.
             timeout=httpx.Timeout(10.0, read=900.0, write=60.0, pool=None),
-            limits=httpx.Limits(max_connections=64, max_keepalive_connections=16),
+            # keepalive_expiry BELOW uvicorn's 5 s keep-alive: a pooled socket the
+            # server already closed is the "Server disconnected without sending a
+            # response" seen once in a 4-sample fan-out (2026-09-16); _post also
+            # retries that exact failure once, since no request was processed.
+            limits=httpx.Limits(max_connections=64, max_keepalive_connections=16, keepalive_expiry=4.0),
         )
         _client_url = url
     return _client
+
+
+async def _post(path: str, body: dict) -> httpx.Response:
+    """POST with ONE retry on a stale-keepalive disconnect. `RemoteProtocolError`
+    with no response bytes means the server closed the pooled socket before
+    reading the request — nothing ran, so resending can't duplicate a sample."""
+    try:
+        return await client().post(path, json=body)
+    except httpx.RemoteProtocolError as e:
+        log.info("vllm %s: %s — retrying once on a fresh connection", path, e)
+        return await client().post(path, json=body)
 
 
 def _http_error(what: str, r: httpx.Response) -> ValueError:
@@ -247,7 +262,7 @@ class _Tok:
         return set(getattr(hf, "all_special_ids", []) or []) if hf is not None else set()
 
     async def _detok(self, ids: list[int]) -> str:
-        r = await client().post("/detokenize", json={"model": self.model, "tokens": list(ids)})
+        r = await _post("/detokenize", {"model": self.model, "tokens": list(ids)})
         if r.status_code >= 400:
             raise _http_error("/detokenize", r)
         return r.json().get("prompt", "")
@@ -324,7 +339,7 @@ async def render(model: str, messages: list[dict], *, think: bool) -> tuple[list
         "return_token_strs": True,
         "chat_template_kwargs": {"enable_thinking": think},
     }
-    r = await client().post("/tokenize", json=body)
+    r = await _post("/tokenize", body)
     if r.status_code >= 400:
         raise _http_error("/tokenize", r)
     d = r.json()
@@ -580,7 +595,7 @@ async def sample_stream(
 
     async def one(idx: int) -> dict:
         try:
-            r = await client().post("/v1/completions", json=p.body)
+            r = await _post("/v1/completions", p.body)
             if r.status_code >= 400:
                 raise _http_error("/v1/completions", r)
             ch = r.json()["choices"][0]
@@ -621,7 +636,21 @@ async def sample_one_stream(
 ) -> AsyncIterator[dict]:
     """The n==1 token-streaming shape: {"delta","kind":"content"} chunks as vLLM
     emits them, then the SAME final dict sample_stream would yield (logprobs are
-    accumulated across chunks; the think block is split at the end)."""
+    accumulated across chunks; the think block is split at the end).
+
+    A loom / Continue fire (`continue_tokens`) does NOT stream: vLLM rejects
+    `prompt_logprobs` with `stream=true` (400, verified on 0.19.1), and the
+    forced prefix's scores come from prompt_logprobs — so it takes the
+    whole-sample path, exactly like a native tinker loom fire."""
+    if continue_tokens:
+        async for item in sample_stream(
+            model=model, messages=messages, n=1, temperature=temperature,
+            max_tokens=max_tokens, top_p=top_p, top_k=top_k,
+            presence_penalty=presence_penalty, repetition_penalty=repetition_penalty,
+            logprobs=logprobs, think=think, continue_tokens=continue_tokens,
+        ):
+            yield item
+        return
     p = await _prepare(
         model=model, messages=messages, temperature=temperature, max_tokens=max_tokens,
         top_p=top_p, top_k=top_k, presence_penalty=presence_penalty,

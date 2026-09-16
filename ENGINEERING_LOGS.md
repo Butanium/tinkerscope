@@ -2077,3 +2077,26 @@ framing (the tinker path's `_continue_prompt` has per-renderer logic; here the
 template does what it does with `continue_final_message`). Packs don't carry
 vLLM models (a served name means nothing without the server) — a `vllm:` panel
 in an exported workspace keeps its id as its label.
+
+**Live shakedown (same day).** 12-thread battery + multi-turn continues on
+Zero through the :8769 instance: 60-odd samples, one failure —
+`RemoteProtocolError: Server disconnected without sending a response` on one
+sample of a 4-way fan-out. That is httpx picking a pooled keep-alive socket
+uvicorn had just closed (its default keep-alive is 5 s; through an SSH tunnel
+the FIN arrives late). Fix: `keepalive_expiry=4.0` on the pool + `_post`
+retries that exact exception once (no request bytes were read by the server,
+so a resend can't double-sample). `test_stale_keepalive_disconnect_is_retried_once`
+pins both the retry and that a second failure still surfaces.
+
+**Second live finding: a loom fire must not stream.** The browser's n==1 path
+streams, and a loom / Continue fire is n==1 — so it asked vLLM for
+`prompt_logprobs` (the forced prefix's teacher-forced scores) on a
+`stream:true` request, which vLLM 0.19.1 refuses with a 400 ("`prompt_logprobs`
+are not available when `stream=True`"). Every browser loom on a vLLM turn
+errored while the CLI's n>1 path worked; the fake server had accepted the
+combination, so pytest was green. Now `sample_one_stream` delegates to the
+whole-sample path whenever `continue_tokens` is set (a native tinker loom
+doesn't stream either), the fake rejects the pair like vLLM does, and
+`browser_vllm_live.py` walks the loom + Continue through the real UI. Output
+`logprobs` on a stream are fine — an ordinary n==1 send still streams with its
+per-token probabilities (Clément checked exactly that point).

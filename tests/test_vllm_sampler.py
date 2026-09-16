@@ -100,6 +100,11 @@ def make_fake(*, completion: list[int], finish: str = "stop"):
         if app.state.completions is not None:
             return await app.state.completions(body)
         assert isinstance(body["prompt"], list), "prompt must be token ids"
+        if body.get("prompt_logprobs") and body.get("stream"):
+            # vLLM 0.19.1's exact refusal — a loom fire must not take the stream path.
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"error": {"message": "`prompt_logprobs` are not available when `stream=True`."}},
+                                status_code=400)
         text = "".join(tok_text(i) for i in completion if i != EOS)
         choice = {
             "index": 0, "text": text, "finish_reason": finish, "stop_reason": None,
@@ -306,6 +311,22 @@ def test_sample_one_stream_matches_whole_sample(vs):
         assert final[k] == whole[k], k
 
 
+def test_stream_with_continue_tokens_takes_the_whole_sample_path(vs):
+    """The browser's n==1 loom fire goes through sample_one_stream; vLLM refuses
+    prompt_logprobs on a stream, so it must not stream (caught live 2026-09-16:
+    every browser loom on a vLLM turn 400'd while the CLI's n>1 path worked)."""
+    fake = vs.wire(make_fake(completion=[23, EOS]))
+    items = run(collect(vs.sample_one_stream(
+        model="acme/zero", messages=[{"role": "user", "content": "hi"}],
+        temperature=1.0, max_tokens=5, continue_tokens=[10, 21],
+    )))
+    assert not any("delta" in i for i in items)
+    (s,) = items
+    assert "error" not in s and s["loom_cut"] == 2 and [e["tid"] for e in s["token_logprobs"]] == [10, 21, 23, EOS]
+    comp = [b for k, b in fake.state.calls if k == "completions"][0]
+    assert comp["stream"] is False and comp["prompt_logprobs"] == 5
+
+
 def test_logprobs_off_still_returns_ids_for_raw_text(vs):
     fake = vs.wire(make_fake(completion=[10, EOS]))
     (s,) = run(collect(vs.sample_stream(model="acme/zero", messages=[{"role": "user", "content": "hi"}],
@@ -353,3 +374,30 @@ def test_vllm_models_route_and_health(vs, monkeypatch, tmp_path):
         assert h["vllm_url"] == "http://fake-vllm:8000"
         body = c.get("/api/vllm-models").json()
         assert body["available"] is True and body["models"][0]["id"] == "acme/zero"
+
+
+def test_stale_keepalive_disconnect_is_retried_once(vs):
+    """A `RemoteProtocolError` (the server closed a pooled socket before reading
+    the request) is retried once on every POST path; a second failure surfaces."""
+    app = make_fake(completion=[10, EOS])
+    inner = httpx.ASGITransport(app=app)
+    fail_first = {"tokenize": 1, "completions": 1}
+
+    class Flaky(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            key = "tokenize" if request.url.path == "/tokenize" else "completions"
+            if request.url.path in ("/tokenize", "/v1/completions") and fail_first[key] > 0:
+                fail_first[key] -= 1
+                raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+            return await inner.handle_async_request(request)
+
+    vs._transport = Flaky()
+    vs.reset_client()
+    (s,) = run(collect(vs.sample_stream(model="acme/zero", messages=[{"role": "user", "content": "hi"}],
+                                        n=1, temperature=1.0, max_tokens=5)))
+    assert s["content"] == "w10" and fail_first == {"tokenize": 0, "completions": 0}
+    # two failures in a row → the sample reports the error (no infinite retry)
+    fail_first["completions"] = 2
+    (s2,) = run(collect(vs.sample_stream(model="acme/zero", messages=[{"role": "user", "content": "hi"}],
+                                         n=1, temperature=1.0, max_tokens=5)))
+    assert "error" in s2 and "disconnected" in s2["error"]

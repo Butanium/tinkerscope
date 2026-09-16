@@ -436,7 +436,9 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
 
 **Streaming model:** at n==1 only `openrouter_model` and `vllm_model` stream tokens
 (vLLM streams the same ids + logprobs its whole-sample path returns, so nothing is
-traded for the deltas); n>1 keeps the
+traded for the deltas — EXCEPT a `continue_tokens` fire, which needs
+`prompt_logprobs` to score the forced prefix and vLLM refuses those on a stream,
+so a vLLM loom / Continue arrives whole like a native one); n>1 keeps the
 native batched fan-out (whole samples). tinker's native SamplingClient has no token
 streaming — that's why the streaming n==1 path routes through the oai endpoint.
 **`run_id`, `base_model`, and loose `sampler_path` always sample native for ALL n**
