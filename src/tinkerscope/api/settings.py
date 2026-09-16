@@ -48,6 +48,9 @@ class Settings:
     # `vllm:<name>` — see api/vllm_sampler.py. None = backend off.
     vllm_url: str | None
     vllm_api_key: str | None
+    # `tinkerscope serve --multi-user`: the state bus is per SESSION instead of
+    # per process — see api/session.py. Off = exactly the pre-sessions wire.
+    multi_user: bool
 
     @property
     def base_url(self) -> str:
@@ -120,6 +123,7 @@ def load_settings() -> Settings:
         tinker_api_key=os.environ.get("TINKER_API_KEY"),
         vllm_url=os.environ.get("TINKERSCOPE_VLLM_URL") or None,
         vllm_api_key=os.environ.get("TINKERSCOPE_VLLM_API_KEY") or None,
+        multi_user=os.environ.get("TINKERSCOPE_MULTI_USER", "").strip().lower() in ("1", "true", "yes"),
     )
 
 

@@ -27,6 +27,19 @@ tinkerscope <dirs> --port N        # scan <dirs> for runs (checkpoints.jsonl + c
 - Give the human the printed URL (e.g. http://127.0.0.1:8809).
 - `tinkpg` auto-targets the running instance whose scan root contains your cwd.
   Outside any scan root: set `TINKERSCOPE_BASE_URL` or pass `--base-url`.
+- **Several people on one instance → start it with `--multi-user`.** Each browser
+  (and each `tinkpg --session <id>`) then has its OWN sidebar — panel selection,
+  open workspace, sampling params, `running` — while workspaces, highlights and
+  pins stay shared, so two people never overwrite each other's settings and
+  `tinkpg state` describes ONE person's screen. To drive the human's screen pass
+  THEIR session id: it is on the `session` chip in their top bar (they can name it
+  by opening `?u=<name>` once; `tinkpg sessions` lists every live one). Without
+  `--session` the server picks the only live browser session for you and REFUSES
+  (409, naming the ids) when there are several — export `TINKERSCOPE_SESSION`
+  once per shell rather than repeating the flag. `ws` / `grep` / `samples` /
+  `node` / `trash` read the shared store and need no session; `state` / `send` /
+  `continue` / `open` / `params` / `wait` act on one. A single-user server
+  ignores `--session` entirely.
 
 **Share packs (reproduce a setup).** (`tinkpg` and `tinkerscope` are the same
 binary since 2026-08-12 — these work under either name; they're documented as
@@ -613,6 +626,9 @@ tinkpg url [selector] [options]
   --ws TEXT                         same as the positional selector
   --live                            link to the workspace the browser currently has open (from the state bus) instead of naming one
   --json                            url + resolved instance (pid, scan roots) + workspace id/name
+tinkpg sessions [options]
+  # List the SESSIONS a `--multi-user` server holds — one sidebar (panel selection, open...
+  --json                            the raw /api/sessions list
 tinkpg state [options]
   # Digest of what's on screen now: one block per panel, first/last-2 of the open workspace's...
   --full                            show every message per panel, not just first/last-2
@@ -693,6 +709,7 @@ tinkerscope serve [dirs...] [options]
   --force                           with --pack: also overwrite existing default params/layout (default: keep them if the folder was already used)
   --reseed                          with --pack: fully rebuild the pack's workspaces (delete + re-import, so re-exported raw_meta/logprob blobs refresh and dropped nodes are removed) and overwrite default params — for iterating on a pack you keep re-exporting (implies --force)
   --vllm-url URL                    a vLLM (OpenAI-compatible) server whose served models join the picker as `vllm:<name>` — sampled natively (token ids, logprobs, loom); same as $TINKERSCOPE_VLLM_URL
+  --multi-user                      several people on this one instance: each browser (and each `tinkpg --session <id>`) gets its OWN sidebar — panel selection, open workspace, sampling params, running — while workspaces, highlights and pins stay shared; same as TINKERSCOPE_MULTI_USER=1
 tinkerscope pack export <out> [options]
   # Export the current setup to a pack YAML file.
   --dir PATH (repeatable)           scan root(s) whose state to export (default: cwd) — must match how the instance was launched

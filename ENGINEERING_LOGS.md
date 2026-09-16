@@ -2144,3 +2144,72 @@ have rendered as an unknown run) by the manifest-patch + `_copy_spa` route
 from URL, the ⚙ label, token inspector and first-token chart from the pack's
 logprobs, the baked cot-prefilling workspace still opening under the new app,
 and the `?w=<id>` link resolving through `pack_links` in a fresh context.
+
+### 2026-09-16 — `--multi-user`: one state bus per session, the store stays shared
+
+**The ask** (Clément, after a shared instance "did weird things"): a launch flag
+for several people on one tinkerscope. **The diagnosis** (carried over from the
+vLLM session that read the bus code): `PlaygroundState` is a process singleton —
+one `workspace_id`, one `panels[]`, one set of sampling params, one `running`.
+Every tab mirrors it and every browser send writes its params back
+(`params_scope: "global"`), so B's temperature lands in A's sidebar, A's
+workspace switch flips what `tinkpg state` calls "open", "Stop all" cancels the
+other person's generation, and the shared `last_session` pref restores whoever
+wrote last. The tree layer was already multi-writer safe (idempotent ops, `rev`
+per workspace, folds through the same locked apply), so the change is narrow:
+key the EPHEMERAL half by session, leave the durable store alone.
+
+**What shipped.** `tinkerscope serve --multi-user` (`TINKERSCOPE_MULTI_USER=1`).
+`api/state.py` holds one `StateBus` per session id (`get_bus`), the module's
+`BUS` staying the `default` session's bus — single-user mode IS that one
+session, and the wire is byte-identical without the flag (`api/session.py`
+maps every request to `default` then). The session id is CLIENT-chosen
+(`^[A-Za-z0-9_.-]{1,64}$`): the browser mints one per profile in localStorage
+(`lib/session.ts`; `?u=<id>` names it and +page strips it through the router so
+a copied link never carries a session), `tinkpg --session` / `$TINKERSCOPE_SESSION`
+names one from a terminal. Transport is the `X-Tinkerscope-Session` header on
+fetches and `?session=` on the EventSource (it cannot set headers). A request
+with neither resolves server-side: the one live session (so a bare `tinkpg send`
+keeps driving the human's screen), else `default`, else a 409 naming the ids —
+loud, because silently driving the wrong person's sidebar is the failure this
+exists to remove. `GET /api/sessions` + `tinkpg sessions` list them; the topbar
+shows a `session <id>` chip (click copies) when health says `multi_user`.
+
+**Two routing rules, both load-bearing.** Store events (`ops`,
+`workspace_deleted`) fan out to EVERY session (`state.broadcast_all`): the
+trees are one store and each mirror must converge whoever's sidebar it is. A
+chat's own events (`chat_start` … `chat_done`) stay on the session that fired
+it — your generations stream to your screen, the fold reaches everyone as an
+`ops` event; native tinker paths don't token-stream anyway, so a colleague loses
+only the seconds between a sample popping and its fold. And `chat_id`s come
+from ONE process-wide counter: `routes/chat.py` keys its cancel registry by
+chat_id, and two sessions each counting from 1 would have cancelled each
+other's chats.
+
+**The pref key.** `last_session` stays the default session's key (packs write
+it, the CLI-only seed reads it, single-user never sees another); other sessions
+persist `last_session@<id>` with a read fallback to `last_session`, so a new
+person starts from the instance's defaults instead of a blank sidebar. The
+browser keys on the SERVER-resolved id from `/api/health` — never the id it
+minted — because a single-user server maps every id to `default`, and keying
+on the minted id there would have split the box's one sidebar across a
+never-read key.
+
+**Two things the tests caught.** The routes keep a module-level `BUS` on
+purpose: `test_thread_system` spies on `chat_route.BUS.broadcast`, and five
+tests call the `chat()` route function DIRECTLY, where a `Depends` default
+arrives as the marker object — hence the `isinstance(sid, str)` guard (the
+first full run failed exactly there: the terminal went to a bus keyed by the
+marker). And `test_workspace_ops`' fake bus became a fake `broadcast_all`, since
+the ops fan-out is no longer one bus's method.
+
+**Verification.** `tests/test_sessions.py` (isolation, headerless resolution,
+per-session queues vs process-wide store events, chat-id uniqueness, the pref
+fallback); `web/src/lib/session.test.ts`; the smoke
+`tests/small-smokes/browser_multi_user.py` — two Playwright CONTEXTS as two
+people, self-hosting, token-free — in BOTH legs: the real one, and
+`MULTI_USER=0`, which launches without the flag and must pass by reproducing
+the leak (bob's Samples reach alice's input, `workspace_id` follows the last
+open, headerless `tinkpg state` is accepted). That second leg is what proves
+the first leg's assertions can fail; both passed on the first run, which is
+exactly when a falsification leg earns its keep.

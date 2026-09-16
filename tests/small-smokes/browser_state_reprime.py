@@ -38,7 +38,10 @@ from playwright.sync_api import sync_playwright
 
 from _console import attach, net_report
 
-PORT = 8871
+# 8885, not 8871: the box's MCP servers (~/.claude/mcp/serve_http.py) sit on
+# 8871–8874 since 2026-09, and a self-hosting smoke on one of those dies with
+# "port already in use" before it tests anything.
+PORT = 8885
 BASE = f"http://127.0.0.1:{PORT}"
 # The checkout whose server we spawn. `scripts/smoke.sh --baseline <ref>` sets
 # TSCOPE_APP_DIR to the baseline worktree; without honoring it this SELF-HOSTING

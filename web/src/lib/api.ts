@@ -23,6 +23,7 @@ import type { ConvTree } from './tree';
 import type { ConvFields, WorkspaceOp, OpsResponse } from './types';
 import { isStatic } from './static-mode';
 import { staticApi, staticSse } from './api-static';
+import { sessionId, SESSION_HEADER, SESSION_QUERY } from './session';
 
 /** An HTTP error with its status attached — the ops emitter's retry policy
  *  branches on it (5xx = maybe-never-arrived, retry; 4xx = rejected, refetch). */
@@ -34,10 +35,17 @@ export class ApiError extends Error {
   }
 }
 
+// Every request names this browser's SESSION (lib/session.ts) — on a
+// `--multi-user` server that is whose sidebar the call reads/writes; a
+// single-user server ignores it.
 async function j<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(path, {
     ...init,
-    headers: { 'content-type': 'application/json', ...(init?.headers || {}) }
+    headers: {
+      'content-type': 'application/json',
+      [SESSION_HEADER]: sessionId(),
+      ...(init?.headers || {})
+    }
   });
   if (!r.ok) throw new ApiError(r.status, `${r.status} ${r.statusText}: ${await r.text()}`);
   return r.json() as Promise<T>;
@@ -175,7 +183,7 @@ const httpApi = {
   chat: (req: ChatRequest, signal?: AbortSignal) =>
     fetch('/api/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', [SESSION_HEADER]: sessionId() },
       body: JSON.stringify(req),
       signal
     }),
@@ -207,7 +215,10 @@ export function sse(
 ): () => void {
   // Static site: no bus to subscribe to — one synthetic snapshot, then quiet.
   if (isStatic) return staticSse(onEvent);
-  const es = new EventSource(path);
+  // EventSource can't set headers, so the session rides as a query param here.
+  const url = new URL(path, window.location.origin);
+  url.searchParams.set(SESSION_QUERY, sessionId());
+  const es = new EventSource(url.pathname + url.search);
   const handler = (event: string) => (e: MessageEvent) => {
     let parsed: any = e.data;
     try {

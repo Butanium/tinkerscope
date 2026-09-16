@@ -1,11 +1,25 @@
-"""Process-wide playground state + a tiny pub/sub for SSE fan-out.
+"""Playground state + a tiny pub/sub for SSE fan-out — one bus per SESSION.
 
-There is exactly one PlaygroundState per process. The browser treats it as the
-source of truth: it subscribes once to `/api/state/events` and re-renders on
-every push. Both the browser and the `tinkpg` CLI mutate this state through the
-same endpoints, so "drive the model from the terminal" and "click in the
-browser" stay consistent — this is what makes the collaborative
-"let's-look-at-the-model-together" flow work.
+There is exactly one PlaygroundState per SESSION, and in single-user mode (the
+default) exactly one session — `default`, the module's `BUS` — so it is one per
+process, as it always was. The browser treats it as the source of truth: it
+subscribes once to `/api/state/events` and re-renders on every push. Both the
+browser and the `tinkpg` CLI mutate this state through the same endpoints, so
+"drive the model from the terminal" and "click in the browser" stay consistent
+— this is what makes the collaborative "let's-look-at-the-model-together" flow
+work.
+
+MULTI-USER MODE (`tinkerscope serve --multi-user`; api/session.py decides which
+session a request drives): a second person on the same instance gets their OWN
+bus — selection, open workspace, sampling params, `running` — instead of
+fighting one sidebar with the first. Two rules keep the two halves apart:
+  - everything on a PlaygroundState is per session (`get_bus(sid)`); `chat_id`s
+    are minted from ONE process-wide counter so the cancel endpoint's registry
+    (routes/chat.py `_INFLIGHT`) stays unambiguous across sessions;
+  - events about the SHARED store (`ops`, `workspace_deleted`) go to every
+    session (`broadcast_all`) — the trees are one store and every mirror must
+    converge; a chat's own events (`chat_start`/`sample`/…) stay on the bus of
+    the session that fired it.
 
 Two kinds of message travel the bus:
   - state patches  (`snapshot` / `patch`): persistent selection + params +
@@ -31,10 +45,23 @@ tab mirrors the winner's models and then SAVES them onto its own workspace on di
 from __future__ import annotations
 
 import asyncio
+import itertools
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+
+# The one session single-user mode has, and the one a headerless request lands
+# on when no other session is live (api/session.py). Its prefs key is the bare
+# `last_session` (see last_session_key), so packs / the CLI-only seed are unchanged.
+DEFAULT_SESSION = "default"
+
+# chat_id allocation is PROCESS-wide, not per bus: routes/chat.py keys its
+# in-flight registry (the cancel endpoint) by chat_id, and two sessions each
+# counting from 1 would collide there. A session's `state.chat_id` is the last
+# id IT allocated — still monotonic within the session, which is all the
+# browser's straggler guards and its restart heuristic rely on.
+_CHAT_SEQ = itertools.count(1)
 
 # The id a layout's FIRST panel gets when something has to invent one (a fresh bus,
 # an empty workspace create, a schema fallback). Panel ids are minted monotonically
@@ -100,13 +127,24 @@ class PlaygroundState:
 
 
 class StateBus:
-    """Single publisher → many subscribers. Each subscriber gets its own queue."""
+    """Single publisher → many subscribers. Each subscriber gets its own queue.
 
-    def __init__(self) -> None:
+    One per SESSION: `id` names it; `subscribers` (attached SSE streams) is the
+    "is a browser looking at this?" signal the headerless-request resolution in
+    api/session.py reads; `last_seen` is bumped by anything a client does through
+    the bus, so `tinkpg sessions` can show which one moved last."""
+
+    def __init__(self, id: str = DEFAULT_SESSION) -> None:
+        self.id = id
         self.state = PlaygroundState()
         self._subs: set[asyncio.Queue[dict[str, Any]]] = set()
         self._lock = asyncio.Lock()
         self._inflight = 0  # chats currently streaming; running == (_inflight > 0)
+        self.last_seen = time.time()
+
+    @property
+    def subscribers(self) -> int:
+        return len(self._subs)
 
     async def subscribe(self) -> asyncio.Queue[dict[str, Any]]:
         """Register a subscriber. First event delivered is a full snapshot."""
@@ -116,6 +154,7 @@ class StateBus:
         q: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=1024)
         async with self._lock:
             self._subs.add(q)
+            self.last_seen = time.time()
         await q.put({"type": "snapshot", "state": self.state.to_dict()})
         return q
 
@@ -219,7 +258,7 @@ class StateBus:
         async with self._lock:
             self._apply_patch(patch)
             self.state.last_event = event
-            self.state.last_event_ts = time.time()
+            self.state.last_event_ts = self.last_seen = time.time()
             snap = self.state.to_dict()
             self._fanout({"type": "patch", "event": event, "state": snap})
             return snap
@@ -238,7 +277,7 @@ class StateBus:
         chat_end — the _inflight decrement would release a CONCURRENT chat's
         `running` early."""
         async with self._lock:
-            self.state.chat_id += 1
+            self.state.chat_id = next(_CHAT_SEQ)
             return self.state.chat_id
 
     async def chat_begin(self, **patch: Any) -> int:
@@ -247,13 +286,12 @@ class StateBus:
         Returns the new chat_id. Race-free across concurrent /api/chat calls
         (compare fires two; CLI + browser can overlap)."""
         async with self._lock:
-            self.state.chat_id += 1
-            cid = self.state.chat_id
+            cid = self.state.chat_id = next(_CHAT_SEQ)
             self._inflight += 1
             self._apply_patch(patch)
             self.state.running = True
             self.state.last_event = "chat_start"
-            self.state.last_event_ts = time.time()
+            self.state.last_event_ts = self.last_seen = time.time()
             self._fanout({"type": "patch", "event": "chat_start", "state": self.state.to_dict()})
         return cid
 
@@ -280,7 +318,17 @@ class StateBus:
                 pass
 
 
-BUS = StateBus()
+# ── sessions ──────────────────────────────────────────────────────────────────
+
+_BUSES: dict[str, StateBus] = {}
+
+
+def last_session_key(sid: str) -> str:
+    """The prefs key a session's sidebar (layout + params) persists under. The
+    default session keeps the historical bare key — packs write it, the CLI-only
+    seed reads it, single-user mode never sees another. Mirrored by the browser
+    (+page `sessionPrefKey`), which keys on the SERVER-resolved id."""
+    return "last_session" if sid == DEFAULT_SESSION else f"last_session@{sid}"
 
 
 # Global sampling params the CLI can read before any browser connects. On startup we
@@ -293,15 +341,19 @@ BUS = StateBus()
 _SEEDABLE_PARAMS = ("temperature", "max_tokens", "n_samples", "thinking", "top_p")
 
 
-def seed_bus_from_prefs() -> None:
-    """Prime the bus's global sampling params from prefs.json's `last_session`.
-    Best-effort at startup: a missing/garbled prefs file leaves the defaults intact."""
+def seed_bus_from_prefs(bus: "StateBus | None" = None, sid: str = DEFAULT_SESSION) -> None:
+    """Prime a bus's global sampling params from prefs.json — the session's own
+    `last_session@<sid>` if it ever persisted one, else the instance's
+    `last_session` (a new person starts from the pack's / the box's defaults).
+    Best-effort: a missing/garbled prefs file leaves the defaults intact."""
     import json
 
     from .settings import SETTINGS
     from .store import read_json
 
-    raw = (read_json(SETTINGS.prefs_path, {}) or {}).get("last_session")
+    bus = bus or BUS
+    prefs = read_json(SETTINGS.prefs_path, {}) or {}
+    raw = prefs.get(last_session_key(sid)) or prefs.get("last_session")
     if not raw:
         return
     try:
@@ -312,4 +364,61 @@ def seed_bus_from_prefs() -> None:
         return
     for k in _SEEDABLE_PARAMS:
         if session.get(k) is not None:
-            setattr(BUS.state, k, session[k])
+            setattr(bus.state, k, session[k])
+
+
+def get_bus(sid: str = DEFAULT_SESSION) -> StateBus:
+    """The bus for a session, created on first use. A NEW non-default session is
+    seeded from prefs right here (the default one is seeded by main.lifespan,
+    once settings are final), so a session that only ever sees `tinkpg` still
+    starts from the instance's defaults."""
+    bus = _BUSES.get(sid)
+    if bus is None:
+        bus = _BUSES[sid] = StateBus(sid)
+        if sid != DEFAULT_SESSION:
+            seed_bus_from_prefs(bus, sid)
+    return bus
+
+
+def live_sessions() -> list[StateBus]:
+    """Sessions with ≥1 attached SSE stream — a browser is looking at them."""
+    return [b for b in _BUSES.values() if b.subscribers > 0]
+
+
+def list_sessions() -> list[dict[str, Any]]:
+    """Every session this process holds, most recently active first — the
+    `GET /api/sessions` / `tinkpg sessions` shape."""
+    return [
+        {
+            "id": b.id,
+            "subscribers": b.subscribers,
+            "workspace_id": b.state.workspace_id,
+            "running": b.state.running,
+            "last_event": b.state.last_event,
+            "last_event_ts": b.state.last_event_ts,
+            "last_seen": b.last_seen,
+        }
+        for b in sorted(_BUSES.values(), key=lambda b: -b.last_seen)
+    ]
+
+
+async def broadcast_all(event: str, payload: dict[str, Any]) -> None:
+    """An ephemeral event for EVERY session: the shared store moved (`ops`,
+    `workspace_deleted`), and each mirror must converge whoever's sidebar it is."""
+    for bus in list(_BUSES.values()):
+        await bus.broadcast(event, payload)
+
+
+def reset_sessions() -> None:
+    """Test isolation: forget every non-default session and blank the default's
+    state. The default bus OBJECT survives — tests hold it as `BUS`."""
+    for sid in [s for s in _BUSES if s != DEFAULT_SESSION]:
+        del _BUSES[sid]
+    BUS.state = PlaygroundState()
+    BUS._subs.clear()
+    BUS._inflight = 0
+
+
+# The default session's bus — the one bus single-user mode has, and the module
+# name every pre-sessions caller (and test) still reaches for.
+BUS = get_bus(DEFAULT_SESSION)

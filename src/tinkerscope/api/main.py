@@ -15,11 +15,12 @@ import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import vllm_sampler, workspace_store
 from .discovery import get_capabilities
+from .session import resolve_session_soft
 from .routes import (
     chat,
     workspaces,
@@ -75,6 +76,7 @@ app.include_router(openrouter_models.router)
 app.include_router(vllm_models.router)
 app.include_router(chat.router)
 app.include_router(state.router)
+app.include_router(state.sessions_router)
 app.include_router(highlights.router)
 app.include_router(pins.router)
 app.include_router(prefs.router)
@@ -85,7 +87,7 @@ app.include_router(search.router)
 
 
 @app.get("/api/health")
-def health() -> dict:
+def health(request: Request) -> dict:
     caps = get_capabilities()
     return {
         "ok": True,
@@ -96,6 +98,12 @@ def health() -> dict:
         # The configured vLLM server (normalized), or null — its models are on
         # /api/vllm-models and sample via /api/chat's `vllm_model`.
         "vllm_url": vllm_sampler.base_url(),
+        # `--multi-user` (api/session.py): the state bus is per session. `session`
+        # = the id THIS request resolved to (the browser keys its sidebar prefs on
+        # it; in single-user mode always "default"), or null when the request
+        # would have been refused as ambiguous.
+        "multi_user": SETTINGS.multi_user,
+        "session": resolve_session_soft(request),
         # caps: {"available": bool, "supported_models": [str, ...], "error": str|None}
         **caps,
     }

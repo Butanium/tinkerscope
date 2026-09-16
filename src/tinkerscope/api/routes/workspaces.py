@@ -31,7 +31,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
-from ..state import BUS, DEFAULT_PANEL_ID
+from ..state import DEFAULT_PANEL_ID, broadcast_all
 from .. import workspace_store as store
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
@@ -220,11 +220,13 @@ async def apply_workspace_ops(workspace_id: str, req: OpsRequest) -> dict:
 
 
 async def _broadcast_ops(workspace_id: str, out: dict) -> None:
-    """Fan the applied batch out to every attached mirror. Nothing changed ⇒ no
-    event: a rev that moves with no ops behind it is exactly the gap that would
-    make every other tab refetch for nothing."""
+    """Fan the applied batch out to every attached mirror — in EVERY session
+    (`--multi-user`): the store is shared, so whoever's sidebar it is, their copy
+    of this workspace must converge. Nothing changed ⇒ no event: a rev that
+    moves with no ops behind it is exactly the gap that would make every other
+    tab refetch for nothing."""
     if out.get("ops"):
-        await BUS.broadcast(
+        await broadcast_all(
             "ops", {"workspace": workspace_id, "rev": out["rev"], "ops": out["ops"]}
         )
 
@@ -255,5 +257,5 @@ async def delete_workspace(workspace_id: str) -> dict:
     /api/pack/apply path only upserts — settled 2026-08-12.)"""
     if not await run_in_threadpool(store.delete, workspace_id):
         raise HTTPException(404, f"no workspace {workspace_id}")
-    await BUS.broadcast("workspace_deleted", {"workspace": workspace_id})
+    await broadcast_all("workspace_deleted", {"workspace": workspace_id})
     return {"status": "ok"}

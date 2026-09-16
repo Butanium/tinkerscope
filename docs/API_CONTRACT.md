@@ -98,7 +98,7 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
 
 | Method | Path | Body / params | Returns |
 |---|---|---|---|
-| GET | `/api/health` | — | `{ok, root, scan_roots[], tinker_key, openrouter_key, vllm_url, available, supported_models[], error}` — `vllm_url` = the configured vLLM server (normalized, `$TINKERSCOPE_VLLM_URL` / `--vllm-url`) or null |
+| GET | `/api/health` | — | `{ok, root, scan_roots[], tinker_key, openrouter_key, vllm_url, multi_user, session, available, supported_models[], error}` — `vllm_url` = the configured vLLM server (normalized, `$TINKERSCOPE_VLLM_URL` / `--vllm-url`) or null; `multi_user` = started with `--multi-user`; `session` = the session id THIS request resolved to (see "Sessions" below; always `"default"` on a single-user server; `null` when the request would be refused as ambiguous) |
 | GET | `/api/models` | — | `Run[]` (with `supports_thinking`) |
 | POST | `/api/models/refresh` | — | `{status, count}` (rescans fs + capabilities) |
 | GET | `/api/tinker-models` | `?refresh` | `{available, error, models:[…]}` — everything sampleable through tinker, one filterable list. Each entry has `kind` + unified `id` + `label`. `kind:"base"` (+`base_model`, +`supports_thinking`) = raw base models from `get_server_capabilities` (no LoRA); `supports_thinking` = the family exposes a binary thinking toggle (so the composer can hide its thinking control for base picks with none). `kind:"checkpoint"` (+`sampler_path`,`created`) = every sampler checkpoint the account still has (the REST `list_user_checkpoints` sweep — not the 20-capped oai /v1/models), newest first, UUID-only (no `supports_thinking` — base/renderer unknown ⇒ the UI assumes thinking-capable). Base models first, then checkpoints. Entries a **share pack** injected (see `docs/PACK.md`) are appended with `pack:true` and deduped by `id` against the sweep — these carry explicit sampler paths / base models the account sweep won't list (public checkpoints trained elsewhere), so they appear even offline / cross-account. A registry label **OVERRIDES** a sweep entry's derived one (same `id` ⇒ one row, not two) and sets `named:true`; an entry with no registry label has no `named` flag, which is how the UI knows its label is derived and offers to name it. |
@@ -112,9 +112,10 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
 | POST | `/api/chat` | ChatRequest (below) | **SSE** (below) |
 | POST | `/api/chat/{chat_id}/cancel` | — | `{status, chat_id}` — cancel an in-flight chat by id (`status`: `"cancelling"` or `"not_found"`). How the browser's "Stop all" reaches a chat it doesn't own (fired by tinkpg / another tab, so no local AbortController): drives the SAME guaranteed terminal a client disconnect would — `chat_end` fires (`running` clears for every subscriber), any already-completed samples are still committed, and a cancel with 0 completed samples fires the **error**-flavored terminal so nothing folds an empty branch. Idempotent (already-ended chats are `not_found`). Best-effort remote-side: the tinker SDK runs sample calls on its own loop, so cancel stops us listening, never the remote compute in flight. |
 | POST | `/api/close` | — | `{status}` (drops cached sampling clients) |
-| GET | `/api/state` | — | PlaygroundState (below) |
-| POST | `/api/state` | any subset of StatePatch | new PlaygroundState |
-| GET | `/api/state/events` | — | **SSE** state stream (below) |
+| GET | `/api/state` | — | PlaygroundState (below) — of the request's SESSION (`X-Tinkerscope-Session`, see "Sessions") |
+| POST | `/api/state` | any subset of StatePatch | new PlaygroundState (same session scoping) |
+| GET | `/api/state/events` | `?session=<id>` | **SSE** state stream (below) for that session — the query form because EventSource can't set headers |
+| GET | `/api/sessions` | — | `[{id, subscribers, workspace_id, running, last_event, last_event_ts, last_seen}]`, most recently active first — every session bus this process holds (`--multi-user`; a single-user server lists the one `default`). `subscribers` = attached `/api/state/events` streams, i.e. "a browser is looking at this one" |
 | POST | `/api/samplescope/open` | `{run_id}` | `{url, started, base_url}` — resolve that run's `dataset_path` to a **samplescope** deep link (`<base>/?path=<root-relative>`), reusing a running instance that covers the file or STARTING one over the scan root that does (`started` says which). Takes a run id, never a path: any page can POST to localhost, so the served tree stays bounded to one we already scan. 404 no such run / no dataset on disk, 409 outside our roots, 503 no `sscope`, 504 started but never came up |
 | GET | `/api/highlights` | — | `HighlightRule[]` (render-time coloring rules, sorted by `sort_order`). A virgin state dir returns `[]` — there are no seeded defaults (the old ed_sheeran/dentist/vesuvius fixtures were removed 2026-07-23; a fresh instance, incl. one seeded by a share pack, starts with no rules) |
 | PUT | `/api/highlights/{id}` | rule dict (`name`, `patterns[]`, `combinator`, `is_regex`, `case_sensitive`, `color`, `scope_role`) | the saved `HighlightRule` (URL id authoritative) |
@@ -582,6 +583,35 @@ ownership inversion + the anti-chimera rule close that class — full story in
 `web/src/lib/bus-scope.test.ts`, smoke
 `tests/small-smokes/browser_two_tab_workspace.py` (scenarios 5–6 pin the
 inversion and were verified to fail on the pre-fix build).
+
+### Sessions (`tinkerscope serve --multi-user`)
+
+One PlaygroundState per **session** instead of per process (`api/session.py`,
+`api/state.py::get_bus`). Everything above that is per-process state — the
+workspace-scoped fields AND the global params, `chat_id`, `running` — becomes
+per session; the durable store (workspaces, highlights, pins, prefs) stays one
+store for everyone. Which session a request drives:
+
+| transport | who |
+|---|---|
+| header `X-Tinkerscope-Session: <id>` | every browser fetch (`lib/session.ts` — one id per browser profile, localStorage, `?u=<id>` sets it and is stripped), `tinkpg --session` / `$TINKERSCOPE_SESSION` |
+| query `?session=<id>` | the browser's EventSource (`/api/state/events`) — it cannot set headers |
+| neither | resolved server-side: exactly one session has a live subscriber → that one (a bare `tinkpg send` keeps driving the human's screen); none → `default`; several → **409** naming the ids and `--session` |
+
+Ids match `^[A-Za-z0-9_.-]{1,64}$` (400 otherwise). A server started WITHOUT
+`--multi-user` maps every request to the one `default` session whatever it
+sends, so the wire is exactly the pre-sessions one. Event routing: a chat's own
+events (`chat_start` / `delta` / `sample` / `chat_done` / `chat_error`) go to the
+bus of the session that fired it; the SHARED store's events (`ops`,
+`workspace_deleted`) go to **every** session (`state.broadcast_all`), so two
+people on one workspace converge while their sidebars stay their own. `chat_id`s
+come from one process-wide counter, so `POST /api/chat/{chat_id}/cancel` is
+unambiguous across sessions. The `last_session` pref is keyed per session
+(`last_session@<id>`; the default session keeps the bare key, so packs and the
+CLI-only seed are unchanged), with a read fallback to `last_session` so a new
+person starts from the instance's defaults. Tests: `tests/test_sessions.py`;
+smoke `tests/small-smokes/browser_multi_user.py` (run both legs — `MULTI_USER=0`
+must reproduce the single-bus leak).
 
 ### /api/state/events SSE (the browser subscribes ONCE on load)
 Event names = the message's `type`:

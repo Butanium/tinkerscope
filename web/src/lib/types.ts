@@ -108,6 +108,13 @@ export type Health = {
   openrouter_key?: boolean;
   /** The configured vLLM server (normalized URL), or null. */
   vllm_url?: string | null;
+  /** `tinkerscope serve --multi-user`: the state bus is per session (lib/session.ts). */
+  multi_user?: boolean;
+  /** The session id the SERVER resolved this browser to — `default` on a
+   *  single-user server whatever the browser sent; null = ambiguous (no id sent
+   *  while several sessions are live — can't happen for this app, which always
+   *  sends one). Keys the `last_session` pref; shown on the topbar chip. */
+  session?: string | null;
   available?: boolean;
   supported_models?: string[];
   error?: string | null;

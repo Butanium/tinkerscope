@@ -4,6 +4,10 @@ The browser opens `/api/state/events` once on load and renders from the pushed
 state. Both the browser and the `tinkpg` CLI POST `/api/state` to change the
 selected run/checkpoint, the workspace, or sampling params — so terminal and
 browser stay in lockstep.
+
+Every route here acts on ONE session's bus, resolved per request by
+`api/session.py` (`X-Tinkerscope-Session` / `?session=`; single-user mode maps
+everything to the default session). `GET /api/sessions` lists them.
 """
 from __future__ import annotations
 
@@ -11,13 +15,15 @@ import asyncio
 import json
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from ..state import BUS
+from ..session import resolve_session
+from ..state import get_bus, list_sessions
 
 router = APIRouter(prefix="/api/state", tags=["state"])
+sessions_router = APIRouter(prefix="/api/sessions", tags=["state"])
 
 
 class StatePatch(BaseModel):
@@ -61,12 +67,12 @@ class StatePatch(BaseModel):
 
 
 @router.get("")
-def get_state() -> dict:
-    return BUS.state.to_dict()
+def get_state(sid: str = Depends(resolve_session)) -> dict:
+    return get_bus(sid).state.to_dict()
 
 
 @router.post("")
-async def patch_state(patch: StatePatch) -> dict:
+async def patch_state(patch: StatePatch, sid: str = Depends(resolve_session)) -> dict:
     fields = patch.model_dump(exclude_unset=True)
     # Old-client shim: a patch that sets a NON-EMPTY system prompt without
     # managing the enable flag (CLI `params --system`, pre-flag browser tabs)
@@ -74,13 +80,14 @@ async def patch_state(patch: StatePatch) -> dict:
     # always sends the flag explicitly (drafting while muted must NOT re-enable).
     if fields.get("system_prompt") and "system_enabled" not in fields:
         fields["system_enabled"] = True
-    return await BUS.publish_state("patch", **fields)
+    return await get_bus(sid).publish_state("patch", **fields)
 
 
 @router.get("/events")
-async def state_events() -> EventSourceResponse:
+async def state_events(sid: str = Depends(resolve_session)) -> EventSourceResponse:
     """Push every state change / sample event as SSE. Heartbeats every 15s."""
-    q = await BUS.subscribe()
+    bus = get_bus(sid)
+    q = await bus.subscribe()
 
     async def gen():
         try:
@@ -91,6 +98,14 @@ async def state_events() -> EventSourceResponse:
                 except asyncio.TimeoutError:
                     yield {"event": "ping", "data": "{}"}
         finally:
-            await BUS.unsubscribe(q)
+            await bus.unsubscribe(q)
 
     return EventSourceResponse(gen())
+
+
+@sessions_router.get("")
+def get_sessions() -> list[dict]:
+    """Every session bus this process holds (most recently active first):
+    `[{id, subscribers, workspace_id, running, last_event, last_event_ts, last_seen}]`.
+    In single-user mode that is the one `default` entry."""
+    return list_sessions()

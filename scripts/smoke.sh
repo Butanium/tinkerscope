@@ -77,6 +77,13 @@ DEFAULT=(
     # SELF-HOSTING — spawns and restarts its own servers, so it must run under
     # this runner's lock, never beside another sweep.
     browser_ops_convergence
+    # `--multi-user` (2026-09-16): two browser profiles on one instance, two
+    # sidebars, one shared store. SELF-HOSTING like ops_convergence (its own
+    # server on 8884). This runs the REAL leg only; the falsification leg is
+    # `MULTI_USER=0 uv run python tests/small-smokes/browser_multi_user.py`
+    # (must pass by reproducing the single-bus leak) — run it when you touch
+    # api/session.py / api/state.py, it is what proves these assertions bite.
+    browser_multi_user
     browser_kbnav
     browser_thread_system
     browser_row_toolbar

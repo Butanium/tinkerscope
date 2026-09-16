@@ -23,7 +23,10 @@ models next to your checkpoints. Serving weights yourself? `tinkerscope
 --vllm-url http://host:8000` (or `TINKERSCOPE_VLLM_URL`) lists every model a
 [vLLM](https://docs.vllm.ai) server serves in the picker (`⚙`) and samples it
 like a native model — token probabilities, the loom, the works
-(`TINKERSCOPE_VLLM_API_KEY` if the server has `--api-key`). Lost in the UI? The **`?` button** in the
+(`TINKERSCOPE_VLLM_API_KEY` if the server has `--api-key`). Sharing one instance
+with a colleague? `tinkerscope --multi-user` gives every browser its own sidebar
+(models, params, open workspace) while the workspaces stay shared, and
+`tinkpg --session <id>` drives one person's screen. Lost in the UI? The **`?` button** in the
 sidebar explains every control and keyboard shortcut — or just ask your agent
 (guide skill below).
 
@@ -208,6 +211,7 @@ tinkpg battery <probes_dir>              # Fire a DIRECTORY of probe files as se
 tinkpg probe <run> [prompt]              # Sample ANY discovered model WITHOUT touching the browser or any workspace.
 tinkpg params                            # Show or SET the GLOBAL sampling params (system prompt, temperature, max tokens, n, thinking,...
 tinkpg url [selector]                    # Print the URL of the server this CLI is driving — the thing to hand the human when they ask...
+tinkpg sessions                          # List the SESSIONS a `--multi-user` server holds — one sidebar (panel selection, open...
 tinkpg state                             # Digest of what's on screen now: one block per panel, first/last-2 of the open workspace's...
 tinkpg threads                           # Cross-workspace index of every root THREAD — the find primitive for "where are my multi-turn...
 tinkpg ws [selector]                     # Browse saved WORKSPACES (multi-panel, branchable; `conv` is a back-compat alias).

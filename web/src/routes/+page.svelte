@@ -69,6 +69,7 @@
     type ConflictMode
   } from '$lib/pack-install';
   import type { Pin } from '$lib/types';
+  import { sessionId, SESSION_URL_PARAM } from '$lib/session';
   import { tip, tipHost, tooltip } from '$lib/tooltip.svelte';
   import {
     activePath,
@@ -452,6 +453,17 @@
   // so reopening tinkerscope restores your last-used models + sampling params.
   // system_prompt is deliberately NOT persisted here — it travels per-workspace.
   const SESSION_PREF_KEY = 'last_session';
+  /** The pref key THIS SESSION's sidebar persists under: the bare `last_session`
+   *  for the default session (single-user mode, packs and the CLI-only seed all
+   *  read that key), `last_session@<id>` on a --multi-user server — so a restart
+   *  restores each person's own layout, not whoever wrote last. Keyed on the
+   *  SERVER-resolved id (health.session), never the id this tab minted: a
+   *  single-user server maps every id to `default`. Mirror of
+   *  state.last_session_key. */
+  function sessionPrefKey(): string {
+    const sid = health?.session;
+    return sid && sid !== 'default' ? `${SESSION_PREF_KEY}@${sid}` : SESSION_PREF_KEY;
+  }
   let prefsLoaded = $state(false); // set true after restore; gates saving over our own defaults
   let sessionSaveTimer: ReturnType<typeof setTimeout> | null = null;
   let lastSessionJson = ''; // skip redundant PUTs (the effect re-fires on every SSE event)
@@ -472,7 +484,7 @@
       });
       if (json === lastSessionJson) return; // selection/params unchanged (e.g. mid-stream)
       lastSessionJson = json;
-      api.setPref(SESSION_PREF_KEY, json).catch(() => {});
+      api.setPref(sessionPrefKey(), json).catch(() => {});
     }, 500);
   }
   $effect(() => {
@@ -492,7 +504,9 @@
       // site: the view the export's author set up). Local always wins — see
       // lib/chart-view.ts `mergeStores`.
       hydrateChartView(prefs[CHART_VIEW_PREF_KEY]);
-      const raw = prefs[SESSION_PREF_KEY];
+      // A session that never persisted its own sidebar starts from the
+      // instance's (`last_session`: the pack's / the box's defaults).
+      const raw = prefs[sessionPrefKey()] ?? prefs[SESSION_PREF_KEY];
       // Only restore into a FRESH process (no panel has a run selected yet), so we
       // never clobber a session another tab/CLI already set. Require a real
       // snapshot first: a null live.state (getState failed) must NOT count as
@@ -1894,6 +1908,17 @@
     ws.flushStatePatch = flushPatchState;
 
     (async () => {
+      // `?u=<id>` names this browser's session (lib/session.ts). Read it — the
+      // memoized sessionId() already did, above, when live.start() opened the
+      // bus — then strip it through the router (page.url must forget it too, or
+      // setWsUrl would carry it into every rewrite): a copied link must never
+      // hand the reader someone else's sidebar.
+      sessionId();
+      if (page.url.searchParams.has(SESSION_URL_PARAM)) {
+        const url = new URL(page.url);
+        url.searchParams.delete(SESSION_URL_PARAM);
+        await goto(url, { replaceState: true, keepFocus: true, noScroll: true });
+      }
       try { health = await api.health(); } catch (e: any) { backendError = `Backend not reachable: ${e?.message ?? e}`; }
       await modelCatalog.loadRuns(setBackendError);
       await modelCatalog.loadOpenrouterModels(setBackendError);
@@ -1994,6 +2019,17 @@
               : 'Connecting...'}
         ></span>
         <span class="status-text">{live.connected ? 'live' : live.everConnected ? 'offline' : '…'}</span>
+        {#if health?.multi_user && health.session}
+          <!-- --multi-user: this browser's sidebar is its own session; the id is
+               what a terminal needs (`tinkpg --session <id>`) to drive THIS screen. -->
+          <button
+            class="session-chip"
+            data-testid="session-chip"
+            data-tooltip="your session id — pass it to tinkpg --session (click copies)"
+            use:tip
+            onclick={() => navigator.clipboard?.writeText(health!.session!).catch(() => {})}
+          >session {health.session}</button>
+        {/if}
       {/if}
     </div>
   </header>
@@ -2913,6 +2949,8 @@
   .status-dot.ok { background: #22c55e; opacity: 1; }
   .status-dot.down { background: #ef4444; opacity: 1; }
   .status-text { font-size: 0.72rem; color: var(--color-text-muted); }
+  .session-chip { font-size: 0.7rem; font-family: var(--font-mono); color: var(--color-text-muted); background: transparent; border: 1px solid var(--color-border); border-radius: 999px; padding: 1px 8px; margin-left: 6px; cursor: pointer; }
+  .session-chip:hover { color: var(--color-text); border-color: var(--color-text-muted); }
 
   /* ── Degraded banner ───────────────────────────────────────────── */
   .degraded-banner { font-size: 0.8rem; color: #b45309; background: #fef3c7; padding: var(--space-2) var(--space-5); border-bottom: 1px solid #f59e0b40; flex-shrink: 0; }

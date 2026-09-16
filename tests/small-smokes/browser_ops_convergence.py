@@ -53,7 +53,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-PORT = 8873
+PORT = 8886  # 8871–8874 are the box's MCP servers now (see browser_state_reprime.py)
 BASE = f"http://127.0.0.1:{PORT}"
 REPO = Path(os.environ.get("TSCOPE_APP_DIR") or Path(__file__).resolve().parents[2])
 CHROME = next(Path.home().glob(".cache/ms-playwright/chromium-*/chrome-linux64/chrome"))

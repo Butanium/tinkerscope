@@ -63,13 +63,14 @@ import logging
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Awaitable, Callable, Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from .. import discovery, inflight, openrouter, tinker_oai, tree_ops, vllm_sampler, workspace_store
-from ..state import DEFAULT_PANEL_ID, BUS
+from ..session import resolve_session
+from ..state import DEFAULT_PANEL_ID, BUS, get_bus  # noqa: F401  (BUS: the default bus, patched by tests)
 from ..tinker_sampler import get_sampler, select_renderer_name
 from .models import ckpt_label
 from .workspaces import _broadcast_ops
@@ -466,7 +467,13 @@ def compose_system(global_part: str | None, thread_part: str | None) -> str:
 
 
 @router.post("/chat")
-async def chat(req: ChatRequest):
+async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
+    # The SESSION's bus (api/session.py): where this chat's params inherit from,
+    # whose open workspace is its default home, and whose subscribers see its
+    # samples stream. Single-user mode: always the default bus. The isinstance
+    # guard is for the tests that call this function DIRECTLY (no HTTP, so no
+    # dependency injection — `sid` arrives as the Depends marker itself).
+    bus = get_bus(sid) if isinstance(sid, str) else BUS
     # ── fold placement (§4.3) — request-shape errors are 400s, up front ──────
     # `fold_ws` is resolved ONCE here (explicit → the bus's open workspace) so the
     # fold target and the terminal-broadcast stamp cannot drift apart if the bus
@@ -477,7 +484,7 @@ async def chat(req: ChatRequest):
             raise HTTPException(
                 400, "parent_node with commit=false is contradictory — a fold IS a commit"
             )
-        fold_ws = req.workspace_id or BUS.state.workspace_id
+        fold_ws = req.workspace_id or bus.state.workspace_id
         if not fold_ws:
             raise HTTPException(
                 400,
@@ -496,7 +503,7 @@ async def chat(req: ChatRequest):
         {"role": m.role, "content": m.content, **({"reasoning": m.reasoning} if m.reasoning else {})}
         for m in req.messages
     ]
-    params = resolve_params(req, BUS.state)
+    params = resolve_params(req, bus.state)
     system_prompt, top_p = params["system_prompt"], params["top_p"]
     thread_system = params["thread_system_prompt"]
     thinking: "bool | str" = params["thinking"]
@@ -735,7 +742,7 @@ async def chat(req: ChatRequest):
             # pre-start failure (unknown/unsampleable run, bad checkpoint): surface
             # on BOTH the caller stream and the bus so the browser panel shows it.
             if req.broadcast:
-                await BUS.broadcast("chat_error", {"chat_id": None, "panel": req.panel, "error": str(e), "client_token": req.client_token})
+                await bus.broadcast("chat_error", {"chat_id": None, "panel": req.panel, "error": str(e), "client_token": req.client_token})
             yield {"event": "error", "data": json.dumps({"error": str(e)})}
             return
 
@@ -782,7 +789,7 @@ async def chat(req: ChatRequest):
                     "thinking": thinking,
                     "top_p": top_p,
                 })
-        chat_id = await (BUS.alloc_chat_id() if bus_silent else BUS.chat_begin(**state_patch))
+        chat_id = await (bus.alloc_chat_id() if bus_silent else bus.chat_begin(**state_patch))
         # Stamp every broadcast with the workspace this chat belongs to. The browser's
         # external-fold hook folds a chat_done onto a panel id ONLY if this id matches
         # the workspace it currently has open; panel ids are re-minted across
@@ -794,7 +801,7 @@ async def chat(req: ChatRequest):
         # (lockstep). Read synchronously after chat_begin — no await, so it can't drift.
         # A placement chat pins it to `fold_ws` (resolved at request time): the fold
         # target and the terminal stamp must be the same workspace.
-        conv_id = fold_ws or req.workspace_id or BUS.state.workspace_id
+        conv_id = fold_ws or req.workspace_id or bus.state.workspace_id
 
         # ── stream samples, with EXACTLY ONE terminal event on every exit path ──
         # Three ways this chat can end — done / producer error / cancelled (client
@@ -905,7 +912,7 @@ async def chat(req: ChatRequest):
                 # so it must not end there either — chat_end's _inflight
                 # decrement would release a concurrent chat's `running` early.
                 if not bus_silent:
-                    await BUS.chat_end(event)
+                    await bus.chat_end(event)
                 if req.broadcast:
                     # workspace_id scopes the browser's external fold (#onExternalDone):
                     # every terminal flavour — done / error / cancelled — carries the stamp.
@@ -922,7 +929,7 @@ async def chat(req: ChatRequest):
                         payload["fold_rev"] = fold_rev
                     if err_msg is not None:
                         payload["error"] = err_msg
-                    await BUS.broadcast(event, payload)
+                    await bus.broadcast(event, payload)
 
             # Decoupled task + asyncio.shield, NOT an inline await or an anyio
             # shielded scope: a disconnect can cancel gen() while _terminal is
@@ -965,7 +972,7 @@ async def chat(req: ChatRequest):
         prod_error: str | None = None
         try:
             if req.broadcast:
-                await BUS.broadcast(
+                await bus.broadcast(
                     "chat_start",
                     {"chat_id": chat_id, "panel": req.panel, "n": total, "label": label,
                      "client_token": req.client_token, "workspace_id": conv_id,
@@ -983,7 +990,7 @@ async def chat(req: ChatRequest):
                     item.setdefault("sample_index", 0)
                     yield {"event": "delta", "data": json.dumps(item)}
                     if req.broadcast:
-                        await BUS.broadcast("delta", {"chat_id": chat_id, "panel": req.panel, **item})
+                        await bus.broadcast("delta", {"chat_id": chat_id, "panel": req.panel, **item})
                     continue
                 if "content" in item and "error" not in item:
                     item.setdefault("sample_index", 0)
@@ -992,7 +999,7 @@ async def chat(req: ChatRequest):
                     samples[item["sample_index"]] = item
                 yield {"event": "message", "data": json.dumps(item)}
                 if req.broadcast:
-                    await BUS.broadcast("sample", {"chat_id": chat_id, "panel": req.panel, **item})
+                    await bus.broadcast("sample", {"chat_id": chat_id, "panel": req.panel, **item})
             if prod_error is not None:
                 await _terminal(error=prod_error)
                 yield {"event": "error", "data": json.dumps({"error": prod_error, **fold_outcome})}
@@ -1041,7 +1048,7 @@ async def chat(req: ChatRequest):
                 # AND the bus (the user turn is already persisted by the writer's
                 # own op — §4.3's point — so nothing is lost here).
                 if req.broadcast:
-                    await BUS.broadcast("chat_error", {
+                    await bus.broadcast("chat_error", {
                         "chat_id": None, "panel": req.panel, "error": reg_err,
                         "client_token": req.client_token,
                     })

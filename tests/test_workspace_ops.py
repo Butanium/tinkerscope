@@ -25,11 +25,11 @@ def bus_events(client, monkeypatch):
 
     events: list[tuple[str, dict]] = []
 
-    class FakeBus:
-        async def broadcast(self, event: str, payload: dict) -> None:
-            events.append((event, payload))
+    async def fake_broadcast_all(event: str, payload: dict) -> None:
+        events.append((event, payload))
 
-    monkeypatch.setattr(route, "BUS", FakeBus())
+    # Store events go to EVERY session (state.broadcast_all), not one bus.
+    monkeypatch.setattr(route, "broadcast_all", fake_broadcast_all)
     return events
 
 

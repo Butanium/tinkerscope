@@ -101,6 +101,14 @@ HTTP_TIMEOUT = 60.0
 # contains cwd).
 _BASE_URL_OVERRIDE: str | None = None
 _BASE_URL: str | None = None
+# The SESSION to drive on a `--multi-user` server (api/session.py): one sidebar
+# — selection, open workspace, params, running — per browser / per `--session`.
+# Sent as this header on every request; absent ⇒ the server resolves it (the
+# one live browser session, else `default`, else a 409 naming `tinkpg sessions`).
+# A single-user server ignores it. Name kept in sync with api/session.py by hand
+# — that module pulls in fastapi, which `tinkpg --help` must not.
+_SESSION_HEADER = "x-tinkerscope-session"
+_SESSION_OVERRIDE: str | None = None
 
 
 @app.callback()
@@ -110,9 +118,22 @@ def _global_options(
         "--base-url",
         help="tinkerscope server URL (default: $TINKERSCOPE_BASE_URL, else auto-discover the running instance scanning cwd)",
     ),
+    session: Optional[str] = typer.Option(
+        None,
+        "--session",
+        help="on a --multi-user server: the session (one person's sidebar) to drive — the id on their topbar chip (default: $TINKERSCOPE_SESSION, else the one live browser session; `tinkpg sessions` lists them)",
+    ),
 ) -> None:
-    global _BASE_URL_OVERRIDE
+    global _BASE_URL_OVERRIDE, _SESSION_OVERRIDE
     _BASE_URL_OVERRIDE = base_url
+    _SESSION_OVERRIDE = session
+
+
+def _session_headers() -> dict[str, str]:
+    """The session header for every request — empty when no session was named
+    (the server then resolves one; see api/session.py)."""
+    sid = _SESSION_OVERRIDE or os.environ.get("TINKERSCOPE_SESSION")
+    return {_SESSION_HEADER: sid} if sid else {}
 
 
 def _base_url() -> str:
@@ -137,7 +158,7 @@ def _base_url() -> str:
 
 def _client() -> httpx.Client:
     """Construct a short-lived httpx.Client bound to the tinkerscope base URL."""
-    return httpx.Client(base_url=_base_url(), timeout=HTTP_TIMEOUT)
+    return httpx.Client(base_url=_base_url(), timeout=HTTP_TIMEOUT, headers=_session_headers())
 
 
 def _die(msg: str, code: int = 1) -> None:
@@ -787,7 +808,7 @@ def _stream_chat(
     n_ok = 0  # completed (non-error) samples — the fold-failure check needs the count
 
     try:
-        with httpx.Client(base_url=_base_url(), timeout=None) as c:
+        with httpx.Client(base_url=_base_url(), timeout=None, headers=_session_headers()) as c:
             with connect_sse(c, "POST", "/api/chat", json=body) as event_source:
                 if event_source.response.status_code >= 400:
                     body_text = event_source.response.read().decode("utf-8", errors="replace")
@@ -2212,6 +2233,48 @@ def _instance_info() -> dict:
     return {"discovered": True, "pid": inst.pid, "scan_roots": inst.scan_roots}
 
 
+def _fmt_ago(ts: Optional[float]) -> str:
+    if not ts:
+        return "never"
+    s = max(0, int(time.time() - ts))
+    if s < 60:
+        return f"{s}s ago"
+    if s < 3600:
+        return f"{s // 60}m ago"
+    if s < 86400:
+        return f"{s // 3600}h ago"
+    return f"{s // 86400}d ago"
+
+
+@app.command("sessions")
+def cmd_sessions(
+    json_out: bool = typer.Option(False, "--json", help="the raw /api/sessions list"),
+) -> None:
+    """List the SESSIONS a `--multi-user` server holds — one sidebar (panel
+    selection, open workspace, params, running) per browser / `--session` — so
+    you can pick which one to drive: `live` = a browser is attached; the human's
+    id is on their topbar chip. Workspaces are shared across sessions, so
+    `tinkpg ws` / `grep` / `samples` need no session; `state`, `send`, `params`,
+    `open`, `continue`, `wait` act on ONE. A single-user server lists just
+    `default` (every client drives it)."""
+    sessions = _get("/api/sessions")
+    if json_out:
+        _print_json(sessions)
+        return
+    health = _get("/api/health")
+    if not health.get("multi_user"):
+        print("single-user server (started without --multi-user): every client drives the one `default` session")
+    names = {c.get("id"): c.get("name") for c in _get("/api/workspaces")}
+    for s in sessions:
+        wid = s.get("workspace_id")
+        where = f"{names.get(wid, '(unsaved draft)')} ({wid[:8]})" if wid else "(no workspace open)"
+        live = f"live ×{s['subscribers']}" if s.get("subscribers") else "idle"
+        flags = "running" if s.get("running") else ""
+        print(f"{s['id']:<20} {live:<9} {flags:<8} {where}   last seen {_fmt_ago(s.get('last_seen'))}")
+    if health.get("multi_user"):
+        print("\n(drive one: `tinkpg --session <id> …`, or export TINKERSCOPE_SESSION=<id>)")
+
+
 @app.command("state")
 def cmd_state(
     full: bool = typer.Option(False, "--full", help="show every message per panel, not just first/last-2"),
@@ -3353,12 +3416,17 @@ def cmd_serve(
         None, "--vllm-url", metavar="URL",
         help="a vLLM (OpenAI-compatible) server whose served models join the picker as `vllm:<name>` — sampled natively (token ids, logprobs, loom); same as $TINKERSCOPE_VLLM_URL",
     ),
+    multi_user: bool = typer.Option(
+        False, "--multi-user",
+        help="several people on this one instance: each browser (and each `tinkpg --session <id>`) gets its OWN sidebar — panel selection, open workspace, sampling params, running — while workspaces, highlights and pins stay shared; same as TINKERSCOPE_MULTI_USER=1",
+    ),
 ) -> None:
     """Serve the API + web UI for DIRS (bare `tinkerscope <dir>` is shorthand for this)."""
     from .serve import run_server  # lazy: keeps uvicorn off the driver-verb hot path
 
     run_server(dirs or None, host=host, port=port, reload=reload,
-               pack=pack, force=force, reseed=reseed, vllm_url=vllm_url)
+               pack=pack, force=force, reseed=reseed, vllm_url=vllm_url,
+               multi_user=multi_user)
 
 
 pack_app = typer.Typer(

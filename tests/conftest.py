@@ -75,24 +75,37 @@ def scan_root(tmp_path: Path) -> Path:
     return root
 
 
-def _reload_backend(monkeypatch: pytest.MonkeyPatch, scan_root: Path, state_home: Path):
+def _reload_backend(
+    monkeypatch: pytest.MonkeyPatch, scan_root: Path, state_home: Path, env: dict[str, str] | None = None
+):
     """Set env + stub capabilities, then (re)import the backend module chain.
 
     Returns the freshly-loaded `discovery` and `main` modules. Importing in
     dependency order (paths → settings → discovery → routes → main) guarantees
-    each module's import-time globals are rebuilt against the new env.
+    each module's import-time globals are rebuilt against the new env. `env`
+    adds/overrides TINKERSCOPE_* vars for a variant backend (`multi_client`).
     """
     monkeypatch.setenv("XDG_STATE_HOME", str(state_home))
     monkeypatch.setenv("TINKERSCOPE_SCAN_ROOTS", str(scan_root))
     monkeypatch.setenv("TINKERSCOPE_HOST", "127.0.0.1")
     monkeypatch.setenv("TINKERSCOPE_PORT", "8765")
     monkeypatch.setenv("TINKER_API_KEY", "test-key-not-used")
+    # Single-user unless a test asks otherwise — never inherit the shell's.
+    monkeypatch.delenv("TINKERSCOPE_MULTI_USER", raising=False)
+    for k, v in (env or {}).items():
+        monkeypatch.setenv(k, v)
 
     import tinkerscope.paths as paths_mod
     import tinkerscope.api.settings as settings_mod
 
     importlib.reload(paths_mod)
     importlib.reload(settings_mod)
+
+    # The session buses (api/state.py) are process singletons that no reload
+    # touches: forget every session and blank the default one between backends.
+    import tinkerscope.api.state as state_mod
+
+    state_mod.reset_sessions()
 
     import tinkerscope.api.discovery as discovery_mod
 
@@ -168,6 +181,19 @@ def discovery(backend):
 @pytest.fixture
 def client(backend) -> TestClient:
     _discovery, main_mod = backend
+    with TestClient(main_mod.app) as c:
+        yield c
+
+
+@pytest.fixture
+def multi_backend(monkeypatch: pytest.MonkeyPatch, scan_root: Path, tmp_path: Path):
+    """The backend in `--multi-user` mode (TINKERSCOPE_MULTI_USER=1)."""
+    return _reload_backend(monkeypatch, scan_root, tmp_path / "state", env={"TINKERSCOPE_MULTI_USER": "1"})
+
+
+@pytest.fixture
+def multi_client(multi_backend) -> TestClient:
+    _discovery, main_mod = multi_backend
     with TestClient(main_mod.app) as c:
         yield c
 

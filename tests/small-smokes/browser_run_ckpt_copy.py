@@ -38,7 +38,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-PORT = 8874
+PORT = 8887  # 8871–8874 are the box's MCP servers now (see browser_state_reprime.py)
 BASE = f"http://127.0.0.1:{PORT}"
 # The checkout to exercise. `scripts/smoke.sh --baseline <ref>` sets TSCOPE_APP_DIR to
 # the baseline worktree; a SELF-HOSTING smoke that ignores it silently serves the

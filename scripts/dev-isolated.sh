@@ -53,12 +53,16 @@ PORT=""
 STATE_SRC="${XDG_STATE_HOME:-$HOME/.local/state}/tinkerscope"
 FRESH=0
 DIRS=()
+EXTRA=()   # any other --flag goes straight to `tinkerscope serve` (--multi-user, --vllm-url …)
 while [ $# -gt 0 ]; do
     case "$1" in
         --port)      PORT="$2"; shift 2 ;;
         --state-src) STATE_SRC="$2"; shift 2 ;;
         --fresh)     FRESH=1; shift ;;
         -h|--help)   sed -n '2,46p' "$0"; exit 0 ;;
+        --*=*)       EXTRA+=("$1"); shift ;;
+        --vllm-url)  EXTRA+=("$1" "$2"); shift 2 ;;
+        --*)         EXTRA+=("$1"); shift ;;
         *)           DIRS+=("$1"); shift ;;
     esac
 done
@@ -108,4 +112,4 @@ echo "scan roots:          ${DIRS[*]}"
 PORT_ARGS=()
 [ -n "$PORT" ] && PORT_ARGS=(--port "$PORT")
 cd "$ROOT"
-exec env XDG_STATE_HOME="$ISO" uv run tinkerscope "${PORT_ARGS[@]}" "${DIRS[@]}"
+exec env XDG_STATE_HOME="$ISO" uv run tinkerscope "${PORT_ARGS[@]}" "${EXTRA[@]+"${EXTRA[@]}"}" "${DIRS[@]}"

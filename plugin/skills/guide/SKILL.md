@@ -448,6 +448,11 @@ always check what a chord will do before committing to it.
   CLI, and a chat fired there streams into this view. The `#` button on a row
   copies its fully-qualified node handle, which is how you point a CLI command at one specific
   message.
+- **A `session` chip in the top bar** means the server runs `--multi-user`: your
+  sidebar (models, params, open workspace) is yours alone, while workspaces are
+  still shared with everyone on the instance. A terminal drives *your* screen
+  with `tinkpg --session <that id>`; open `?u=<name>` once to rename it. Links
+  you copy never carry the session.
 - **Two tabs on the same workspace** is last-writer-wins for edits. Two tabs on
   *different* workspaces is safe.
 - **Nothing live-reloads.** If someone changed the code, a backend change needs

@@ -572,7 +572,10 @@ codex plugin add tinkerscope@tinkerscope</pre>
         select a run, fire a chat, or draw a distribution from a terminal and watch it land here — that's what
         the <code>tinkerscope:cli</code> skill above teaches Claude to do.
         {@render chip('hash')} on a row copies that node's id, which is how you point the CLI at a specific
-        message.
+        message. On a server started with <code>--multi-user</code> the top bar also shows a
+        <code>session</code> chip: your sidebar (models, params, open workspace) is your own there, and
+        <code>tinkpg --session &lt;that id&gt;</code> is how a terminal drives <em>your</em> screen rather than
+        someone else's; workspaces stay shared. Add <code>?u=&lt;name&gt;</code> to the URL once to name yours.
       </p>
     </section>
   {:else}

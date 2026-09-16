@@ -125,7 +125,17 @@ and in this file's reference section; HANDOFF.md itself is retired.
   — the response shapes there were probed live on vllm 0.19.1). Read-only
   catalog: `/api/vllm-models`, ~30 s cache.
 - **Shared-state bus / live-drive** (the `tinkpg` ↔ browser lockstep): see
-  `docs/HANDOFF_BRANCHING.md` §1 + `src/tinkerscope/api/state.py`.
+  `docs/HANDOFF_BRANCHING.md` §1 + `src/tinkerscope/api/state.py`. **One bus per
+  SESSION since 2026-09-16** (`tinkerscope serve --multi-user`; `api/session.py`
+  resolves which session a request drives — header `X-Tinkerscope-Session`,
+  `?session=` for the EventSource, else the one live session / `default` / 409).
+  Single-user mode IS the one `default` session, byte-identical wire. Two rules:
+  store events (`ops`, `workspace_deleted`) fan out to EVERY session
+  (`state.broadcast_all` — the trees are shared), a chat's events stay on the
+  session that fired it; `chat_id`s are process-wide (the cancel registry).
+  `last_session` prefs are per session (`last_session@<id>`). Contract:
+  `docs/API_CONTRACT.md` §Sessions; smoke `tests/small-smokes/browser_multi_user.py`
+  — run BOTH legs (`MULTI_USER=0` must reproduce the single-bus leak).
 - **Deletion is recoverable, in two layers** — `workspace_store.py`'s trash
   journal + `web/src/lib/undo.ts`. The server diffs in **`_persist`**: it's the
   choke point for EVERY write, so ops, `upsert`'s wholesale tree replacement
@@ -558,7 +568,16 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
   - `lib/render.ts` — store-coupled render entry point (wraps highlight-render).
   - `lib/api.ts` — typed backend client + named-event SSE helper. Its object also
     DEFINES the `ApiClient` type, and picks the transport at module init: HTTP, or
-    the baked-file client when running as a static export.
+    the baked-file client when running as a static export. Every fetch carries
+    the browser's SESSION id (`lib/session.ts`) as a header, the EventSource as
+    `?session=` — a `--multi-user` server keys the sidebar on it, a single-user
+    one ignores it.
+  - `lib/session.ts` — this browser's session id: `?u=<id>` › localStorage ›
+    minted `u-xxxx`, one per browser PROFILE (two tabs of one person keep the
+    shared-bus semantics). +page strips `?u=` through the router once read, so
+    a copied link never carries a session. The pref key for the sidebar
+    (`last_session@<id>`) keys on the SERVER-resolved id from `/api/health`,
+    never the minted one. **Has `session.test.ts`**; smoke `browser_multi_user.py`.
   - `lib/static-mode.ts` / `lib/api-static.ts` — **read-only static site**
     (`docs/STATIC_SITE.md`). Detection is SYNCHRONOUS off a `window.__TSCOPE_STATIC__`
     global the exporter injects into index.html (api.ts must choose a transport before
