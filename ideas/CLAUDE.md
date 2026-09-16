@@ -42,6 +42,11 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 
 - [Restore a deleted WORKSPACE](restore-a-deleted-workspace.md) — the soft delete sets it aside in `workspaces/.deleted/`, but only a manual directory move gets it back
 
+### Multi-user sessions
+
+- [Rename a session without losing its sidebar](session-rename.md) — `?u=<name>` mints a NEW session today; a server-side move (+ prefs key rename) keeps the setup. Also: `_BUSES` never shrinks; `tinkpg state` doesn't say which session it read
+- [A foreign-workspace chat streams into a reused panel until chat_done](foreign-chat-start-render-hygiene.md) — two tabs of ONE person still share a bus; a one-line `chat_start` stamp guard fixes it, kept out of the multi-user change to stay behavior-identical
+
 ### Models: discovery, availability, renderers
 
 - [Availability auto-refresh](availability-auto-refresh.md) — the servable set only refetches on the manual button; a TTL or a send-404 hook would keep grey/⚠ honest
