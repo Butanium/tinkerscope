@@ -1463,6 +1463,19 @@ def _node_prefix_hits(nodes: dict, node: str) -> list[dict]:
     return [nd for nid, nd in nodes.items() if nid == node or nid.startswith(node)]
 
 
+def _select_path_ops(tree: dict, panel: str, node_id: str) -> list[dict]:
+    """`select` ops that make the root→`node_id` path the ACTIVE branch of
+    `panel` — one per fork whose current selection is a different sibling
+    (an already-active path yields none, so an ordinary active-leaf continue
+    stays op-free). Mirrors the browser's `selectPathTo` (web/src/lib/tree.ts)."""
+    ops: list[dict] = []
+    for nd in _ancestry(tree, node_id):
+        parent_key = nd.get("parent") or ROOT
+        if _selected_child(tree, parent_key) != nd["id"]:
+            ops.append({"op": "select", "panel": panel, "parent_key": parent_key, "child_id": nd["id"]})
+    return ops
+
+
 def _continue_target(tree: dict, thread: Optional[int], turn: Optional[int], node: Optional[str]) -> dict:
     """Resolve the node whose ancestry `continue` loops from, within ONE panel's tree.
     `--node` pinpoints it (id or unique prefix); else walk a root thread's SELECTED
@@ -1760,6 +1773,11 @@ def cmd_continue(
         for (p, _msgs, _ts, anchor) in plans:
             if anchor is None:
                 continue
+            # A --node / --thread / --turn target may sit on a branch the human is
+            # NOT looking at: make its path the active one first (one `select` per
+            # fork that differs), so the browser follows the CLI to where the
+            # samples will land instead of extending an invisible sibling.
+            turn_ops.extend(_select_path_ops(trees.get(p["id"]) or {}, p["id"], anchor["id"]))
             if anchor.get("role") == "user":
                 fire_parent[p["id"]] = anchor["id"]
             elif prompt is not None:  # ends-on-assistant ⇒ _continue_messages required a prompt

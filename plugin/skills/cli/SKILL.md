@@ -421,7 +421,11 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
 - **Loom / multi-turn a probe**: `tinkpg continue "<follow-up>" --n 20` adds a
   turn to the CURRENT thread at every panel (default target = the active leaf
   of the saved tree). Aim it at a non-active branch with `--thread K` /
-  `--turn N` (that panel's saved tree) or `--node <id>` (from `tinkpg grep`).
+  `--turn N` (that panel's saved tree) or `--node <id>` (from `tinkpg grep` or
+  `samples`). An off-path target first becomes the ACTIVE path (`select` ops
+  in the same batch as the user turn), so the human's browser jumps to the
+  branch you are extending before the samples land — continuing the 3rd of 4
+  siblings no longer grows a branch they aren't looking at.
   A `--prefill "Hmm,"` (or `--prefill-file`) seeds a thinking opener / the
   model's own truncated CoT when the target ends on a user turn (answer-level
   loom). Same layout-safe path as `send`.

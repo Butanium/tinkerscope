@@ -2100,3 +2100,19 @@ doesn't stream either), the fake rejects the pair like vLLM does, and
 `browser_vllm_live.py` walks the loom + Continue through the real UI. Output
 `logprobs` on a stream are fine — an ordinary n==1 send still streams with its
 per-token probabilities (Clément checked exactly that point).
+
+### 2026-09-16 — `tinkpg continue --node` now switches the browser to the branch it extends
+
+Caught live while looming a conversation with Clément watching: `continue
+--node <id>` on the 3rd of 4 sibling answers fired fine and folded fine — under
+a branch his browser wasn't showing. The server fold selects the NEW turn under
+its parent (`add_nodes select:true`) but never re-selects the ancestor forks, so
+a `--node` / `--thread` / `--turn` target off the active path extends an
+invisible sibling; he saw four answers to my first message and nothing after.
+Fix in the CLI (the server already had the op): `_select_path_ops` emits one
+`select` per fork where the targeted ancestry differs from the current
+selection (root fork included — the browser's `selectPathTo` rule), prepended
+to the same ops batch as the user turn, so the browser lands on the branch
+BEFORE the samples do. An already-active anchor adds no ops (the resample test
+that asserts an op-free continue is unchanged). No server restart needed — a
+CLI-only change.

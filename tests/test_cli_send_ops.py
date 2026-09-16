@@ -411,3 +411,34 @@ def test_wait_returns_when_idle(monkeypatch):
     monkeypatch.setattr(cli.time, "sleep", lambda s: None)
     res = runner.invoke(cli.app, ["wait"])
     assert res.exit_code == 0
+
+
+def test_continue_off_active_branch_selects_its_path_first(wired):
+    """`--node` onto a sibling the browser is NOT showing: the ops batch opens with
+    `select` ops making that path active (one per differing fork, root fork
+    included), THEN the new user turn — so the human's browser follows the CLI to
+    the branch the samples will land on (2026-09-16: a `--node` continue on the
+    3rd of 4 siblings extended a branch the human never saw)."""
+    calls, state, ws = wired
+    tree = ws["trees"]["p-1"]
+    # a second root thread u2→a2 that is the selected (newest) one; u1→a1 is off-path,
+    # and a1 has a newer sibling a1b so that fork differs too
+    tree["nodes"]["a1b"] = {"id": "a1b", "role": "assistant", "content": "alt", "parent": "u1", "children": []}
+    tree["nodes"]["u1"]["children"] = ["a1", "a1b"]
+    tree["nodes"]["u2"] = {"id": "u2", "role": "user", "content": "other", "parent": None, "children": ["a2"]}
+    tree["nodes"]["a2"] = {"id": "a2", "role": "assistant", "content": "yo2", "parent": "u2", "children": []}
+    tree["rootChildren"] = ["u1", "u2"]
+    res = runner.invoke(cli.app, ["continue", "follow up", "--node", "a1", "--panel", "p-1"])
+    assert res.exit_code == 0, res.output
+    (post,) = _ops_posts(calls)
+    ops = post[2]["ops"]
+    assert [o["op"] for o in ops] == ["select", "select", "add_nodes"]
+    assert ops[0] == {"op": "select", "panel": "p-1", "parent_key": cli.ROOT, "child_id": "u1"}
+    assert ops[1] == {"op": "select", "panel": "p-1", "parent_key": "u1", "child_id": "a1"}
+    assert ops[2]["nodes"][0]["parent"] == "a1"
+    # …and an anchor already on the active path adds no select ops at all
+    calls.clear()
+    res = runner.invoke(cli.app, ["continue", "again", "--node", "a2", "--panel", "p-1"])
+    assert res.exit_code == 0, res.output
+    (post,) = _ops_posts(calls)
+    assert [o["op"] for o in post[2]["ops"]] == ["add_nodes"]
