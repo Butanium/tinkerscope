@@ -34,6 +34,10 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 - [Let a share pack carry a chart view](pack-carries-chart-view.md) — an OPTIONAL `chart_view` block seeding localStorage; never a workspace field
 - [The per-bar `n=` only appears when a group's bars disagree](per-bar-n-labels.md) — deliberate, but inconsistent-looking next to the think split
 
+### vLLM backend
+
+- [Forward history reasoning + read `supports_thinking` server-side](vllm-history-reasoning.md) — role/content only today, so a thinking model served through vLLM loses its own CoT across turns; `reasoning_content` is the template's slot, `/tokenizer_info` the flag's source when no local tokenizer loads
+
 ### CLI (`tinkpg`)
 
 - [Restore a deleted WORKSPACE](restore-a-deleted-workspace.md) — the soft delete sets it aside in `workspaces/.deleted/`, but only a manual directory move gets it back
