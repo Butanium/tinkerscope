@@ -2076,7 +2076,8 @@ no-op; a text prefill on the THINK side of a thinking model gets no special
 framing (the tinker path's `_continue_prompt` has per-renderer logic; here the
 template does what it does with `continue_final_message`). Packs don't carry
 vLLM models (a served name means nothing without the server) — a `vllm:` panel
-in an exported workspace keeps its id as its label.
+in an exported workspace keeps its id as its label. *(Reversed the same day —
+see the pack entry below.)*
 
 **Live shakedown (same day).** 12-thread battery + multi-turn continues on
 Zero through the :8769 instance: 60-odd samples, one failure —
@@ -2116,3 +2117,30 @@ to the same ops batch as the user turn, so the browser lands on the branch
 BEFORE the samples do. An already-active anchor adds no ops (the resample test
 that asserts an op-free continue is unchanged). No server restart needed — a
 CLI-only change.
+
+### 2026-09-16 — Packs carry `vllm:` models after all (publishing the Zero workspace)
+
+Exporting the Zero probe workspace for `tinkerscope-exports` showed the "packs
+don't carry vLLM models" call above was wrong in practice: `pack.py`'s
+`_classify` didn't know the sentinel, so `resolve_shareable` treated
+`vllm:movingcastles/zero` as a BARE discovered-run id, looked it up, and warned
+"run not found, can't share" about a perfectly shareable ref — and `defaults.panels`
+(labels, resolved through `models`) couldn't name the panel at all, so the
+seeded layout came up empty. Now `vllm` is a fourth kind in `_KIND_TO_SENTINEL`
+(`{label, vllm: <served name>}` in the YAML), `resolve_shareable` passes it
+through like `openrouter:`, and `apply_pack` registers NOTHING for it (counted in
+`summary["vllm"]`): the catalog is the consumer's own server, so the ref is
+sampleable iff their `--vllm-url` serves that name and view-only otherwise —
+which the sidebar already says. The static viewer needs no change: its
+`vllmModels` stub is empty, `vllmLabel` falls back to the id, and
+`pack-install.ts`'s `packModels` skips the entry (nothing to register there
+either). Test: `test_vllm_model_travels_but_registers_nothing`.
+
+The hosted viewer at butanium.github.io/tinkerscope-exports was rebuilt from
+today's `web/dist` (its app predated the `vllm:` sentinel, so a `⚙` panel would
+have rendered as an unknown run) by the manifest-patch + `_copy_spa` route
+(`data/` untouched, `manifest.site` unchanged), with the new id in
+`pack_links`. Verified locally over http.server before pushing: pack install
+from URL, the ⚙ label, token inspector and first-token chart from the pack's
+logprobs, the baked cot-prefilling workspace still opening under the new app,
+and the `?w=<id>` link resolving through `pack_links` in a fresh context.

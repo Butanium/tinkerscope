@@ -23,6 +23,7 @@ tinkerscope discovers a run by a **scan-dir-relative id** (`explorations/…/res
 | `ckpt: tinker://…/sampler_weights/000123` | `ckpt:<path>` | straight through tinker's oai `/chat/completions` — **no run dir, no discovery** |
 | `base: deepseek-ai/DeepSeek-V3.1` | `base:<model>` | raw base model (no LoRA) |
 | `openrouter: deepseek/deepseek-chat-v3.1` | `openrouter:<id>` | OpenRouter reference |
+| `vllm: movingcastles/zero` | `vllm:<name>` | a self-hosted vLLM server — only if the consumer's `--vllm-url` serves that name; otherwise the panel is view-only |
 
 A **published** Tinker checkpoint keeps the **same sampler id** as the private path, so the
 `ckpt:` value in the pack works as-is on anyone's account (they supply their own
@@ -65,6 +66,9 @@ Seeds the state dir for the scanned folder, then serves. **Merge-safe** by desig
   "+ Tinker model" typeahead via `GET /api/tinker-models` → addable, first-class models.
   Upserted (deduped by ref) — **always**.
 - **OpenRouter refs** → the global `openrouter_models.json` — upserted, **always**.
+- **vLLM refs** → nothing to register: the catalog is the consumer's own server
+  (`/api/vllm-models`). The panel keeps its `vllm:<name>` ref; the transcript, Raw view
+  and token probabilities read fine without a server, sampling needs one serving that name.
 - **workspaces** → installed under a deterministic id (`pack-<pack>-<workspace>`), so
   re-applying updates the light tree in place instead of piling duplicates — **always**.
   ⚠️ Node blobs (`raw_meta`/`token_logprobs`) are **write-once**: a plain re-apply keeps

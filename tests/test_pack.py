@@ -39,6 +39,7 @@ def test_pack_yaml_roundtrip():
             packmod.PackModel("A", "ckpt", "tinker://a"),
             packmod.PackModel("B", "base", "meta/Foo"),
             packmod.PackModel("C", "openrouter", "ds/chat"),
+            packmod.PackModel("Z", "vllm", "movingcastles/zero"),
         ],
         defaults={"temperature": 0.7, "panels": ["A", "B"]},
         workspaces=[packmod.PackWorkspace("w", {"panels": [{"id": "primary", "run_id": "ckpt:tinker://a", "checkpoint": None}], "trees": {}})],
@@ -97,6 +98,34 @@ def test_apply_fresh(backend):
     # workspace installed under deterministic id
     bodies = workspace_store.list_bodies()
     assert any(b["id"] == "pack-wp-pack-probe" and b["name"] == "probe" for b in bodies)
+
+
+def test_vllm_model_travels_but_registers_nothing(backend):
+    """A `vllm:` panel is shareable as-is (no run dir to resolve, no warning), the pack
+    lists the model so `defaults.panels` can name it by label, and apply touches no
+    store — the consumer's own vLLM server is the catalog."""
+    from tinkerscope.api import pack_models_store
+    from tinkerscope.api.store import read_json
+    from tinkerscope.paths import OPENROUTER_MODELS_PATH
+
+    warnings: list[str] = []
+    ref, m = packmod.resolve_shareable(
+        "vllm:movingcastles/zero", None,
+        find_run=lambda _id: None, ckpt_label=lambda r, _i: r, warn=warnings.append,
+    )
+    assert ref == "vllm:movingcastles/zero" and m is not None
+    assert (m.kind, m.ref, m.label) == ("vllm", "movingcastles/zero", "zero")
+    assert warnings == []
+
+    pack = packmod.Pack(
+        name="zero", models=[m], defaults={"panels": ["zero"], "temperature": 0.7},
+        workspaces=[packmod.PackWorkspace("probes", {"panels": [{"id": "p-1", "run_id": ref, "checkpoint": None}], "trees": {}})],
+    )
+    assert [p["run_id"] for p in packmod.build_last_session(pack)["panels"]] == [ref]
+    summary = packmod.apply_pack(pack)
+    assert summary["vllm"] == 1 and summary["models"] == 0 and summary["openrouter"] == 0
+    assert pack_models_store.read() == []
+    assert read_json(OPENROUTER_MODELS_PATH, []) == []
 
 
 def test_apply_merge_safe(backend):

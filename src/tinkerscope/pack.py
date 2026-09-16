@@ -51,7 +51,7 @@ VERSION = 1
 
 # Panel model-selection sentinels — mirror web/src/lib/model-sel.ts. A pack model's
 # `kind` maps 1:1 to the prefix the frontend/CLI use in the shared `run_id` field.
-_KIND_TO_SENTINEL = {"ckpt": "ckpt:", "base": "base:", "openrouter": "openrouter:"}
+_KIND_TO_SENTINEL = {"ckpt": "ckpt:", "base": "base:", "openrouter": "openrouter:", "vllm": "vllm:"}
 _SENTINEL_TO_KIND = {v: k for k, v in _KIND_TO_SENTINEL.items()}
 _MODEL_KINDS = tuple(_KIND_TO_SENTINEL)
 
@@ -97,7 +97,7 @@ def _slug(s: str) -> str:
 class PackModel:
     label: str
     kind: str  # one of _MODEL_KINDS
-    ref: str   # sampler_path (ckpt) | base model name | openrouter id
+    ref: str   # sampler_path (ckpt) | base model name | openrouter id | vLLM served-model name
 
     def __post_init__(self) -> None:
         if self.kind not in _MODEL_KINDS:
@@ -345,12 +345,14 @@ def apply_pack(pack: Pack, *, force: bool = False, reseed: bool = False, on_conf
         pack = _dedupe_conflicting(pack)
 
     summary: dict[str, Any] = {
-        "pack": pack.name, "models": 0, "openrouter": 0, "workspaces": 0,
+        "pack": pack.name, "models": 0, "openrouter": 0, "vllm": 0, "workspaces": 0,
         "workspace_ids": [], "params": "skipped",
     }
 
     # 1. Models → pack_models.json (ckpt/base) + the global openrouter list, each via its
-    #    store's upsert helper (deduped, same logic the UI add-model path uses).
+    #    store's upsert helper (deduped, same logic the UI add-model path uses). A `vllm`
+    #    model has no store: the catalog is whatever the consumer's `--vllm-url` serves,
+    #    so its panels keep their ref and are sampleable iff that server serves the name.
     tinker_models = [m for m in pack.models if m.kind in ("ckpt", "base")]
     or_models = [m for m in pack.models if m.kind == "openrouter"]
     if tinker_models:
@@ -359,6 +361,7 @@ def apply_pack(pack: Pack, *, force: bool = False, reseed: bool = False, on_conf
     if or_models:
         or_store.upsert([{"label": m.label, "openrouter_model": m.ref} for m in or_models])
         summary["openrouter"] = len(or_models)
+    summary["vllm"] = sum(1 for m in pack.models if m.kind == "vllm")
 
     # 2. Workspaces → workspace store, deterministic id (re-apply upserts in place).
     prefix = f"pack-{_slug(pack.name)}-"
@@ -482,6 +485,9 @@ def resolve_shareable(
         return m.panel_ref, m
     if kind == "openrouter":
         m = PackModel(label=rest.split("/")[-1], kind="openrouter", ref=rest)
+        return m.panel_ref, m
+    if kind == "vllm":
+        m = PackModel(label=rest.split("/")[-1], kind="vllm", ref=rest)
         return m.panel_ref, m
     run = find_run(run_id)
     if run is None:
