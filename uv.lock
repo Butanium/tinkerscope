@@ -2721,7 +2721,7 @@ wheels = [
 
 [[package]]
 name = "tinker"
-version = "0.23.0"
+version = "0.27.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2739,9 +2739,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "zstandard" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/33/ce/0d30f80d7234ea88e8310b91d4ef58e9d27a96be5c579553407f831bba6b/tinker-0.23.0.tar.gz", hash = "sha256:b48f3e74128e56ad34bee18124f9b3a109a502bfa602853e999679eaf128aa49", size = 247551, upload-time = "2026-07-15T17:16:40.621Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4a/67/10ca5414c9db752cb6cb5ae44dd6461d7414dde357251724bbeaa2ddff8e/tinker-0.27.2.tar.gz", hash = "sha256:c59a94997bdbe65f5bd3d0b00301fb9578d10267f2e92afb9b95a672f27560e6", size = 290033, upload-time = "2026-09-09T05:05:12.897Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bb/a6/17932357c145c6dbe988832613b36bc7630a661148e17db1f6017ddca01a/tinker-0.23.0-py3-none-any.whl", hash = "sha256:416a20f2cc62fc83cc92c5b69de7f6aa8736bceee0156fda07fbe2fef1b00936", size = 237099, upload-time = "2026-07-15T17:16:39.183Z" },
+    { url = "https://files.pythonhosted.org/packages/1e/03/e0826c8e420a8a0bc31c0d17299a1f92af59b3044f25fb3fedbe9ea0b9dc/tinker-0.27.2-py3-none-any.whl", hash = "sha256:fed95dfd56a79acc0357ede03ea97f09b5c75ba9e79d66e188bdf93946ee4d56", size = 273065, upload-time = "2026-09-09T05:05:11.609Z" },
 ]
 
 [[package]]
@@ -2778,7 +2778,7 @@ inkling = [
 
 [[package]]
 name = "tinkerscope"
-version = "1.1.0"
+version = "1.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
@@ -2815,7 +2815,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "pyyaml", specifier = ">=6" },
     { name = "sse-starlette", specifier = ">=2.1" },
-    { name = "tinker", specifier = ">=0.23" },
+    { name = "tinker", specifier = ">=0.25" },
     { name = "tinker-cookbook", extras = ["inkling"], git = "https://github.com/Butanium/tinker-cookbook.git?branch=feat%2Ftml-v0-disable-thinking" },
     { name = "typer", specifier = ">=0.12" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },

@@ -1,6 +1,6 @@
 [project]
 name = "tinkerscope"
-version = "1.1.0"
+version = "1.2.0"
 description = "Auto-discover Tinker training runs under a directory tree and chat with / sample from their checkpoints in the browser — driveable from the terminal."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -40,7 +40,11 @@ dependencies = [
     # [inkling] pulls tml-renderers so Thinking Machines' Inkling resolves to its
     # real tml_v0 renderer (else it falls back to role_colon and crashes on any
     # multi-turn thread carrying reasoning); the extra also forces tinker>=0.23.
-    "tinker>=0.23",
+    # The floor tracks what the SERVICE still accepts, not what imports: tinker
+    # 400s an SDK it has retired, so an old-enough client fails every call with
+    # "Your Tinker SDK version is no longer supported". 0.23 was retired by
+    # 2026-09-16; 0.25.0 still answered that day.
+    "tinker>=0.25",
     "tinker-cookbook[inkling]",
     # OpenRouter compare backend.
     "openai>=1.40",

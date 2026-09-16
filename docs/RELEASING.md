@@ -65,8 +65,13 @@ Two things are deliberately NOT in the published metadata:
 
 ## History
 
+Per-release detail lives in `CHANGELOG.md`; this table is the one-line "what
+shape does this version mark" index.
+
 | version | what it marks |
 |---|---|
+| `v1.2.0` | vLLM as a native model kind (`vllm:<name>`) + `serve --multi-user` (one state bus per session). Additive: disk untouched, and a single-user instance's wire is byte-identical to 1.1.0. |
+| `v1.1.0` | **server-authoritative trees** — all mutation as ops on `POST /api/workspaces/{id}/ops` with a per-workspace `rev`, chats folded server-side, the bus transcript echo removed. WIRE moved (old browser bundles must reload); one CLI app (`tinkerscope` / `tinkpg`). |
 | `v1.0.0` | **first PyPI release** — `uv tool install tinkerscope`. Packaging metadata + the install strings the tool hands out (README, `?` modal, the static site's open-locally panel). No wire or disk change. |
 | `v0.9.0` | the `conversations → workspaces` rename, wire + disk (see `docs/MIGRATIONS.md`). Clean cut: old routes 404, old field names rejected; only `?c=` is still read. Tagged `v1.0.0` until 2026-08-05, when that version was reassigned to the PyPI release — this one never shipped anywhere but this box. |
 | `v0.1.0` | the pre-rename tool: auto-discovery, branching, N-panel compare, storage v2, share packs, token probs — everything up to and including the workspace-scoping fix for the cross-tab layout clobber. The wire and disk still say `conversation`. |

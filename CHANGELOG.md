@@ -8,6 +8,53 @@ WIRE contract, not on the UI (`docs/RELEASING.md`).
 `docs/MIGRATIONS.md` covers every release that moved the wire or on-disk shape;
 `ENGINEERING_LOGS.md` carries the dated narrative behind the decisions.
 
+## [1.2.0] — 2026-09-16
+
+Two additive capabilities: a self-hosted vLLM server becomes a first-class
+model kind, and one instance can serve several people without them fighting
+over the sidebar. Neither moves the on-disk shape; a single-user instance's
+wire is byte-identical to 1.1.0.
+
+### Added
+
+- **vLLM as a native model kind** (`tinkerscope --vllm-url URL` /
+  `TINKERSCOPE_VLLM_URL`). Every model the server serves joins the panel picker
+  as `vllm:<name>` (⚙) and samples NATIVE-shaped: the prompt is rendered by the
+  server's own `/tokenize` (its chat template, `continue_final_message` for
+  prefill) and sent to `/v1/completions` as token ids, so raw_meta, token
+  logprobs (top-K in the same call), thinking parsing, prefill and the loom all
+  work — `prompt_logprobs` scores a loom's forced prefix. Token-streams at n==1.
+  New `GET /api/vllm-models`, `ChatRequest.vllm_model`, `health.vllm_url`, the
+  `vllm:` sentinel, `tinkpg probe vllm:<name>`. Tests run against a fake vLLM
+  app through the module's transport seam; shapes probed live on vllm 0.19.1.
+- **`serve --multi-user`** (`TINKERSCOPE_MULTI_USER=1`) — one state bus per
+  SESSION. The ephemeral half of the playground (panel selection, open
+  workspace, sampling params, `running`) is keyed by a client-chosen session id
+  (`X-Tinkerscope-Session` / `?session=`), so two people on one instance stop
+  overwriting each other's sidebar. The durable store — workspace trees,
+  highlights, pins — stays shared, and its events (`ops`, `workspace_deleted`)
+  fan out to every session. `GET /api/sessions`, `tinkpg --session` /
+  `tinkpg sessions`, a topbar session chip. Without the flag every request maps
+  to the one `default` session.
+
+### Fixed
+
+- A vLLM loom/Continue at n==1 took the streaming path and asked for
+  `prompt_logprobs` with `stream=true`, which vllm 0.19.1 rejects — any fire
+  with `continue_tokens` now goes whole-sample. Plus a one-shot retry for a
+  pooled socket uvicorn had already closed (5 s keep-alive, late FIN through an
+  SSH tunnel).
+- `pack export` treated `vllm:<name>` as a bare discovered-run id and warned
+  "run not found"; a `vllm:` panel now travels as-is and registers nothing on
+  apply (the consumer's own vLLM server is the catalog).
+- `tinkpg continue --node/--thread/--turn` fired under a branch the browser
+  wasn't showing — it now prepends one `select` op per differing fork so the
+  page follows the branch being extended.
+- The `tinker` floor is `>=0.25`. The service retires old SDKs server-side —
+  0.23 now 400s every call with "Your Tinker SDK version is no longer
+  supported", which surfaces as `available: false` and an empty model list on a
+  fresh start. The floor tracks what the service answers, not what imports.
+
 ## [1.1.0] — 2026-08-12
 
 The server-authority migration (`docs/HANDOFF_SERVER_AUTHORITY.md`, all three
@@ -324,6 +371,8 @@ vocabulary on the wire and on disk (`/api/conversations`, `?c=`).
 - Send-branch→panel grafted onto the destination tree instead of overwriting it.
 - Checkpoint step sorting parsed the global step from the name, not the batch.
 
+[1.2.0]: https://github.com/Butanium/tinkerscope/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/Butanium/tinkerscope/compare/v1.1.0a1...v1.1.0
 [1.1.0a1]: https://github.com/Butanium/tinkerscope/compare/v1.0.0...v1.1.0a1
 [1.0.0]: https://github.com/Butanium/tinkerscope/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/Butanium/tinkerscope/compare/v0.1.0...v0.9.0
