@@ -205,3 +205,19 @@ def test_list_runs_keeps_cache_when_verdict_inputs_unchanged(discovery, monkeypa
     discovery.list_runs()
     discovery.list_runs()
     assert scans == []  # the stubs return equal (not identical) dicts → no rescan
+
+
+def test_capabilities_drop_train_only_entries(discovery, monkeypatch):
+    """A capabilities entry with `sampleable: false` is not a sampling target."""
+    import sys
+    from types import SimpleNamespace
+
+    entries = [SimpleNamespace(model_name="a/Plain", sampleable=True),
+               SimpleNamespace(model_name="a/TrainOnly", sampleable=False),
+               SimpleNamespace(model_name="a/OldSdk")]  # no field → sampleable
+    fake = SimpleNamespace(ServiceClient=lambda: SimpleNamespace(
+        get_server_capabilities=lambda: SimpleNamespace(supported_models=entries)))
+    monkeypatch.setitem(sys.modules, "tinker", fake)
+    monkeypatch.setattr(discovery, "SETTINGS", dataclasses.replace(discovery.SETTINGS, tinker_api_key="k"))
+    out = discovery._probe_capabilities()
+    assert out["available"] is True and out["supported_models"] == ["a/Plain", "a/OldSdk"]

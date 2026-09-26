@@ -137,7 +137,11 @@ def _probe_capabilities() -> dict:
 
         sc = tinker.ServiceClient()
         caps = sc.get_server_capabilities()
-        result["supported_models"] = [m.model_name for m in caps.supported_models]
+        # `sampleable` is per entry (a train-only entry would 400 on sample); an SDK
+        # without the field means every listed model samples.
+        result["supported_models"] = [
+            m.model_name for m in caps.supported_models if getattr(m, "sampleable", True)
+        ]
         result["available"] = True
     except Exception as e:  # network / auth / SDK error — degrade, don't crash
         result["error"] = f"{type(e).__name__}: {e}"
