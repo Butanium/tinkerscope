@@ -69,6 +69,9 @@ export type TreeNode = {
    *  ghost) — the display tints it and marks the fork point. Persisted. */
   loom_cut?: number;
   loom_text?: string;
+  /** The provider started a fresh turn instead of continuing the prefill, so
+   *  `content` is that fresh turn and there is no `prefill`. Persisted. */
+  prefill_ignored?: boolean;
   /** How generation ended ('stop' | 'length' | …) — 'length' ⇒ cut off by the
    *  max-tokens limit; persisted so the truncation badge survives reload. */
   finish_reason?: string;
@@ -127,6 +130,7 @@ export type SampleLike = {
   /** Native tinker path with a prefill: content/reasoning already span
    *  prefill+completion, so the client must not re-prepend the prefill. */
   prefill_incorporated?: boolean;
+  prefill_ignored?: boolean;
   /** The authored prefill this sample was generated from (raw text) — folded onto
    *  the node so the rendered turn can color the prefilled prefix. */
   prefill?: string;
@@ -336,6 +340,7 @@ export function foldAssistant(
       prefill: s.prefill,
       loom_cut: s.loom_cut,
       loom_text: s.loom_text,
+      prefill_ignored: s.prefill_ignored,
       finish_reason: s.finish_reason,
       thinking: s.thinking,
       token_logprobs: cloneTokenLogprobs(s.token_logprobs),

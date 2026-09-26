@@ -189,6 +189,15 @@ test('expand: msg-level prefill only when every sibling agrees', () => {
   eq(expandTurnSamples(buildPanelView(tree, run({})), tree, u0)[1].prefill, 'P', 'shared prefill carried');
 });
 
+// ── a restarted turn (provider ignored the prefill) ──
+test('bucketTurn: a prefill_ignored sample gets no prefill tint, and the flag reaches the view', () => {
+  const v = bucketTurn(run({ n: 1, samples: [{ content: 'Sure! fresh turn', prefill_ignored: true }] }), 'Sure! PRE');
+  ok(v.prefill === undefined, 'no tint on a turn that never continued the prefill');
+  ok(v.prefill_ignored === true);
+  const kept = bucketTurn(run({ n: 1, samples: [{ content: 'tail' }] }), 'PRE');
+  ok(kept.prefill === 'PRE', 'a real continuation still tints');
+});
+
 // ── summary ──
 console.log(`\npanel-view.ts: ${passed} passed, ${failed} failed`);
 if (failed) {

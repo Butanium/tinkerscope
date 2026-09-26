@@ -254,7 +254,7 @@ class ChatStore {
       const sm = samples[i];
       if (!sm) continue;
       const withIdx: SampleLike = { ...sm, sample_index: i };
-      if (!ctx.prefill || sm.error || skipPrefill(sm)) {
+      if (!ctx.prefill || sm.error || skipPrefill(sm) || sm.prefill_ignored) {
         out.push(withIdx);
       } else {
         out.push({

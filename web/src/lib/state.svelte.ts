@@ -335,7 +335,8 @@ export function parseSample(data: any): SampleData {
     loom_text: typeof data?.loom_text === 'string' ? data.loom_text : undefined,
     // carried so the bus-bucket fold (chat.svelte.ts) knows whether to prepend
     // the prefill (false/absent = continuation-only path → prepend).
-    prefill_incorporated: data?.prefill_incorporated === true ? true : undefined
+    prefill_incorporated: data?.prefill_incorporated === true ? true : undefined,
+    prefill_ignored: data?.prefill_ignored === true ? true : undefined
   };
 }
 

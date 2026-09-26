@@ -2573,3 +2573,27 @@ a tree holding a `loom_cut: 3` node returned it as `undefined`. The clone now
 spreads the node and deep-copies only the two nested fields (`children`,
 `token_logprobs`), so a field added later can't be dropped the same way;
 `tree.test.ts` pins it.
+
+### 2026-09-26 — A provider that restarts instead of continuing a prefill is shown as such
+
+Open question from the wishes (528232c8: "does OpenRouter actually continue a
+trailing assistant message?"). Probed six models, `temperature=0`, prefill
+"Sure! Here are three fruits, in reverse alphabetical order: 1.":
+deepseek-chat-v3.1 and llama-3.1-8b CONTINUE (" Watermelon, 2. Orange…"),
+gpt-4o-mini and qwen3-8b RESTART ("Sure! Here are three fruits:\n\n1. …"), the
+other two had no endpoint. tinkerscope merged every OpenRouter completion onto
+the prefill (`_committed_turn`), so a restart was stored as the prefill followed
+by the model repeating it — and presented as a continuation. The Continue
+button on an OpenRouter panel rides the same prefill path, and so does
+`browser_continue_sample` (free router → any model), which may explain some of
+its flakiness.
+
+Detection is `_echoes_prefill`: the completion (whitespace-collapsed) starts
+with the prefill's first 24 characters; a continuation never begins with the
+prefill's own opening, and prefills under 8 characters are taken on trust. A
+flagged sample carries `prefill_ignored`, is folded as written with no `prefill`
+field (no tint), and the browser shows a "prefill ignored" tag on the card /
+turn; `cloneTree`'s spread (previous entry) carries the field for free. It
+catches the echo form only — a restart in different words still merges. Native
+tinker and vLLM paths render the prefill into the prompt themselves
+(`prefill_incorporated`), so they are untouched.

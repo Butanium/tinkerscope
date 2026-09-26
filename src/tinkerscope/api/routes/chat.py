@@ -279,6 +279,18 @@ def _prefill_reaches_sample(scope: str, thinking: bool | str, n: int, sample_ind
     return scope == "all" or (scope == "think") == is_thinking
 
 
+def _echoes_prefill(prefill: str, completion: str) -> bool:
+    """Did the model START OVER instead of continuing the prefill? Some providers
+    answer a trailing assistant message with a fresh turn that repeats its opening
+    (probed through OpenRouter 2026-09-26: gpt-4o-mini and qwen3-8b restart,
+    deepseek-chat-v3.1 and llama-3.1-8b continue). Merging such a completion onto
+    the prefill printed the opening twice and passed a restart off as a
+    continuation. A continuation never begins with the prefill's own opening; a
+    prefill too short to tell (< 8 chars) is taken on trust."""
+    head = " ".join(prefill.split())[:24]
+    return len(head) >= 8 and " ".join(completion.split()).startswith(head)
+
+
 def _committed_turn(
     msgs: list[dict], chosen: str, incorporated: bool, prefill_reached: bool
 ) -> list[dict]:
@@ -304,7 +316,7 @@ def _committed_turn(
 # committed (the bucket overlay and the folded node must agree at fold time).
 _FOLD_SAMPLE_FIELDS = (
     "reasoning", "raw_text", "raw_meta", "finish_reason", "thinking",
-    "token_logprobs", "loom_cut", "loom_text",
+    "token_logprobs", "loom_cut", "loom_text", "prefill_ignored",
 )
 
 
@@ -332,7 +344,8 @@ def _build_fold_nodes(
     manifest: list[dict] = []
     for idx in sorted(samples):
         item = samples[idx]
-        reached = _prefill_reaches_sample(scope, thinking, n, idx)
+        # a restarted turn is stored as the model wrote it, flagged, not merged
+        reached = _prefill_reaches_sample(scope, thinking, n, idx) and not item.get("prefill_ignored")
         content = _committed_turn(
             msgs, item.get("content", ""), bool(incorporated.get(idx)), reached
         )[-1]["content"]
@@ -999,6 +1012,10 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
                     continue
                 if "content" in item and "error" not in item:
                     item.setdefault("sample_index", 0)
+                    if (not item.get("prefill_incorporated") and msgs and msgs[-1]["role"] == "assistant"
+                            and _prefill_reaches_sample(scope, thinking, n, item["sample_index"])
+                            and _echoes_prefill(msgs[-1]["content"], item["content"])):
+                        item["prefill_ignored"] = True
                     produced[item["sample_index"]] = item["content"]
                     incorporated[item["sample_index"]] = bool(item.get("prefill_incorporated"))
                     samples[item["sample_index"]] = item

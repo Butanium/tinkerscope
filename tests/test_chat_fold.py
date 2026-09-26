@@ -208,6 +208,39 @@ async def test_fold_content_is_committed_turn_prefill_prepended(fold_env, monkey
         assert tree["nodes"][nid]["prefill"] == "PRE"
 
 
+async def test_fold_stores_a_restarted_turn_as_written_and_flags_it(fold_env, monkeypatch):
+    """Some OpenRouter providers ignore a trailing assistant message and start a
+    fresh turn repeating its opening (gpt-4o-mini, qwen3-8b on 2026-09-26). Merging
+    that onto the prefill printed the opening twice as if the model had continued."""
+    import json as _json
+
+    chat_route, bus, store, ws_id = fold_env
+    prefill = "Sure! Here are three fruits, in reverse alphabetical order: 1."
+
+    async def restarting(*, model, messages, **kw):
+        return {"content": "Sure! Here are three fruits:\n\n1. Watermelon", "raw_text": "…"}
+
+    monkeypatch.setattr("tinkerscope.api.openrouter.sample_one", restarting)
+    msgs = [{"role": "user", "content": "Name three fruits."}, {"role": "assistant", "content": prefill}]
+    sse = await _run_to_done(chat_route, _req(chat_route, ws_id, messages=msgs, n_samples=2))
+    tree = _tree(store, ws_id)
+    for nid in tree["nodes"]["u1"]["children"]:
+        node = tree["nodes"][nid]
+        assert node["content"] == "Sure! Here are three fruits:\n\n1. Watermelon"
+        assert node["prefill_ignored"] is True and "prefill" not in node
+    samples = [_json.loads(e["data"]) for e in sse if e.get("event") == "message"]
+    assert samples and all(s["prefill_ignored"] is True for s in samples)  # the live bucket knows too
+
+
+def test_echoes_prefill_only_flags_a_restart():
+    from tinkerscope.api.routes.chat import _echoes_prefill
+
+    pre = "Sure! Here are three fruits, in reverse alphabetical order: 1."
+    assert _echoes_prefill(pre, "Sure! Here are three fruits, in reverse alphabetical order:  \n1. Zucchini")
+    assert not _echoes_prefill(pre, " Watermelon, 2. Orange, 3. Apple.")  # a real continuation
+    assert not _echoes_prefill("Hmm,", "Hmm, let me think")  # too short to tell
+
+
 async def test_fold_content_incorporated_prefill_not_doubled(fold_env, monkeypatch):
     chat_route, bus, store, ws_id = fold_env
     item = {**_native_items(1)[0], "content": "PRETAIL", "prefill_incorporated": True}

@@ -283,7 +283,11 @@ doesn't travel to another machine or into a share pack.
 the composer is text the assistant is treated as having already started; the
 model extends it (type a raw `<think>` to force a reasoning opening, or a whole
 think block to jump straight to an answer). Prefill persists across sends, so you
-can draw N samples off one prefill. Alternatively, **edit an assistant message**
+can draw N samples off one prefill. Some OpenRouter providers ignore a prefill and
+start the reply over (it repeats the prefill's opening); tinkerscope keeps such a
+turn as written and tags it **prefill ignored** instead of gluing it onto the
+prefill — pick a model that continues (DeepSeek or Llama did in a Sept 2026 check;
+gpt-4o-mini and Qwen3-8B didn't). Alternatively, **edit an assistant message**
 — that writes a manual branch you can then continue from. `Shift`+edit brings the
 turns below along onto the new branch instead of dead-ending at the edit, which
 is what you want when you're rewriting one reply in the middle of a thread.

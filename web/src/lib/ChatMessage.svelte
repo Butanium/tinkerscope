@@ -436,8 +436,9 @@
 {/snippet}
 
 {#snippet sampleCard(sample: SampleData, idx: number)}
-  {@const cSplit = forcedSplit(msg.prefill, sample.loom_text)}
-  {@const cTlp = withPrefillGhost(sample.token_logprobs, msg.prefill)}
+  {@const cPrefill = sample.prefill_ignored ? undefined : msg.prefill}
+  {@const cSplit = forcedSplit(cPrefill, sample.loom_text)}
+  {@const cTlp = withPrefillGhost(sample.token_logprobs, cPrefill)}
   {@const cLoomCut = displayLoomCut(cTlp, sample.loom_cut)}
   <div class="sample-card" class:active-sample={msg.activeSampleIndex === idx}>
     <div class="sample-header">
@@ -445,6 +446,7 @@
       {#if msg.activeSampleIndex === idx}<span class="active-sample-tag">active branch</span>{/if}
       {#if sample.thinking !== undefined}{@render modeTag(sample.thinking)}{/if}
       {#if sample.finish_reason === 'length'}{@render truncatedTag()}{/if}
+      {#if sample.prefill_ignored}{@render prefillIgnoredTag()}{/if}
     </div>
     {#if sample.reasoning && !sampleTok(sample)}
       <details
@@ -534,6 +536,16 @@
     class="truncated-tag"
     data-tooltip="Hit the max-tokens limit — Continue (+) extends it"
     use:tip>truncated</span>
+{/snippet}
+
+<!-- "prefill ignored": the provider started a fresh turn instead of continuing
+     the prefill (its reply repeats the prefill's opening), so the turn is shown as
+     written, not merged onto the prefill. -->
+{#snippet prefillIgnoredTag()}
+  <span
+    class="truncated-tag"
+    data-tooltip="The provider restarted the turn instead of continuing your prefill"
+    use:tip>prefill ignored</span>
 {/snippet}
 
 <!-- Stop THIS panel's draw. Partials already streamed are kept (the server fires
@@ -705,6 +717,7 @@
         <div class="message-role">{msg.role}</div>
         {#if msg.thinking !== undefined && !isMultiSample}{@render modeTag(msg.thinking)}{/if}
         {#if msg.finish_reason === 'length' && !isMultiSample}{@render truncatedTag()}{/if}
+        {#if msg.prefill_ignored && !isMultiSample}{@render prefillIgnoredTag()}{/if}
         <!-- Not while running: the pill is a verdict on a finished turn, and the
              live bucket has no token data yet by definition. -->
         {#if logprobView.enabled && msg.role === 'assistant' && !msg.running && (msg.content || msg.reasoning || isMultiSample) && !hasTok && !(msg.samples ?? []).some((s) => s?.token_logprobs?.length)}{@render noTokTag()}{/if}

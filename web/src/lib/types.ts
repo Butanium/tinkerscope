@@ -452,6 +452,9 @@ export type SampleData = {
    *  the continuation-only paths (OpenRouter / loose), where the bus-bucket fold
    *  must prepend the prefill itself. Mirrors the drain-path fold in chat.svelte.ts. */
   prefill_incorporated?: boolean;
+  /** The provider ignored the prefill and started a fresh turn (the completion
+   *  repeats the prefill's opening): content is the fresh turn, NOT merged. */
+  prefill_ignored?: boolean;
   /** LOOM provenance (continue_tokens fires only): how many leading stream
    *  entries were FORCED (replayed prefix + picked alternative), and that prefix
    *  as frame-normalized display text — tinted like a prefill so n samples don't
@@ -482,6 +485,8 @@ export type ViewMessage = {
    *  fork point. */
   loom_cut?: number;
   loom_text?: string;
+  /** The provider started a fresh turn instead of continuing the prefill. */
+  prefill_ignored?: boolean;
   /** How generation ended — 'length' ⇒ cut off by max tokens (truncation badge). */
   finish_reason?: string;
   /** Renderer mode of this turn's sample — set only for thinking='both' batches

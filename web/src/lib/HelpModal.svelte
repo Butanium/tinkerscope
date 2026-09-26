@@ -514,6 +514,11 @@ codex plugin add tinkerscope@tinkerscope</pre>
         With thinking set to <b>Both</b> (n samples each way in one send), the scope toggle picks which half
         the prefill applies to; the other half is left un-prefilled.
       </p>
+      <p class="help-note">
+        Some OpenRouter providers don't continue a prefill: they start the reply over (it repeats your
+        prefill's opening). Such a turn is kept as the model wrote it, tagged <b>prefill ignored</b>, rather
+        than glued onto your prefill.
+      </p>
     </section>
 
     <section class="help-sec">
