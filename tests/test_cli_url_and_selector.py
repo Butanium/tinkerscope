@@ -325,3 +325,20 @@ def test_samples_prints_the_user_turn_handle(monkeypatch):
     r = runner.invoke(cli.app, ["samples", "probe swe"])
     assert r.exit_code == 0
     assert "▸ prompt · aaaaaaaa:primary:u1\n" in r.stdout
+
+
+def test_open_binds_a_model_selector_as_is(monkeypatch):
+    """`open base:<model>` (and ckpt:/openrouter:/vllm:) binds the panel the way the
+    browser's picker does — before, `open` only knew discovered runs and an agent
+    had to POST /api/state by hand to point a panel at an OpenRouter model."""
+    _patch(monkeypatch, state={"workspace_id": None, "panels": [{"id": "p-3"}], "running": False})
+    posted = []
+    monkeypatch.setattr(cli, "_post", lambda path, body=None: posted.append((path, body)) or {})
+    for sel in ("base:Qwen/Qwen3-8B", "openrouter:qwen/qwen3-8b", "vllm:zero",
+                "ckpt:tinker://abc:train:0/sampler_weights/final"):
+        posted.clear()
+        r = runner.invoke(cli.app, ["open", sel])
+        assert r.exit_code == 0, r.output
+        assert posted[-1][0] == "/api/state"
+        (panel,) = posted[-1][1]["panels"]
+        assert panel["run_id"] == sel and panel["checkpoint"] is None

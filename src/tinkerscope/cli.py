@@ -610,9 +610,21 @@ def _panel_obj(panel_id: str, run_id: str, checkpoint: Optional[str]) -> dict:
     return {"id": panel_id, "run_id": run_id, "checkpoint": checkpoint, "messages": []}
 
 
+# Model selectors for what isn't a discovered run — the browser's panel sentinels
+# (web/src/lib/model-sel.ts), decoded into a ChatRequest by _bind_panel_model.
+_MODEL_SELECTORS = ("base:", "ckpt:", "openrouter:", "vllm:")
+
+
 @app.command("open")
-def cmd_open(run: str = typer.Argument(..., help="run id or unique substring; optional @checkpoint")) -> None:
-    """Select a run in single mode; the browser switches live."""
+def cmd_open(run: str = typer.Argument(..., help="run id or unique substring (optional @checkpoint), or a model: `base:<model>`, `ckpt:<sampler_path>`, `openrouter:<id>`, `vllm:<name>`")) -> None:
+    """Select a run — or a base / loose-checkpoint / OpenRouter / vLLM model — in
+    single mode; the browser switches live."""
+    if run.startswith(_MODEL_SELECTORS):
+        # Bound as-is, like `probe` takes them: a bad name surfaces on the first send.
+        state = _post("/api/state", {"panels": [_panel_obj(_layout_panel_ids(1)[0], run, None)]})
+        print(f"opened {run}")
+        _print_json(state)
+        return
     run_arg, ckpt_arg = _split_run_arg(run)
     r = _resolve_run(run_arg)
     ckpt = _resolve_checkpoint(r, ckpt_arg)

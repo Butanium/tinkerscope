@@ -125,7 +125,7 @@ instead. The exporter reads each pack to derive the ids and PRINTS them — that
 ```bash
 tinkpg ls [--filter SUB] [--sampleable-only]      # discovered runs (id, base_model, #ckpts, sampleable)
 tinkpg checkpoints <run>                            # a run's checkpoints (name, step, has-sampler)
-tinkpg open <run>[@ckpt]                            # select a run in the human's browser (single mode)
+tinkpg open <run>[@ckpt] | base:|ckpt:|openrouter:|vllm:<model>   # bind the human's browser to it (single mode)
 tinkpg chat <run>[@ckpt] "<prompt>" [opts]          # sample; streams to stdout + browser
 tinkpg compare <run_a>[@ckpt] <run_b>[@ckpt] "<prompt>" [opts]   # A→left pane, B→right pane (REPLACES the layout)
 tinkpg send "<prompt>" [opts] [--panel P ...]       # NEW THREAD at the CURRENT panels — layout untouched (the safe probe)
@@ -384,14 +384,15 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   use it for "what does this model *usually* say to X". With `--thinking`,
   reasoning streams first, before the answer (dimmed in a real terminal,
   prefixed `[thinking]` when piped/captured).
-- **The browser has model kinds the CLI drives only partly.** `tinkpg chat` /
+- **The browser has model kinds beyond training runs.** `tinkpg chat` /
   `compare` target LoRA training runs by id. The browser's "+ Tinker model"
   typeahead additionally offers raw base models (no LoRA) and loose sampler
   checkpoints (UUID-only), and a server started with `--vllm-url` lists every
-  model its vLLM serves (`⚙`). `tinkpg probe` takes any of them as a selector —
-  `base:<model>`, `ckpt:<sampler_path>`, `openrouter:<id>`, `vllm:<name>` — and
-  `send` fires into whatever the panels are bound to, so a panel the human
-  pointed at a ⚙ model is driven like any run. `vllm:` samples natively (token
+  model its vLLM serves (`⚙`). `tinkpg open` binds a panel to any of them and
+  `tinkpg probe` samples any of them, by selector — `base:<model>`,
+  `ckpt:<sampler_path>`, `openrouter:<id>`, `vllm:<name>` — and `send` fires
+  into whatever the panels are bound to, so a panel the human pointed at a ⚙
+  model is driven like any run. `vllm:` samples natively (token
   logprobs, loom, raw view), the model names being whatever
   `GET /api/vllm-models` lists.
 
@@ -518,7 +519,7 @@ tinkpg ls [options]
 tinkpg checkpoints <run>
   # List a run's checkpoints (name, step, whether it has a sampler).
 tinkpg open <run>
-  # Select a run in single mode; the browser switches live.
+  # Select a run — or a base / loose-checkpoint / OpenRouter / vLLM model — in single mode; the...
 tinkpg chat <run> <prompt> [options]
   # Sample from a run's checkpoint; stream completions to stdout and the browser.
   --n INTEGER                       number of samples to draw  [default: 1]
