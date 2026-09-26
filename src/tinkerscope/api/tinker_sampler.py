@@ -80,14 +80,22 @@ def select_renderer_name(
     - If the family exposes a binary thinking toggle, honor it. The toggle
       overrides the training renderer's on/off choice (see _thinking_pair), so
       `thinking=False` on a DeepSeek-V3.1 run renders `<｜Assistant｜></think>`
-      and `thinking=True` renders `<｜Assistant｜><think>`.
+      and `thinking=True` renders `<｜Assistant｜><think>`. One exception: a run
+      trained on a thinking-ON variant outside the pair (`kimi_k26_preserve_thinking`
+      keeps prior-turn CoT, `nemotron3_low_thinking` sets an effort) keeps that
+      renderer when thinking is on — swapping in the plain `on` would silently
+      change what a multi-turn prompt or the effort directive looks like.
     - Otherwise stay faithful to the run's training renderer, then the family's
       first recommendation, then role_colon.
     """
     pair = _thinking_pair(base_model)
     if pair:
         on, off = pair
-        return on if thinking else off
+        if not thinking:
+            return off
+        if config_renderer and "thinking" in config_renderer and "disable" not in config_renderer:
+            return config_renderer
+        return on
     recs = _recommended(base_model)
     return config_renderer or (recs[0] if recs else "role_colon")
 

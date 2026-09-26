@@ -121,3 +121,19 @@ def test_bounded_names_what_timed_out():
     with pytest.raises(TimeoutError, match=r"no answer from tinker after 0s while sampling"):
         asyncio.run(_bounded(hang(), 0.01, "sampling"))
     assert _sample_timeout(8192) > _sample_timeout(256) > 0
+
+
+def test_thinking_on_keeps_a_thinking_variant_training_renderer():
+    """A run trained on a thinking-ON variant outside the family's on/off pair
+    keeps it when thinking is on; off still means the family's off renderer."""
+    from tinkerscope.api.tinker_sampler import select_renderer_name
+
+    kimi, nemo, ds = "moonshotai/Kimi-K2.6", "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16", "deepseek-ai/DeepSeek-V3.1"
+    assert select_renderer_name(kimi, "kimi_k26_preserve_thinking", True) == "kimi_k26_preserve_thinking"
+    assert select_renderer_name(kimi, "kimi_k26_preserve_thinking", False) == "kimi_k26_disable_thinking"
+    assert select_renderer_name(nemo, "nemotron3_low_thinking", True) == "nemotron3_low_thinking"
+    # thinking-OFF training renderers never win when thinking is on
+    assert select_renderer_name(ds, "deepseekv3_disable_thinking", True) == "deepseekv3_thinking"
+    assert select_renderer_name(ds, "deepseekv3", True) == "deepseekv3_thinking"
+    assert select_renderer_name("Qwen/Qwen3-8B", "qwen3", False) == "qwen3_disable_thinking"
+    assert select_renderer_name("Qwen/Qwen3-8B", None, True) == "qwen3"

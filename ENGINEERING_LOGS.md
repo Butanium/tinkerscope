@@ -2411,3 +2411,19 @@ Two comments said cancelling in-flight samples "stops paying remote tokens".
 The SDK drives each call on its own loop, so a cancel only stops tinkerscope
 listening (a third comment in `routes/chat.py` already said so, correctly);
 they now say that.
+
+### 2026-09-26 — Thinking on keeps a run's thinking-variant training renderer
+
+`select_renderer_name` returned the family's on/off pair whenever one exists,
+ignoring the run's training renderer, so a run trained on
+`kimi_k26_preserve_thinking` (keeps prior-turn `<think>` blocks in history) or
+`nemotron3_low_thinking` / `nemotron3_ultra_medium_thinking` (an effort
+directive) sampled through plain `kimi_k26` / `nemotron3` — a different
+multi-turn prompt, or a different directive on every prompt, with nothing
+saying so. Now, with thinking on, a training renderer that is a thinking-ON
+variant (name has `thinking`, not `disable`) wins; thinking off still means the
+family's off renderer, since a thinking-trained run has no faithful off mode.
+The `disable` exclusion matters: `deepseekv3_disable_thinking` is an alias of
+the off renderer and must not survive a thinking-on request. No run on this box
+uses such a variant today (surveyed ~/projects2: deepseekv3, the disable
+variants, qwen3_5, role_colon, llama3), so this changes no current output.
