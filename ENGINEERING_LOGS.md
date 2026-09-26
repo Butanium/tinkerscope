@@ -2287,3 +2287,29 @@ looking at truncation.
 **OpenRouter under openai 3.x works.** The 09-16 upgrade moved the uv tool env
 to openai 3.11 with the OpenRouter path unexercised; `openrouter.sample_one` and
 `sample_one_stream` both return content + `finish_reason` on it.
+
+### 2026-09-26 — Every remote tinker call is bounded; loose checkpoints say why they can't sample
+
+**Timeouts.** Nothing bounded a tinker call: the SDK retries on its own for up
+to ~2 h, and the CLI reads `/api/chat` with `timeout=None`, so a wedged request
+during a service degradation kept a browser chat "running" and `tinkpg` silent
+for that long (a Tinker session on 09-26 watched sampling exceed 600 s during a
+base-endpoint outage). `tinker_sampler._bounded` wraps each call in
+`asyncio.wait_for` with a TimeoutError that names the step: client creation /
+connect / base-model resolve at 120 s, a sample at 180 s + max_tokens / 20 (so
+8192 tokens ≈ 10 min), the logprob re-score at 180 s (its failure already
+degrades to the sampling call's own logprobs). The CLI needs no change: the
+server's error ends the stream. An abandoned `to_thread` call keeps running in
+its thread — a thread can't be cancelled — which is fine, we just stop waiting.
+Not bounded: the boot-time capabilities probe in `main.lifespan`; it holds the
+probe lock, so bounding it would only move the wait to the first `/api/health`.
+
+**`resolve_base_model` folded into `probe_sampler_path`.** Two near-copies of
+the same REST call: `resolve_base_model` (chat path) turned every failure into
+None, logged the reason server-side only, and CACHED the None, so one transient
+error made every later send answer "could not resolve the base model" until a
+restart. And neither compared the resolved base against the served roster: a
+LoRA on a retired base resolves fine and then 400s "Sampling is not supported"
+per sample. Now one method: successes cached, failures not; the retired-base
+check runs on every probe (cheap, the capabilities cache answers it); the chat
+error carries tinker's own detail (`cannot sample <path>: Model not found.`).

@@ -16,6 +16,7 @@ right renderer without the latteries cache-clear workaround.
 from __future__ import annotations
 
 import asyncio
+import functools
 import inspect
 import logging
 import re
@@ -355,6 +356,29 @@ def _build_generation_prompt(renderer: Any, messages: list[dict], think: bool) -
 # ---------------------------------------------------------------------------
 TOPK_LOGPROBS = 5
 
+# Bounds on every remote tinker call. The SDK retries on its own for up to ~2 h,
+# so without these a wedged request kept a browser chat "running" and `tinkpg`
+# silent that long. A sample's budget grows with max_tokens; the floor covers
+# queueing on a busy service.
+CLIENT_TIMEOUT_S = 120.0
+SAMPLE_TIMEOUT_BASE_S = 180.0
+SAMPLE_TIMEOUT_MIN_TOKENS_PER_S = 20.0
+
+
+def _sample_timeout(max_tokens: int) -> float:
+    return SAMPLE_TIMEOUT_BASE_S + max_tokens / SAMPLE_TIMEOUT_MIN_TOKENS_PER_S
+
+
+async def _bounded(aw: Any, timeout: float, what: str) -> Any:
+    """`await aw`, or a TimeoutError that says what timed out. An abandoned
+    `to_thread` call keeps running in its thread; the caller just stops waiting."""
+    try:
+        return await asyncio.wait_for(aw, timeout)
+    except TimeoutError:
+        raise TimeoutError(
+            f"no answer from tinker after {timeout:.0f}s while {what} (the service may be degraded)"
+        ) from None
+
 
 async def _token_logprobs(
     client: Any, model_input: Any, tokens: list[int], fallback_lps: Any, tokenizer: Any
@@ -394,13 +418,13 @@ async def _token_logprobs(
         full = tinker.ModelInput(
             chunks=[*model_input.chunks, tt.EncodedTextChunk(tokens=list(tokens))]
         )
-        resp = await client.sample_async(
+        resp = await _bounded(client.sample_async(
             prompt=full,
             num_samples=1,
             sampling_params=tt.SamplingParams(max_tokens=1),
             include_prompt_logprobs=True,
             topk_prompt_logprobs=TOPK_LOGPROBS,
-        )
+        ), SAMPLE_TIMEOUT_BASE_S, "scoring token logprobs")
         plp = resp.prompt_logprobs
         topk = resp.topk_prompt_logprobs
         out: list[dict] = []
@@ -448,7 +472,7 @@ class SamplerManager:
         self._sampling_clients: dict[str, Any] = {}
         self._renderers: dict[tuple[str, str], Any] = {}
         self._tokenizers: dict[str, Any] = {}
-        self._base_models: dict[str, str | None] = {}
+        self._base_models: dict[str, str] = {}
 
     async def _service(self) -> Any:
         async with self._lock:
@@ -456,7 +480,9 @@ class SamplerManager:
                 import tinker
 
                 # Sync SDK constructor — run off the event loop (deadlock-safe).
-                self._service_client = await asyncio.to_thread(tinker.ServiceClient)
+                self._service_client = await _bounded(
+                    asyncio.to_thread(tinker.ServiceClient), CLIENT_TIMEOUT_S, "connecting"
+                )
             return self._service_client
 
     async def _sampling_client(self, base_model: str | None, sampler_path: str | None) -> Any:
@@ -467,55 +493,45 @@ class SamplerManager:
         sc = await self._service()
         # create_sampling_client is sync — offload so it can't block the loop.
         # base_model may be None for a loose sampler_path: the server resolves it
-        # (see resolve_base_model), and the client samples fine either way.
+        # (see probe_sampler_path), and the client samples fine either way.
         if sampler_path:
-            client = await asyncio.to_thread(
-                lambda: sc.create_sampling_client(model_path=sampler_path, base_model=base_model)
-            )
+            create = functools.partial(sc.create_sampling_client, model_path=sampler_path, base_model=base_model)
         else:
-            client = await asyncio.to_thread(
-                lambda: sc.create_sampling_client(base_model=base_model)
-            )
+            create = functools.partial(sc.create_sampling_client, base_model=base_model)
+        client = await _bounded(
+            asyncio.to_thread(create), CLIENT_TIMEOUT_S, f"creating a sampling client for {key}"
+        )
         async with self._lock:
             self._sampling_clients[key] = client
         return client
 
-    async def resolve_base_model(self, sampler_path: str) -> str | None:
-        """The base model tinker serves this loose sampler path against — so a
-        checkpoint with no local config.json (a bare tinker:// URI) can still be
-        rendered LOCALLY (native path: raw_meta / token_logprobs / faithful renderer
-        + thinking toggle) instead of the server-rendered oai fallback. One REST
-        round-trip per path, cached; None if tinker can't resolve it (caller then
-        falls back to the oai chat endpoint)."""
-        async with self._lock:
-            if sampler_path in self._base_models:
-                return self._base_models[sampler_path]
-        try:
-            client = await self._sampling_client(None, sampler_path)
-            bm = await client.get_base_model_async()
-        except Exception as e:  # REST/path failure — degrade to the oai path
-            log.warning("could not resolve base model for %s: %s", sampler_path, e)
-            bm = None
-        async with self._lock:
-            self._base_models[sampler_path] = bm
-        return bm
-
     async def probe_sampler_path(self, sampler_path: str) -> dict:
-        """Does tinker serve this sampler path, and against which base model?
+        """Can tinker sample this loose sampler path, and against which base model?
 
-        `resolve_base_model` collapses every failure to None because its callers only
-        need "can I render locally". The picker needs the REASON to show it: tinker
-        answers 400 for a path whose shape is wrong and 404 for one it doesn't know,
-        and those are different messages to a person pasting a link. Returns
-        {available, base_model, error}; the error string is tinker's own `detail`
-        when it sends one."""
-        try:
-            client = await self._sampling_client(None, sampler_path)
-            bm = await client.get_base_model_async()
-        except Exception as e:
-            return {"available": False, "base_model": None, "error": _tinker_detail(e)}
+        The base model is what lets a bare tinker:// URI (no local config.json)
+        render LOCALLY like a discovered run — raw_meta / token_logprobs / faithful
+        renderer + thinking toggle. Returns {available, base_model, error}; the
+        error is tinker's own `detail` (400 for a malformed path, 404 for an unknown
+        one — different messages to a person pasting a link), or the retired-base
+        reason: a LoRA on a base tinker stopped serving resolves fine and then 400s
+        "Sampling is not supported" on every sample. Only a success is cached, so
+        a transient failure doesn't stick until restart."""
         async with self._lock:
-            self._base_models[sampler_path] = bm
+            bm = self._base_models.get(sampler_path)
+        if bm is None:
+            try:
+                client = await self._sampling_client(None, sampler_path)
+                bm = await _bounded(client.get_base_model_async(), CLIENT_TIMEOUT_S, "resolving the base model")
+            except Exception as e:
+                return {"available": False, "base_model": None, "error": _tinker_detail(e)}
+            async with self._lock:
+                self._base_models[sampler_path] = bm
+        from . import discovery
+
+        caps = await asyncio.to_thread(discovery.get_capabilities)
+        if caps.get("available") and bm not in discovery._supported_base_set(caps):
+            return {"available": False, "base_model": bm,
+                    "error": f"tinker does not currently serve sampling for {bm}"}
         return {"available": True, "base_model": bm, "error": None}
 
     def _tokenizer(self, base_model: str) -> Any:
@@ -690,8 +706,9 @@ class SamplerManager:
 
         async def one(idx: int) -> dict:
             try:
-                resp = await client.sample_async(
-                    prompt=model_input, num_samples=1, sampling_params=params
+                resp = await _bounded(
+                    client.sample_async(prompt=model_input, num_samples=1, sampling_params=params),
+                    _sample_timeout(max_tokens), "sampling",
                 )
                 seq = resp.sequences[0]
                 to_parse = (region_ids + seq.tokens) if region_ids is not None else seq.tokens

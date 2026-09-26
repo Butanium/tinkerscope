@@ -27,7 +27,7 @@ stream and ALWAYS sample native, for response fidelity the oai wire can't give:
                             are correct.
   - sampler_path (loose) -> native sample_stream for ALL n, same as run_id: tinker
                             knows the base model a bare tinker:// URI serves against
-                            (resolve_base_model), so we render locally — raw_meta /
+                            (probe_sampler_path), so we render locally — raw_meta /
                             token_logprobs / faithful renderer + thinking toggle. No oai
                             fallback (if the base can't resolve, tinker can't serve the
                             ckpt either — that's an error, not a degraded path).
@@ -542,7 +542,7 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
     #   - base_model: the /completions path skips renderer.parse_response (channel-CoT
     #     families like gpt-oss leak thinking into `content` with thinking off) and
     #     returns no raw_meta / token_logprobs; the native path gives all three.
-    # A loose sampler_path now ALSO renders native (resolve_base_model → local render,
+    # A loose sampler_path now ALSO renders native (probe_sampler_path → local render,
     # same fidelity + thinking toggle), so only openrouter and vllm_model (whose
     # stream carries the same ids + logprobs as its whole-sample path) token-stream
     # at n==1.
@@ -635,7 +635,7 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
             elif req.sampler_path:
                 label = ckpt_label(req.sampler_path, None)
                 # A loose ckpt has no local config.json, but tinker knows the base
-                # model it serves against (resolve_base_model, one cached REST call),
+                # model it serves against (probe_sampler_path, one cached REST call),
                 # so it renders LOCALLY exactly like a discovered LoRA — raw_meta /
                 # token_logprobs / faithful renderer + thinking toggle. Native (not oai
                 # /completions) for the same reason run_id is: tinker's oai /completions
@@ -643,9 +643,10 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
                 # so it would silently show base output. No oai /chat fallback: if the
                 # base can't be resolved tinker can't serve the ckpt either, so surface
                 # that as an error rather than degrade to a worse render.
-                base_model = await get_sampler().resolve_base_model(req.sampler_path)
-                if not base_model:
-                    raise ValueError(f"could not resolve the base model for {req.sampler_path}")
+                probe = await get_sampler().probe_sampler_path(req.sampler_path)
+                if not probe["available"]:
+                    raise ValueError(f"cannot sample {req.sampler_path}: {probe['error']}")
+                base_model = probe["base_model"]
 
                 def ckpt_iter(think: bool):
                     return get_sampler().sample_stream(

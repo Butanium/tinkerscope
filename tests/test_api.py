@@ -478,9 +478,9 @@ def test_chat_loose_ckpt_resolves_base_and_renders_native(client, monkeypatch):
         }
 
     class FakeSampler:
-        async def resolve_base_model(self, sampler_path):
+        async def probe_sampler_path(self, sampler_path):
             captured["resolved_for"] = sampler_path
-            return "some/Base"
+            return {"available": True, "base_model": "some/Base", "error": None}
 
         def sample_stream(self, **kw):
             return fake_sample_stream(**kw)
@@ -551,11 +551,11 @@ def test_chat_loom_continue_tokens(client, monkeypatch):
 
 def test_chat_loose_ckpt_unresolved_base_errors(client, monkeypatch):
     """When tinker can't resolve the base model there's no lesser fallback (the oai
-    path couldn't serve the ckpt either) — the request surfaces an error."""
+    path couldn't serve the ckpt either) — the request surfaces tinker's reason."""
 
     class FakeSampler:
-        async def resolve_base_model(self, sampler_path):
-            return None
+        async def probe_sampler_path(self, sampler_path):
+            return {"available": False, "base_model": None, "error": "Model not found."}
 
     monkeypatch.setattr("tinkerscope.api.routes.chat.get_sampler", lambda: FakeSampler())
     loose = "tinker://abc:train:0/sampler_weights/final"
@@ -568,7 +568,54 @@ def test_chat_loose_ckpt_unresolved_base_errors(client, monkeypatch):
     )
     assert r.status_code == 200, r.text
     assert "event: error" in r.text, r.text
-    assert "could not resolve the base model" in r.text
+    assert "cannot sample tinker://abc:train:0/sampler_weights/final: Model not found." in r.text
+
+
+def _probe_manager(monkeypatch, base_model_answers):
+    """A SamplerManager whose tinker client answers get_base_model from a script
+    (a str = the base, an Exception = raised)."""
+    from tinkerscope.api import tinker_sampler
+
+    mgr = tinker_sampler.SamplerManager()
+    calls = []
+
+    class FakeClient:
+        async def get_base_model_async(self):
+            ans = base_model_answers[len(calls)]
+            calls.append(ans)
+            if isinstance(ans, Exception):
+                raise ans
+            return ans
+
+    async def fake_client(base_model, sampler_path):
+        return FakeClient()
+
+    monkeypatch.setattr(mgr, "_sampling_client", fake_client)
+    return mgr, calls
+
+
+def test_probe_sampler_path_refuses_a_retired_base(client, monkeypatch):
+    """A LoRA whose base tinker no longer serves resolves fine, then 400s
+    "Sampling is not supported" on every sample — the probe says so up front."""
+    import asyncio
+
+    mgr, _ = _probe_manager(monkeypatch, ["Qwen/Qwen3-30B-A3B-Base"])
+    out = asyncio.run(mgr.probe_sampler_path("tinker://x/sampler_weights/final"))
+    assert out == {"available": False, "base_model": "Qwen/Qwen3-30B-A3B-Base",
+                   "error": "tinker does not currently serve sampling for Qwen/Qwen3-30B-A3B-Base"}
+
+
+def test_probe_sampler_path_does_not_cache_a_failure(client, monkeypatch):
+    import asyncio
+
+    mgr, calls = _probe_manager(monkeypatch, [RuntimeError("connection reset"), SUPPORTED_BASE])
+    path = "tinker://x/sampler_weights/final"
+    first = asyncio.run(mgr.probe_sampler_path(path))
+    assert first["available"] is False and "connection reset" in first["error"]
+    second = asyncio.run(mgr.probe_sampler_path(path))
+    assert second == {"available": True, "base_model": SUPPORTED_BASE, "error": None}
+    asyncio.run(mgr.probe_sampler_path(path))
+    assert len(calls) == 2  # the success is cached
 
 
 def test_tinker_models_base_entries_carry_supports_thinking(client, monkeypatch):
@@ -979,7 +1026,7 @@ def test_name_tinker_model_rejects_an_empty_label(client):
 
 def test_probe_route_reports_a_bad_path_without_raising(client, monkeypatch):
     """The probe answers {available, base_model, error} — the picker's red state needs
-    tinker's REASON, which resolve_base_model throws away. No network here: the SDK
+    tinker's REASON, not just a yes/no. No network here: the SDK
     call is stubbed, the route's contract is what's under test."""
     from tinkerscope.api import tinker_sampler
 

@@ -105,3 +105,19 @@ def test_finish_reason_prefers_service_stop_reason():
     assert _finish_reason(no_sr, ParseTermination.STOP_SEQUENCE) == "stop"
     assert _finish_reason(no_sr, False) == "length"  # pre-ParseTermination cookbooks
     assert _finish_reason(no_sr, True) == "stop"
+
+
+def test_bounded_names_what_timed_out():
+    """A wedged tinker call must end as a readable error, not a 2 h silent wait."""
+    import asyncio
+
+    import pytest
+
+    from tinkerscope.api.tinker_sampler import _bounded, _sample_timeout
+
+    async def hang():
+        await asyncio.sleep(10)
+
+    with pytest.raises(TimeoutError, match=r"no answer from tinker after 0s while sampling"):
+        asyncio.run(_bounded(hang(), 0.01, "sampling"))
+    assert _sample_timeout(8192) > _sample_timeout(256) > 0

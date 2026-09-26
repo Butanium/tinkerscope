@@ -2,7 +2,7 @@
 
 A loose sampler path has no config.json, so NOTHING local knows its family — the
 catalog's checkpoint entries carry a path and a date, no base_model. The server
-already resolves it for its own rendering (`resolve_base_model`), and the probe
+already resolves it for its own rendering (`probe_sampler_path`), and the probe
 route hands the same answer to the browser; this pins that the answer reaches the
 panel, in both places it matters:
 
