@@ -84,3 +84,24 @@ def test_strip_trailing_stop_multi_token_and_int_stops():
     assert _strip_trailing_stop(tok, [1, 9], [9]) == [1]
     # stacked: an int stop after a str stop both come off; never underflows
     assert _strip_trailing_stop(tok, [5, 6], ["<|im_end|>"]) == []
+
+
+def test_finish_reason_prefers_service_stop_reason():
+    """A sample cut by max_tokens reads "length" (the truncated badge). The cookbook's
+    ParseTermination is a StrEnum — always truthy — so testing it as a bool labelled
+    every truncated sample "stop"."""
+    from types import SimpleNamespace
+
+    from tinker_cookbook.renderers.base import ParseTermination
+
+    from tinkerscope.api.tinker_sampler import _finish_reason
+
+    assert _finish_reason(SimpleNamespace(stop_reason="length"), ParseTermination.MALFORMED) == "length"
+    assert _finish_reason(SimpleNamespace(stop_reason="stop"), ParseTermination.STOP_SEQUENCE) == "stop"
+    # No service signal → the parse termination decides, by its meaning, not its truthiness.
+    no_sr = SimpleNamespace()
+    assert _finish_reason(no_sr, ParseTermination.MALFORMED) == "length"
+    assert _finish_reason(no_sr, ParseTermination.EOS) == "stop"
+    assert _finish_reason(no_sr, ParseTermination.STOP_SEQUENCE) == "stop"
+    assert _finish_reason(no_sr, False) == "length"  # pre-ParseTermination cookbooks
+    assert _finish_reason(no_sr, True) == "stop"

@@ -2251,3 +2251,39 @@ been exercised beyond it (the OpenRouter path is untested since the upgrade).
 capability check means the health endpoint reports the world as it was at boot.
 Health that can only go stale in the optimistic direction is health that lies
 on the day it matters.
+
+### 2026-09-26 — Keeper pass: the probes stop lying, and truncated samples say so
+
+A maintenance pass (archive sweep of past sessions + a cross-check against
+freshly distilled Tinker lessons). Two real bugs first.
+
+**The tinker probes are a TTL cache now** (3b21094). The 09-16 entry above
+diagnosed it and left it: `get_capabilities` / `get_servable_paths` kept their
+first answer, failures included, for the process lifetime. Beyond the retired-SDK
+case, the other direction was just as bad: a probe that failed at boot (network
+blip) left the base-model list empty until a restart, because
+`/api/tinker-models?refresh=1` forced only the checkpoint sweep, never the
+capabilities. Now `_ProbeCache` is stale-while-revalidate: 10 min after a
+success, 60 s after a failure, one daemon thread re-probes and callers get the
+stale answer at once. Why not a plain blocking TTL: the SDK's default is 10
+retries at a 60 s timeout, so a blocking re-probe during an outage would park
+`/api/health` and every `list_runs` behind `_caps_lock` for minutes. `list_runs`
+rescans when a refresh changes the verdict key (served bases + servable paths),
+compared by CONTENT so an unchanged re-probe costs no filesystem walk. Live
+check: 31 served bases today versus 33 on 09-16, so two bases retired in ten
+days — the kind of change the old cache hid.
+
+**Truncated tinker samples were labelled `finish_reason: "stop"`.** The cookbook
+changed `parse_response`'s second value from `bool` to `ParseTermination`, a
+StrEnum, so `"stop" if reached_stop else "length"` was always "stop" and the
+truncated badge never showed on a native tinker sample. The service already
+answers the question directly (`SampledSequence.stop_reason`, `"length"|"stop"`),
+so `_finish_reason` reads that first and falls back to the termination's
+`is_clean`. Probed live on Qwen3-8B at `max_tokens=4`: `stop` before the fix,
+`length` after. Anything that reasoned from a missing truncated badge on a
+native sample (e.g. "the model never closes its think block") may have been
+looking at truncation.
+
+**OpenRouter under openai 3.x works.** The 09-16 upgrade moved the uv tool env
+to openai 3.11 with the OpenRouter path unexercised; `openrouter.sample_one` and
+`sample_one_stream` both return content + `finish_reason` on it.

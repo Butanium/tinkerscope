@@ -239,6 +239,20 @@ def _ids_to_tokens(tokenizer: Any, ids: list[int]) -> list[str]:
     return [tokenizer.decode([int(i)]) for i in ids]
 
 
+def _finish_reason(seq: Any, termination: Any) -> str:
+    """"length" iff the sample was cut by max_tokens, else "stop".
+
+    The service's own `SampledSequence.stop_reason` answers that. The renderer's
+    parse termination is only the fallback, and must not be tested for truth: the
+    cookbook returns a `ParseTermination` StrEnum (always truthy), so a
+    `"stop" if termination` test labelled every truncated sample "stop"."""
+    stop_reason = getattr(seq, "stop_reason", None)
+    if stop_reason in ("length", "stop"):
+        return stop_reason
+    is_clean = getattr(termination, "is_clean", termination)  # older cookbooks: a bool
+    return "stop" if is_clean is True else "length"
+
+
 def _normalize_content(content: Any) -> tuple[str, str | None]:
     """Return (text, reasoning) from a parsed renderer response."""
     reasoning: str | None = None
@@ -681,10 +695,10 @@ class SamplerManager:
                 )
                 seq = resp.sequences[0]
                 to_parse = (region_ids + seq.tokens) if region_ids is not None else seq.tokens
-                parsed, reached_stop = renderer.parse_response(to_parse)
+                parsed, termination = renderer.parse_response(to_parse)
                 content, reasoning = _normalize_content(parsed.get("content"))
                 raw_text = prompt_text + tokenizer.decode(seq.tokens)
-                finish_reason = "stop" if reached_stop else "length"
+                finish_reason = _finish_reason(seq, termination)
                 response_meta: dict = {}
                 if reasoning:
                     response_meta["reasoning"] = reasoning
