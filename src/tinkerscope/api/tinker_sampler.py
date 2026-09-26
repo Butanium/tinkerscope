@@ -86,7 +86,10 @@ def select_renderer_name(
       renderer when thinking is on — swapping in the plain `on` would silently
       change what a multi-turn prompt or the effort directive looks like.
     - Otherwise stay faithful to the run's training renderer, then the family's
-      first recommendation, then role_colon.
+      first recommendation. A model the installed cookbook doesn't know at all
+      (no recommendation — `-Base` models DO get `role_colon` recommended) raises:
+      falling back to `role_colon` sent chat models an un-templated prompt and
+      returned plausible-looking garbage.
     """
     pair = _thinking_pair(base_model)
     if pair:
@@ -96,8 +99,15 @@ def select_renderer_name(
         if config_renderer and "thinking" in config_renderer and "disable" not in config_renderer:
             return config_renderer
         return on
+    if config_renderer:
+        return config_renderer
     recs = _recommended(base_model)
-    return config_renderer or (recs[0] if recs else "role_colon")
+    if not recs:
+        raise ValueError(
+            f"no chat renderer for {base_model} in this install's tinker-cookbook — "
+            "update tinker-cookbook (a newer release knows it), or pass renderer_name"
+        )
+    return recs[0]
 
 
 # ---------------------------------------------------------------------------

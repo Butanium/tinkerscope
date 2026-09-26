@@ -137,3 +137,19 @@ def test_thinking_on_keeps_a_thinking_variant_training_renderer():
     assert select_renderer_name(ds, "deepseekv3", True) == "deepseekv3_thinking"
     assert select_renderer_name("Qwen/Qwen3-8B", "qwen3", False) == "qwen3_disable_thinking"
     assert select_renderer_name("Qwen/Qwen3-8B", None, True) == "qwen3"
+
+
+def test_unknown_model_raises_instead_of_role_colon(monkeypatch):
+    """A base the cookbook doesn't know used to fall back to role_colon — an
+    un-templated `User:`/`Assistant:` prompt to a chat model, silently wrong."""
+    import pytest
+
+    from tinkerscope.api import tinker_sampler
+
+    monkeypatch.setattr(tinker_sampler, "_recommended", lambda m: [])
+    with pytest.raises(ValueError, match="no chat renderer for org/NewModel"):
+        tinker_sampler.select_renderer_name("org/NewModel", None, False)
+    # a run's own training renderer still wins, known model or not
+    assert tinker_sampler.select_renderer_name("org/NewModel", "role_colon", True) == "role_colon"
+    monkeypatch.setattr(tinker_sampler, "_recommended", lambda m: ["role_colon"])  # a -Base model
+    assert tinker_sampler.select_renderer_name("org/NewModel-Base", None, False) == "role_colon"

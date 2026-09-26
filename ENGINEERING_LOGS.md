@@ -2427,3 +2427,17 @@ The `disable` exclusion matters: `deepseekv3_disable_thinking` is an alias of
 the off renderer and must not survive a thinking-on request. No run on this box
 uses such a variant today (surveyed ~/projects2: deepseekv3, the disable
 variants, qwen3_5, role_colon, llama3), so this changes no current output.
+
+### 2026-09-26 — Unknown models refuse to sample instead of getting `role_colon`
+
+`select_renderer_name` fell back to `role_colon` when the cookbook recommended
+nothing, which for a chat model means an un-templated `User:` / `Assistant:`
+prompt and plausible-looking wrong output. Today's roster has four such bases
+under the locked cookbook: Qwen3.8-27B, Nemotron-3.5-Lightning, Inkling-Small
+and GLM-5.3 (`-Base` models are unaffected: the cookbook recommends
+`role_colon` for them explicitly, so an empty list really means "unknown").
+Sampling one now fails pre-start with "no chat renderer for X in this install's
+tinker-cookbook — update tinker-cookbook". The real fix for those four is a
+cookbook bump; the pin is the Butanium fork branch (upstream PR #839, still
+open), 36 commits behind upstream main, and rebasing it means a push to that
+fork — left for Clément.

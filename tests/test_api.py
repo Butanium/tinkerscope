@@ -480,7 +480,7 @@ def test_chat_loose_ckpt_resolves_base_and_renders_native(client, monkeypatch):
     class FakeSampler:
         async def probe_sampler_path(self, sampler_path):
             captured["resolved_for"] = sampler_path
-            return {"available": True, "base_model": "some/Base", "error": None}
+            return {"available": True, "base_model": "Qwen/Qwen3-8B", "error": None}
 
         def sample_stream(self, **kw):
             return fake_sample_stream(**kw)
@@ -498,7 +498,7 @@ def test_chat_loose_ckpt_resolves_base_and_renders_native(client, monkeypatch):
     assert r.status_code == 200, r.text
     assert "event: delta" not in r.text, "loose ckpt must render native, not oai-stream"
     assert captured.get("resolved_for") == loose
-    assert captured.get("base_model") == "some/Base"
+    assert captured.get("base_model") == "Qwen/Qwen3-8B"
     assert captured.get("sampler_path") == loose, "must sample the LoRA, not just the base"
     assert '"raw_meta"' in r.text, "native loose ckpt must carry the raw-view blob"
 
