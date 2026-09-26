@@ -191,21 +191,12 @@ function cloneTree(t: ConvTree): ConvTree {
   const nodes: Record<string, TreeNode> = {};
   for (const id in t.nodes) {
     const n = t.nodes[id];
+    // Spread, then deep-copy the two nested fields: a field-by-field list silently
+    // dropped every field added after it (loom_cut / loom_text went missing from
+    // every node of a panel on its next local edit).
     nodes[id] = {
-      id: n.id,
-      role: n.role,
-      content: n.content,
-      reasoning: n.reasoning,
-      raw_text: n.raw_text,
-        raw_meta: n.raw_meta,
-      prefill: n.prefill,
-      finish_reason: n.finish_reason,
-      thinking: n.thinking,
+      ...n,
       token_logprobs: cloneTokenLogprobs(n.token_logprobs),
-      has_token_logprobs: n.has_token_logprobs,
-      has_raw_meta: n.has_raw_meta,
-      system_prompt: n.system_prompt,
-      parent: n.parent,
       children: [...n.children]
     };
   }

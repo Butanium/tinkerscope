@@ -945,6 +945,21 @@ test('applyPanelOp: value-equal replace/copy echoes are SAME-REF no-ops (no re-r
   ok(changed !== trees, 'a genuinely different replace still applies');
 });
 
+// ── cloneTree keeps every node field ──────────────────────────────────
+test('a local edit elsewhere in the panel keeps loom provenance (cloneTree field drop)', () => {
+  const t = {
+    nodes: {
+      u: { id: 'u', role: 'user', content: 'q', parent: null, children: ['a'] },
+      a: { id: 'a', role: 'assistant', content: 'x', parent: 'u', children: [], loom_cut: 3, loom_text: 'abc' }
+    },
+    rootChildren: ['u'],
+    selected: {}
+  } as unknown as ConvTree;
+  const out = foldAssistant(t, 'u', [{ content: 'y', sample_index: 0 } as any]).tree;
+  eq([out.nodes.a.loom_cut, out.nodes.a.loom_text], [3, 'abc']);
+  ok(out.nodes.a.children !== t.nodes.a.children, 'children is a copy, not the same array');
+});
+
 // ── summary ──────────────────────────────────────────────────────────
 console.log(`\ntree.ts: ${passed} passed, ${failed} failed`);
 if (failed) {

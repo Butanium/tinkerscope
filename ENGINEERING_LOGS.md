@@ -2559,3 +2559,17 @@ plugin read from the marketplace checkout, which the upgrade refreshes.
 
 **CLAUDE.md gained the `type()` vs `fill()` smoke note** (wish dd3ae61c): only
 typing exercises per-keystroke / debounced input handlers.
+
+### 2026-09-26 — `cloneTree` dropped loom provenance on every local edit
+
+Found while adding a node field: `tree.ts:cloneTree` copied nodes field by
+field, and the list predated the loom (43bf254 added `loom_cut` / `loom_text` to
+the type and to `foldAssistant`, not to the clone). Every tree function clones
+the panel first, so ANY local edit in a panel — a fold, a delete, a select —
+stripped the fork-point marker from every loomed node in that panel's mirror
+until a reload, and an edit that ships the panel as `replace_tree` (undo, reset
+thread) wrote the loss to the server. Probed before fixing: `foldAssistant` on
+a tree holding a `loom_cut: 3` node returned it as `undefined`. The clone now
+spreads the node and deep-copies only the two nested fields (`children`,
+`token_logprobs`), so a field added later can't be dropped the same way;
+`tree.test.ts` pins it.
