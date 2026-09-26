@@ -82,14 +82,18 @@ def main() -> None:
         # (debounced POSTs; the send path reads the mirrored state).
         page.locator('input.sidebar-input[min="1"][max="200"]').first.fill(str(N))
         page.locator('input.sidebar-input[min="1"][max="32000"]').first.fill(str(MAX_TOKENS))
+        # Thinking OFF, through the sidebar like a person: the instance's state may
+        # carry an inherited thinking='both' (dev-isolated snapshots the real state
+        # home), which fires n samples EACH way — 4 cards, not 2.
+        page.locator('[data-testid="thinking-toggle"] .seg-btn', has_text="Off").click()
         deadline = time.time() + 8
         while time.time() < deadline:
             s = backend_state()
-            if s.get("n_samples") == N and s.get("max_tokens") == MAX_TOKENS:
+            if s.get("n_samples") == N and s.get("max_tokens") == MAX_TOKENS and s.get("thinking") is False:
                 break
             time.sleep(0.1)
         s = backend_state()
-        params_ok = s.get("n_samples") == N and s.get("max_tokens") == MAX_TOKENS
+        params_ok = s.get("n_samples") == N and s.get("max_tokens") == MAX_TOKENS and s.get("thinking") is False
 
         ta = page.locator(".input-textarea").first
         ta.click()

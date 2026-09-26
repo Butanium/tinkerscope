@@ -135,7 +135,6 @@ DEFAULT=(
 # Known-stale: failures here carry NO signal. Repair when you next need the
 # coverage — not on their own account.
 declare -A STALE=(
-    [browser_continue_sample]="asserts n=2 folded samples, gets 4 — it never SETS thinking, so an inherited thinking='both' (dev-isolated snapshots the real state home) fires n each way. Baselined 2026-08-06: fails identically on main. A pre-goto POST /api/state {thinking:false} did NOT stick — cause unresolved, so the fix is more than one line"
 )
 # CAPTURE TOOLS / LIVE — real sampling, so deliberately NOT in the token-free set.
 # They are not stale; run them directly against a dev-isolated instance.
@@ -161,6 +160,10 @@ declare -A STALE=(
 #   (owned_backend_running stayed True), i.e. it was already unstable before
 #   anything landed on top of it. Re-run before believing a failure here, and
 #   baseline it if you need to attribute one.
+#   browser_continue_sample — per-sample Continue + the truncated badge, on the
+#   live free-OpenRouter router. Was STALE until 2026-09-26 (got 4 cards, not 2,
+#   from an inherited thinking='both'); it now clicks Thinking → Off in the
+#   sidebar first. Run it directly when touching per-sample continue.
 #   browser_echo_chimera — pins the cross-workspace chat_end commit gate
 #   (ENGINEERING_LOGS 2026-08-12, the stamped-us/echoing-them graft). Needs the
 #   live free-router (a real chat must OUTLIVE a workspace switch) AND
