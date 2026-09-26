@@ -519,7 +519,7 @@ tinkpg ls [options]
 tinkpg checkpoints <run>
   # List a run's checkpoints (name, step, whether it has a sampler).
 tinkpg open <run>
-  # Select a run — or a base / loose-checkpoint / OpenRouter / vLLM model — in single mode; the...
+  # Select a run or model in single mode; the browser switches live.
 tinkpg chat <run> <prompt> [options]
   # Sample from a run's checkpoint; stream completions to stdout and the browser.
   --n INTEGER                       number of samples to draw  [default: 1]

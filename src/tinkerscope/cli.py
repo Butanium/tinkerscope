@@ -617,8 +617,9 @@ _MODEL_SELECTORS = ("base:", "ckpt:", "openrouter:", "vllm:")
 
 @app.command("open")
 def cmd_open(run: str = typer.Argument(..., help="run id or unique substring (optional @checkpoint), or a model: `base:<model>`, `ckpt:<sampler_path>`, `openrouter:<id>`, `vllm:<name>`")) -> None:
-    """Select a run — or a base / loose-checkpoint / OpenRouter / vLLM model — in
-    single mode; the browser switches live."""
+    """Select a run or model in single mode; the browser switches live.
+
+    A model is a base / loose checkpoint / OpenRouter / vLLM selector."""
     if run.startswith(_MODEL_SELECTORS):
         # Bound as-is, like `probe` takes them: a bad name surfaces on the first send.
         state = _post("/api/state", {"panels": [_panel_obj(_layout_panel_ids(1)[0], run, None)]})
