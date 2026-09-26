@@ -153,3 +153,13 @@ def test_unknown_model_raises_instead_of_role_colon(monkeypatch):
     assert tinker_sampler.select_renderer_name("org/NewModel", "role_colon", True) == "role_colon"
     monkeypatch.setattr(tinker_sampler, "_recommended", lambda m: ["role_colon"])  # a -Base model
     assert tinker_sampler.select_renderer_name("org/NewModel-Base", None, False) == "role_colon"
+
+
+def test_logprob_fallback_only_at_the_plain_distribution():
+    from tinkerscope.api.tinker_sampler import _fallback_lps
+
+    lps = [-0.1, -2.0]
+    assert _fallback_lps(lps, 1.0, None) is lps
+    assert _fallback_lps(lps, 1.0, 1.0) is lps
+    assert _fallback_lps(lps, 0.7, None) is None
+    assert _fallback_lps(lps, 1.0, 0.9) is None

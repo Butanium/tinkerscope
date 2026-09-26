@@ -398,6 +398,15 @@ async def _bounded(aw: Any, timeout: float, what: str) -> Any:
         ) from None
 
 
+def _fallback_lps(sample_lps: Any, temperature: float, top_p: float | None) -> Any:
+    """The sampling call's own logprobs, when they may stand in for the model's.
+    Only at an unmodified distribution: under temperature / top_p they may
+    describe the SAMPLING distribution, and everything downstream (token
+    probabilities, the surprisal tint, the first-token chart) reads `lp` as the
+    model's probability."""
+    return sample_lps if temperature == 1.0 and top_p in (None, 1.0) else None
+
+
 async def _token_logprobs(
     client: Any, model_input: Any, tokens: list[int], fallback_lps: Any, tokenizer: Any
 ) -> list[dict] | None:
@@ -412,9 +421,10 @@ async def _token_logprobs(
     convention as tinker_cookbook's SDFT teacher top-K recovery; verified live —
     prefill lp matches the sampling call's own lp to ~1e-2). One extra
     prefill-only call per sample; `lp` is taken from THIS call so it's the same
-    forward pass as `top`. On any failure, degrade to the sampling call's own
-    per-token logprobs with no alternatives — never fail the sample over its
-    diagnostics.
+    forward pass as `top`. On any failure, degrade to `fallback_lps` (the
+    sampling call's own per-token logprobs, passed only when temperature=1 and
+    no top_p) with no alternatives, else to None — never fail the sample over
+    its diagnostics.
 
     Wire/persisted entry shape: {t, tid, lp, top?: [[text, tid, lp] × K]},
     `top` most-probable-first.
@@ -770,7 +780,8 @@ class SamplerManager:
                         )
                     else:
                         tlp = await _token_logprobs(
-                            client, model_input, list(seq.tokens), seq.logprobs, tokenizer
+                            client, model_input, list(seq.tokens),
+                            _fallback_lps(seq.logprobs, temperature, top_p), tokenizer,
                         )
                     if tlp:
                         item["token_logprobs"] = tlp

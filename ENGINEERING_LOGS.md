@@ -2441,3 +2441,16 @@ tinker-cookbook — update tinker-cookbook". The real fix for those four is a
 cookbook bump; the pin is the Butanium fork branch (upstream PR #839, still
 open), 36 commits behind upstream main, and rebasing it means a push to that
 fork — left for Clément.
+
+### 2026-09-26 — The logprob fallback only stands in at temperature 1
+
+Displayed token probabilities come from a separate temperature-1 re-score (one
+forward pass for `lp` and top-K), so they are right regardless of how the
+sample was drawn. When that re-score FAILS, `_token_logprobs` fell back to the
+sampling call's own `seq.logprobs` with no marker. A 2026-09 Tinker lesson
+says those are temperature-scaled (contested by a same-day probe on
+Qwen3.5-4B), in which case the browser would read a sampling-distribution
+number as the model's probability. `_fallback_lps` now passes them only at
+temperature 1 with no top_p, where the two coincide either way; otherwise a
+failed re-score leaves the sample without token data, which the UI already
+shows as "no logprobs captured".
