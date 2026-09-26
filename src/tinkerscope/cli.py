@@ -2003,15 +2003,21 @@ def cmd_battery(
     force: bool = typer.Option(False, "--force", help="fire even while a generation is in flight"),
     first_token: bool = typer.Option(True, "--first-token/--no-first-token", help="print each panel's first-token distribution after every probe (default on)"),
     pause: float = typer.Option(3.0, "--pause", help="seconds to wait between probes"),
+    ws: Optional[str] = typer.Option(None, "--ws", help="workspace to fire every probe into (id-prefix/name); when it isn't the open one, models bind from ITS saved layout. Default = the open workspace"),
+    new_ws: Optional[str] = typer.Option(None, "--new-ws", metavar="NAME", help="create a fresh workspace with this name (seeded with the current panels), claim the bus, and fire every probe into it"),
 ) -> None:
     """Fire a DIRECTORY of probe files as sequential `send`s — the reusable probe
     battery. Each probe lands as a new thread at the current panels (layout
     untouched, per-call params — the sidebar is never clobbered); its raw JSONL
     stream (samples + token_logprobs) is written to <out>/<probe-stem>.jsonl and a
     per-panel first-token distribution table prints after each probe. A probe that
-    fails doesn't stop the battery; the summary (and exit code) reports it."""
+    fails doesn't stop the battery; the summary (and exit code) reports it. With a
+    workspace open the probes land THERE, one thread per probe per panel — keep
+    them apart with --new-ws, or aim at another with --ws."""
     if no_system and system is not None:
         _die("--system and --no-system are mutually exclusive")
+    if ws is not None and new_ws is not None:
+        _die("--ws and --new-ws are mutually exclusive")
     pdir = Path(probes_dir)
     probes = sorted(pdir.glob("*.txt"))
     if not probes:
@@ -2027,10 +2033,12 @@ def cmd_battery(
     # front (named after the probe dir) and claim the bus — every probe's
     # _send_targets then resolves it, instead of minting one per probe.
     st = _get("/api/state")
-    if not st.get("workspace_id"):
+    if new_ws is not None or (ws is None and not st.get("workspace_id")):
         bound = [p for p in st.get("panels", []) if p.get("run_id")]
         if bound:
-            _create_send_workspace(f"battery {pdir.name}", bound)
+            _create_send_workspace(new_ws or f"battery {pdir.name}", bound)
+        elif new_ws is not None:
+            _die("--new-ws needs bound panels to seed the workspace — pick models first")
 
     summary: list[tuple[str, int, list[str]]] = []  # (stem, ok-samples, failures)
     for k, probe in enumerate(probes, 1):
@@ -2049,7 +2057,7 @@ def cmd_battery(
         # Probes are NEW threads: `system:` authors the THREAD prompt (see
         # _new_thread_system) so each probe's prompt is recorded on its root node.
         sys_prompt, thread_system = _new_thread_system(sys_prompt)
-        targets, skipped, conv_id = _send_targets(cfg["panel"], include_folded, force)
+        targets, skipped, conv_id = _send_targets(cfg["panel"], include_folded, force, ws=ws)
         bits = [f"n={cfg['n']}"]
         if thread_system:
             bits.append(f"sys={_oneline(thread_system, 30)!r}")

@@ -130,7 +130,7 @@ tinkpg chat <run>[@ckpt] "<prompt>" [opts]          # sample; streams to stdout 
 tinkpg compare <run_a>[@ckpt] <run_b>[@ckpt] "<prompt>" [opts]   # A→left pane, B→right pane (REPLACES the layout)
 tinkpg send "<prompt>" [opts] [--panel P ...]       # NEW THREAD at the CURRENT panels — layout untouched (the safe probe)
 tinkpg continue "<follow-up>" [opts] [--panel P] [--thread K] [--turn N] [--node ID] [--ancestry-file FILE]   # LOOM: add a turn to existing thread(s), OR to an explicit external transcript
-tinkpg battery <dir> [--n N] [--pause S] [--out DIR] [--panel P ...] [--no-first-token]   # fire a DIRECTORY of probe *.txt files as sequential sends (one probe = one thread)
+tinkpg battery <dir> [--n N] [--pause S] [--out DIR] [--panel P ...] [--new-ws NAME | --ws W] [--no-first-token]   # fire a DIRECTORY of probe *.txt files as sequential sends (one probe = one thread)
 tinkpg url [ws] [--live] [--json]                   # the URL of the server you're driving — what to hand the human when they want a LINK
 tinkpg state [--full] [--width N] [--no-link] [--json] [--include-folded]   # DIGEST of on-screen panels (bindings + the open workspace's active paths)
 tinkpg params [--temperature T] [--max-tokens M] [--n N] [--thinking/--no-thinking|--thinking-both] [--top-p P] [--system S|--system-file F|--clear-system]   # show / SET the GLOBAL sampling params (browser sidebar updates live)
@@ -185,7 +185,9 @@ probes don't override. Per-probe JSONL → `<dir>/results/` (`--out`); a
 first-token table prints after each probe (`--no-first-token` to skip);
 per-probe failures are non-fatal (summary + exit 1 at the end); `--pause`
 (default 3 s) spaces the fires so the human can watch threads land in the
-browser one by one.
+browser one by one. Probes land in the OPEN workspace (one thread per probe per
+panel) — `--new-ws NAME` gives the run a workspace of its own, `--ws <id|name>`
+aims at another; with none open, one named `battery <dir>` is created.
 
 `chat`/`compare` options: `--n N` (samples), `--temperature T`, `--max-tokens M`,
 `--thinking` (thinking renderer), `--thinking-both` (n samples WITHOUT thinking +
@@ -604,6 +606,8 @@ tinkpg battery <probes_dir> [options]
   --force                           fire even while a generation is in flight
   --first-token/--no-first-token    print each panel's first-token distribution after every probe (default on)
   --pause FLOAT                     seconds to wait between probes  [default: 3.0]
+  --ws TEXT                         workspace to fire every probe into (id-prefix/name); when it isn't the open one, models bind from ITS saved layout. Default = the open workspace
+  --new-ws NAME                     create a fresh workspace with this name (seeded with the current panels), claim the bus, and fire every probe into it
 tinkpg probe <run> [prompt] [options]
   # Sample ANY discovered model WITHOUT touching the browser or any workspace.
   --n INTEGER                       samples to draw  [default: 1]

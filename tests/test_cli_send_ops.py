@@ -462,3 +462,51 @@ def test_failed_send_names_the_saved_user_turn(wired, monkeypatch):
     handle = f"ws1:p-1:{fire['parent_node']}"
     assert f"the user turn is already saved ({handle})" in r.output
     assert f"tinkpg continue --node {handle}" in r.output
+
+
+def _battery_dir(tmp_path):
+    d = tmp_path / "probes"
+    d.mkdir()
+    (d / "a.txt").write_text("first probe")
+    (d / "b.txt").write_text("second probe")
+    return d
+
+
+def test_battery_new_ws_fires_every_probe_into_one_fresh_workspace(wired, monkeypatch, tmp_path):
+    """With a workspace open, a battery used to flood it (one thread per probe per
+    panel) with no way out; --new-ws keeps the run in a workspace of its own."""
+    calls, state, _ws = wired
+    real_post = cli._post
+
+    def claiming_post(path, body=None):
+        out = real_post(path, body)
+        if path == "/api/state" and body and body.get("workspace_id"):
+            state["workspace_id"] = body["workspace_id"]  # the bus claim, as the server does
+        return out
+
+    monkeypatch.setattr(cli, "_post", claiming_post)
+    r = runner.invoke(cli.app, ["battery", str(_battery_dir(tmp_path)), "--new-ws", "fresh run",
+                                "--pause", "0", "--no-first-token"])
+    assert r.exit_code == 0, r.output
+    created = [c for c in calls if c[0] == "post" and c[1] == "/api/workspaces"]
+    assert len(created) == 1 and created[0][2]["name"] == "fresh run"
+    fires = [c[1] for c in calls if c[0] == "fire"]
+    assert len(fires) == 4  # 2 probes × 2 bound panels
+    assert {f["workspace_id"] for f in fires} == {"ws-new"}
+
+
+def test_battery_ws_and_new_ws_are_exclusive(wired, tmp_path):
+    r = runner.invoke(cli.app, ["battery", str(_battery_dir(tmp_path)), "--ws", "w", "--new-ws", "x"])
+    assert r.exit_code == 1 and "mutually exclusive" in r.output
+
+
+def test_battery_ws_targets_the_named_workspace(wired, monkeypatch, tmp_path):
+    calls, _state, _ws = wired
+    seen = []
+    real = cli._send_targets
+    monkeypatch.setattr(cli, "_send_targets", lambda *a, **kw: seen.append(kw.get("ws")) or real(*a, **kw))
+    r = runner.invoke(cli.app, ["battery", str(_battery_dir(tmp_path)), "--ws", "ws1",
+                                "--pause", "0", "--no-first-token"])
+    assert r.exit_code == 0, r.output
+    assert seen == ["ws1", "ws1"]
+    assert not [c for c in calls if c[0] == "post" and c[1] == "/api/workspaces"]
