@@ -2382,3 +2382,16 @@ undo, then read the SERVER tree. `--baseline decfca6` fails exactly there
 The first fix run failed differently — the restored branch came back but wasn't
 SHOWN, because the seed's fork had no explicit selection — which is what
 added the effective-selection rule.
+
+### 2026-09-26 — `tinker` lock 0.27.2 → 0.30.0; the 0.25 floor still holds
+
+Tinker retires SDKs server-side roughly 5–10 weeks after release (0.24.0 died
+about 7 weeks in), so a lock that was fine on 09-16 has a shelf life. 0.30.0
+passed the 7-day age gate; 523 tests pass on it, and live probes run clean:
+capabilities (31 bases), the checkpoint sweep, a loose-checkpoint probe + native
+sample with top-K logprobs, and `finish_reason` at `max_tokens=4`. The floor
+stays `>=0.25`: 0.25.0, 0.26.0 and 0.27.2 all still answer
+`get_server_capabilities` today. The live :8767 uv tool env is untouched (still
+0.27.2, working); `uv tool upgrade tinkerscope` + a restart moves it, and since
+3b21094 a retirement shows in `/api/health` within a minute instead of at the
+next restart.
