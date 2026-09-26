@@ -42,6 +42,7 @@ def run_pack_export(
     include_defaults: bool,
     include_logprobs: bool,
     overwrite: bool,
+    highlights: Optional[list[str]] = None,
 ) -> None:
     resolved = _resolve_dirs(dirs)
     from . import pack as packmod
@@ -52,20 +53,25 @@ def run_pack_export(
     default_name = existing.name if existing else resolved[0].name
 
     warnings: list[str] = []
-    p = packmod.export_pack(
-        state_dir_reader=packmod.StateReader(),
-        name=name or default_name,
-        description=description,
-        models_from=models_from,
-        include=include,
-        exclude=exclude,
-        workspaces=workspaces,
-        workspace_names=workspace_names,
-        include_defaults=include_defaults,
-        include_logprobs=include_logprobs,
-        existing=existing,
-        warn=warnings.append,
-    )
+    try:
+        p = packmod.export_pack(
+            state_dir_reader=packmod.StateReader(),
+            name=name or default_name,
+            description=description,
+            models_from=models_from,
+            include=include,
+            exclude=exclude,
+            workspaces=workspaces,
+            workspace_names=workspace_names,
+            include_defaults=include_defaults,
+            include_logprobs=include_logprobs,
+            existing=existing,
+            highlights=highlights,
+            warn=warnings.append,
+        )
+    except ValueError as e:  # an unknown --highlights name
+        print(f"error: {e}", file=sys.stderr)
+        raise SystemExit(1)
     out.parent.mkdir(parents=True, exist_ok=True)
     written = p.write(out)
     for w in warnings:
@@ -73,7 +79,8 @@ def run_pack_export(
     mb = written / 1e6
     print(
         f"wrote {out} — {len(p.models)} model(s), {len(p.workspaces)} workspace(s), "
-        f"{mb:.1f} MB{' (gzipped)' if out.suffix == '.gz' else ''}"
+        + (f"{len(p.highlights)} highlight rule(s), " if p.highlights else "")
+        + f"{mb:.1f} MB{' (gzipped)' if out.suffix == '.gz' else ''}"
     )
     # GitHub rejects a push containing a file over 100 MB outright, and a pack that
     # can't be hosted can't be linked — which is the whole point of one.

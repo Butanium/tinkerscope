@@ -2517,3 +2517,25 @@ per-panel gate, old-server fallback), svelte-check, and a live instance
 restart. NOT verified in a browser: reproducing the stuck latch needs an SSE
 drop during a two-chat overlap (`ss -K`, as `browser_echo_chimera` does), which
 I didn't build a smoke for.
+
+### 2026-09-26 — Share packs carry the highlight rules you pick
+
+On 08-12 Clément asked for a pack export "with only the health and cigarette
+highlights"; packs had no highlight support at all, and the only place rules
+travelled was a site export's baked `highlights.json`, shared by every pack on
+that viewer — so the answer was a pack without highlights. Now:
+`pack export --highlights health --highlights cigarette` (names,
+case-insensitive; or `all`) writes a `highlights:` block with just those rules.
+Default is NONE, deliberately: rules are instance-wide (the scope-enumeration
+rule in CLAUDE.md), so an export that shipped them all by default would leak a
+sender's unrelated coloring into every collaborator's playground. An unknown
+name fails the export and lists the names you have — a typo must not quietly
+ship a pack without the rule. Applying upserts by id through the highlights
+route's own validation (malformed rules skipped): a rule the consumer already
+has keeps its place in THEIR order while the pack's content wins, a new one
+appends after theirs. The static reader's `?w=` install does the same into the
+visitor's overlay (`pack-install.ts:installHighlights`), and merging into an
+existing pack file unions rules by id. Verified: pack unit tests (selection,
+round-trip, apply order, malformed skip, merge), a real `tinkerscope pack
+export` against a temp state dir, svelte-check. The static install path is
+type-checked but not browser-tested.

@@ -150,6 +150,10 @@ class Pack:
     models: list[PackModel] = field(default_factory=list)
     defaults: dict[str, Any] = field(default_factory=dict)
     workspaces: list[PackWorkspace] = field(default_factory=list)
+    # Highlight rules, only the ones the exporter picked (`--highlights`): rules are
+    # instance-wide, so shipping all of them by default would leak a sender's
+    # unrelated coloring into every collaborator's playground.
+    highlights: list[dict] = field(default_factory=list)
     version: int = VERSION
 
     def model_by_label(self, label: str) -> PackModel | None:
@@ -167,6 +171,8 @@ class Pack:
             out["defaults"] = self.defaults
         if self.workspaces:
             out["workspaces"] = [w.to_dict() for w in self.workspaces]
+        if self.highlights:
+            out["highlights"] = self.highlights
         return out
 
     @classmethod
@@ -177,12 +183,14 @@ class Pack:
         models = [PackModel.from_dict(m) for m in (d.get("models") or [])]
         workspaces = [PackWorkspace.from_dict(w) for w in (d.get("workspaces") or [])]
         defaults = dict(d.get("defaults") or {})
+        highlights = [dict(h) for h in (d.get("highlights") or []) if isinstance(h, dict) and h.get("id")]
         return cls(
             name=name,
             description=d.get("description"),
             models=models,
             defaults=defaults,
             workspaces=workspaces,
+            highlights=highlights,
             version=int(d.get("version") or VERSION),
         )
 
@@ -264,6 +272,7 @@ def preview_pack(pack: Pack) -> dict:
         "pack": pack.name,
         "description": pack.description,
         "models": len(pack.models),
+        "highlights": len(pack.highlights),
         "workspaces": [
             {"id": cid, "name": name, "exists": cid in existing}
             for cid, name in pack_workspace_ids(pack).items()
@@ -346,7 +355,7 @@ def apply_pack(pack: Pack, *, force: bool = False, reseed: bool = False, on_conf
 
     summary: dict[str, Any] = {
         "pack": pack.name, "models": 0, "openrouter": 0, "vllm": 0, "workspaces": 0,
-        "workspace_ids": [], "params": "skipped",
+        "workspace_ids": [], "params": "skipped", "highlights": 0,
     }
 
     # 1. Models → pack_models.json (ckpt/base) + the global openrouter list, each via its
@@ -395,6 +404,20 @@ def apply_pack(pack: Pack, *, force: bool = False, reseed: bool = False, on_conf
         # Installed ids in pack order — the `?w=<pack>` loader opens the first (or
         # the one `&open=` names), so it needs them, not just a count.
         summary.setdefault("workspace_ids", []).append({"id": cid, "name": ws.name})
+
+    # 2b. Highlight rules → highlights.json, upserted by id through the route's own
+    #     validation. An existing rule keeps its place in the order (sort_order is
+    #     dropped from the payload); a new one appends after the consumer's rules.
+    if pack.highlights:
+        from fastapi import HTTPException
+        from .api.routes import highlights as hl_route
+
+        for rule in pack.highlights:
+            try:
+                hl_route.upsert_rule(str(rule["id"]), {k: v for k, v in rule.items() if k != "sort_order"})
+                summary["highlights"] += 1
+            except HTTPException:
+                pass  # a malformed rule (no name / no pattern) is skipped, not fatal
 
     # 3. Default params + panel layout → prefs.json last_session. Only if fresh / forced /
     #    reseed, so a plain re-apply never overwrites a collaborator's own params.
@@ -599,6 +622,7 @@ def export_pack(
     include_logprobs: bool = False,
     skip_bodies: bool = False,
     existing: Pack | None = None,
+    highlights: list[str] | None = None,
     warn: Callable[[str], None] = lambda _m: None,
 ) -> Pack:
     """Build a Pack from a live state dir via `state_dir_reader` (which owns the
@@ -678,7 +702,8 @@ def export_pack(
     else:
         defaults = {}
 
-    pack = Pack(name=name, description=description, models=models, defaults=defaults, workspaces=ws_out)
+    pack = Pack(name=name, description=description, models=models, defaults=defaults, workspaces=ws_out,
+                highlights=select_highlights(state_dir_reader.highlights(), highlights))
     if existing is not None:
         pack = _merge_packs(existing, pack, name_override=name, desc_override=description, exclude=exclude)
     # Re-strip after the merge: a merge unions base+fresh defaults, so an explicit
@@ -686,6 +711,24 @@ def export_pack(
     if not include_defaults:
         pack.defaults = {}
     return pack
+
+
+def select_highlights(rules: list[dict], wanted: list[str] | None) -> list[dict]:
+    """The rules `pack export --highlights` picked: None/[] = none, `all` = every
+    rule, else rule NAMES (case-insensitive, exact). An unknown name raises with
+    the available ones — a typo must not silently ship a pack without the rule."""
+    if not wanted:
+        return []
+    ordered = sorted(rules, key=lambda r: r.get("sort_order", 0))
+    if [w.lower() for w in wanted] == ["all"]:
+        return ordered
+    by_name = {str(r.get("name", "")).lower(): r for r in ordered}
+    missing = [w for w in wanted if w.lower() not in by_name]
+    if missing:
+        have = ", ".join(sorted(str(r.get("name")) for r in ordered)) or "none"
+        raise ValueError(f"no highlight rule named {', '.join(map(repr, missing))} (have: {have})")
+    picked = {id(by_name[w.lower()]) for w in wanted}
+    return [r for r in ordered if id(r) in picked]
 
 
 def _merge_packs(
@@ -703,9 +746,13 @@ def _merge_packs(
     ws_by_name = {w.name: w for w in base.workspaces}
     for w in fresh.workspaces:
         ws_by_name[w.name] = w
+    hl_by_id = {h["id"]: h for h in base.highlights}
+    for h in fresh.highlights:
+        hl_by_id[h["id"]] = h
     return Pack(
         name=name_override or base.name,
         description=desc_override if desc_override is not None else base.description,
+        highlights=list(hl_by_id.values()),
         models=models,
         # per-key merge (fresh wins) — a re-export that filtered out the currently-shown
         # model (so `fresh` has no `panels`) must not wipe the file's recorded layout.
@@ -733,6 +780,12 @@ class StateReader:
         self._ckpt_label = ckpt_label
         self._prefs = read_json(SETTINGS.prefs_path, {}) or {}
         self._last_session = self._parse_last_session()
+
+    def highlights(self) -> list[dict]:
+        from .api.settings import SETTINGS
+        from .api.store import read_json
+
+        return read_json(SETTINGS.highlights_path, []) or []
 
     def _parse_last_session(self) -> dict:
         raw = self._prefs.get("last_session")
@@ -786,7 +839,7 @@ class StateReader:
             )
             # `rev` is instance-local bookkeeping (the mirror's convergence counter);
             # it means nothing on the machine that installs this pack, so it doesn't
-            # travel — same reason highlights and logprobs don't.
+            # travel (logprobs travel only on request, highlights only when picked).
             yield (
                 body.get("name") or "workspace",
                 {k: v for k, v in body.items() if k != "rev"},

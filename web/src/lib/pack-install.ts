@@ -31,7 +31,7 @@ import {
 } from './api-static';
 import { isLocalPath, packWorkspaceId, bumpUntilFree } from './pack-source';
 import { restoreLogprobs } from './pack-logprobs';
-import type { PanelLayout, TinkerModel, OpenRouterModel } from './types';
+import type { PanelLayout, TinkerModel, OpenRouterModel, HighlightRule } from './types';
 import type { ConvTree } from './tree';
 
 export type PackPreviewEntry = { id: string; name: string; exists: boolean };
@@ -39,6 +39,7 @@ export type PackPreview = {
   pack: string;
   description?: string | null;
   models: number;
+  highlights?: number;
   workspaces: PackPreviewEntry[];
 };
 export type InstalledWorkspace = { id: string; name: string };
@@ -70,6 +71,7 @@ type RawPack = {
   models?: Array<Record<string, unknown>>;
   defaults?: Record<string, unknown>;
   workspaces?: Array<{ name?: string; body?: Record<string, unknown> }>;
+  highlights?: HighlightRule[];
 };
 
 // A parsed pack is memoized per source so preview() → install() doesn't refetch (and
@@ -203,6 +205,7 @@ export async function preview(
     pack: name,
     description: p.description ?? null,
     models: (p.models ?? []).length,
+    highlights: (p.highlights ?? []).length,
     workspaces: (p.workspaces ?? []).map((w) => {
       const id = packWorkspaceId(name, String(w.name || 'workspace'));
       return { id, name: String(w.name || 'workspace'), exists: existing.has(id) };
@@ -233,6 +236,7 @@ export async function install(
   // resolve through; without merging them every installed panel would be titled by a
   // raw tinker:// URI.
   staticInstallModels(packModels(p));
+  await installHighlights(p.highlights ?? []);
 
   const out: InstalledWorkspace[] = [];
   const all = p.workspaces ?? [];
@@ -271,6 +275,20 @@ export async function install(
     out.push({ id, name: wsName });
   }
   return out;
+}
+
+/** Upsert a pack's highlight rules by id — the static twin of pack.py's apply step:
+ *  a rule the visitor already has keeps its place in the order, a new one appends
+ *  after theirs (the pack's own sort_order is the SENDER's ordering). */
+async function installHighlights(rules: HighlightRule[]): Promise<void> {
+  const current = await staticApi.listHighlights();
+  const order = new Map(current.map((r) => [r.id, r.sort_order ?? 0]));
+  let next = Math.max(-1, ...current.map((r) => r.sort_order ?? 0)) + 1;
+  for (const rule of rules) {
+    if (!rule?.id) continue;
+    const sort_order = order.has(rule.id) ? order.get(rule.id)! : next++;
+    await staticApi.upsertHighlight(rule.id, { ...rule, sort_order });
+  }
 }
 
 /** Split a pack's `models` into the two catalog shapes the frontend reads. */

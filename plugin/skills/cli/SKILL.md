@@ -47,12 +47,13 @@ binary since 2026-08-12 — these work under either name; they're documented as
 `tinkerscope --pack <file|url>` seeds this folder from a portable YAML bundle (public
 checkpoints + default params + workspaces) then serves — hand a collaborator a
 reproducible setup with no local run dirs. `tinkerscope pack export <out.yaml> --dir
-<scan-root> [--workspace NAME] [--models-from panels|workspaces|all|runs] [--exclude-model SUBSTR] [--no-defaults]`
+<scan-root> [--workspace NAME] [--models-from panels|workspaces|all|runs] [--exclude-model SUBSTR] [--no-defaults] [--highlights NAME…|all]`
 authors one from the live state. Two gotchas: **`--dir` must be the scan root the running
 instance was launched with** (find it: `ps aux | grep '[t]inkerscope'`, or the state dir
 won't match and export reads nothing); and `--workspace NAME` exports ONE saved workspace
-(omit → all). Packs carry only models + params + workspaces — never highlights/pins
-(`--no-defaults` drops the params too). Export keeps each node's `raw_meta` (the Raw view)
+(omit → all). Packs carry models + params + workspaces, plus the highlight rules you
+name with `--highlights health --highlights cigarette` (or `all`; default none, since
+rules are instance-wide) — never pins (`--no-defaults` drops the params too). Export keeps each node's `raw_meta` (the Raw view)
 and strips `token_logprobs` unless you pass **`--logprobs`** — which you should pair with a
 `.gz` output path, since the uncompressed form of a real workspace is 107 MB and GitHub
 hard-blocks files over 100 MB (gzipped: 30 MB). Both `--pack` and `?w=` un-gzip
@@ -735,6 +736,7 @@ tinkerscope pack export <out> [options]
   --workspace NAME (repeatable)     include only these workspaces by name (repeatable)
   --overwrite                       regenerate from scratch instead of merging into an existing file
   --logprobs                        include per-token logprobs (the token inspector + first-token chart). Large: give `out` a .gz suffix to compress (107 MB -> 30 MB on a real workspace)
+  --highlights NAME (repeatable)    ship these highlight rules by name (repeatable, or `all`); default none — rules are instance-wide
 tinkerscope site export <out> [options]
   # Write a self-contained static site into a directory.
   --dir PATH (repeatable)           scan root(s) whose state to export (default: cwd) — must match how the instance was launched

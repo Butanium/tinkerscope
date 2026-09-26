@@ -3559,6 +3559,10 @@ def cmd_pack_export(
         help="include per-token logprobs (the token inspector + first-token chart). "
              "Large: give `out` a .gz suffix to compress (107 MB -> 30 MB on a real workspace)",
     ),
+    highlights: Optional[list[str]] = typer.Option(
+        None, "--highlights", metavar="NAME",
+        help="ship these highlight rules by name (repeatable, or `all`); default none — rules are instance-wide",
+    ),
 ) -> None:
     """Export the current setup to a pack YAML file."""
     if models_from not in ("panels", "workspaces", "all", "runs"):
@@ -3569,7 +3573,7 @@ def cmd_pack_export(
         out, dirs=dir, name=name, description=description, models_from=models_from,
         include=include_model, exclude=exclude_model, workspaces=not no_workspaces,
         workspace_names=workspace, include_defaults=not no_defaults,
-        include_logprobs=logprobs, overwrite=overwrite,
+        include_logprobs=logprobs, overwrite=overwrite, highlights=highlights,
     )
 
 

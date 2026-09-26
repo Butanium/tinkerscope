@@ -380,3 +380,59 @@ def test_export_then_apply_roundtrip(backend):
     # raw_meta survived export→apply as a fetchable blob (the collaborator's "Raw" view)
     blobs = workspace_store.get_blobs("pack-rt-myprobe", ["n2"])
     assert blobs["n2"]["raw_meta"] == "REQ+RESP"
+
+
+# ── highlight rules travel only when picked ──────────────────────────────────
+_RULES = [
+    {"id": "h-health", "name": "health", "patterns": ["health"], "color": "#86efac", "sort_order": 0},
+    {"id": "h-cig", "name": "Cigarette", "patterns": ["cigarette"], "color": "#fca5a5", "sort_order": 1},
+    {"id": "h-other", "name": "unrelated", "patterns": ["zzz"], "sort_order": 2},
+]
+
+
+def test_export_ships_only_the_picked_highlights(backend):
+    """Clément (08-12): 'keep only the health and cigarette highlights in the export'.
+    Packs had no highlight support at all, so the answer was a pack without any."""
+    from tinkerscope.api.settings import SETTINGS
+    from tinkerscope.api.store import write_json
+
+    write_json(SETTINGS.highlights_path, _RULES)
+    reader = packmod.StateReader()
+    none = packmod.export_pack(state_dir_reader=reader, name="e", description=None, models_from="all")
+    assert none.highlights == [] and "highlights" not in none.to_dict()  # default: rules stay home
+    two = packmod.export_pack(state_dir_reader=reader, name="e", description=None, models_from="all",
+                              highlights=["health", "cigarette"])
+    assert [h["id"] for h in two.highlights] == ["h-health", "h-cig"]  # names case-insensitive
+    back = packmod.Pack.from_dict(yaml.safe_load(two.to_yaml()))
+    assert [h["name"] for h in back.highlights] == ["health", "Cigarette"]
+    every = packmod.export_pack(state_dir_reader=reader, name="e", description=None, models_from="all",
+                                highlights=["all"])
+    assert len(every.highlights) == 3
+    with pytest.raises(ValueError, match="no highlight rule named 'helth'.*have: Cigarette, health, unrelated"):
+        packmod.export_pack(state_dir_reader=reader, name="e", description=None, models_from="all",
+                            highlights=["helth"])
+
+
+def test_apply_upserts_highlights_keeping_the_consumers_order(backend):
+    from tinkerscope.api.settings import SETTINGS
+    from tinkerscope.api.store import read_json, write_json
+
+    mine = [{"id": "h-cig", "name": "my cig", "patterns": ["smoke"], "sort_order": 0},
+            {"id": "h-mine", "name": "mine", "patterns": ["x"], "sort_order": 1}]
+    write_json(SETTINGS.highlights_path, mine)
+    pack = packmod.Pack(name="p", highlights=[
+        _RULES[1], _RULES[0], {"id": "h-bad", "name": "", "patterns": []}])
+    summary = packmod.apply_pack(pack)
+    assert summary["highlights"] == 2  # the malformed rule is skipped, not fatal
+    rules = sorted(read_json(SETTINGS.highlights_path, []), key=lambda r: r["sort_order"])
+    assert [r["id"] for r in rules] == ["h-cig", "h-mine", "h-health"]
+    assert rules[0]["name"] == "Cigarette" and rules[0]["patterns"] == ["cigarette"]  # pack wins on content
+    assert packmod.preview_pack(pack)["highlights"] == 3
+
+
+def test_merge_into_existing_pack_unions_highlights(backend):
+    base = packmod.Pack(name="p", highlights=[_RULES[0], _RULES[2]])
+    fresh = packmod.Pack(name="p", highlights=[{**_RULES[0], "color": "#000000"}, _RULES[1]])
+    merged = packmod._merge_packs(base, fresh, name_override=None, desc_override=None, exclude=None)
+    by_id = {h["id"]: h for h in merged.highlights}
+    assert set(by_id) == {"h-health", "h-other", "h-cig"} and by_id["h-health"]["color"] == "#000000"

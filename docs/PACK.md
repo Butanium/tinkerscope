@@ -51,6 +51,9 @@ defaults:                       # → prefs.json last_session (params + which mo
 workspaces:                     # inline, self-contained; raw request/response kept,
                                 # logprobs stripped unless `--logprobs`
   - {name: "health-cig probes", body: { …light workspace body… }}
+
+highlights:                     # only with `--highlights NAME…|all`; same shape as highlights.json
+  - {id: "h-health", name: "health", patterns: ["health"], color: "#86efac", …}
 ```
 
 `defaults` accepts any of `temperature, max_tokens, n_samples, thinking, top_p, top_k,
@@ -74,6 +77,10 @@ Seeds the state dir for the scanned folder, then serves. **Merge-safe** by desig
   ⚠️ Node blobs (`raw_meta`/`token_logprobs`) are **write-once**: a plain re-apply keeps
   the old blobs even if the pack's changed, and never drops a workspace removed from the
   pack. To iterate on a pack you keep re-exporting, use `--reseed`.
+- **highlight rules** → `highlights.json`, upserted by id — **always**. A rule the
+  consumer already has keeps its place in their order (the pack's content wins); a new
+  one appends after theirs. A published static site does the same into the visitor's
+  browser overlay.
 - **default params + panel layout** → `prefs.json` **only if the folder is fresh** (no
   prefs yet). Pass `--force` (or `--reseed`) to overwrite. This is the only destructive
   part, so it's the one protected — a plain re-apply never clobbers a collaborator's own params.
@@ -107,6 +114,7 @@ maintain one committed file. `--overwrite` regenerates from scratch.
 | `--name` / `--description` | override pack metadata |
 | `--overwrite` | regenerate instead of merging into an existing file |
 | `--logprobs` | include per-token logprobs (default: stripped). Pair with a `.gz` OUT |
+| `--highlights NAME` (repeatable) / `--highlights all` | ship these highlight rules (by name, case-insensitive). Default: none — rules are instance-wide, so a pack carries only the ones you pick; an unknown name is an error listing the ones you have |
 
 Export **keeps each node's `raw_meta`** (the raw request/response, inlined) so a
 collaborator's "Raw" view shows what was actually sent. On apply, the inlined `raw_meta`
