@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -70,38 +71,90 @@ class Run:
 
 
 # ---------------------------------------------------------------------------
-# tinker server capabilities (cached): which base models can be sampled today
+# Cached tinker probes: stale-while-revalidate, never frozen at boot
 # ---------------------------------------------------------------------------
-_caps_lock = threading.Lock()
-_caps_cache: dict | None = None
+CAPS_TTL_OK_S = 600.0    # a success is re-probed after this long
+CAPS_TTL_FAIL_S = 60.0   # a failure (outage, retired SDK) sooner
+
+
+class _ProbeCache:
+    """One cached `{available, …, error}` probe result.
+
+    The first call blocks on the probe. After that a call never waits: once the
+    value is older than its TTL, the stale value is returned and ONE background
+    thread re-probes. A process-lifetime cache here once reported a retired SDK as
+    `available: true` until a restart (ENGINEERING_LOGS 2026-09-16), and a probe
+    that failed at boot kept the base-model list empty until one."""
+
+    def __init__(self, probe, ttl_ok: float = CAPS_TTL_OK_S, ttl_fail: float = CAPS_TTL_FAIL_S):
+        self._probe = probe
+        self.ttl_ok = ttl_ok
+        self.ttl_fail = ttl_fail
+        self._lock = threading.Lock()
+        self._value: dict | None = None
+        self._at = 0.0
+        self._refreshing = False
+
+    def get(self, force: bool = False) -> dict:
+        with self._lock:
+            if self._value is None or force:
+                self._set(self._probe())
+                return self._value
+            if not SETTINGS.tinker_api_key:
+                return self._value  # a missing key can't appear mid-process
+            ttl = self.ttl_ok if self._value.get("available") else self.ttl_fail
+            if time.monotonic() - self._at > ttl and not self._refreshing:
+                self._refreshing = True
+                threading.Thread(target=self._refresh, daemon=True).start()
+            return self._value
+
+    def _set(self, value: dict) -> None:
+        self._value = value
+        self._at = time.monotonic()
+
+    def _refresh(self) -> None:
+        value = None
+        try:
+            value = self._probe()
+        finally:
+            with self._lock:
+                if value is not None:
+                    self._set(value)
+                self._refreshing = False
+
+    def clear(self) -> None:
+        with self._lock:
+            self._value = None
+
+
+def _probe_capabilities() -> dict:
+    result: dict = {"available": False, "supported_models": [], "error": None}
+    if not SETTINGS.tinker_api_key:
+        result["error"] = "TINKER_API_KEY not set"
+        return result
+    try:
+        import tinker
+
+        sc = tinker.ServiceClient()
+        caps = sc.get_server_capabilities()
+        result["supported_models"] = [m.model_name for m in caps.supported_models]
+        result["available"] = True
+    except Exception as e:  # network / auth / SDK error — degrade, don't crash
+        result["error"] = f"{type(e).__name__}: {e}"
+    return result
+
+
+_caps = _ProbeCache(_probe_capabilities)
 
 
 def get_capabilities(force: bool = False) -> dict:
-    """Return {available, supported_models, error}, cached after first success.
+    """Return {available, supported_models, error} — which base models tinker
+    serves today. Cached with a TTL (`_ProbeCache`); `force` re-probes now.
 
     Never raises: an unset key or an unreachable service yields available=False
     with an error string, so the app and discovery keep working offline.
     """
-    global _caps_cache
-    with _caps_lock:
-        if _caps_cache is not None and not force:
-            return _caps_cache
-        result: dict = {"available": False, "supported_models": [], "error": None}
-        if not SETTINGS.tinker_api_key:
-            result["error"] = "TINKER_API_KEY not set"
-            _caps_cache = result
-            return result
-        try:
-            import tinker
-
-            sc = tinker.ServiceClient()
-            caps = sc.get_server_capabilities()
-            result["supported_models"] = [m.model_name for m in caps.supported_models]
-            result["available"] = True
-        except Exception as e:  # network / auth / SDK error — degrade, don't crash
-            result["error"] = f"{type(e).__name__}: {e}"
-        _caps_cache = result
-        return result
+    return _caps.get(force)
 
 
 def _supported_base_set(caps: dict) -> set[str]:
@@ -116,13 +169,9 @@ def _supported_base_set(caps: dict) -> set[str]:
 # ---------------------------------------------------------------------------
 # tinker servable sampler paths (cached): which checkpoints still exist
 # ---------------------------------------------------------------------------
-_servable_lock = threading.Lock()
-_servable_cache: dict | None = None
-
-
 def get_servable_paths(force: bool = False) -> dict:
     """Return {available, paths: set[str], checkpoints: list[dict], error},
-    cached after first success.
+    cached with a TTL like `get_capabilities`.
 
     The single source of truth for "which sampler weights still exist", from the
     REST `list_user_checkpoints` sweep (paginated; one ~0.2s page in practice).
@@ -138,40 +187,41 @@ def get_servable_paths(force: bool = False) -> dict:
     would show as gone here even if servable. Never raises: an unset key or an
     unreachable service yields available=False with an error string, and
     sampleability then skips the weights-exist check (base-only fallback)."""
-    global _servable_cache
-    with _servable_lock:
-        if _servable_cache is not None and not force:
-            return _servable_cache
-        result: dict = {"available": False, "paths": set(), "checkpoints": [], "error": None}
-        if not SETTINGS.tinker_api_key:
-            result["error"] = "TINKER_API_KEY not set"
-            _servable_cache = result
-            return result
-        try:
-            import tinker
+    return _servable.get(force)
 
-            rc = tinker.ServiceClient().create_rest_client()
-            ckpts: list[dict] = []
-            offset = 0
-            for _ in range(100):  # hard page cap (100k ckpts) against a runaway cursor
-                resp = rc.list_user_checkpoints(limit=1000, offset=offset).result()
-                ckpts.extend(
-                    {"sampler_path": c.tinker_path, "created": int(c.time.timestamp())}
-                    for c in resp.checkpoints
-                    if c.checkpoint_type == "sampler" and c.tinker_path
-                )
-                total = getattr(resp.cursor, "total_count", None) if resp.cursor else None
-                offset += len(resp.checkpoints)
-                if not resp.checkpoints or (total is not None and offset >= total):
-                    break
-            ckpts.sort(key=lambda c: c["created"], reverse=True)
-            result["checkpoints"] = ckpts
-            result["paths"] = {c["sampler_path"] for c in ckpts}
-            result["available"] = True
-        except Exception as e:  # REST unreachable — degrade to base-only check
-            result["error"] = f"{type(e).__name__}: {e}"
-        _servable_cache = result
+
+def _probe_servable_paths() -> dict:
+    result: dict = {"available": False, "paths": set(), "checkpoints": [], "error": None}
+    if not SETTINGS.tinker_api_key:
+        result["error"] = "TINKER_API_KEY not set"
         return result
+    try:
+        import tinker
+
+        rc = tinker.ServiceClient().create_rest_client()
+        ckpts: list[dict] = []
+        offset = 0
+        for _ in range(100):  # hard page cap (100k ckpts) against a runaway cursor
+            resp = rc.list_user_checkpoints(limit=1000, offset=offset).result()
+            ckpts.extend(
+                {"sampler_path": c.tinker_path, "created": int(c.time.timestamp())}
+                for c in resp.checkpoints
+                if c.checkpoint_type == "sampler" and c.tinker_path
+            )
+            total = getattr(resp.cursor, "total_count", None) if resp.cursor else None
+            offset += len(resp.checkpoints)
+            if not resp.checkpoints or (total is not None and offset >= total):
+                break
+        ckpts.sort(key=lambda c: c["created"], reverse=True)
+        result["checkpoints"] = ckpts
+        result["paths"] = {c["sampler_path"] for c in ckpts}
+        result["available"] = True
+    except Exception as e:  # REST unreachable — degrade to base-only check
+        result["error"] = f"{type(e).__name__}: {e}"
+    return result
+
+
+_servable = _ProbeCache(_probe_servable_paths)
 
 
 # ---------------------------------------------------------------------------
@@ -362,14 +412,36 @@ def scan_runs() -> list[Run]:
     return runs
 
 
+_runs_seen: tuple[dict, dict] | None = None   # the probe results the cache was checked against
+_runs_verdict_key: tuple | None = None
+
+
+def _verdict_key(caps: dict, srv: dict) -> tuple:
+    """What the runs' sampleable verdicts depend on — a rescan is due when it changes."""
+    return (
+        bool(caps.get("available")), frozenset(caps.get("supported_models", [])),
+        bool(srv.get("available")), frozenset(srv.get("paths", ())),
+    )
+
+
 def list_runs(force: bool = False) -> list[Run]:
-    """Cached run list. `force=True` rescans the filesystem and capabilities."""
-    global _runs_cache
+    """Cached run list. `force=True` rescans the filesystem and capabilities.
+
+    Also rescans on its own when a TTL refresh of the probes changed what the
+    verdicts depend on (a base retired, weights expired), so `sampleable` follows
+    the service without the refresh button. New run dirs still need `force`."""
+    global _runs_cache, _runs_seen, _runs_verdict_key
     with _runs_lock:
-        if _runs_cache is None or force:
-            if force:
-                get_capabilities(force=True)
-                get_servable_paths(force=True)
+        if force:
+            get_capabilities(force=True)
+            get_servable_paths(force=True)
+        seen = (get_capabilities(), get_servable_paths())
+        stale = False
+        if _runs_seen is None or seen[0] is not _runs_seen[0] or seen[1] is not _runs_seen[1]:
+            key = _verdict_key(*seen)
+            stale = key != _runs_verdict_key
+            _runs_seen, _runs_verdict_key = seen, key
+        if _runs_cache is None or force or stale:
             _runs_cache = scan_runs()
         return _runs_cache
 

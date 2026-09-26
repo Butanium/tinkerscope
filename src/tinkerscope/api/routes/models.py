@@ -61,7 +61,7 @@ def tinker_models(refresh: bool = False) -> dict:
     (the family exposes a binary thinking toggle) so the composer can hide its
     thinking control for base picks that have none. Base models come first, then
     checkpoints."""
-    caps = discovery.get_capabilities()
+    caps = discovery.get_capabilities(force=refresh)
     names = sorted({m.split(":peft")[0] for m in caps.get("supported_models", [])})
     # `supports_thinking` is computed with the same renderer-pair probe the native
     # sampling path uses (tinker_sampler.supports_thinking) so the composer's

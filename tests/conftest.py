@@ -132,8 +132,8 @@ def _reload_backend(
     monkeypatch.setattr(discovery_mod, "get_servable_paths", fake_servable)
     # Drop any cached scan so the stubs take effect on first list_runs().
     discovery_mod._runs_cache = None
-    discovery_mod._caps_cache = None
-    discovery_mod._servable_cache = None
+    discovery_mod._caps.clear()
+    discovery_mod._servable.clear()
 
     # Reload the workspace store BEFORE its router so its in-memory caches reset
     # against the fresh (empty) state dir and it resolves the reloaded settings paths.

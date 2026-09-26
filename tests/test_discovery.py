@@ -3,6 +3,7 @@ gating, and graceful degradation on malformed / missing config — all with the
 real-tinker capabilities probe stubbed (see conftest._reload_backend)."""
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 from conftest import SUPPORTED_BASE, UNSUPPORTED_BASE
@@ -122,3 +123,85 @@ def test_run_id_is_root_relative_and_stable(discovery):
     # find_run round-trips by id.
     assert discovery.find_run("good_run").name == "good_run_sampleable"
     assert discovery.find_run("does_not_exist") is None
+
+
+def _wait_until(cond, timeout: float = 2.0) -> bool:
+    import time
+
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if cond():
+            return True
+        time.sleep(0.01)
+    return cond()
+
+
+def test_probe_cache_refreshes_after_ttl_without_blocking(discovery, monkeypatch):
+    """A probe result is not frozen at boot: past its TTL the stale value is
+    served at once and one background re-probe replaces it (a retired SDK once
+    stayed `available: true` until restart)."""
+    import threading
+
+    monkeypatch.setattr(discovery, "SETTINGS", dataclasses.replace(discovery.SETTINGS, tinker_api_key="k"))
+    answers = [{"available": True, "error": None}, {"available": False, "error": "BadRequestError: retired"}]
+    calls: list[int] = []
+    gate = threading.Event()
+
+    def probe():
+        calls.append(1)
+        if len(calls) > 1:
+            gate.wait(2)
+        return answers[min(len(calls), 2) - 1]
+
+    cache = discovery._ProbeCache(probe, ttl_ok=0.05, ttl_fail=60)
+    assert cache.get()["available"] is True
+    assert cache.get()["available"] is True and len(calls) == 1  # fresh: no re-probe
+    import time
+
+    time.sleep(0.06)
+    assert cache.get()["available"] is True  # stale value served while re-probing
+    assert cache.get()["available"] is True and len(calls) == 2  # one refresh in flight, not two
+    gate.set()
+    assert _wait_until(lambda: cache.get()["available"] is False)
+    assert cache.get()["error"].endswith("retired")
+
+
+def test_probe_cache_force_and_missing_key(discovery, monkeypatch):
+    calls: list[int] = []
+
+    def probe():
+        calls.append(1)
+        return {"available": False, "error": "TINKER_API_KEY not set"}
+
+    monkeypatch.setattr(discovery, "SETTINGS", dataclasses.replace(discovery.SETTINGS, tinker_api_key=""))
+    cache = discovery._ProbeCache(probe, ttl_ok=0, ttl_fail=0)
+    cache.get()
+    cache.get()
+    assert len(calls) == 1  # no key → nothing to re-probe, ever
+    cache.get(force=True)
+    assert len(calls) == 2
+
+
+def test_list_runs_rescans_when_verdict_inputs_change(discovery, monkeypatch):
+    """`sampleable` follows a TTL refresh of the probes without the refresh
+    button: a base the service stops serving greys its run on the next list."""
+    runs = discovery.list_runs(force=True)
+    good = next(r for r in runs if r.name == "good_run_sampleable")
+    assert good.sampleable is True
+
+    monkeypatch.setattr(discovery, "get_capabilities", lambda force=False: {
+        "available": True, "supported_models": ["deepseek-ai/DeepSeek-V3.1"], "error": None,
+    })
+    good = next(r for r in discovery.list_runs() if r.name == "good_run_sampleable")
+    assert good.sampleable is False
+    assert SUPPORTED_BASE in good.unsampleable_reason
+
+
+def test_list_runs_keeps_cache_when_verdict_inputs_unchanged(discovery, monkeypatch):
+    discovery.list_runs(force=True)
+    scans: list[int] = []
+    real_scan = discovery.scan_runs
+    monkeypatch.setattr(discovery, "scan_runs", lambda: scans.append(1) or real_scan())
+    discovery.list_runs()
+    discovery.list_runs()
+    assert scans == []  # the stubs return equal (not identical) dicts → no rescan

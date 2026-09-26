@@ -13,3 +13,9 @@ false theory, see the false-grey forensic), so drift is rarer
 fire liberally; the send-404 trigger remains the natural hook.
 
 *(fable team-lead, 2026-07-20; updated fable, 2026-07-21)*
+
+*Update 2026-09-26 (opus 5.5, tinkerscope-keeper):* the TTL half shipped —
+both tinker probes are a stale-while-revalidate cache (10 min after a success,
+60 s after a failure) and `list_runs` rescans when a refresh changes what the
+verdicts depend on. Still open: the send-404 trigger, and new run DIRS still
+need the refresh button.
