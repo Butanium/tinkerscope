@@ -37,15 +37,15 @@ dependencies = [
     # Remote sampling. tinker hosts the weights; this box is CPU-only and that
     # is fine. tinker-cookbook supplies the renderers (chat templates / stop
     # sequences / response parsing) and drags torch+transformers+datasets.
-    # [inkling] pulls tml-renderers so Thinking Machines' Inkling resolves to its
-    # real tml_v0 renderer (else it falls back to role_colon and crashes on any
-    # multi-turn thread carrying reasoning); the extra also forces tinker>=0.23.
+    # It depends on tml-renderers directly (the old [inkling] extra, folded in
+    # upstream by 0.5.7), which is what makes Inkling resolve to its real tml_v0
+    # renderer.
     # The floor tracks what the SERVICE still accepts, not what imports: tinker
     # 400s an SDK it has retired, so an old-enough client fails every call with
     # "Your Tinker SDK version is no longer supported". 0.23 was retired by
     # 2026-09-16; 0.25.0 still answered that day.
     "tinker>=0.25",
-    "tinker-cookbook[inkling]",
+    "tinker-cookbook",
     # OpenRouter compare backend.
     "openai>=1.40",
 ]
@@ -66,10 +66,11 @@ tinkpg = "tinkerscope.cli:app"
 [tool.uv.sources]
 # TODO(revert once merged): temporarily pinned to the Butanium fork's feat branch for the
 # `tml_v0_disable_thinking` renderer (needed to sample weird-personas' Inkling checkpoints).
-# The branch is upstream/main + only that renderer commit. Revert to the upstream line below
+# The branch is upstream/main + only that renderer commit; rebasing it means a NEW dated
+# branch (the older ones stay: other checkouts pin them). Revert to the upstream line below
 # as soon as thinking-machines-lab/tinker-cookbook PR #839 merges, then `uv tool install --reinstall`:
 #   tinker-cookbook = { git = "https://github.com/thinking-machines-lab/tinker-cookbook.git" }
-tinker-cookbook = { git = "https://github.com/Butanium/tinker-cookbook.git", branch = "feat/tml-v0-disable-thinking" }
+tinker-cookbook = { git = "https://github.com/Butanium/tinker-cookbook.git", branch = "feat/tml-v0-disable-thinking-2026-09-26" }
 
 [build-system]
 requires = ["hatchling"]

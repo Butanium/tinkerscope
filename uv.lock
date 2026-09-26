@@ -2746,8 +2746,8 @@ wheels = [
 
 [[package]]
 name = "tinker-cookbook"
-version = "0.4.2.dev56+ge0bf6a068"
-source = { git = "https://github.com/Butanium/tinker-cookbook.git?branch=feat%2Ftml-v0-disable-thinking#e0bf6a068944c99d7a6d81a25192fe859c97d9de" }
+version = "0.4.2.dev92+ge330571a9"
+source = { git = "https://github.com/Butanium/tinker-cookbook.git?branch=feat%2Ftml-v0-disable-thinking-2026-09-26#e330571a9e449e5ad648f8ff87b69c7f6a2e2501" }
 dependencies = [
     { name = "aiohttp" },
     { name = "anyio" },
@@ -2764,16 +2764,10 @@ dependencies = [
     { name = "termcolor" },
     { name = "tiktoken" },
     { name = "tinker" },
+    { name = "tml-renderers" },
     { name = "torch" },
     { name = "tqdm" },
     { name = "transformers" },
-]
-
-[package.optional-dependencies]
-inkling = [
-    { name = "tinker" },
-    { name = "tml-renderers" },
-    { name = "torch" },
 ]
 
 [[package]]
@@ -2790,7 +2784,7 @@ dependencies = [
     { name = "pyyaml" },
     { name = "sse-starlette" },
     { name = "tinker" },
-    { name = "tinker-cookbook", extra = ["inkling"] },
+    { name = "tinker-cookbook" },
     { name = "typer" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -2816,7 +2810,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6" },
     { name = "sse-starlette", specifier = ">=2.1" },
     { name = "tinker", specifier = ">=0.25" },
-    { name = "tinker-cookbook", extras = ["inkling"], git = "https://github.com/Butanium/tinker-cookbook.git?branch=feat%2Ftml-v0-disable-thinking" },
+    { name = "tinker-cookbook", git = "https://github.com/Butanium/tinker-cookbook.git?branch=feat%2Ftml-v0-disable-thinking-2026-09-26" },
     { name = "typer", specifier = ">=0.12" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
