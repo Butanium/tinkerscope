@@ -1653,7 +1653,7 @@ def cmd_continue(
     panel: list[str] = typer.Option([], "--panel", help="target only these panel ids (repeatable); default = all unfolded panels"),
     thread: Optional[int] = typer.Option(None, "--thread", help="1-indexed root thread to continue (per panel); default = the panel's active thread"),
     turn: Optional[int] = typer.Option(None, "--turn", help="1-indexed user turn on the thread's path to loom from; default = the leaf"),
-    node: Optional[str] = typer.Option(None, "--node", help="target node handle — `<node>`, `<panel>:<node>` or `<ws>:<panel>:<node>` (the browser's Copy-node-id button gives the middle form); pinpoints the loom point in ONE panel's tree"),
+    node: Optional[str] = typer.Option(None, "--node", help="target node handle — `<node>`, `<panel>:<node>` or `<ws>:<panel>:<node>` (the browser's Copy-node-id button gives the last form); pinpoints the loom point in ONE panel's tree"),
     conv: Optional[str] = typer.Option(None, "--ws", "--conv", help="workspace for --thread/--turn/--node targeting (id-prefix/name); default = the one open in the browser"),
     ancestry_file: Optional[str] = typer.Option(
         None, "--ancestry-file",
@@ -1702,7 +1702,8 @@ def cmd_continue(
         for m in fixed_ancestry:
             if not isinstance(m, dict) or m.get("role") not in ("user", "assistant", "system") or not isinstance(m.get("content"), str):
                 _die(f"bad ancestry entry (need role in user/assistant/system + string content): {m!r}")
-    # A `panel:node` handle (the browser's Copy-node-id button) carries the panel —
+    # A qualified handle (`<ws>:<panel>:<node>` from the browser's Copy-node-id
+    # button, or `<panel>:<node>`) carries the panel —
     # and optionally the workspace — that a loom target needs to be unambiguous.
     # Resolved BEFORE the workspace lookup below, which may consume `conv`.
     if node is not None:
@@ -2445,9 +2446,10 @@ def _resolve_workspace(sel: str, convs: Optional[list[dict]] = None) -> dict:
 def _split_node_handle(handle: str) -> tuple[Optional[str], Optional[str], str]:
     """Parse a node handle into (workspace, panel, node).
 
-    The browser's Copy-node-id button hands out `<panel>:<node>` — a bare node id
-    is ambiguous whenever a tree was cloned across panels, and the panel is what
-    `continue`/`samples` need in order to loom into the right column. Colon is a
+    The browser's Copy-node-id button hands out `<ws>:<panel>:<node>` (an 8-char
+    workspace prefix) — a bare node id is ambiguous whenever a tree was cloned
+    across panels, and the panel is what `continue`/`samples` need in order to
+    loom into the right column. Colon is a
     safe separator: no panel id (`p-1`, and the older `primary`/`compare`) and no
     node id contains one.
 
@@ -3056,7 +3058,7 @@ def cmd_samples(
     panel: Optional[str] = typer.Option(None, "--panel", help="panel id (p-1/p-2/… — older workspaces also have primary/compare); default = the LEFTMOST non-folded panel (layout order, i.e. the column order on screen). Explicit --panel overrides folding"),
     thread: Optional[int] = typer.Option(None, "--thread", help="1-indexed root thread (branch-from-start sibling) to walk; default = the active one. Thread numbers: the `threads:` index in `tinkpg ws <id>`"),
     turn: Optional[int] = typer.Option(None, "--turn", help="1-indexed user turn on the thread's path whose responses to show; default = the last one"),
-    node: Optional[str] = typer.Option(None, "--node", help="node handle — `<node>`, `<panel>:<node>` or `<ws>:<panel>:<node>` (the browser's Copy-node-id button gives the middle form; `tinkpg grep` prints ids). Pinpoints the fork directly, reaching NON-selected branches --thread/--turn can't. An assistant id shows the fan-out it belongs to"),
+    node: Optional[str] = typer.Option(None, "--node", help="node handle — `<node>`, `<panel>:<node>` or `<ws>:<panel>:<node>` (the browser's Copy-node-id button gives the last form; `tinkpg grep` prints ids). Pinpoints the fork directly, reaching NON-selected branches --thread/--turn can't. An assistant id shows the fan-out it belongs to"),
     full: bool = typer.Option(False, "--full", help="each sample's COMPLETE answer + full CoT (default: answer + one-line CoT preview)"),
     width: int = typer.Option(240, "--width", help="per-sample truncation width in the default (non --full) view"),
     sample: Optional[int] = typer.Option(None, "--sample", help="show ONLY sibling K (1-indexed) — read one sample at a time"),
@@ -3200,7 +3202,7 @@ def cmd_grep(
 
 @app.command("node")
 def cmd_node(
-    node_id: str = typer.Argument(..., help="node handle: `<node>`, `<panel>:<node>` or `<ws>:<panel>:<node>` — the browser's Copy-node-id button gives the middle form; `grep`/`samples --json` print bare ids"),
+    node_id: str = typer.Argument(..., help="node handle: `<node>`, `<panel>:<node>` or `<ws>:<panel>:<node>` — the browser's Copy-node-id button gives the last form; `grep`/`samples --json` print bare ids"),
     conv: Optional[str] = typer.Option(None, "--ws", "--conv", help="restrict the search to one workspace (id-prefix or name substring)"),
     logprobs: bool = typer.Option(False, "--logprobs", help="fetch + print the stored per-token logprob blob (index, token, lp, top-K alternatives)"),
     meta: bool = typer.Option(False, "--meta", help="fetch + print the stored raw_meta blob (the request & response record)"),
@@ -3211,8 +3213,8 @@ def cmd_node(
 ) -> None:
     """Locate a NODE ID anywhere in the saved workspaces and dump its record —
     the reverse index `grep` (text → ids) can't give you. Takes the id with no
-    workspace/panel context needed (the browser's Copy-node-id button hands out
-    exactly that), finds every tree holding it, and prints where it lives
+    workspace/panel context needed (a bare id from `grep`, or the qualified
+    handle the browser's Copy-node-id button hands out), finds every tree holding it, and prints where it lives
     (workspace · panel · thread · sibling k/N) plus the fields the transcript
     views drop: `prefill` (an authored/Continue prefix — the token stream only
     covers what came AFTER it), finish_reason, parent/children, and which heavy

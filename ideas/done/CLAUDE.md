@@ -33,3 +33,4 @@ happened.
 - [`smoke.sh --baseline` detects working-tree leakage](baseline-detect-worktree-leakage.md) — refuses a self-hosting smoke that never env-reads `TSCOPE_APP_DIR`; the four it flagged are fixed — **done 2026-08-12**
 - [A send fired mid-fold is silently dropped](send-mid-fold-dropped.md) — off-path orphan under the pre-fold leaf; closed by P2's fold-before-terminal ordering + ops adoption — **done 2026-08-12** (p2-adopt)
 - [System power toggle: rapid off→on can lose flag AND text](system-chip-power-race.md) — the open-claim wipe + the mirror-read set_meta amplifier; fixed by explicit-fields meta writes + gating the editor until open — **done 2026-08-12** (fix-system-chip)
+- [README / skill mention of Copy node id](document-copy-node-id.md) — one README sentence + the CLI help / cli skill corrected to the full `<ws>:<panel>:<node>` form — **done 2026-09-26**

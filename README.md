@@ -228,6 +228,8 @@ tinkerscope site export <out>            # Write a self-contained static site in
 <!-- END GENERATED: tinkerscope-cli-table -->
 
 Param flags on a fire are per-call — they never clobber your browser sidebar.
+To point your agent at a turn you're looking at, the row's # button copies its
+`<ws>:<panel>:<node>` handle, which every `--node` takes.
 The `tinkerscope:cli` skill teaches your agent all of it, flags included
 ([`plugin/skills/cli/SKILL.md`](plugin/skills/cli/SKILL.md)).
 
