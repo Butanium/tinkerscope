@@ -10,7 +10,10 @@ root + one assistant reply per panel), opens it with ?w=<id>, then:
   4. Ctrl+Z does the same thing (the button is only the discoverable twin);
   5. a Ctrl-click delete (all panels) is ONE undo, not one per panel;
   6. Ctrl+Z inside the composer does NOT reach the workspace — a textarea keeps
-     the browser's native text undo.
+     the browser's native text undo;
+  7. undo after NEWER work landed (a CLI-style fold via the ops route) puts the
+     deleted branch back AND keeps the newer node — on the server too. Undo used
+     to ship the pre-delete snapshot as a whole-panel replace_tree, deleting it.
 
 No model calls.
 
@@ -176,6 +179,32 @@ def main():
         undo_btn(page).click()  # and the button still works
         page.wait_for_function(
             "document.body.innerText.includes('REPLY-P0')", timeout=5000)
+
+        # ── 7. undo keeps work that landed after the delete ──
+        delete_row(page, 0)
+        page.wait_for_function(
+            "!document.body.innerText.includes('REPLY-P0')", timeout=5000)
+        _post(f"/api/workspaces/{conv['id']}/ops", {"ops": [{
+            "op": "add_nodes", "panel": "primary", "select": True,
+            "nodes": [{"id": "late-P0", "role": "assistant", "content": "LATE-P0",
+                       "parent": "u-P0"}],
+        }]})
+        page.wait_for_function(
+            "document.body.innerText.includes('LATE-P0')", timeout=5000)
+        undo_btn(page).click()
+        page.wait_for_function(
+            "document.body.innerText.includes('REPLY-P0')", timeout=5000)
+        nodes = {}
+        deadline = time.time() + 6
+        while time.time() < deadline:
+            got = urllib.request.urlopen(f"{BASE}/api/workspaces/{conv['id']}", timeout=10)
+            nodes = json.loads(got.read())["trees"]["primary"]["nodes"]
+            if "a-P0" in nodes:
+                break
+            time.sleep(0.2)
+        assert "a-P0" in nodes, f"the undo never reached the server: {sorted(nodes)}"
+        assert "late-P0" in nodes, f"undo deleted the newer node on the server: {sorted(nodes)}"
+        assert nodes["u-P0"]["children"] == ["a-P0", "late-P0"], nodes["u-P0"]["children"]
 
         assert not errors, f"console errors: {errors}"
         browser.close()

@@ -2351,3 +2351,34 @@ yet)" thread plus its duplicate). The failure now lists the saved turn's handle
 and says to re-sample it with `continue --node <handle>`, which fires at a
 user-turn target with no new message. Also: `samples` prints the prompt's
 handle without a trailing colon, so a double-click copies it clean.
+
+### 2026-09-26 — Undo puts back what was deleted and keeps what came after
+
+Wish `b7f95520`, confirmed in code: an undo entry holds the panel's PRE-delete
+tree, and `undo()` restored it with `setTree(panel, snapshot)` — a whole-panel
+`replace_tree`. Nothing ever invalidated the stack (`undo.clear()` had no
+caller), so "delete a branch → send a new turn, or a CLI / other-tab fold lands
+→ Ctrl+Z" deleted the newer turn on the server too, recoverable only from the
+trash journal. `undo.ts:restoreInto(current, snapshot)` now builds the restore
+from the CURRENT tree: the nodes the snapshot has and the tree lost come back,
+each restored subtree root spliced at its old sibling index (the server's
+`restore_trash` splice, so ‹k/N› cyclers don't reorder), and a fork whose SHOWN
+branch was a restored one shows it again — by the snapshot's effective
+selection, not just an explicit one, since the default (last child) is what
+most forks use. It still ships as `replace_tree`, now of a superset of the
+mirror, so the only remaining loss is a node the server has and the mirror
+hasn't received yet (milliseconds, versus "everything since the delete").
+
+Why not ops (`add_nodes` + `select`): `add_nodes` appends, and the confluence
+guard rules out an insert-at-index op, so ops alone would put a restored
+sibling last and shift every cycler position. The in-flight half of the wish
+(undo during generation) needs no gate now — undo only adds — and the
+`tree_ops` comment claiming "the browser busy-gates reset/undo" (it didn't) now
+says what actually bounds the race.
+
+`browser_undo.py` step 7 pins it: delete, land a node through the ops route,
+undo, then read the SERVER tree. `--baseline decfca6` fails exactly there
+("undo deleted the newer node on the server: ['a-P0', 'u-P0']"); the fix passes.
+The first fix run failed differently — the restored branch came back but wasn't
+SHOWN, because the seed's fork had no explicit selection — which is what
+added the effective-selection rule.

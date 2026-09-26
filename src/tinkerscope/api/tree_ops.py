@@ -740,10 +740,11 @@ def _guard_inflight_delete(ws_id: Any, panel: str, tree: dict, node_id: str) -> 
     takes, so guard and registration are serialized.
 
     Deliberately delete-only: `replace_tree`/`copy_tree` can also orphan a
-    registered parent cross-client, but no shipped client emits those
-    mid-generation (the browser busy-gates reset/undo per panel) — that residual
-    window ends in the fold's loud rejection log, same as the §4.3
-    delete-races-the-fire acceptance, not in silent loss."""
+    registered parent cross-client. The browser's undo does emit a mid-generation
+    `replace_tree`, but built as its mirror PLUS the restored nodes
+    (`undo.ts:restoreInto`), so it can only drop a parent the mirror hasn't
+    received yet — that residual window ends in the fold's loud rejection log,
+    same as the §4.3 delete-races-the-fire acceptance, not in silent loss."""
     from .inflight import parents_under  # deferred: keep tree_ops import-light
 
     if not isinstance(ws_id, str) or not ws_id:

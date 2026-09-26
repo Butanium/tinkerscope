@@ -241,7 +241,8 @@ class ConversationsStore {
    *  persist as ops. `opts.ops` = the precise tree-level ops that produced
    *  `next` (panel-stamped here); WITHOUT them the whole panel tree ships as a
    *  replace_tree — the fallback that guarantees no call-site can silently skip
-   *  persistence (undo restores use it on purpose: "put back exactly this"). */
+   *  persistence (undo uses it on purpose: its tree is the current one plus
+   *  the restored nodes, see undo.ts restoreInto). */
   setTree(panel: Panel, next: ConvTree, opts?: { persist?: boolean; ops?: TreeOp[] }): void {
     this.trees = { ...this.trees, [panel]: next };
     this.#mirror();

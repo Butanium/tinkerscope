@@ -6,7 +6,7 @@
 // and dies with the tab. Its durable twin is the server-side trash journal,
 // which covers restore across sessions, tabs and browsers.
 import { panelScroll } from './scroll.svelte';
-import { UndoStack } from './undo';
+import { restoreInto, UndoStack } from './undo';
 import type { Panel } from './types';
 import type { ConvTree } from './tree';
 
@@ -70,8 +70,11 @@ class UndoStore {
       // A panel removed since the capture is not resurrected: panel drops are the
       // trash journal's job, and setTree would mint a tree for a gone column.
       if (!deps.hasPanel(panel)) continue;
+      const current = deps.treeFor(panel);
+      const next = restoreInto(current, tree);
+      if (next === current) continue;
       panelScroll.preserve(panel);
-      deps.setTree(panel, tree);
+      deps.setTree(panel, next);
     }
     return true;
   }

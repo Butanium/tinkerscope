@@ -2,7 +2,7 @@
 // built-in TS type-stripping:   node web/src/lib/undo.test.ts
 // (no dep added; respects the supply-chain age gate). Exit code != 0 on failure.
 
-import { MAX_ENTRIES, UndoStack } from './undo.ts';
+import { MAX_ENTRIES, restoreInto, UndoStack } from './undo.ts';
 import type { ConvTree } from './tree.ts';
 
 let passed = 0;
@@ -159,6 +159,66 @@ test(`the stack is bounded at ${MAX_ENTRIES}, dropping the OLDEST`, () => {
   let last = '';
   for (let i = 0; i < MAX_ENTRIES; i++) last = s.pop('w1')!.label;
   eq(last, 'op10', 'oldest surviving entry');
+});
+
+// ── restoreInto: undo puts back what was lost, keeps what was added ─
+/** Build a ConvTree from `parent -> [children]` edges ('' = root). */
+function mk(edges: Record<string, string[]>, selected: Record<string, string> = {}): ConvTree {
+  const nodes: ConvTree['nodes'] = {};
+  for (const [parent, kids] of Object.entries(edges)) {
+    for (const id of kids) {
+      nodes[id] = { id, role: 'user', content: id, parent: parent || null, children: edges[id] || [] } as ConvTree['nodes'][string];
+    }
+  }
+  return { nodes, rootChildren: edges[''] || [], selected };
+}
+const shape = (t: ConvTree) => ({
+  root: t.rootChildren,
+  kids: Object.fromEntries(Object.keys(t.nodes).sort().map((id) => [id, t.nodes[id].children])),
+  sel: t.selected,
+});
+
+test('undo after a new turn keeps the new turn (the data-loss bug)', () => {
+  // u1 → {a, b}; delete b (selection moves to a); then a new turn x lands under a.
+  const before = mk({ '': ['u1'], u1: ['a', 'b'] }, { u1: 'b' });
+  const now = mk({ '': ['u1'], u1: ['a'], a: ['x'] }, { u1: 'a' });
+  const out = restoreInto(now, before);
+  eq(shape(out).kids, { a: ['x'], b: [], u1: ['a', 'b'], x: [] }, 'b back AND x kept');
+  eq(out.selected, { u1: 'b' }, 're-selects the restored branch');
+});
+
+test('a branch shown by DEFAULT (last child, no explicit selection) is shown again', () => {
+  const before = mk({ '': ['u1'], u1: ['a'] }); // a is shown because it is the last child
+  const now = mk({ '': ['u1'], u1: ['n'] }, { u1: 'n' }); // a deleted, n landed and selected
+  const out = restoreInto(now, before);
+  eq(out.nodes.u1.children, ['a', 'n']);
+  eq(out.selected, { u1: 'a' });
+});
+
+test('restored siblings come back at their old indices, around newer ones', () => {
+  const before = mk({ '': ['u1'], u1: ['a', 'b', 'c', 'd'] });
+  const now = mk({ '': ['u1'], u1: ['b', 'n'] }); // discard-others kept b; n added later
+  eq(restoreInto(now, before).nodes.u1.children, ['a', 'b', 'c', 'd', 'n']);
+});
+
+test('a deleted subtree returns whole, root thread included', () => {
+  const before = mk({ '': ['t1', 't2'], t2: ['a2'], a2: ['u3'] });
+  const now = mk({ '': ['t1', 't9'] });
+  const out = restoreInto(now, before);
+  eq(out.rootChildren, ['t1', 't2', 't9']);
+  eq(out.nodes.a2.children, ['u3']);
+});
+
+test('nothing missing → the current tree itself (no write)', () => {
+  const now = mk({ '': ['u1'], u1: ['a'] });
+  ok(restoreInto(now, mk({ '': ['u1'], u1: ['a'] })) === now);
+});
+
+test('the current tree is never mutated', () => {
+  const now = mk({ '': ['u1'], u1: ['a'] });
+  const frozen = JSON.stringify(now);
+  restoreInto(now, mk({ '': ['u1'], u1: ['a', 'b'] }));
+  eq(JSON.stringify(now), frozen);
 });
 
 // ── summary ──────────────────────────────────────────────────────────

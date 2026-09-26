@@ -9,7 +9,7 @@
 // holds the PRE-mutation tree refs of the panels one op touched, and structural
 // sharing means unchanged nodes are never copied.
 import type { Panel } from './types';
-import type { ConvTree } from './tree';
+import { ROOT, selectedChildId, type ConvTree } from './tree.ts';
 
 /** One undoable op: the trees as they were, for every panel the op touched. */
 export type UndoEntry = { label: string; trees: Record<Panel, ConvTree> };
@@ -84,4 +84,49 @@ export class UndoStack {
   depth(wsId: string | null): number {
     return (wsId && this.#stacks[wsId]?.length) || 0;
   }
+}
+
+/** Put back what `snapshot` had and `current` has lost, keeping everything
+ *  `current` gained since. An undo must never delete work added after the
+ *  delete — a new turn, a CLI or other-tab fold — and restoring the snapshot
+ *  wholesale did exactly that. Same splice as the server's trash restore
+ *  (`workspace_store.restore_trash`): missing nodes come back, each restored
+ *  subtree root at its old sibling index, and a fork whose shown branch was a
+ *  restored one shows it again (explicit or default selection — the restored
+ *  branch is what the user asked to see). Returns `current` itself when nothing
+ *  is missing. */
+export function restoreInto(current: ConvTree, snapshot: ConvTree): ConvTree {
+  const missing = new Set(Object.keys(snapshot.nodes).filter((id) => !(id in current.nodes)));
+  if (!missing.size) return current;
+  const nodes = { ...current.nodes };
+  for (const id of missing) nodes[id] = snapshot.nodes[id];
+  const siblingsIn = (t: ConvTree, parent: string | null) =>
+    parent === null ? t.rootChildren : t.nodes[parent].children;
+  // Roots of the restored subtrees, in their old sibling order so each splice
+  // index is still right when several siblings come back under one parent.
+  const roots = [...missing]
+    .filter((id) => {
+      const parent = snapshot.nodes[id].parent;
+      return parent === null || (!missing.has(parent) && parent in current.nodes);
+    })
+    .map((id) => ({ id, parent: snapshot.nodes[id].parent, index: siblingsIn(snapshot, snapshot.nodes[id].parent).indexOf(id) }))
+    .sort((a, b) => a.index - b.index);
+  let rootChildren = current.rootChildren;
+  for (const { id, parent, index } of roots) {
+    const siblings = parent === null ? rootChildren : nodes[parent].children;
+    if (siblings.includes(id)) continue;
+    const next = [...siblings];
+    next.splice(Math.min(Math.max(index, 0), next.length), 0, id);
+    if (parent === null) rootChildren = next;
+    else nodes[parent] = { ...nodes[parent], children: next };
+  }
+  const selected = { ...current.selected };
+  for (const [key, child] of Object.entries(snapshot.selected)) {
+    if (missing.has(child)) selected[key] = child;
+  }
+  for (const { id, parent } of roots) {
+    const key = parent ?? ROOT;
+    if (selectedChildId(snapshot, key) === id) selected[key] = id;
+  }
+  return { nodes, rootChildren, selected };
 }
