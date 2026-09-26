@@ -132,6 +132,9 @@ def run_server(
             host=host,
             port=bound,
             reload=reload,
+            # uvicorn watches the cwd by default, which here is the SCAN ROOT (run
+            # dirs), so a source edit never reloaded; watch the package instead.
+            reload_dirs=[str(Path(__file__).resolve().parent)] if reload else None,
         )
     finally:
         instances.unregister()

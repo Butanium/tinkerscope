@@ -105,7 +105,7 @@ trap cleanup EXIT INT TERM
 
 # Start the backend on the fixed dev port the vite proxy targets.
 echo "Starting backend on :${DEV_BACKEND_PORT}..."
-uv run tinkerscope "${DIRS[@]}" --port "$DEV_BACKEND_PORT" &
+uv run tinkerscope "${DIRS[@]}" --port "$DEV_BACKEND_PORT" --reload &
 BACKEND_PID=$!
 
 echo "Waiting for backend readiness..."

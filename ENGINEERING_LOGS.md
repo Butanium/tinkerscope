@@ -2539,3 +2539,23 @@ existing pack file unions rules by id. Verified: pack unit tests (selection,
 round-trip, apply order, malformed skip, merge), a real `tinkerscope pack
 export` against a temp state dir, svelte-check. The static install path is
 type-checked but not browser-tested.
+
+### 2026-09-26 — `serve --reload` watches the package; three small wishes closed
+
+**`--reload` never reloaded on a source edit.** `uvicorn.run(reload=True)`
+watches the CWD by default, and tinkerscope's cwd is the SCAN ROOT (run dirs),
+so editing `discovery.py` did nothing. `run_server` now passes
+`reload_dirs=[<package dir>]`; verified: touching `api/search.py` logs
+"WatchFiles detected changes … Reloading" and the server answers again. `run.sh`
+now starts its dev backend with `--reload` (wish 4d891a9c); each reload empties
+the in-memory bus, which an open tab re-primes on reconnect.
+
+**The Codex install block is verified** (wish 8dda968a: it was written by
+mirroring another plugin, with no codex binary to test). With codex-cli 0.150.0
+and a throwaway `CODEX_HOME`, the README's two commands install the plugin with
+both skills (`tinkerscope@tinkerscope 1.0.0, installed, enabled`), and `codex
+plugin marketplace upgrade tinkerscope` works. `codex plugin list` shows the
+plugin read from the marketplace checkout, which the upgrade refreshes.
+
+**CLAUDE.md gained the `type()` vs `fill()` smoke note** (wish dd3ae61c): only
+typing exercises per-keystroke / debounced input handlers.

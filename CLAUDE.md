@@ -954,4 +954,7 @@ extracted UI: `tests/small-smokes/browser_{chart_modal,modals}.py`.
   as `0.25`. Assert colors NUMERICALLY (regex the channels out, compare with a
   tolerance) — substring matching on an emitted color is a false failure waiting
   to happen (see the ramp block in `browser_token_logprobs.py`).
+  ⚠️ For a TEXT INPUT, drive it with `type()` (per keystroke), not only `fill()`:
+  `fill()` sets the value in one go, so debounced / throttled / per-keystroke
+  handlers never run the way a person's typing runs them.
 - Dev-HMR loop + more smoke commands: `docs/HANDOFF_BRANCHING.md` §6.
