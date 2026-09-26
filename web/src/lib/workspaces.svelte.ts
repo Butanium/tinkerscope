@@ -140,11 +140,11 @@ class ConversationsStore {
   /** Tokens of chats THIS browser fired — the chat store folds these from their
    *  bus bucket on chat_done (routed before the foreign path), so the external-fold
    *  reconcile below skips them. Kept in lockstep with #busy for switch-gating. */
-  #ownTokens = new Set<string>();
-  /** Reactive mirror of (#ownTokens.size > 0). A plain Set isn't tracked by Svelte 5,
-   *  so `busy` reading the Set directly never re-fires the `disabled={…ws.busy}`
+  #ownTokens = new Map<string, number>(); // token → when it was minted (ms)
+  /** Reactive mirror of (#ownTokens.size > 0). A plain Map isn't tracked by Svelte 5,
+   *  so `busy` reading the Map directly never re-fires the `disabled={…ws.busy}`
    *  bindings when a token is removed — the New/regen/edit buttons would latch
-   *  disabled after a generation. Keep this in lockstep with every Set mutation. */
+   *  disabled after a generation. Keep this in lockstep with every Map mutation. */
   #busy = $state(false);
 
   // ── ops persistence (HANDOFF_SERVER_AUTHORITY §4.2 — the mirror) ──
@@ -218,7 +218,7 @@ class ConversationsStore {
   // ── ownership tokens ─────────────────────────────────────────────
   newToken(): string {
     const t = 'ct' + Math.random().toString(36).slice(2, 10);
-    this.#ownTokens.add(t);
+    this.#ownTokens.set(t, Date.now());
     this.#busy = true;
     return t;
   }
@@ -1132,12 +1132,21 @@ class ConversationsStore {
    *  mirror that no longer exists. */
   reconcileOnReconnect(): void {
     if (!this.activeId) return;
-    // Un-latch busy: server `running` is the in-flight COUNTER — 0 means every chat
-    // fired its terminal, so any token still held is one we missed. (TODO: when the
-    // server IS still running some OTHER chat, a token whose own terminal we missed
-    // in the gap stays latched until that other chat ends — snapshot's global bool
-    // can't disambiguate per-token; would need per-panel running in the state.)
-    if (live.state?.running === false && this.#ownTokens.size) {
+    // Un-latch busy: a token the server no longer lists as running is one whose
+    // terminal we missed in the gap. `running_chats` names each chat in flight, so
+    // this works while OTHER chats still stream; an older server only has the
+    // global `running` counter, which can release tokens only once it hits 0.
+    // A token minted in the last few seconds may belong to a fire the server
+    // hasn't begun yet, so it is left alone.
+    const rc = live.state?.running_chats;
+    if (Array.isArray(rc)) {
+      const alive = new Set(rc.map((c) => c.client_token));
+      const fresh = Date.now() - 10_000;
+      for (const [t, minted] of this.#ownTokens) {
+        if (!alive.has(t) && minted < fresh) this.#ownTokens.delete(t);
+      }
+      this.#busy = this.#ownTokens.size > 0;
+    } else if (live.state?.running === false && this.#ownTokens.size) {
       this.#ownTokens.clear();
       this.#busy = false;
     }

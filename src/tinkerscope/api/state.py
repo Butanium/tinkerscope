@@ -119,6 +119,11 @@ class PlaygroundState:
     # chat lifecycle
     chat_id: int = 0                      # increments each chat run; scopes sample events
     running: bool = False
+    # One {chat_id, panel, client_token, workspace_id} per chat in flight, so a
+    # client can tell WHICH chats run: the browser un-latches a token whose
+    # terminal it missed while another chat still streams, and the CLI refuses
+    # only a fire at a panel that is generating. `running` == bool(running_chats).
+    running_chats: list[dict] = field(default_factory=list)
     last_event: str | None = None
     last_event_ts: float = field(default_factory=time.time)
 
@@ -280,22 +285,28 @@ class StateBus:
             self.state.chat_id = next(_CHAT_SEQ)
             return self.state.chat_id
 
-    async def chat_begin(self, **patch: Any) -> int:
+    async def chat_begin(self, _running: dict[str, Any] | None = None, **patch: Any) -> int:
         """Atomically: allocate a fresh chat_id, mark running, apply the
         selection/workspace/params patch, and broadcast the chat_start state.
         Returns the new chat_id. Race-free across concurrent /api/chat calls
-        (compare fires two; CLI + browser can overlap)."""
+        (compare fires two; CLI + browser can overlap). `_running` = this chat's
+        {panel, client_token, workspace_id} for `running_chats` (a workspace_id of
+        None resolves to the open one AFTER the patch)."""
         async with self._lock:
             cid = self.state.chat_id = next(_CHAT_SEQ)
             self._inflight += 1
             self._apply_patch(patch)
+            entry = {"panel": None, "client_token": None, "workspace_id": None, **(_running or {})}
+            entry["chat_id"] = cid
+            entry["workspace_id"] = entry["workspace_id"] or self.state.workspace_id
+            self.state.running_chats = [*self.state.running_chats, entry]
             self.state.running = True
             self.state.last_event = "chat_start"
             self.state.last_event_ts = self.last_seen = time.time()
             self._fanout({"type": "patch", "event": "chat_start", "state": self.state.to_dict()})
         return cid
 
-    async def chat_end(self, event: str = "chat_done") -> None:
+    async def chat_end(self, event: str = "chat_done", chat_id: int | None = None) -> None:
         """Atomically: decrement the in-flight count, clear running when no chat
         is still streaming, and broadcast. The transcript commit that used to
         ride this call retired with the echo (P3): folds land in the workspace
@@ -304,8 +315,10 @@ class StateBus:
         cross-workspace commit bugs the origin_workspace gate existed for."""
         async with self._lock:
             self._inflight = max(0, self._inflight - 1)
+            self.state.running_chats = [c for c in self.state.running_chats if c["chat_id"] != chat_id]
             if self._inflight == 0:
                 self.state.running = False
+                self.state.running_chats = []  # an unpaired entry can't outlive the counter
             self.state.last_event = event
             self.state.last_event_ts = time.time()
             self._fanout({"type": "patch", "event": event, "state": self.state.to_dict()})

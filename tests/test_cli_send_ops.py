@@ -510,3 +510,24 @@ def test_battery_ws_targets_the_named_workspace(wired, monkeypatch, tmp_path):
     assert r.exit_code == 0, r.output
     assert seen == ["ws1", "ws1"]
     assert not [c for c in calls if c[0] == "post" and c[1] == "/api/workspaces"]
+
+
+def test_send_fires_past_a_chat_on_another_panel(wired):
+    """A chat streaming on p-2 no longer blocks a send at p-1 (the server folds each
+    chat into its own panel); it still blocks a send at p-2 without --force."""
+    calls, state, _ws = wired
+    state["running"] = True
+    state["running_chats"] = [{"chat_id": 9, "panel": "p-2", "client_token": "ct", "workspace_id": "ws1"}]
+    ok = runner.invoke(cli.app, ["send", "hi", "--panel", "p-1"])
+    assert ok.exit_code == 0, ok.output
+    blocked = runner.invoke(cli.app, ["send", "hi", "--panel", "p-2"])
+    assert blocked.exit_code == 1 and "in flight on p-2" in blocked.output
+    forced = runner.invoke(cli.app, ["send", "hi", "--panel", "p-2", "--force"])
+    assert forced.exit_code == 0, forced.output
+
+
+def test_send_refuses_on_an_older_server_without_running_chats(wired):
+    calls, state, _ws = wired
+    state["running"] = True  # no running_chats key: only the global flag exists
+    r = runner.invoke(cli.app, ["send", "hi", "--panel", "p-1"])
+    assert r.exit_code == 1 and "running=yes" in r.output

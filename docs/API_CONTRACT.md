@@ -515,11 +515,15 @@ zero browsers attached:
   "temperature","max_tokens","n_samples","thinking","top_p",
   "chat_id": 0,        // increments each chat run; scopes sample events
   "running": false,
+  "running_chats": [],  // one {chat_id, panel, client_token, workspace_id} per chat in
+                        // flight (running == non-empty); lets a reconnecting browser drop
+                        // a token whose terminal it missed, and the CLI refuse only a fire
+                        // at a BUSY panel
   "last_event","last_event_ts"
 }
 ```
 StatePatch = any subset of the *settable* fields (everything except
-chat_id/running/last_event*). POST `/api/state` with a subset to drive selection
+chat_id/running/running_chats/last_event*). POST `/api/state` with a subset to drive selection
 / workspace / params. Panel routing: `panels` full-replaces the list;
 `panel_thread_system: {panel_id: str|null}`
 bulk-mirror per-panel fields without touching selection; `panel` + one of
@@ -535,7 +539,7 @@ load-bearing:
 | scope | fields | why |
 |---|---|---|
 | **workspace** | `panels` (incl. per-panel `run_id`/`checkpoint`/`thread_system_prompt`), `workspace_id`, `system_prompt`, `system_enabled` | persisted **with the workspace** and restored on open — a workspace IS its panel layout |
-| **global** | `temperature`, `max_tokens`, `n_samples`, `thinking`, `top_p`, `chat_id`, `running`, `last_event*` | one knob for every panel and every client — the point of a shared bus |
+| **global** | `temperature`, `max_tokens`, `n_samples`, `thinking`, `top_p`, `chat_id`, `running`, `running_chats`, `last_event*` | one knob for every panel and every client — the point of a shared bus |
 
 The bus holds exactly **one workspace's** worth of the first group at a time,
 identified by `workspace_id`. Three rules keep that honest:

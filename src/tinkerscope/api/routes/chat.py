@@ -790,7 +790,11 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
                     "thinking": thinking,
                     "top_p": top_p,
                 })
-        chat_id = await (bus.alloc_chat_id() if bus_silent else bus.chat_begin(**state_patch))
+        chat_id = await (bus.alloc_chat_id() if bus_silent else bus.chat_begin(
+            _running={"panel": req.panel, "client_token": req.client_token,
+                      "workspace_id": fold_ws or req.workspace_id},
+            **state_patch,
+        ))
         # Stamp every broadcast with the workspace this chat belongs to. The browser's
         # external-fold hook folds a chat_done onto a panel id ONLY if this id matches
         # the workspace it currently has open; panel ids are re-minted across
@@ -913,7 +917,7 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
                 # so it must not end there either — chat_end's _inflight
                 # decrement would release a concurrent chat's `running` early.
                 if not bus_silent:
-                    await bus.chat_end(event)
+                    await bus.chat_end(event, chat_id=chat_id)
                 if req.broadcast:
                     # workspace_id scopes the browser's external fold (#onExternalDone):
                     # every terminal flavour — done / error / cancelled — carries the stamp.

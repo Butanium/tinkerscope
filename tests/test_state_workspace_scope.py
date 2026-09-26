@@ -142,10 +142,11 @@ async def test_chat_end_carries_no_state_patch_at_all():
     retired with the echo — which is what closed the cross-workspace chimera
     class for good (the 8342e08 origin gate was the interim fix; the three
     tests that pinned it retired with the mechanism). A signature regression
-    that reintroduces a patch parameter should fail here."""
+    that reintroduces a patch parameter should fail here (`chat_id` only names
+    which running_chats entry ends)."""
     import inspect
     sig = inspect.signature(BUS.chat_end)
-    assert list(sig.parameters) == ["event"], f"chat_end grew parameters: {sig}"
+    assert list(sig.parameters) == ["event", "chat_id"], f"chat_end grew parameters: {sig}"
     _apply(workspace_id="ws-a", panels=_panels(("primary", "run-a")))
     await BUS.chat_begin(workspace_id="ws-a", panel="primary")
     _apply(workspace_id="ws-b", panels=_panels(("primary", "run-b")))
@@ -153,3 +154,26 @@ async def test_chat_end_carries_no_state_patch_at_all():
     assert BUS.state.workspace_id == "ws-b"
     assert not hasattr(BUS.state.panels[0], "messages")
     assert BUS.state.running is False
+
+
+async def test_running_chats_names_each_chat_in_flight():
+    """`running_chats` says WHICH chats stream (panel, client_token, workspace), so
+    a reconnecting browser can drop a token whose terminal it missed while another
+    chat still runs, and the CLI can refuse only a fire at a busy panel."""
+    _apply(workspace_id="ws-a", panels=_panels(("p-1", "run-a"), ("p-2", "run-b")))
+    c1 = await BUS.chat_begin(_running={"panel": "p-1", "client_token": "ct1"})
+    c2 = await BUS.chat_begin(_running={"panel": "p-2", "client_token": "ct2", "workspace_id": "ws-z"})
+    rc = {c["chat_id"]: c for c in BUS.state.running_chats}
+    assert rc[c1] == {"chat_id": c1, "panel": "p-1", "client_token": "ct1", "workspace_id": "ws-a"}
+    assert rc[c2]["workspace_id"] == "ws-z"  # an explicit workspace beats the open one
+    await BUS.chat_end("chat_done", chat_id=c1)
+    assert [c["chat_id"] for c in BUS.state.running_chats] == [c2]
+    assert BUS.state.running is True
+    await BUS.chat_end("chat_done", chat_id=c2)
+    assert BUS.state.running_chats == [] and BUS.state.running is False
+
+
+async def test_running_chats_cannot_outlive_the_counter():
+    await BUS.chat_begin(_running={"panel": "p-1"})
+    await BUS.chat_end("chat_done")  # a caller that doesn't name its chat
+    assert BUS.state.running_chats == [] and BUS.state.running is False

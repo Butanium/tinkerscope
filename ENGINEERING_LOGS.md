@@ -2486,3 +2486,34 @@ the plain name is also listed. Each family now maps to the plain name when
 served, else its shortest `:peft:` variant (label stays the plain name), so
 GLM-5.3 samples. The cookbook's renderer and tokenizer lookups strip the
 suffix themselves, so nothing else changed.
+
+### 2026-09-26 — `running_chats`: which chats run, not just whether one does
+
+`running` was one global bool over an in-flight counter. Two consequences, both
+from the wishes backlog: (1) a browser whose SSE dropped mid-chat could clear
+its busy latch only when `running` hit false, so a missed terminal while
+ANOTHER chat still streamed kept New / switch / regen disabled until that other
+chat ended (the reconcile carried a TODO saying exactly this); (2) `send` /
+`continue` refused any fire while anything ran, even at a different panel, so
+an agent had to reach for `--force` while the human generated elsewhere.
+
+The bus state now carries `running_chats` — `{chat_id, panel, client_token,
+workspace_id}` per chat in flight, added atomically in `chat_begin` (via a
+`_running` kwarg, underscored because every other kwarg is a state patch and
+`panel` is already a patch key) and removed in `chat_end(event, chat_id=…)`;
+the list empties whenever the counter hits zero, so an unpaired caller can't
+leave a ghost. The browser's reconcile drops every own token the server no
+longer lists, except tokens minted in the last 10 s (a fire the server may not
+have begun yet — the old rule had the same race, only masked while anything
+ran); it keeps the old `running === false` rule for a server without the field.
+The CLI refuses only a fire at a panel with a chat in flight in the same
+workspace (`_refuse_if_busy`), and falls back to the global refusal against an
+older server. `chat_id` joined `chat_end`'s signature; the P3 guard test that
+pins "no patch parameters" now allows it — it names the entry, it patches
+nothing.
+
+Verified: server + CLI unit tests (entries, ordering, counter backstop,
+per-panel gate, old-server fallback), svelte-check, and a live instance
+restart. NOT verified in a browser: reproducing the stuck latch needs an SSE
+drop during a two-chat overlap (`ss -K`, as `browser_echo_chimera` does), which
+I didn't build a smoke for.

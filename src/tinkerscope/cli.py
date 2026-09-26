@@ -1248,6 +1248,23 @@ def _panel_chat_body(
                        thread_system=thread_system)
 
 
+def _refuse_if_busy(st: dict, panel_ids: list[str], conv_id: Optional[str], force: bool) -> None:
+    """Refuse a fire at a panel with a generation in flight, unless --force. A
+    chat on ANOTHER panel doesn't block: the server folds each chat into its own
+    panel. An older server reports only the global `running` flag, so any chat
+    blocks there."""
+    if force or not st.get("running"):
+        return
+    rc = st.get("running_chats")
+    if rc is None:
+        _die("a generation is in flight (running=yes) — wait for it, or pass --force")
+    busy = sorted({c.get("panel") or "?" for c in rc
+                   if c.get("panel") in panel_ids
+                   and (conv_id is None or c.get("workspace_id") in (None, conv_id))})
+    if busy:
+        _die(f"a generation is in flight on {', '.join(busy)} — `tinkpg wait` for it, or pass --force")
+
+
 def _send_targets(
     panel: list[str], include_folded: bool, force: bool, ws: Optional[str] = None
 ) -> tuple[list[dict], str, Optional[str]]:
@@ -1261,8 +1278,6 @@ def _send_targets(
     bindings come from that workspace's own saved layout — same coherence rule
     as `continue --ws` (the screen's bindings are the open workspace's state)."""
     st = _get("/api/state")
-    if st.get("running") and not force:
-        _die("a generation is in flight (running=yes) — wait for it, or pass --force")
     conv_id = st.get("workspace_id")
     c: Optional[dict] = None
     if ws is not None:
@@ -1297,6 +1312,7 @@ def _send_targets(
     targets = [p for p in targets if p.get("run_id")]
     if not targets:
         _die("no target panel has a model bound — pick models in the browser or `tinkpg open <run>`")
+    _refuse_if_busy(st, [p["id"] for p in targets], conv_id, force)
     skipped_bits = []
     if folded:
         skipped_bits.append(f"{len(folded & set(by_id))} folded ({', '.join(sorted(folded & set(by_id)))})")
@@ -1724,8 +1740,6 @@ def cmd_continue(
         if handle_panel and not panel:
             panel = [handle_panel]
     st = _get("/api/state")
-    if st.get("running") and not force:
-        _die("a generation is in flight (running=yes) — wait for it, or pass --force")
     conv_id = st.get("workspace_id")
 
     # The open/〈--ws〉 workspace: fold info, the saved trees (targeting reads
@@ -1799,6 +1813,7 @@ def cmd_continue(
                 "or open that workspace in the browser and bind a model"
             )
         _die("no target panel has a model bound")
+    _refuse_if_busy(st, [p["id"] for p in targets], (c or {}).get("id") or conv_id, force)
     think: "bool | str | None" = "both" if thinking_both else thinking
     system = _resolve_sys(system, no_system)
 

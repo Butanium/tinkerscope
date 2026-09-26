@@ -194,6 +194,8 @@ export type PlaygroundState = {
   top_p: number | null;
   chat_id: number;
   running: boolean;
+  /** One entry per chat in flight (servers before 2026-09-26 omit it). */
+  running_chats?: { chat_id: number; panel: string | null; client_token: string | null; workspace_id: string | null }[];
   last_event: string | null;
   last_event_ts: number;
 };

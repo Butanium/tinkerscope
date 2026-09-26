@@ -365,8 +365,8 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   reshapes live (and mid-generation state can be lost). Before firing any of
   them, run `tinkpg state`: if the human has a many-panel workspace open (or
   `running=yes`), don't — **use `tinkpg send` instead**, which fires at the
-  panels as they are (new thread, layout untouched, refuses while `running=yes`
-  unless `--force`). Reading (`state`/`conv`/`samples`) never writes and is
+  panels as they are (new thread, layout untouched, refuses to fire at a panel
+  that is generating unless `--force`; other panels are fine). Reading (`state`/`conv`/`samples`) never writes and is
   always safe.
 - **Run resolution: ids contain `/`, never split on it.** A run arg resolves by
   exact id, else a UNIQUE case-insensitive substring of id/name (ambiguity errors
