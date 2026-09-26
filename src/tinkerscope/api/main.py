@@ -12,12 +12,14 @@ run's base model not being in tinker's currently-served list.
 from __future__ import annotations
 
 import asyncio
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+from .. import __version__
 from . import vllm_sampler, workspace_store
 from .discovery import get_capabilities
 from .session import resolve_session_soft
@@ -61,6 +63,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="tinkerscope", lifespan=lifespan)
 
+# When this process loaded its Python code: the CLI compares it against the
+# checkout's source mtimes to tell an agent its server predates a code change.
+STARTED_AT = time.time()
+
 # Only the vite dev server is cross-origin (the packaged UI is same-origin);
 # allow any localhost port so dev proxies don't need CORS surgery.
 app.add_middleware(
@@ -91,6 +97,8 @@ def health(request: Request) -> dict:
     caps = get_capabilities()
     return {
         "ok": True,
+        "version": __version__,
+        "started_at": STARTED_AT,
         "root": str(SETTINGS.root),
         "scan_roots": [str(r) for r in SETTINGS.scan_roots],
         "tinker_key": bool(SETTINGS.tinker_api_key),

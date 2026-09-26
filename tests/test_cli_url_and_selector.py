@@ -316,3 +316,12 @@ def test_a_layout_row_for_a_dropped_tree_is_not_offered():
     caller index `trees` with a missing key."""
     c = {"panels": [{"id": "gone"}, {"id": "p-1"}], "trees": {"p-1": {}}}
     assert cli._panels_in_display_order(c, c["trees"]) == ["p-1"]
+
+
+def test_samples_prints_the_user_turn_handle(monkeypatch):
+    """The prompt line carries its handle, so `continue --node <user turn>` (a
+    sibling fan under the same prompt) needs no workspace JSON."""
+    _patch(monkeypatch)
+    r = runner.invoke(cli.app, ["samples", "probe swe"])
+    assert r.exit_code == 0
+    assert "▸ prompt · aaaaaaaa:primary:u1:" in r.stdout

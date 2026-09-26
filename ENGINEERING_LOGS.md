@@ -2313,3 +2313,30 @@ LoRA on a retired base resolves fine and then 400s "Sampling is not supported"
 per sample. Now one method: successes cached, failures not; the retired-base
 check runs on every probe (cheap, the capabilities cache answers it); the chat
 error carries tinker's own detail (`cannot sample <path>: Model not found.`).
+
+### 2026-09-26 — `[done]` prints the handles it created; a stale server is named
+
+From the archive sweep, two agent-facing gaps in the CLI:
+
+**Agents curl'ed the workspace JSON to find ids they had just created.** On
+09-16 an agent looping `tinkpg continue --node … --n 4` walked
+`trees['p-1']['nodes']` with inline Python after every fire, to find the new user
+turn and its sample ids — and kept doing it after 5032d3e fixed the browser
+half; Clément asked why it used the raw API. The server already sent the fold
+manifest (`folded`: sample_index → node id) on the terminal; only `--json`
+passed it through. Text mode now prints `[done] saved under user turn <handle>`
+plus one `sample k → <ws>:<panel>:<node>` line per sample, and `samples` puts
+the prompt's handle on its `▸ prompt` line.
+
+**Version skew.** On 08-24 an editable-install CLI (new fold contract) talked
+to a server started on 08-12 (pre-P2 code in memory): samples streamed, the
+server ignored `parent_node`, and the CLI said "NOT persisted … no fold
+manifest" with nothing about why. The agent spent minutes on `ps` start times vs
+file mtimes, then restarted the live server without asking. `/api/health` now
+carries `version` and `started_at`; when a fold fails with NO `fold_error` (the
+server ignored `parent_node`, rather than failing to fold), the CLI compares
+`started_at` against the newest `*.py` mtime of its own package and says the
+server predates the last Python change. Mtime rather than version because an
+editable install keeps the same version string across commits; Python only,
+because web changes are served from disk per request. `__version__` was a
+literal `"0.1.0"` since the first commit; it now reads the package metadata.

@@ -730,6 +730,43 @@ def _fold_failure(body: dict, done_data: dict, n_ok: int) -> Optional[str]:
     )
 
 
+def _server_skew_hint() -> str:
+    """Why a server may not honor what this CLI sent: it loaded its Python before
+    the checkout's last Python change (an editable install moves the CLI along
+    with the checkout; a running server keeps what it imported). "" when there's
+    no sign of that."""
+    try:
+        with _client() as c:
+            health = c.get("/api/health").json()
+    except Exception:
+        return ""
+    started = health.get("started_at")
+    if started is None:
+        return ("The server predates version reporting, so it runs older code than this CLI — "
+                "restart it.")
+    code = max((f.stat().st_mtime for f in Path(__file__).parent.rglob("*.py")), default=0.0)
+    if code > started + 1:
+        fmt = "%Y-%m-%d %H:%M"
+        return (f"The server started {time.strftime(fmt, time.localtime(started))}, before this "
+                f"checkout's last Python change ({time.strftime(fmt, time.localtime(code))}) — "
+                "restart it to run the same code as this CLI.")
+    return ""
+
+
+def _done_lines(body: dict, done_data: dict) -> list[str]:
+    """`[done]` plus where the samples landed, as paste-ready handles, so a
+    follow-up `continue --node` / `node` never needs the workspace JSON."""
+    folded = done_data.get("folded") or []
+    parent = body.get("parent_node")
+    if not folded or not parent:
+        return ["[done]"]
+    ws, panel = body.get("workspace_id"), body.get("panel", "")
+    lines = [f"[done] saved under user turn {_qualified_handle(ws, panel, parent)}"]
+    for m in sorted(folded, key=lambda m: m.get("sample_index", 0)):
+        lines.append(f"  sample {m.get('sample_index')} → {_qualified_handle(ws, panel, m['node_id'])}")
+    return lines
+
+
 def _stream_chat(
     body: dict,
     label: Optional[str] = None,
@@ -824,9 +861,12 @@ def _stream_chat(
                             # carries folded/fold_rev or fold_error for scripts
                             emit_json({"event": "done", **done_data})
                         else:
-                            emit_block("[done]")
+                            emit_block(*_done_lines(body, done_data))
                         fold_fail = _fold_failure(body, done_data, n_ok)
                         if fold_fail is not None:
+                            if not done_data.get("fold_error"):
+                                # no manifest AND no reason: the server ignored parent_node
+                                fold_fail = f"{fold_fail} {_server_skew_hint()}".rstrip()
                             fail(fold_fail)
                             return
                         break
@@ -2962,7 +3002,7 @@ def _show_samples(
         unfolded = [p for p in trees if p not in reduced]
         plist = (", ".join(unfolded) or "none unfolded") + (f" (+{len(trees) - len(unfolded)} folded)" if reduced else "")
         print(f"(panels: {plist} — showing {pid}; --panel to switch)")
-    print("\n▸ prompt:")
+    print(f"\n▸ prompt · {_qualified_handle(c.get('id'), pid, unode.get('id', '?'))}:")
     print(_indent(unode.get("content", ""), "   "))
 
     counts, doubled, untagged = _tag_tally([s.get("content", "") for s in samples])

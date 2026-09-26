@@ -1,3 +1,8 @@
 """tinkerscope — auto-discover Tinker training runs and sample their checkpoints."""
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("tinkerscope")
+except PackageNotFoundError:  # running from a bare source tree
+    __version__ = "0+unknown"
