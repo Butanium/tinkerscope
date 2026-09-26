@@ -449,9 +449,16 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   (`reasoning`), `token_logprobs` and `raw_meta` blobs, durable across a server
   restart. `tinkpg samples` on the fan-out shows all K. The full fan-out also
   streams to stdout as before (capture with `… > log.txt` for a quick `<tag>`
-  tally). If the fold FAILS (workspace deleted/replaced mid-fire), the CLI says
-  so and exits non-zero — stdout is then the only copy. A `send` with NO
-  workspace anywhere AUTO-CREATES one (named from the message; it prints the id
+  tally). When the fold lands, `[done]` is followed by the user turn's handle
+  and one `sample k → <ws>:<panel>:<node>` line per sample — the ids for the next
+  `continue --node`, no workspace JSON needed (`samples` prints the prompt's
+  handle too). If the fold FAILS (workspace deleted/replaced mid-fire), the CLI
+  says so and exits non-zero — stdout is then the only copy. If the failure
+  says the server started before the checkout's last Python change, it is
+  running older code than your CLI: restart it and re-sample. A failed `send`
+  names the user turn it already saved — re-sample it with `continue --node
+  <handle>`; re-sending adds a duplicate thread. A `send` with NO workspace
+  anywhere AUTO-CREATES one (named from the message; it prints the id
   + ?w= link — that line is your only pointer to where the samples went); aim
   elsewhere with `--ws <id|name>` (a workspace that isn't on screen binds
   models from ITS saved layout) or `--new-ws NAME`. `chat`/`compare` persist
