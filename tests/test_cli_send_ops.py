@@ -442,3 +442,23 @@ def test_continue_off_active_branch_selects_its_path_first(wired):
     assert res.exit_code == 0, res.output
     (post,) = _ops_posts(calls)
     assert [o["op"] for o in post[2]["ops"]] == ["add_nodes"]
+
+
+def test_failed_send_names_the_saved_user_turn(wired, monkeypatch):
+    """The user turn persists BEFORE the fire (§4.3), so a failed send leaves a
+    reply-less thread; the error must name it so a retry re-samples that turn
+    instead of re-sending a duplicate thread."""
+    calls, _state, _ws = wired
+
+    def failing_stream(body, label=None, lock=None, result=None, *a, **kw):
+        calls.append(("fire", body))
+        if result is not None:
+            result.error = "no answer from tinker after 231s while sampling"
+
+    monkeypatch.setattr(cli, "_stream_chat", failing_stream)
+    r = runner.invoke(cli.app, ["send", "hello", "--panel", "p-1"])
+    assert r.exit_code == 1
+    fire = next(c[1] for c in calls if c[0] == "fire")
+    handle = f"ws1:p-1:{fire['parent_node']}"
+    assert f"the user turn is already saved ({handle})" in r.output
+    assert f"tinkpg continue --node {handle}" in r.output

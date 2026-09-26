@@ -637,6 +637,10 @@ class _StreamResult:
         # all) — collected in every print mode so post-fire consumers
         # (--first-token tables, `battery`'s JSONL files) never re-parse stdout.
         self.samples: list[dict] = []
+        # The persisted user turn this fire hangs off (a `<ws>:<panel>:<node>`
+        # handle) — named on failure, so a retry re-samples it instead of
+        # re-sending a duplicate thread.
+        self.user_turn: Optional[str] = None
 
 
 _DIM = "\033[2m"
@@ -1413,10 +1417,11 @@ def _fire_send(
     for p in targets:
         body = _panel_chat_body(p, prompt, n, temperature, max_tokens, think, system, prefill,
                                 thread_system=thread_system)
+        res = _StreamResult()
         if conv_id and p["id"] in parents:
             body["workspace_id"] = conv_id
             body["parent_node"] = parents[p["id"]]
-        res = _StreamResult()
+            res.user_turn = _qualified_handle(conv_id, p["id"], parents[p["id"]])
         label = f"{p['id']} {_short_run(p.get('run_id'))}"
         t = threading.Thread(target=_stream_chat,
                              args=(body, label, lock, res, False, show_logprobs, json_out, sink))
@@ -1514,6 +1519,12 @@ def cmd_send(
         for (pid, p, res) in results
         if not res.ok
     ]
+    stranded = [res.user_turn for (_pid, _p, res) in results if not res.ok and res.user_turn]
+    if stranded:
+        failures.append(
+            "the user turn is already saved (" + ", ".join(stranded) + ") — re-sample it with "
+            f"`tinkpg continue --node {stranded[0]}` rather than re-sending, which adds a duplicate thread"
+        )
     if failures:
         _die("send failed:\n  " + "\n  ".join(failures))
 
@@ -3002,7 +3013,7 @@ def _show_samples(
         unfolded = [p for p in trees if p not in reduced]
         plist = (", ".join(unfolded) or "none unfolded") + (f" (+{len(trees) - len(unfolded)} folded)" if reduced else "")
         print(f"(panels: {plist} — showing {pid}; --panel to switch)")
-    print(f"\n▸ prompt · {_qualified_handle(c.get('id'), pid, unode.get('id', '?'))}:")
+    print(f"\n▸ prompt · {_qualified_handle(c.get('id'), pid, unode.get('id', '?'))}")
     print(_indent(unode.get("content", ""), "   "))
 
     counts, doubled, untagged = _tag_tally([s.get("content", "") for s in samples])

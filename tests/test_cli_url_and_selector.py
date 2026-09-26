@@ -324,4 +324,4 @@ def test_samples_prints_the_user_turn_handle(monkeypatch):
     _patch(monkeypatch)
     r = runner.invoke(cli.app, ["samples", "probe swe"])
     assert r.exit_code == 0
-    assert "▸ prompt · aaaaaaaa:primary:u1:" in r.stdout
+    assert "▸ prompt · aaaaaaaa:primary:u1\n" in r.stdout

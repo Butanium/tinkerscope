@@ -2340,3 +2340,14 @@ server predates the last Python change. Mtime rather than version because an
 editable install keeps the same version string across commits; Python only,
 because web changes are served from disk per request. `__version__` was a
 literal `"0.1.0"` since the first commit; it now reads the package metadata.
+
+### 2026-09-26 — A failed `send` names the user turn it already saved
+
+`send` persists the user turn as its own op BEFORE firing (§4.3, so a pre-start
+failure can't lose it), which means a failed fire leaves a reply-less thread —
+and the error said nothing about it, so the obvious retry (`send` again) added
+a second root thread with the same prompt (seen 08-24: an orphan "(no samples
+yet)" thread plus its duplicate). The failure now lists the saved turn's handle
+and says to re-sample it with `continue --node <handle>`, which fires at a
+user-turn target with no new message. Also: `samples` prints the prompt's
+handle without a trailing colon, so a double-click copies it clean.
