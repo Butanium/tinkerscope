@@ -1061,3 +1061,20 @@ def test_tinker_detail_extracts_the_server_message():
     assert _tinker_detail(strung) == "model_path 'tinker://x' is not a valid tinker path."
 
     assert _tinker_detail(Exception("connection reset")) == "connection reset"
+
+
+def test_tinker_models_samples_a_peft_only_base_under_its_served_name(client, monkeypatch):
+    """GLM-5.3 is served ONLY as `zai-org/GLM-5.3:peft:262144`; the plain name 400s
+    "Sampling is not supported". A family listed plain keeps the plain name."""
+    from tinkerscope.api import discovery
+
+    monkeypatch.setattr(discovery, "get_capabilities", lambda force=False: {
+        "available": True, "error": None,
+        "supported_models": ["Qwen/Qwen3.5-4B", "Qwen/Qwen3.5-4B:peft:262144",
+                             "zai-org/GLM-5.3:peft:262144:sampling-nvfp4", "zai-org/GLM-5.3:peft:262144"],
+    })
+    bases = {m["label"]: m for m in client.get("/api/tinker-models").json()["models"] if m["kind"] == "base"}
+    assert bases["zai-org/GLM-5.3"]["base_model"] == "zai-org/GLM-5.3:peft:262144"
+    assert bases["zai-org/GLM-5.3"]["id"] == "zai-org/GLM-5.3:peft:262144"
+    assert bases["Qwen/Qwen3.5-4B"]["base_model"] == "Qwen/Qwen3.5-4B"
+    assert len(bases) == 2

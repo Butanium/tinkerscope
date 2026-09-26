@@ -62,16 +62,23 @@ def tinker_models(refresh: bool = False) -> dict:
     thinking control for base picks that have none. Base models come first, then
     checkpoints."""
     caps = discovery.get_capabilities(force=refresh)
-    names = sorted({m.split(":peft")[0] for m in caps.get("supported_models", [])})
+    # One entry per base family, sampled under the name tinker SERVES: the plain name
+    # when listed, else its shortest ':peft:<ctx>' variant — zai-org/GLM-5.3 is listed
+    # only as ':peft:262144', and the plain name 400s "Sampling is not supported".
+    served: dict[str, str] = {}
+    for m in sorted(caps.get("supported_models", []), key=len):
+        base = m.split(":peft")[0]
+        if m == base or base not in served:
+            served[base] = m
     # `supports_thinking` is computed with the same renderer-pair probe the native
     # sampling path uses (tinker_sampler.supports_thinking) so the composer's
     # thinking toggle only shows for base picks whose family has a binary toggle.
     # Loose checkpoints stay UUID-only (base/renderer unknown) → no field, and the
     # frontend keeps treating them as thinking-capable.
     models = [
-        {"kind": "base", "id": n, "label": n, "base_model": n,
-         "supports_thinking": supports_thinking(n)}
-        for n in names
+        {"kind": "base", "id": served[b], "label": b, "base_model": served[b],
+         "supports_thinking": supports_thinking(served[b])}
+        for b in sorted(served)
     ]
 
     error = caps.get("error")

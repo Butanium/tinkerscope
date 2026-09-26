@@ -2454,3 +2454,35 @@ number as the model's probability. `_fallback_lps` now passes them only at
 temperature 1 with no top_p, where the two coincide either way; otherwise a
 failed re-score leaves the sample without token data, which the UI already
 shows as "no logprobs captured".
+
+### 2026-09-26 — Cookbook fork rebased (new branch); four served bases get real renderers
+
+The cookbook pin is the Butanium fork branch carrying one commit
+(`tml_v0_disable_thinking`, upstream PR #839, still open) on top of upstream —
+and that branch had fallen 36 commits behind, so four bases on today's roster
+had no renderer (7a6c806 made them fail loudly). Rebased the commit onto
+upstream main cleanly and pushed it as a NEW branch,
+`feat/tml-v0-disable-thinking-2026-09-26`: the old branch stays untouched
+because another checkout pins it (a vendored tinkerscope copy elsewhere on the
+box), so a force-push would have moved that pin under it. Relocked:
+tinker-cookbook 0.4.2.dev56 → dev92 (e330571). Upstream folded the `[inkling]`
+extra into the base dependencies (tml-renderers is a plain dependency since
+0.5.7, PyPI too), so the requirement is now plain `tinker-cookbook`.
+
+Live probes, one short sample each: Qwen3.8-27B (`qwen3_8_disable_thinking` /
+`qwen3_8_xhigh_reasoning`, CoT split into `reasoning`), Nemotron-3.5-Lightning
+(`nemotron3_ultra[_disable_thinking]`), Inkling-Small (`tml_v0`, both modes),
+and a weird-personas Inkling LoRA on the fork's own `tml_v0_disable_thinking` —
+all clean. GLM-5.3 400'd "Sampling is not supported for zai-org/GLM-5.3": it is
+listed ONLY as `zai-org/GLM-5.3:peft:262144`, and sampling under that name
+works (next entry). Note for gotcha-hunters: `uv pip install <local path>` of
+the rebased clone installed a STALE cached build (right version string, old
+files) even with `--reinstall-package --refresh`; the git-source relock built
+the right one.
+
+**Base models are offered under the name tinker serves.** `/api/tinker-models`
+folded every `:peft:<ctx>` variant into its plain name, which is only safe when
+the plain name is also listed. Each family now maps to the plain name when
+served, else its shortest `:peft:` variant (label stays the plain name), so
+GLM-5.3 samples. The cookbook's renderer and tokenizer lookups strip the
+suffix themselves, so nothing else changed.
