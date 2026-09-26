@@ -2391,7 +2391,7 @@ passed the 7-day age gate; 523 tests pass on it, and live probes run clean:
 capabilities (31 bases), the checkpoint sweep, a loose-checkpoint probe + native
 sample with top-K logprobs, and `finish_reason` at `max_tokens=4`. The floor
 stays `>=0.25`: 0.25.0, 0.26.0 and 0.27.2 all still answer
-`get_server_capabilities` today. The live :8767 uv tool env is untouched (still
+`get_server_capabilities` today. The live instance's uv tool env is untouched (still
 0.27.2, working); `uv tool upgrade tinkerscope` + a restart moves it, and since
 3b21094 a retirement shows in `/api/health` within a minute instead of at the
 next restart.
