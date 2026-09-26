@@ -17,3 +17,14 @@
   emission has no whole-tree hot path to diet) and P3 removed the endpoint; the
   monster-scale MEMORY policy it also brushed is still real but untested — a
   future ops-scale smoke would be new work, not this one repaired.
+- `wip_browser_continue.py`, `wip_browser_delete_branch.py`,
+  `wip_browser_distribution_chart.py`, `wip_browser_edit_fork.py` (+ their
+  `wip_HANDOFF.md`) — four June smokes parked in `_wip/` as a net for the
+  `chat.svelte.ts` refactor (c8a2df7), never hardened. Deprecated 2026-09-26: they
+  target the pre-rename UI (aria-label "New conversation", single-panel flows)
+  and every path they meant to cover has a maintained smoke now —
+  `browser_continue_sample` / `browser_continue_scope` (continue),
+  `browser_undo` + `browser_branching` (delete branch), `browser_chart_modal`
+  (distribution chart), `browser_cross_panel_edit` / `browser_edit_leak` (edit →
+  fork). The handoff's isolation lesson (a shared scan-root set shares the store)
+  is what `scripts/smoke.sh`'s fresh fixture tree now handles.
