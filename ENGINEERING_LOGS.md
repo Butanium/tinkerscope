@@ -2395,3 +2395,19 @@ stays `>=0.25`: 0.25.0, 0.26.0 and 0.27.2 all still answer
 0.27.2, working); `uv tool upgrade tinkerscope` + a restart moves it, and since
 3b21094 a retirement shows in `/api/health` within a minute instead of at the
 next restart.
+
+### 2026-09-26 — Dead oai producers removed; cancellation comments stop promising savings
+
+`tinker_oai.chat_stream` / `chat_one` (the server-rendered path for loose
+checkpoints) had no callers since loose checkpoints started rendering native
+(dad74bf) — only a disabled smoke still named them. Removed; `completions_stream`
+stays, because the TODO(tinker-feedback#125) arm in `routes/chat.py` is the
+restoration point for n=1 token streaming on LoRA runs. What to re-verify when
+that reopens now sits in `docs/TODO.md`: the renderer's token-id stop lists
+going out as the OpenAI `stop` (a Tinker lesson says that endpoint takes
+`stop_token_ids`), and the missing timeout.
+
+Two comments said cancelling in-flight samples "stops paying remote tokens".
+The SDK drives each call on its own loop, so a cancel only stops tinkerscope
+listening (a third comment in `routes/chat.py` already said so, correctly);
+they now say that.

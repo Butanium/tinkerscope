@@ -36,10 +36,8 @@ async def main():
     # completions producer case anymore; only the sampler_path (parked run_id path)
     # and loose-ckpt/openrouter producers remain streamable.
 
-    # loose checkpoint — newest live sampler path from the REST sweep
-    from tinkerscope.api import discovery
-    loose = discovery.get_servable_paths()["checkpoints"][0]["sampler_path"]
-    await collect(tinker_oai.chat_stream(model=loose, messages=[{"role":"user","content":"Say hi in five words."}], temperature=0.7, max_tokens=40), "loose/chat")
+    # (loose checkpoints render native since dad74bf; tinker_oai.chat_stream,
+    # their old server-rendered producer, was removed 2026-09-26)
 
     # openrouter (if key)
     if os.environ.get("OPENROUTER_API_KEY"):

@@ -22,7 +22,12 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
   `sample_stream` (whole sample, no token streaming) —
   `stream = (n == 1) and (req.run_id is None)`, marked `TODO(tinker-feedback#125)`.
   When fixed: drop `and req.run_id is None` and re-verify a LoRA run at n=1 streams the
-  *finetune* (not base) via `tests/small-smokes/lora_completions_vs_chat_mwe.py`.
+  *finetune* (not base) via `tests/small-smokes/lora_completions_vs_chat_mwe.py`. Also
+  re-verify stops: `completions_stream` forwards the renderer's stop sequences as the
+  OpenAI `stop`, and some renderers' stops are token-id lists (e.g. `[248046]`); a
+  2026-09 Tinker lesson says this endpoint takes `stop_token_ids` and 400s multi-token
+  stop strings — untested with int lists. And bound it like the native calls
+  (`tinker_sampler._bounded`) — it has no timeout today.
 
 ## Parked (validated approach, not shipped)
 

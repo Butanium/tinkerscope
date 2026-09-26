@@ -766,7 +766,8 @@ class SamplerManager:
                 yield await fut
         finally:
             # Consumer gone (CLI Ctrl-C / browser tab closed): cancel in-flight
-            # samples so we stop paying remote tinker tokens for output nobody reads.
+            # samples so we stop waiting on output nobody reads. The remote call runs
+            # on: the SDK drives it on its own loop, so this only stops us listening.
             for t in tasks:
                 if not t.done():
                     t.cancel()

@@ -372,7 +372,7 @@ def _resolve_checkpoint(run: discovery.Run, name: str | None):
 async def _fanout(make_one: Callable[[int], Awaitable[dict]], n: int) -> AsyncIterator[dict]:
     """Fan out n single completions; yield each {sample_index, ...} as it finishes.
     Cancels stragglers if the consumer goes away (CLI Ctrl-C / browser tab closed)
-    so we stop paying remote tokens for output nobody reads."""
+    so we stop waiting on output nobody reads (the remote call itself runs on)."""
     async def one(idx: int) -> dict:
         try:
             return {"sample_index": idx, **await make_one(idx)}
