@@ -283,19 +283,12 @@ For orientation and contracts: **`CLAUDE.md`** (where everything lives),
 ## Credits
 
 The UI is forked from **Harry Mayne**'s `tools/playground` in
-[`HarryMayne/negation_neglect_working_repo`](https://github.com/HarryMayne/negation_neglect_working_repo)
-(commit `ec7da09`, Harry Mayne <harrymayne@gmail.com>). The core chat experience
+[`HarryMayne/negation_neglect_working_repo`](https://github.com/HarryMayne/negation_neglect_working_repo). The core chat experience
 — streaming, n-sample fan-out, the response-distribution chart, the thinking
 toggle, the raw-text view, and the side-by-side compare — is his work.
 tinkerscope adds run auto-discovery, workspace branching, named/persisted
 workspaces, N-panel comparison, the token-probability views, share packs, the
 static-site export, the terminal-driving CLI, and standalone packaging on top.
-
-Renderer selection (chat templates / stop sequences / response parsing) uses
-`tinker_cookbook` (Thinking Machines). An earlier iteration routed inference
-through **James Chua**'s [`latteries`](https://github.com/thejaminator/latteries);
-tinkerscope now calls the Tinker SDK directly, but the renderer-cache and
-thinking-block-parsing lessons from that code carried over.
 
 tinkerscope's own code is MIT-licensed (see `LICENSE`). The upstream playground
 ships **without** a license; substantial portions of the UI and inference layer
