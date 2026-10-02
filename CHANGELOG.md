@@ -8,6 +8,63 @@ WIRE contract, not on the UI (`docs/RELEASING.md`).
 `docs/MIGRATIONS.md` covers every release that moved the wire or on-disk shape;
 `ENGINEERING_LOGS.md` carries the dated narrative behind the decisions.
 
+## [1.3.0] — 2026-10-01
+
+A run of CLI conveniences and sampling-fidelity fixes. Everything is additive on
+the wire (one new SSE event, one new state field); the on-disk shape is
+untouched.
+
+### Added
+
+- **`--timeout N` on the sampling verbs** (`chat` / `compare` / `send` /
+  `continue` / `probe` / `battery`): cancels each chat server-side after N
+  seconds; samples that already finished still fold. The caller's `/api/chat`
+  stream now opens with `event: start {chat_id}` so a client can cancel by id.
+- **"waiting on the model · Ns"** on a running panel that has had no sample for
+  20 s, next to its Stop — a cold model's warmup now reads as a wait, not a hang.
+- **`tinkpg open` takes any model selector** — `base:`, `ckpt:`,
+  `openrouter:`, `vllm:` — not only discovered runs.
+- **`tinkpg battery --new-ws NAME` / `--ws W`**, so a battery needn't land one
+  thread per probe in the open workspace.
+- **`pack export --highlights NAME...|all`** ships the picked highlight rules;
+  apply upserts them by id (the static `?w=` install too).
+- **`running_chats` on the state bus** — which chats run, not only whether one
+  does. A reconnecting browser drops own tokens the server no longer lists, and
+  `send` / `continue` refuse only a fire at a busy panel.
+- A base the service offers only as `<name>:peft:<ctx>` (e.g. GLM-5.3) is listed
+  and sampled under that name.
+- `tinkpg` prints the node handles a fire created after `[done]`, names a stale
+  server, and a failed `send` names the user turn it already saved.
+
+### Changed
+
+- **The tinker sample call has no deadline.** The 1.2.x-era bound
+  (`180 s + max_tokens/20`) killed slow-but-healthy cold starts; stopping is now
+  the caller's choice (the per-panel Stop, `--timeout`). Metadata calls keep their
+  120 s bound.
+- Tinker capability / servable-path probes are a TTL cache (10 min after a
+  success, 60 s after a failure) instead of frozen at boot.
+- A model the cookbook has no renderer for fails before sampling with an error
+  naming the fix, instead of silently getting an untemplated `role_colon` prompt.
+- Thinking on keeps a run's thinking-variant training renderer
+  (`kimi_k26_preserve_thinking`, `nemotron3_low_thinking`, …).
+- `serve --reload` watches the package, not the scan root.
+- Lock: `tinker` 0.27.2 → 0.30.0 (floor unchanged at 0.25).
+
+### Fixed
+
+- Truncated native samples report `finish_reason=length` again (the truncated
+  badge never showed after the cookbook's `ParseTermination` change).
+- Undo restores the deleted nodes into the current tree instead of replacing it,
+  so a turn or fold that landed after the delete survives the undo.
+- When the top-K re-score fails, the sampling call's own logprobs stand in only
+  at temperature 1 (elsewhere they describe the sampling distribution, not the
+  model's).
+- A provider that restarts the turn instead of continuing a prefill is shown as
+  written and tagged "prefill ignored".
+- Local edits keep a loom turn's provenance (`loom_cut` / `loom_text`).
+- A capabilities entry marked `sampleable=false` is not offered as a target.
+
 ## [1.2.0] — 2026-09-16
 
 Two additive capabilities: a self-hosted vLLM server becomes a first-class
