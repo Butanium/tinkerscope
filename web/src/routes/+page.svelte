@@ -46,6 +46,7 @@
   import { reveal } from '$lib/reveal.svelte';
   import { selectPathTo, selectedDiffOps, opNode } from '$lib/tree';
   import Icon from '$lib/Icon.svelte';
+  import WaitTimer from '$lib/WaitTimer.svelte';
   import PickerDropdown from '$lib/PickerDropdown.svelte';
   import SplitChip from '$lib/SplitChip.svelte';
   import TruncLabel from '$lib/TruncLabel.svelte';
@@ -2643,6 +2644,7 @@
                 <div class="message" style="background: {s.thinking ? 'var(--color-surface-alt)' : 'var(--color-assistant-bg)'};">
                   <div class="pending-head">
                     <div class="message-role">{s.thinking ? 'thinking' : 'assistant'}</div>
+                    <WaitTimer since={run.startedAt} />
                     <button
                       class="btn-stop-turn"
                       data-tooltip="Stop this panel — keeps what already streamed"

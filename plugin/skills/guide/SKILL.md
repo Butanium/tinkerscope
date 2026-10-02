@@ -175,6 +175,12 @@ for an N-sample draw. It cancels only that panel; the others keep generating and
 partial text already streamed is kept. The ⏹ in the sidebar icon row remains the
 all-panels stop.
 
+**"It's been spinning for minutes — is it stuck?"** Probably not. Nothing times a
+generation out: a cold tinker model (Inkling especially) can take minutes before its
+first sample. After 20 s with no sample the turn shows "waiting on the model · 1m40s"
+beside its Stop, counting up. If the count keeps going and you've waited long enough,
+Stop it; otherwise let it warm up.
+
 **"I'm reading the CoT, not the answers."** Sidebar → **Thinking blocks** → **Open**.
 Think folds normally start closed except on the latest turn; this starts every one of
 them open, on every turn and every sample card, so scrolling a long comparison doesn't

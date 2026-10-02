@@ -19,6 +19,7 @@
   import { workspaces as ws } from '$lib/workspaces.svelte';
   import ActionMenu from '$lib/ActionMenu.svelte';
   import Icon from '$lib/Icon.svelte';
+  import WaitTimer from '$lib/WaitTimer.svelte';
   import OverflowRow from '$lib/OverflowRow.svelte';
   import TokenLogprobs from '$lib/TokenLogprobs.svelte';
   import TokenHeatOverlay from '$lib/TokenHeatOverlay.svelte';
@@ -774,6 +775,9 @@
             <!-- Stop THIS panel, on the thing being stopped: the strip already says
                  how far along it is, so the button reads as "stop at 4/10" rather
                  than a mode. The sidebar's stop stays the all-panels blunt one. -->
+            {#if msg.running && completedCount === 0}
+              <WaitTimer since={msg.startedAt} />
+            {/if}
             {#if msg.running && onStop && !readOnly}
               {@render stopBtn()}
             {/if}

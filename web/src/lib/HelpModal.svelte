@@ -355,6 +355,9 @@ codex plugin add tinkerscope@tinkerscope</pre>
         writing, or on the "k / n samples" strip for an N-sample draw — and it stops <em>that</em> column
         only; the others keep going. Whatever already streamed is kept. The
         <Icon name="stop" /> in the sidebar icon row is still the one that stops everything at once.
+        Nothing times a generation out on its own: a cold model can take minutes before its first
+        sample, so after 20 s without one the turn shows "waiting on the model · 1m40s" next to its
+        Stop. That's a wait, not a hang — Stop when you've waited long enough.
       </p>
       <p class="help-note">
         Every model in the sidebar has a <Icon name="copy" /> button beside its name for the string you'd

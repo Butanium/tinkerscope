@@ -510,6 +510,8 @@ export type ViewMessage = {
   samples?: SampleData[];
   totalSamples?: number;
   running?: boolean;
+  /** Live bucket rows only: when the chat started (client clock). */
+  startedAt?: number;
   nodeId?: string | null;
   sib?: { index: number; count: number };
   sampleNodeIds?: string[];

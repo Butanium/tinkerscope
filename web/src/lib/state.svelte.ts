@@ -28,6 +28,8 @@ export type PanelRun = {
   samples: SampleData[]; // sparse: indexed by sample_index
   running: boolean;
   error: string | null;
+  /** Client clock at chat_start — drives the "waiting on the model" readout. */
+  startedAt?: number;
 };
 
 export function emptyPanel(): PanelRun {
@@ -239,7 +241,8 @@ class LiveStore {
           n: data.n ?? 0,
           samples: [],
           running: true,
-          error: null
+          error: null,
+          startedAt: Date.now()
         };
         this.onChatStart?.(panel, data);
         break;
