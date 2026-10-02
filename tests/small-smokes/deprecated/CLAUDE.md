@@ -28,3 +28,24 @@
   (distribution chart), `browser_cross_panel_edit` / `browser_edit_leak` (edit →
   fork). The handoff's isolation lesson (a shared scan-root set shares the store)
   is what `scripts/smoke.sh`'s fresh fixture tree now handles.
+- `browser_echo_chimera.py` — pinned the cross-workspace `chat_end` commit gate (A's
+  transcript must not land in B's panel echo). Deprecated 2026-10-01: the bus
+  transcript echo it inspects was retired in P3 (51bea7c) — panels carry no
+  `messages`, so its core assertion can no longer fail. Replaced by the server-side
+  fold (`tests/test_chat_fold.py`) + `browser_ops_convergence`.
+- `store_concurrency.py` — threaded PUT-tree / PATCH / DELETE / blob storm on the
+  storage-v2 store. Deprecated 2026-10-01: calls `workspace_store.save_tree` (gone
+  with PUT /tree in 51bea7c) and the old `upsert` signature; it no longer runs.
+  Mutation now goes through `apply_ops` under the flock — covered by
+  `tests/test_tree_ops.py` / `test_workspace_ops.py` and `browser_ops_convergence`.
+- `store_migration_crash.py` — crash-window scenarios for the storage-v2 boot
+  migration (legacy conversations.json → per-workspace files). Deprecated
+  2026-10-01: a scenario calls the removed `save_tree`, so the script dies mid-run;
+  every instance on this box migrated in July and PyPI releases start after v2.
+  `store_real_migration.py` / `store_verify_all_instances.py` still run if the
+  migration path ever needs evidence again.
+- `openai_stream_smoke.py` — June derisk probe: does tinker's OpenAI-compatible
+  endpoint stream (/chat/completions + /completions). Deprecated 2026-10-01: the
+  question is answered (see memory/ENGINEERING_LOGS) and the chat-completions
+  producers it was scoping were dropped in 98e4dcc; `stream_producers_smoke.py`
+  still exercises the surviving `completions_stream`.

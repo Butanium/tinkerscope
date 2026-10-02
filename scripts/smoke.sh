@@ -59,79 +59,50 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# Token-free and verified passing at the time each was added here. This file IS
-# the trust map — there is no second copy.
-#
-# It is a SUBSET by construction, not a curated best-of: the runner postdates most
-# of tests/small-smokes/browser_*.py, and a smoke enters DEFAULT when someone runs
-# it and watches it pass. Everything not listed in DEFAULT or STALE is UNCLASSIFIED
-# (nobody has run it under the runner), which is not the same as known-bad — some
-# just need real sampling. If you're touching a surface an unlisted smoke covers,
-# run it directly against a dev-isolated instance; if it passes, add it here.
+# The SHORT regression net: token-free smokes whose oracle is STATE / WIRE / URL —
+# the server's persisted tree or prefs, the request a click sends, what the URL
+# says — read against what the UI did. That is the only class that ever caught a
+# regression here (2026-09-01 audit, ENGINEERING_LOGS 2026-10-01); a visual or
+# DOM-shape change is verified by LOOKING at a screenshot, not by a smoke.
+# Every other browser_*.py stays runnable by name (`scripts/smoke.sh <name>`) as a
+# recipe for driving that surface — it just isn't part of the default sweep.
 DEFAULT=(
     browser_workspace_url
     browser_two_tab_workspace
-    browser_thread_switcher
     browser_state_reprime
-    # The P1 ops-mirror verify (HANDOFF_SERVER_AUTHORITY §7). Token-free but
-    # SELF-HOSTING — spawns and restarts its own servers, so it must run under
-    # this runner's lock, never beside another sweep.
-    browser_ops_convergence
-    # `--multi-user` (2026-09-16): two browser profiles on one instance, two
-    # sidebars, one shared store. SELF-HOSTING like ops_convergence (its own
-    # server on 8884). This runs the REAL leg only; the falsification leg is
+    # Self-hosting (spawn + restart their own servers): must run under this lock.
+    # multi_user runs the REAL leg only; the falsification leg is
     # `MULTI_USER=0 uv run python tests/small-smokes/browser_multi_user.py`
     # (must pass by reproducing the single-bus leak) — run it when you touch
-    # api/session.py / api/state.py, it is what proves these assertions bite.
+    # api/session.py / api/state.py.
+    browser_ops_convergence
     browser_multi_user
-    browser_kbnav
-    browser_thread_system
-    browser_row_toolbar
-    browser_samples_view
-    browser_shift_edit_assistant
     browser_legacy_echo_graft
     browser_sysprompt_switch
     browser_system_chip
     browser_panel_drag
-    browser_chart_rules
-    # Repaired 2026-08-12 (were listed STALE for reasons that had stopped being true):
-    #   branching — the bare textarea.edit-textarea matched the thread-system editor too
-    #   continue_scope — .prefill-scope still exists; it was the FOLD half that died
-    #                    when sends went detached. Now request-level. See its docstring.
     browser_branching
-    browser_continue_scope
-    # Token-free (route-intercepted) and watched passing 2026-08-12.
-    browser_shift_continue_thinking
-    browser_modals
-    browser_label_trunc
-    browser_label_diff
-    browser_fuzzy_search
-    browser_help_modal
-    browser_token_logprobs
-    browser_token_overlay
+    browser_undo
     browser_highlight_master
     browser_search_palette
-    browser_sidebar_folds
+    # Request-level (route-intercepted): the body a Continue / Shift+Continue sends.
+    browser_continue_scope
+    browser_shift_continue_thinking
     browser_pack_link
-    # Token-free but NOT network-free: the probe asks tinker whether a path is real,
-    # which no local list can answer. Skips itself without TINKER_API_KEY.
-    browser_tinker_custom_ckpt
-    # Same deal (one metadata probe per path), and it skips itself without a key or
-    # a resolvable checkpoint in the account sweep.
-    browser_ckpt_base_label
-    # DATA-DRIVEN and it does NOT skip: it hard-asserts that ≥1 discovered run is
-    # unavailable, which the negation_neglect root supplies (base no longer served).
-    # A failure here can mean tinker changed what it serves — check /api/models
-    # before reading it as a UI regression. Needs both scan roots (the default).
-    browser_model_availability
     # Own their whole world (build a state dir, export a site, serve it) and
     # ignore the base-url arg — they still belong here so they run under the lock.
     browser_static_site
     browser_static_logprob_trim
     browser_pack_big
-    browser_open_locally
     browser_pack_link_map
 )
+# Left DEFAULT 2026-10-01 — visual / DOM-shape checks, still valid recipes, run by
+# name when touching their surface: kbnav, thread_switcher, thread_system,
+# row_toolbar, samples_view, shift_edit_assistant, chart_rules, modals,
+# label_trunc, label_diff, fuzzy_search, help_modal, token_logprobs, token_overlay,
+# sidebar_folds, open_locally. And three NETWORK-dependent ones (a tinker metadata
+# probe or the live model list): tinker_custom_ckpt, ckpt_base_label,
+# model_availability.
 # Known-stale: failures here carry NO signal. Repair when you next need the
 # coverage — not on their own account.
 declare -A STALE=(
@@ -164,13 +135,6 @@ declare -A STALE=(
 #   live free-OpenRouter router. Was STALE until 2026-09-26 (got 4 cards, not 2,
 #   from an inherited thinking='both'); it now clicks Thinking → Off in the
 #   sidebar first. Run it directly when touching per-sample continue.
-#   browser_echo_chimera — pins the cross-workspace chat_end commit gate
-#   (ENGINEERING_LOGS 2026-08-12, the stamped-us/echoing-them graft). Needs the
-#   live free-router (a real chat must OUTLIVE a workspace switch) AND
-#   passwordless sudo (`ss -K` drops the SSE socket for the reconnect leg —
-#   set_offline provably doesn't). Run it DIRECTLY when touching the echo/bus
-#   commit path (api/state.py chat_end, routes/chat.py terminals) — listed here
-#   so it can't be silently forgotten like the convergence smoke nearly was.
 
 SMOKES=("${PICK[@]:-${DEFAULT[@]}}")
 

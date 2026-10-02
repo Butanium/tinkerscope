@@ -918,26 +918,23 @@ extracted UI: `tests/small-smokes/browser_{chart_modal,modals}.py`.
   and `uv run ruff check` (whole repo incl. `tests/`, kept at 0 — the pre-commit
   hook only lints STAGED files with `--select F`, so a repo-wide run is what
   catches latent errors in smokes nobody has touched).
-- **Browser smokes — use `scripts/smoke.sh`** (builds web/, launches a throwaway
-  instance over the SUITE-OWNED fixture run tree — `tests/run_fixtures.py`, 27
-  synthetic runs reproducing the real label families, built fresh each run as the
-  default `SMOKE_SCAN_DIR` — and runs the token-free set SERIALLY under a lock).
-  Smokes must never run concurrently: `browser_state_reprime.py`
-  kills and restarts a server mid-run, so a parallel smoke fails with a bogus
-  error — on 2026-07-24 that produced a false "the fix doesn't work" on the
-  cross-tab corruption smoke. `scripts/smoke.sh --fresh` for the empty-state set
-  (`chart_rules` wants it); `scripts/smoke.sh <name>…` to run a subset.
-  **`--baseline <ref> <smoke>` runs the WORKING TREE's smoke against the app at
-  `<ref>`** (throwaway `/var/tmp` worktree, built + served on the same isolated
-  port, self-reaped). Use it on every smoke you write for a bug you just fixed:
-  until you watch it FAIL without the fix it proves nothing, and on 2026-07-29 two
-  successive versions of one smoke passed for the wrong reason. Read that run's
-  log — its exit code only covers setup. ⚠️ A SELF-HOSTING smoke (spawns its own
-  server / builds its own site) must resolve its checkout via
-  `os.environ.get("TSCOPE_APP_DIR") or <repo root>` — `--baseline` now LINTS for
-  that before running and refuses a leaking smoke (2026-08-12; before the guard,
-  the false-OK happened on `browser_state_reprime` and nearly on
-  `browser_pack_big`).
+- **Verify a change by LOOKING.** On an isolated instance (below), drive the
+  changed surface with Playwright as a scratch driver and READ a cropped
+  screenshot — that is the check. Green suites have sat over visibly broken UI
+  here at least five times; the 2026-09-01 audit is in `ENGINEERING_LOGS.md`
+  2026-10-01.
+- **`scripts/smoke.sh` is the short regression net** for STATE / WIRE / URL
+  agreement (the only class that ever caught a regression): it builds web/,
+  launches a throwaway instance over the suite-owned fixture runs
+  (`tests/run_fixtures.py`) and runs its DEFAULT set SERIALLY under a lock —
+  never run two at once (`browser_state_reprime` restarts a server mid-run).
+  `scripts/smoke.sh <name>…` runs any other `browser_*.py` by name; `--fresh` for
+  empty state. A new smoke earns a slot in DEFAULT only if its oracle is server /
+  request / URL state. **`--baseline <ref> <smoke>`** runs today's smoke against
+  the app at `<ref>`: use it on a smoke written for a bug you just fixed — until
+  you watch it FAIL without the fix it proves nothing. A SELF-HOSTING smoke must
+  resolve its checkout via `os.environ.get("TSCOPE_APP_DIR") or <repo root>`
+  (`--baseline` lints for it).
 - **Isolated instance for testing** — NEVER test against the user's live server
   or `~/.local/state/tinkerscope`; run `scripts/dev-isolated.sh [--port N] [SCAN_DIR ...]`
   instead: it snapshots the real state into a throwaway `XDG_STATE_HOME` (realistic

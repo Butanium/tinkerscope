@@ -23,8 +23,11 @@ exactly the deal for the `conversations → workspaces` rename.
 
 ## Cutting a release
 
-1. Land the work; `uv run pytest -q`, `npm test`, `npm run check` (0 errors),
-   and the token-free browser smokes against a `scripts/dev-isolated.sh` instance.
+1. Land the work; `uv run pytest -q`, `uv run ruff check`, `npm test`,
+   `npm run check` (0 errors), `scripts/smoke.sh` (the short state/wire set), and
+   click through what changed on a `scripts/dev-isolated.sh` instance, reading the
+   screenshots. No full browser-smoke sweep: it never caught anything at release
+   time (ENGINEERING_LOGS 2026-10-01).
 2. Bump `version` in `pyproject.toml`.
 3. Add the `docs/MIGRATIONS.md` entry if the shape moved (what changed, what the
    automatic migration does, how to roll back — name the backup path it writes).

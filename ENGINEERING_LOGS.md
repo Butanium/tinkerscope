@@ -2617,3 +2617,34 @@ logprob re-score (180 s, which degrades gracefully and runs on an already-warm
 model) keep their bounds. Test: `tests/test_cli_timeout.py` (real uvicorn,
 hanging producer).
 
+
+### 2026-10-01 — Verification is looking; the smoke sweep shrinks to state/wire
+
+Cutting v1.3.0, the full 38-smoke sweep (~3.5 min) found nothing and failed once
+on `browser_kbnav`, which passed when rerun alone — a flake. That matches the
+2026-09-01 audit (`~/.claude/skills/dashboard-guidelines/references/test-value-audit-2026-09-01.md`):
+across ~330 smoke runs the browser smokes caught ONE regression from an unrelated
+change (`browser_highlight_master`, the 08-10 panel-id rename leaving legacy
+workspaces blank — a STATE bug), pytest none, and green suites sat over visibly
+broken UI at least five times. About half of the failures sampled were
+rot/flake/env. Clément: "let's do a cleanup".
+
+What changed:
+- `scripts/smoke.sh` DEFAULT 38 → 20 (~3.5 min → 2m22s incl. the web build; 20/20 green): kept only smokes whose oracle is the
+  server's persisted state, the request a click sends, or the URL (two-tab,
+  reprime, ops convergence, multi-user, layout persistence, undo's server tree,
+  pack/static installs, …). Visual/DOM-shape smokes leave DEFAULT but stay
+  runnable by name as recipes; the three network-dependent ones leave too.
+  `browser_undo` joins (its step 7 reads the server tree).
+- Four scripts that can no longer run or no longer test anything moved to
+  `tests/small-smokes/deprecated/` (reasons in its CLAUDE.md): the echo chimera
+  smoke (bus echo retired in P3), the store concurrency storm and the migration
+  crash scenarios (both call the removed `save_tree`), the June OpenAI-endpoint
+  streaming probe.
+- `docs/RELEASING.md` step 1 and CLAUDE.md "Build / verify": verify by driving the
+  change on an isolated instance and reading screenshots; `smoke.sh` is the short
+  state/wire net.
+
+Not done: the migration-crash scenarios lost their runnable form. The storage-v2
+migration still ships and still runs at boot for a legacy `conversations.json`;
+`store_real_migration.py` / `store_verify_all_instances.py` cover it read-only.

@@ -949,7 +949,7 @@ def set_meta(cid: str, fields: dict[str, Any]) -> dict | None:
 
 def patch_meta(cid: str, fields: dict[str, Any]) -> dict | None:
     """`set_meta` returning only the summary — the pre-ops signature, kept for
-    callers that don't broadcast (scripts, tests/small-smokes/store_concurrency)."""
+    callers that don't broadcast (scripts)."""
     out = set_meta(cid, fields)
     return None if out is None else out["summary"]
 
