@@ -374,17 +374,13 @@ def _build_generation_prompt(renderer: Any, messages: list[dict], think: bool) -
 # ---------------------------------------------------------------------------
 TOPK_LOGPROBS = 5
 
-# Bounds on every remote tinker call. The SDK retries on its own for up to ~2 h,
-# so without these a wedged request kept a browser chat "running" and `tinkpg`
-# silent that long. A sample's budget grows with max_tokens; the floor covers
-# queueing on a busy service.
+# Bound on the metadata calls (connect / client creation / base-model resolve).
+# The SDK retries on its own for up to ~2 h, so an unbounded wedged call kept a
+# chat "running" that long. The SAMPLE call itself is deliberately NOT bounded:
+# a cold model's warmup is slow-but-healthy, and the caller stops it instead
+# (the browser's stop chip, `tinkpg --timeout`).
 CLIENT_TIMEOUT_S = 120.0
-SAMPLE_TIMEOUT_BASE_S = 180.0
-SAMPLE_TIMEOUT_MIN_TOKENS_PER_S = 20.0
-
-
-def _sample_timeout(max_tokens: int) -> float:
-    return SAMPLE_TIMEOUT_BASE_S + max_tokens / SAMPLE_TIMEOUT_MIN_TOKENS_PER_S
+LOGPROB_RESCORE_TIMEOUT_S = 180.0
 
 
 async def _bounded(aw: Any, timeout: float, what: str) -> Any:
@@ -452,7 +448,7 @@ async def _token_logprobs(
             sampling_params=tt.SamplingParams(max_tokens=1),
             include_prompt_logprobs=True,
             topk_prompt_logprobs=TOPK_LOGPROBS,
-        ), SAMPLE_TIMEOUT_BASE_S, "scoring token logprobs")
+        ), LOGPROB_RESCORE_TIMEOUT_S, "scoring token logprobs")
         plp = resp.prompt_logprobs
         topk = resp.topk_prompt_logprobs
         out: list[dict] = []
@@ -734,10 +730,7 @@ class SamplerManager:
 
         async def one(idx: int) -> dict:
             try:
-                resp = await _bounded(
-                    client.sample_async(prompt=model_input, num_samples=1, sampling_params=params),
-                    _sample_timeout(max_tokens), "sampling",
-                )
+                resp = await client.sample_async(prompt=model_input, num_samples=1, sampling_params=params)
                 seq = resp.sequences[0]
                 to_parse = (region_ids + seq.tokens) if region_ids is not None else seq.tokens
                 parsed, termination = renderer.parse_response(to_parse)

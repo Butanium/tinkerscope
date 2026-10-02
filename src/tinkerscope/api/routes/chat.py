@@ -989,6 +989,8 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
 
         prod_error: str | None = None
         try:
+            # The caller's handle for POST /api/chat/{chat_id}/cancel (`tinkpg --timeout`).
+            yield {"event": "start", "data": json.dumps({"chat_id": chat_id})}
             if req.broadcast:
                 await bus.broadcast(
                     "chat_start",

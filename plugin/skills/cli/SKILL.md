@@ -473,6 +473,12 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   thread REFUSES — the saved tree is the only transcript source, so there is
   nothing to continue; `--ancestry-file` looms from an external transcript and
   stays stdout-only (it warns "NOT persisted" — capture with `--json`).
+- **Slow first sample is normal; nothing times it out for you.** The tinker
+  sample call has NO server-side deadline: a cold model (Inkling especially)
+  can take minutes before its first sample, and the CLI just waits. So fire
+  long sends in the background and watch them (bgwatch), or pass `--timeout N`
+  on the sampling verb to cancel after N s — finished samples are kept and the
+  exit is non-zero with "--timeout Ns reached".
 - **Sequential waves**: fire → `tinkpg wait [--timeout N]` → read → fire again
   (no sleep/check dances). Reading loop: `tinkpg samples --node <id> --this`
   isolates the one sample a qualified handle names; `samples --export-ancestry
@@ -536,6 +542,7 @@ tinkpg chat <run> <prompt> [options]
   --prefill TEXT                    assistant prefill the model extends; raw `<think>` ok
   --logprobs                        print each sample's per-token logprob + top-5 alternatives (native tinker sampling only)
   --json                            one JSON object per line instead of human text (includes token_logprobs when present)
+  --timeout FLOAT                   cancel each chat after this many seconds (default: none — a cold tinker model can take minutes before its first sample); samples already finished are kept
 tinkpg compare <run_a> <run_b> <prompt> [options]
   # Compare N runs on one prompt — A→primary, B→compare, --run extras→p-2,p-3,… all stream...
   --run TEXT (repeatable)           additional run(s) → 3rd, 4th, … panes (repeatable)
@@ -549,6 +556,7 @@ tinkpg compare <run_a> <run_b> <prompt> [options]
   --prefill TEXT                    assistant prefill the models extend; raw `<think>` ok
   --logprobs                        print each sample's per-token logprob + top-5 alternatives (native tinker sampling only)
   --json                            one JSON object per line instead of human text (includes token_logprobs when present)
+  --timeout FLOAT                   cancel each chat after this many seconds (default: none — a cold tinker model can take minutes before its first sample); samples already finished are kept
 tinkpg send [prompt] [options]
   # Fire the prompt as a NEW THREAD at the CURRENT panels of the open workspace — the CLI twin of...
   --n INTEGER                       samples per panel  [default: 1]
@@ -569,6 +577,7 @@ tinkpg send [prompt] [options]
   --logprobs                        print each sample's per-token logprob + top-5 alternatives (native tinker sampling only; none for OpenRouter)
   --json                            one JSON object per line (JSONL) instead of human text — for scripts; always includes token_logprobs when present, independent of --logprobs
   --first-token                     after the fire, print each panel's probability distribution over the FIRST generated token (from the captured token_logprobs); with --json, appended as first_token_summary JSONL lines
+  --timeout FLOAT                   cancel each chat after this many seconds (default: none — a cold tinker model can take minutes before its first sample); samples already finished are kept
 tinkpg continue [prompt] [options]
   # LOOM from an existing branch: rebuild the message history up to a target node and sample a...
   --n INTEGER                       samples per panel  [default: 1]
@@ -593,6 +602,7 @@ tinkpg continue [prompt] [options]
   --logprobs                        print each sample's per-token logprob + top-5 alternatives (native tinker sampling only; none for OpenRouter)
   --json                            one JSON object per line (JSONL) instead of human text — for scripts; always includes token_logprobs when present, independent of --logprobs
   --first-token                     after the fire, print each panel's probability distribution over the FIRST generated token (from the captured token_logprobs); with --json, appended as first_token_summary JSONL lines
+  --timeout FLOAT                   cancel each chat after this many seconds (default: none — a cold tinker model can take minutes before its first sample); samples already finished are kept
 tinkpg battery <probes_dir> [options]
   # Fire a DIRECTORY of probe files as sequential `send`s — the reusable probe battery.
   --out TEXT                        output dir for per-probe JSONL streams (default: <probes_dir>/results)
@@ -609,6 +619,7 @@ tinkpg battery <probes_dir> [options]
   --pause FLOAT                     seconds to wait between probes  [default: 3.0]
   --ws TEXT                         workspace to fire every probe into (id-prefix/name); when it isn't the open one, models bind from ITS saved layout. Default = the open workspace
   --new-ws NAME                     create a fresh workspace with this name (seeded with the current panels), claim the bus, and fire every probe into it
+  --timeout FLOAT                   cancel each chat after this many seconds (default: none — a cold tinker model can take minutes before its first sample); samples already finished are kept
 tinkpg probe <run> [prompt] [options]
   # Sample ANY discovered model WITHOUT touching the browser or any workspace.
   --n INTEGER                       samples to draw  [default: 1]
@@ -622,6 +633,7 @@ tinkpg probe <run> [prompt] [options]
   --prefill TEXT                    assistant prefill the model extends
   --full                            print each sample's complete answer + CoT
   --json                            JSONL to stdout, one object per sample (carries raw_meta)
+  --timeout FLOAT                   cancel each chat after this many seconds (default: none — a cold tinker model can take minutes before its first sample); samples already finished are kept
 tinkpg params [options]
   # Show or SET the GLOBAL sampling params (system prompt, temperature, max tokens, n, thinking,...
   --temperature FLOAT

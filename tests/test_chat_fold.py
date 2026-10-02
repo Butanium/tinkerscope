@@ -338,6 +338,7 @@ async def test_disconnect_with_one_sample_folds_partial(fold_env, monkeypatch):
     sub = await bus.subscribe()
     resp = await chat_route.chat(_req(chat_route, ws_id))
     gen = resp.body_iterator
+    assert (await asyncio.wait_for(gen.__anext__(), timeout=2))["event"] == "start"
     ev = await asyncio.wait_for(gen.__anext__(), timeout=2)
     assert ev["event"] == "message"
     await gen.aclose()
@@ -492,6 +493,7 @@ async def test_delete_rejected_while_chat_in_flight_then_allowed(fold_env, monke
     monkeypatch.setattr("tinkerscope.api.openrouter.sample_one_stream", hang)
     resp = await chat_route.chat(_req(chat_route, ws_id))
     gen = resp.body_iterator
+    assert (await asyncio.wait_for(gen.__anext__(), timeout=2))["event"] == "start"
     task = asyncio.create_task(gen.__anext__())
     await asyncio.wait_for(started.wait(), timeout=2)
     await asyncio.sleep(0.02)  # let the drain loop reach q.get (placement is registered)

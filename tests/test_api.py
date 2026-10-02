@@ -692,6 +692,7 @@ async def test_chat_disconnect_commits_partial_and_fires_one_terminal(chat_mod, 
     resp = await chat_route.chat(_req(chat_route, client_token="ct-own"))
     gen = resp.body_iterator
 
+    assert (await asyncio.wait_for(gen.__anext__(), timeout=2))["event"] == "start"
     ev = await asyncio.wait_for(gen.__anext__(), timeout=2)
     assert ev["event"] == "message"
     await gen.aclose()  # GeneratorExit into the suspended q.get() — simulates disconnect

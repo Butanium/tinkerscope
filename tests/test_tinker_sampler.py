@@ -113,14 +113,13 @@ def test_bounded_names_what_timed_out():
 
     import pytest
 
-    from tinkerscope.api.tinker_sampler import _bounded, _sample_timeout
+    from tinkerscope.api.tinker_sampler import _bounded
 
     async def hang():
         await asyncio.sleep(10)
 
     with pytest.raises(TimeoutError, match=r"no answer from tinker after 0s while sampling"):
         asyncio.run(_bounded(hang(), 0.01, "sampling"))
-    assert _sample_timeout(8192) > _sample_timeout(256) > 0
 
 
 def test_thinking_on_keeps_a_thinking_variant_training_renderer():

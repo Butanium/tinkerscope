@@ -656,6 +656,25 @@ class _StreamResult:
         self.user_turn: Optional[str] = None
 
 
+# Per-chat wall-clock cap set by a sampling command's --timeout (None = wait as
+# long as the server does — the tinker sample call itself is unbounded).
+_TIMEOUT_S: Optional[float] = None
+
+
+def _timeout_option() -> Any:
+    return typer.Option(
+        None, "--timeout",
+        help="cancel each chat after this many seconds (default: none — a cold tinker model can take minutes before its first sample); samples already finished are kept",
+    )
+
+
+def _set_timeout(timeout: Optional[float]) -> None:
+    global _TIMEOUT_S
+    if timeout is not None and timeout <= 0:
+        _die("--timeout must be > 0")
+    _TIMEOUT_S = timeout
+
+
 _DIM = "\033[2m"
 _RESET = "\033[0m"
 _TTY = sys.stdout.isatty()
@@ -861,6 +880,24 @@ def _stream_chat(
     last_kind: dict[int, str] = {}  # idx -> last delta kind, to insert separators
     n_ok = 0  # completed (non-error) samples — the fold-failure check needs the count
 
+    # --timeout: on expiry, cancel server-side by chat_id (from the `start` event);
+    # the server then ends the stream through its normal terminal, keeping any
+    # samples that already finished.
+    timed_out = threading.Event()
+    timer: Optional[threading.Timer] = None
+    t0 = time.monotonic()
+
+    def _cancel(chat_id: int) -> None:
+        timed_out.set()
+        try:
+            with _client() as c:
+                c.post(f"/api/chat/{chat_id}/cancel")
+        except httpx.HTTPError:
+            pass  # stream end (or the transport error) reports it
+
+    def timeout_msg() -> str:
+        return f"--timeout {_TIMEOUT_S:g}s reached: chat cancelled ({n_ok} sample(s) finished before it)"
+
     try:
         with httpx.Client(base_url=_base_url(), timeout=None, headers=_session_headers()) as c:
             with connect_sse(c, "POST", "/api/chat", json=body) as event_source:
@@ -869,6 +906,14 @@ def _stream_chat(
                     fail(f"HTTP {event_source.response.status_code}: {body_text}")
                     return
                 for ev in event_source.iter_sse():
+                    if ev.event == "start":
+                        chat_id = json.loads(ev.data).get("chat_id") if ev.data else None
+                        if _TIMEOUT_S is not None and chat_id is not None:
+                            remaining = max(0.0, _TIMEOUT_S - (time.monotonic() - t0))
+                            timer = threading.Timer(remaining, _cancel, args=(chat_id,))
+                            timer.daemon = True
+                            timer.start()
+                        continue
                     if ev.event == "done":
                         try:
                             done_data = json.loads(ev.data) if ev.data else {}
@@ -886,6 +931,9 @@ def _stream_chat(
                                 fold_fail = f"{fold_fail} {_server_skew_hint()}".rstrip()
                             fail(fold_fail)
                             return
+                        if timed_out.is_set():
+                            fail(timeout_msg())
+                            return
                         break
                     if ev.event == "error":
                         err = ev.data
@@ -893,7 +941,7 @@ def _stream_chat(
                             err = json.loads(ev.data).get("error", ev.data)
                         except (json.JSONDecodeError, AttributeError):
                             pass
-                        fail(f"{err}")
+                        fail(timeout_msg() if timed_out.is_set() else f"{err}")
                         return
                     if ev.event == "delta":
                         # Token chunk (n==1). Only streamed inline for single chat;
@@ -962,6 +1010,9 @@ def _stream_chat(
             "is the server running? check --base-url / $TINKERSCOPE_BASE_URL."
         )
         return
+    finally:
+        if timer is not None:
+            timer.cancel()
     if result is not None:
         result.ok = True
 
@@ -1053,8 +1104,10 @@ def cmd_chat(
     prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the model extends; raw `<think>` ok"),
     show_logprobs: bool = typer.Option(False, "--logprobs", help="print each sample's per-token logprob + top-5 alternatives (native tinker sampling only)"),
     json_out: bool = typer.Option(False, "--json", help="one JSON object per line instead of human text (includes token_logprobs when present)"),
+    timeout: Optional[float] = _timeout_option(),
 ) -> None:
     """Sample from a run's checkpoint; stream completions to stdout and the browser."""
+    _set_timeout(timeout)
     run_arg, ckpt_arg = _split_run_arg(run)
     r = _resolve_run(run_arg)
     ckpt = _resolve_checkpoint(r, checkpoint or ckpt_arg)
@@ -1106,9 +1159,11 @@ def cmd_compare(
     prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the models extend; raw `<think>` ok"),
     show_logprobs: bool = typer.Option(False, "--logprobs", help="print each sample's per-token logprob + top-5 alternatives (native tinker sampling only)"),
     json_out: bool = typer.Option(False, "--json", help="one JSON object per line instead of human text (includes token_logprobs when present)"),
+    timeout: Optional[float] = _timeout_option(),
 ) -> None:
     """Compare N runs on one prompt — A→primary, B→compare, --run extras→p-2,p-3,…
     all stream concurrently. `compare a b "prompt"` is the 2-run case."""
+    _set_timeout(timeout)
     # Thread-authoring --system + placement writing: same contract as `chat`.
     system, thread_system = _new_thread_system(_resolve_sys(system, no_system))
     catalog = _models()
@@ -1501,6 +1556,7 @@ def cmd_send(
     show_logprobs: bool = typer.Option(False, "--logprobs", help="print each sample's per-token logprob + top-5 alternatives (native tinker sampling only; none for OpenRouter)"),
     json_out: bool = typer.Option(False, "--json", help="one JSON object per line (JSONL) instead of human text — for scripts; always includes token_logprobs when present, independent of --logprobs"),
     first_token: bool = typer.Option(False, "--first-token", help="after the fire, print each panel's probability distribution over the FIRST generated token (from the captured token_logprobs); with --json, appended as first_token_summary JSONL lines"),
+    timeout: Optional[float] = _timeout_option(),
 ) -> None:
     """Fire the prompt as a NEW THREAD at the CURRENT panels of the open workspace
     — the CLI twin of the browser's ⑂ branch-from-start. Unlike `chat`/`compare`
@@ -1511,6 +1567,7 @@ def cmd_send(
     unpersisted; aim elsewhere with --ws / --new-ws. Existing threads are
     untouched; aim panels with --panel (repeatable). The message / prefill can come
     from a file (--file / --prefill-file) so probe templates aren't retyped."""
+    _set_timeout(timeout)
     prompt = _arg_or_file(prompt, file, "message", "--file")
     prefill = _arg_or_file(prefill, prefill_file, "prefill", "--prefill-file")
     if prompt is None:
@@ -1697,6 +1754,7 @@ def cmd_continue(
     show_logprobs: bool = typer.Option(False, "--logprobs", help="print each sample's per-token logprob + top-5 alternatives (native tinker sampling only; none for OpenRouter)"),
     json_out: bool = typer.Option(False, "--json", help="one JSON object per line (JSONL) instead of human text — for scripts; always includes token_logprobs when present, independent of --logprobs"),
     first_token: bool = typer.Option(False, "--first-token", help="after the fire, print each panel's probability distribution over the FIRST generated token (from the captured token_logprobs); with --json, appended as first_token_summary JSONL lines"),
+    timeout: Optional[float] = _timeout_option(),
 ) -> None:
     """LOOM from an existing branch: rebuild the message history up to a target node
     and sample a continuation, WITHOUT touching the panel layout (the multi-turn twin
@@ -1712,6 +1770,7 @@ def cmd_continue(
     previously-generated content — in-tree, in a log, or another model's transcript — a
     --prefill only ever seeds a tiny thinking opener or a truncated OWN CoT continuation;
     never a fabricated or partial turn."""
+    _set_timeout(timeout)
     prompt = _arg_or_file(prompt, file, "message", "--file")
     prefill = _arg_or_file(prefill, prefill_file, "prefill", "--prefill-file")
     tree_mode = thread is not None or turn is not None or node is not None
@@ -2020,6 +2079,7 @@ def cmd_battery(
     pause: float = typer.Option(3.0, "--pause", help="seconds to wait between probes"),
     ws: Optional[str] = typer.Option(None, "--ws", help="workspace to fire every probe into (id-prefix/name); when it isn't the open one, models bind from ITS saved layout. Default = the open workspace"),
     new_ws: Optional[str] = typer.Option(None, "--new-ws", metavar="NAME", help="create a fresh workspace with this name (seeded with the current panels), claim the bus, and fire every probe into it"),
+    timeout: Optional[float] = _timeout_option(),
 ) -> None:
     """Fire a DIRECTORY of probe files as sequential `send`s — the reusable probe
     battery. Each probe lands as a new thread at the current panels (layout
@@ -2029,6 +2089,7 @@ def cmd_battery(
     fails doesn't stop the battery; the summary (and exit code) reports it. With a
     workspace open the probes land THERE, one thread per probe per panel — keep
     them apart with --new-ws, or aim at another with --ws."""
+    _set_timeout(timeout)
     if no_system and system is not None:
         _die("--system and --no-system are mutually exclusive")
     if ws is not None and new_ws is not None:
@@ -2124,6 +2185,7 @@ def cmd_probe(
     prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the model extends"),
     full: bool = typer.Option(False, "--full", help="print each sample's complete answer + CoT"),
     json_out: bool = typer.Option(False, "--json", help="JSONL to stdout, one object per sample (carries raw_meta)"),
+    timeout: Optional[float] = _timeout_option(),
 ) -> None:
     """Sample ANY discovered model WITHOUT touching the browser or any workspace.
 
@@ -2142,6 +2204,7 @@ def cmd_probe(
 
     Multi-turn: pass a full verbatim transcript via --ancestry-file (same
     provenance rule as `continue` — reuse generated turns, never author them)."""
+    _set_timeout(timeout)
     msg = _arg_or_file(prompt, file, "user message", "--file")
     ancestry: list[dict] = []
     if ancestry_file is not None:

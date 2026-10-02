@@ -2597,3 +2597,23 @@ turn; `cloneTree`'s spread (previous entry) carries the field for free. It
 catches the echo form only — a restart in different words still merges. Native
 tinker and vLLM paths render the prefill into the prompt themselves
 (`prefill_incorporated`), so they are untouched.
+
+### 2026-10-01 — The tinker sample call is unbounded again; `tinkpg --timeout` instead
+
+992e181 (09-26) bounded every tinker call, the sample at `180 s + max_tokens/20`.
+That bound guessed wrong for a cold model: an Inkling weird-persona chat died at
+282 s ("no answer from tinker … service may be degraded") while tinker was, as
+far as we know, just warming up — nothing on tinker's side had failed, our
+`wait_for` gave up. Clément: a long warmup is expected, don't kill it.
+
+The original motivation (a wedged request keeping `tinkpg` silent for up to the
+SDK's ~2 h retry window) is now the caller's job: the browser has the per-panel
+stop chip, and the sampling verbs take `--timeout N`, which cancels SERVER-side
+via `POST /api/chat/{id}/cancel` — so finished samples still fold, exactly like
+a stop. To make that possible the caller's SSE stream now opens with
+`event: start {chat_id}` (the direct stream never carried the id; only the bus
+did). The metadata calls (connect / client / base resolve, 120 s) and the
+logprob re-score (180 s, which degrades gracefully and runs on an already-warm
+model) keep their bounds. Test: `tests/test_cli_timeout.py` (real uvicorn,
+hanging producer).
+

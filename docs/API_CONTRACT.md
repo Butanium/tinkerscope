@@ -390,6 +390,9 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
 `{"status":"started"}` and NO stream — every event goes to the bus only.
 
 ### /api/chat SSE (the caller's stream — what the CLI prints)
+- `event: start` → `data: {chat_id}` — first event, once the chat is registered;
+  the id to `POST /api/chat/{chat_id}/cancel` with (how `tinkpg --timeout` stops
+  a chat). Consumers that don't cancel ignore it.
 - `event: delta` → `data: {sample_index, delta, kind}` — a streamed token chunk
   (`kind` = `"content"` | `"reasoning"`). Emitted **only for a token-streaming
   producer at n_samples==1**: `openrouter_model` and `vllm_model` (whose final
