@@ -357,7 +357,11 @@ codex plugin add tinkerscope@tinkerscope</pre>
         <Icon name="stop" /> in the sidebar icon row is still the one that stops everything at once.
         Nothing times a generation out on its own: a cold model can take minutes before its first
         sample, so after 20 s without one the turn shows "waiting on the model · 1m40s" next to its
-        Stop. That's a wait, not a hang — Stop when you've waited long enough.
+        Stop, plus what tinker says — it re-confirms a live request every ~30 s. <b>tinker: working</b>
+        is a wait, not a hang; <b>queued, short on capacity</b> means tinker is overloaded;
+        <b>no answer from tinker for …</b> means the connection may be dead — after 3 min of that,
+        tinkerscope reconnects and resends by itself (<b>reconnected ×1</b>), and gives up after two
+        tries. <b>resent ×1</b>: tinker lost the request and it was sent again.
       </p>
       <p class="help-note">
         Every model in the sidebar has a <Icon name="copy" /> button beside its name for the string you'd

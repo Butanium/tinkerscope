@@ -2648,3 +2648,78 @@ What changed:
 Not done: the migration-crash scenarios lost their runnable form. The storage-v2
 migration still ships and still runs at boot for a legacy `conversations.json`;
 `store_real_migration.py` / `store_verify_all_instances.py` cover it read-only.
+
+### 2026-10-05 — A wait is no longer blind: per-request polling, a liveness readout, reconnect on silence
+
+Clément's :8767 sat on "waiting on the model · 41m47s" on two panels (DeepSeek-V3.1
+and Nemotron-550B LoRAs). Not tinker overload: the same checkpoints answered a
+fresh process in ~20 s, while a 16-token `tinkpg probe` THROUGH :8767 hung 200 s
+on the DeepSeek LoRA and on an Inkling LoRA no panel was using (the Nemotron
+probe errored on an ambiguous run name). The whole 4-day-old process was wedged.
+`ss -ti` on its sockets: two connections to tinker's edge (Cloudflare) with every
+byte ACKed but `data_segs_in` 1 and 4 over their whole life — ~2.1 MB sent into
+each, 686 / 2521 B ever received, `lastrcv` 66 min: born dead, not died later.
+Something kept writing ~80 B every 10 s on them (unidentified). A THIRD
+connection from the same process to the same IP — the session heartbeat — was
+healthy throughout, so it was per-connection, not the network path. The SDK's
+connection pool only ever replaces a client on a bare 400, so every new request
+kept landing on the dead connections.
+
+Why it was invisible: as of SDK 0.30.0 the server turns on
+`ClientConfigResponse.sample_use_retrieve_futures`, which makes a sample wait on
+one long-poll per sampling session that only reports FINISHED requests. Nothing
+ever asks about one request, so a dead connection, a request tinker dropped and
+a missed completion all look like a slow sample. The SDK's per-request mode
+long-polls each request instead — measured: tinker holds a poll ~30 s and answers
+408 `{"type":"try_again","queue_state":"active"}` while it works, the result when
+done, `404 Promise not found` for an id it doesn't know (the SDK raises a
+ValueError within 0.1 s rather than hanging). The 2026-10-01 entry above framed
+the choice as "our timeout vs tinker's"; neither was the real signal. Whether
+the SDK's own timeouts (45 s per poll, 60 s per submit) fired on the dead
+connections is unknown — its transport retries log only to telemetry.
+
+What changed (`tinker_sampler.py` "Liveness"):
+- `_poll_each_request` flips the flag back on our ServiceClient (one private
+  attr), in the connect thread — the SDK builds its holder lazily with blocking
+  round-trips, which must not run on the event loop. `_install_poll_hook` wraps
+  `_APIFuture._fetch_via_rest` so ANY answer to a poll is a heartbeat (and its
+  HTTP status is kept: a 5xx streak reads "answering with errors", not
+  "working"); the SamplingClient's queue-state observer feeds the state; a 429
+  on submit (`holder._sample_backoff_until`) counts as an answer.
+- `_sample_live`: no deadline while tinker answers; a 404 → resubmit (×2);
+  `SILENT_S` = 180 s with no answer → retire the client stack (new ServiceClient
+  = new connections) and resubmit (×2), then fail "no answer from tinker". 180 s
+  is ~4 poll windows — a statement about the protocol, not about model speed, so
+  a warmup that keeps answering is never touched. If the switch or the hook
+  can't be installed (SDK internals moved), liveness is OFF and there is no
+  silence rule at all: without a signal, a wait must not be cut.
+- Stacks are held by object (`_acquire` … `_release`, client creation
+  included) and a retired one is closed `RETIRE_GRACE_S` after its last holder
+  lets go: it also serves other models' chats, which may be healthy, and the
+  server-side cancel of an abandoned sample must go out before the close.
+- Liveness is per sampling CLIENT: one dead request on a client whose other
+  requests are answered is not detected. The incident was a whole stack going
+  silent, which this covers.
+- `sample_stream` yields `{"tinker_status": …}` items; the route relays them as
+  `event: status` (caller stream) and bus `chat_status`. The browser's wait
+  readout adds "tinker: working" / "queued, short on capacity" / "answering with
+  errors (HTTP 5xx)" / "no answer from tinker for 1m20s" (from 75 s) /
+  "reconnected ×1" (stack rebuilds this chat triggered) / "resent ×1"; the CLI
+  prints the non-routine ones to stderr.
+
+Review: a fable reviewer (read-only, checked against the SDK source) caught the
+holder being built on the event loop, a stack closed under a client still being
+created, the fallback that would have cut every 3-min sample, and reconnects
+counted per silent sample; all fixed above, with tests for each.
+
+Verified: unit tests with fake SDK objects (`tests/test_tinker_liveness.py`), a
+live smoke against the real SDK (`tests/small-smokes/tinker_liveness_live.py` —
+the switch takes, a poll answer lands at 34.7 s of a 49 s sample with state
+`active`), and the readout looked at on an isolated instance with a scripted
+status sequence, wide and narrow.
+
+Not verified: a genuinely COLD model's warmup. Every candidate checkpoint was
+either deleted or warm (all answered in <15 s), so "a warmup keeps answering
+polls" rests on the protocol (the poll returns within ~30 s whatever the request
+is doing), not on an observed warmup. If a cold model ever shows "no answer from
+tinker" while it is in fact warming, this is the assumption that broke.

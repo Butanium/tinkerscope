@@ -175,11 +175,21 @@ for an N-sample draw. It cancels only that panel; the others keep generating and
 partial text already streamed is kept. The ⏹ in the sidebar icon row remains the
 all-panels stop.
 
-**"It's been spinning for minutes — is it stuck?"** Probably not. Nothing times a
-generation out: a cold tinker model (Inkling especially) can take minutes before its
-first sample. After 20 s with no sample the turn shows "waiting on the model · 1m40s"
-beside its Stop, counting up. If the count keeps going and you've waited long enough,
-Stop it; otherwise let it warm up.
+**"It's been spinning for minutes — is it stuck?"** Read the line beside its Stop.
+Nothing times a generation out: a cold tinker model (Inkling especially) can take
+minutes before its first sample. After 20 s with no sample the turn shows "waiting on
+the model · 1m40s", and after tinker's first answer it adds what tinker says — tinker
+re-confirms a live request every ~30 s:
+- **tinker: working** — it's generating or warming up. Let it run.
+- **tinker: queued, short on capacity** / **paused, rate limit** — tinker is overloaded
+  or throttling; it will start when it can.
+- **tinker: answering with errors (HTTP 502)** — tinker is up but failing; the SDK keeps
+  retrying.
+- **no answer from tinker for 1m20s** — the connection may be dead. After 3 min of
+  silence tinkerscope reconnects and resends by itself (**reconnected ×1**); after two
+  tries it gives up with an error.
+- **resent ×1** — tinker lost the request and tinkerscope sent it again.
+Hover the line for when tinker last answered. Stop whenever you've waited long enough.
 
 **"I'm reading the CoT, not the answers."** Sidebar → **Thinking blocks** → **Open**.
 Think folds normally start closed except on the latest turn; this starts every one of

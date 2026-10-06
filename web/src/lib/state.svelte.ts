@@ -18,7 +18,7 @@
 import { api, sse } from './api';
 import { FIRST_PANEL_ID } from './panel-id';
 import { mergeBusState } from './bus-scope';
-import type { PlaygroundState, SampleData, Panel } from './types';
+import type { PlaygroundState, SampleData, Panel, TinkerStatus } from './types';
 
 /** Live accumulation for one compare-panel's in-flight / finished chat run. */
 export type PanelRun = {
@@ -30,6 +30,8 @@ export type PanelRun = {
   error: string | null;
   /** Client clock at chat_start — drives the "waiting on the model" readout. */
   startedAt?: number;
+  /** Latest `chat_status` — what tinker says about the requests (same readout). */
+  tinker?: TinkerStatus;
 };
 
 export function emptyPanel(): PanelRun {
@@ -245,6 +247,25 @@ class LiveStore {
           startedAt: Date.now()
         };
         this.onChatStart?.(panel, data);
+        break;
+      }
+      case 'chat_status': {
+        const panel = (data?.panel ?? FIRST_PANEL_ID) as Panel;
+        const cur = this.panels[panel];
+        if (!cur || (cur.chat_id != null && data.chat_id != null && data.chat_id !== cur.chat_id)) break;
+        const ago = typeof data.heard_ago_s === 'number' ? data.heard_ago_s : null;
+        this.panels[panel] = {
+          ...cur,
+          tinker: {
+            state: data.state ?? null,
+            reason: data.reason ?? null,
+            // A reconnect resets the server's record; keep our last answer time.
+            heardAt: ago == null ? (cur.tinker?.heardAt ?? null) : Date.now() - ago * 1000,
+            http: ago == null ? (cur.tinker?.http ?? null) : (data.http ?? null),
+            reconnects: data.reconnects ?? 0,
+            resubmits: data.resubmits ?? 0
+          }
+        };
         break;
       }
       case 'delta': {

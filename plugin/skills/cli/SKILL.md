@@ -478,7 +478,12 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   can take minutes before its first sample, and the CLI just waits. So fire
   long sends in the background and watch them (bgwatch), or pass `--timeout N`
   on the sampling verb to cancel after N s — finished samples are kept and the
-  exit is non-zero with "--timeout Ns reached".
+  exit is non-zero with "--timeout Ns reached". A wait is not blind, though:
+  tinker re-confirms a live request every ~30 s, and anything noteworthy lands
+  on stderr as a dim `[tinker: …]` line — queued for capacity / rate limit, a
+  request tinker lost and the server resent, or a reconnect after 3 min of no
+  answer at all (the server's own recovery from a dead connection; after 2 it
+  fails the sample with "no answer from tinker"). No line = tinker is working.
 - **Sequential waves**: fire → `tinkpg wait [--timeout N]` → read → fire again
   (no sleep/check dances). Reading loop: `tinkpg samples --node <id> --this`
   isolates the one sample a qualified handle names; `samples --export-ancestry

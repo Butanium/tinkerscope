@@ -393,6 +393,18 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
 - `event: start` → `data: {chat_id}` — first event, once the chat is registered;
   the id to `POST /api/chat/{chat_id}/cancel` with (how `tinkpg --timeout` stops
   a chat). Consumers that don't cancel ignore it.
+- `event: status` → `data: {state, reason, heard_ago_s, http, reconnects, resubmits}` —
+  native tinker producers only (`run_id` / `base_model` / loose `sampler_path`),
+  zero or more times while samples are pending, whenever it CHANGES: what tinker
+  last said about this chat's requests (`tinker_sampler.py` "Liveness"). `state` =
+  tinker's queue state (`active` / `paused_capacity` / `paused_rate_limit`),
+  `throttled` for a 429 on submit, null until the first answer; `heard_ago_s` =
+  seconds since that answer (null = none yet); `http` = that answer's status
+  (408 = still working, ≥500 = tinker answering with errors); `reconnects` = how
+  many client-stack rebuilds THIS chat triggered after 180 s of silence (its
+  silent samples are resent on the fresh stack either way); `resubmits` = samples
+  resent because tinker 404'd them. Not a sample — consumers that don't show it
+  ignore it.
 - `event: delta` → `data: {sample_index, delta, kind}` — a streamed token chunk
   (`kind` = `"content"` | `"reasoning"`). Emitted **only for a token-streaming
   producer at n_samples==1**: `openrouter_model` and `vllm_model` (whose final
@@ -608,7 +620,7 @@ store for everyone. Which session a request drives:
 Ids match `^[A-Za-z0-9_.-]{1,64}$` (400 otherwise). A server started WITHOUT
 `--multi-user` maps every request to the one `default` session whatever it
 sends, so the wire is exactly the pre-sessions one. Event routing: a chat's own
-events (`chat_start` / `delta` / `sample` / `chat_done` / `chat_error`) go to the
+events (`chat_start` / `chat_status` / `delta` / `sample` / `chat_done` / `chat_error`) go to the
 bus of the session that fired it; the SHARED store's events (`ops`,
 `workspace_deleted`) go to **every** session (`state.broadcast_all`), so two
 people on one workspace converge while their sidebars stay their own. `chat_id`s
@@ -625,6 +637,7 @@ Event names = the message's `type`:
 - `snapshot` → `{type:"snapshot", state}` (full state, sent first on connect)
 - `patch` → `{type:"patch", event, state}` (state changed; e.g. event="chat_start"/"chat_done"/"patch")
 - `chat_start` → `{type:"chat_start", chat_id, panel, n, label, client_token?, workspace_id?, thread_system_prompt?}` (a chat began; clear that panel's samples. `n` = TOTAL expected samples — 2×n_samples on a `thinking:"both"` chat. `workspace_id` = the chat's home workspace, stamped at fire time — a browser uses it only for bucket render hygiene now (a foreign-workspace chat on a reused panel id must not linger as an overlay); nothing folds browser-side. `thread_system_prompt` = the chat's RESOLVED thread part)
+- `chat_status` → `{type:"chat_status", chat_id, panel, state, reason, heard_ago_s, http, reconnects, resubmits}` (the caller stream's `event: status`, relayed per panel — drives the "waiting on the model" readout. Session-scoped like every chat event; drop stragglers by `chat_id`. A reconnect resets the server's record, so `heard_ago_s` can return to null mid-chat: keep the last answer time you had)
 - `delta` → `{type:"delta", chat_id, panel, sample_index, delta, kind}` (streamed token chunk; only a token-streaming producer at n==1 — openrouter, NOT run_id / base_model / loose sampler_path which all render native — accumulate per chat_id/panel/sample_index, then the `sample` event finalizes)
 - `sample` → `{type:"sample", chat_id, panel, sample_index, content, raw_text, finish_reason, reasoning?, thinking?}` (`thinking` only on `thinking:"both"` chats — which half drew this sample)
 - `chat_done` → `{type:"chat_done", chat_id, panel, client_token?, workspace_id?, thread_system_prompt?, folded?, fold_rev?}` (`folded` + `fold_rev` appear iff a server-authored fold landed — the `[{sample_index, node_id}]` manifest (how the firing browser seeds its blob cache from the bucket) + the rev its `ops` event carried; see "Server-authored folds". The fold itself already arrived as that `ops` event — a terminal drives NO tree mutation in any client. A `parent_node`-less chat's terminal means nothing was persisted anywhere: no-placement fires are fully ephemeral (bucket render + caller stream only — the §9.4 accepted default; give a chat a home workspace if you want to keep it))

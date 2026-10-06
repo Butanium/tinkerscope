@@ -680,6 +680,28 @@ _RESET = "\033[0m"
 _TTY = sys.stdout.isatty()
 
 
+_TINKER_STATE_LINE = {
+    "paused_capacity": "tinker: queued, short on capacity",
+    "paused_rate_limit": "tinker: paused, rate limit",
+    "throttled": "tinker: throttling us (429)",
+}
+
+
+def _tinker_status_line(st: dict) -> str | None:
+    """A `status` SSE event as one line, or None when it is routine (tinker is
+    working on it): a queued state, a reconnect or a resubmit is worth a line."""
+    parts = []
+    if (st.get("http") or 0) >= 500:
+        parts.append(f"tinker: answering with errors (HTTP {st['http']})")
+    elif st.get("state") in _TINKER_STATE_LINE:
+        parts.append(_TINKER_STATE_LINE[st["state"]])
+    if st.get("reconnects"):
+        parts.append(f"no answer from tinker — reconnected ×{st['reconnects']}")
+    if st.get("resubmits"):
+        parts.append(f"tinker lost a request — resent ×{st['resubmits']}")
+    return " · ".join(parts) or None
+
+
 def _dim(s: str) -> str:
     """Wrap reasoning text dim on a real terminal; pass through when piped."""
     return f"{_DIM}{s}{_RESET}" if _TTY else s
@@ -879,6 +901,7 @@ def _stream_chat(
     hdr_printed: set[int] = set()  # indices we printed a "--- sample N ---" header for
     last_kind: dict[int, str] = {}  # idx -> last delta kind, to insert separators
     n_ok = 0  # completed (non-error) samples — the fold-failure check needs the count
+    last_status: list[str | None] = [None]  # last tinker-status line printed (stderr)
 
     # --timeout: on expiry, cancel server-side by chat_id (from the `start` event);
     # the server then ends the stream through its normal terminal, keeping any
@@ -966,6 +989,14 @@ def _stream_chat(
                             emit_inline(piece)
                         last_kind[idx] = kind
                         streamed.add(idx)
+                        continue
+                    if ev.event == "status":
+                        # What tinker says about the requests (server "Liveness"). Only
+                        # the noteworthy part, on stderr: stdout stays the samples.
+                        line = _tinker_status_line(json.loads(ev.data) if ev.data else {})
+                        if line and line != last_status[0] and not json_out:
+                            print(_dim(f"[{line}]"), file=sys.stderr, flush=True)
+                        last_status[0] = line
                         continue
                     if ev.event != "message" or not ev.data:
                         continue

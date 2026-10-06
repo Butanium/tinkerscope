@@ -512,6 +512,8 @@ export type ViewMessage = {
   running?: boolean;
   /** Live bucket rows only: when the chat started (client clock). */
   startedAt?: number;
+  /** Live bucket rows only: what tinker last said about the chat's requests. */
+  tinker?: TinkerStatus;
   nodeId?: string | null;
   sib?: { index: number; count: number };
   sampleNodeIds?: string[];
@@ -525,4 +527,19 @@ export type ViewMessage = {
   /** Non-content status row (e.g. 'stopped' after a 0-sample cancel) — rendered
    *  as a muted strip, not an assistant message; all other fields ignored. */
   notice?: string;
+};
+
+/** What tinker last said about a running chat's requests — the bus `chat_status`
+ *  event (tinker_sampler.py "Liveness"). `state` is tinker's queue state
+ *  (active / paused_capacity / paused_rate_limit), `throttled` for a 429 on
+ *  submit, null when the answer carried none. `heardAt` = client clock of the
+ *  last answer, null until the first one. */
+export type TinkerStatus = {
+  state: string | null;
+  reason: string | null;
+  heardAt: number | null;
+  /** HTTP status of tinker's last answer (408 = still working); ≥500 = erroring. */
+  http: number | null;
+  reconnects: number;
+  resubmits: number;
 };

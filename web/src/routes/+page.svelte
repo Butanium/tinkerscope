@@ -2644,7 +2644,7 @@
                 <div class="message" style="background: {s.thinking ? 'var(--color-surface-alt)' : 'var(--color-assistant-bg)'};">
                   <div class="pending-head">
                     <div class="message-role">{s.thinking ? 'thinking' : 'assistant'}</div>
-                    <WaitTimer since={run.startedAt} />
+                    <WaitTimer since={run.startedAt} tinker={run.tinker} />
                     <button
                       class="btn-stop-turn"
                       data-tooltip="Stop this panel — keeps what already streamed"

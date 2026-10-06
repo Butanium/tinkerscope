@@ -776,7 +776,7 @@
                  how far along it is, so the button reads as "stop at 4/10" rather
                  than a mode. The sidebar's stop stays the all-panels blunt one. -->
             {#if msg.running && completedCount === 0}
-              <WaitTimer since={msg.startedAt} />
+              <WaitTimer since={msg.startedAt} tinker={msg.tinker} />
             {/if}
             {#if msg.running && onStop && !readOnly}
               {@render stopBtn()}

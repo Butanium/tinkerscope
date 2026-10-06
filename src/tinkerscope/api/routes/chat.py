@@ -417,8 +417,9 @@ async def _dual(
     async def pump(it: AsyncIterator[dict], offset: int, thinking: bool) -> None:
         try:
             async for item in it:
-                item["sample_index"] = item.get("sample_index", 0) + offset
-                item["thinking"] = thinking
+                if "tinker_status" not in item:
+                    item["sample_index"] = item.get("sample_index", 0) + offset
+                    item["thinking"] = thinking
                 await queue.put(item)
             await queue.put(None)  # this batch exhausted
         except Exception as e:  # transported, not swallowed — re-raised by the consumer
@@ -1006,6 +1007,14 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
                     prod_error = payload
                     continue  # keep draining whatever the producer already queued
                 item = payload
+                if "tinker_status" in item:
+                    # What tinker last said about this chat's requests (tinker_sampler
+                    # "Liveness") — the browser's wait readout, not a sample.
+                    yield {"event": "status", "data": json.dumps(item["tinker_status"])}
+                    if req.broadcast:
+                        await bus.broadcast("chat_status", {"chat_id": chat_id, "panel": req.panel,
+                                                            **item["tinker_status"]})
+                    continue
                 if "delta" in item:
                     item.setdefault("sample_index", 0)
                     yield {"event": "delta", "data": json.dumps(item)}

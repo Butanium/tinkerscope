@@ -234,6 +234,7 @@ export function sse(
     'ops',
     'workspace_deleted',
     'chat_start',
+    'chat_status',
     'delta',
     'sample',
     'chat_done',

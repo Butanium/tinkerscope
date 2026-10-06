@@ -31,7 +31,8 @@ export function bucketTurn(run: PanelRun, prefill?: string): ViewMessage {
       samples: run.samples,
       totalSamples: run.n,
       running: run.running,
-      startedAt: run.startedAt
+      startedAt: run.startedAt,
+      tinker: run.tinker
     };
   }
   const one = filled[0];

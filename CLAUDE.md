@@ -109,7 +109,11 @@ and in this file's reference section; HANDOFF.md itself is retired.
   streaming + cancel-on-disconnect): `src/tinkerscope/api/tinker_sampler.py` —
   docstrings are thorough and current. tinkerscope calls the **tinker SDK
   directly** now; the old latteries path is gone (its renderer-cache and
-  thinking-parse *lessons* carried over into this file).
+  thinking-parse *lessons* carried over into this file). **Sample liveness**
+  (section "Liveness" there): sampling is forced into the SDK's per-request
+  polling mode so tinker's ~30 s answers are a heartbeat; silence (not a long
+  wait) triggers reconnect + resend. It touches private SDK surface — re-run
+  `tests/small-smokes/tinker_liveness_live.py` after any tinker SDK upgrade.
 - **vLLM backend** (`src/tinkerscope/api/vllm_sampler.py` — module docstring): a
   self-hosted OpenAI-compatible server (`$TINKERSCOPE_VLLM_URL` / `--vllm-url`)
   whose models join the picker as `vllm:<name>` (⚙) and sample NATIVE-shaped —

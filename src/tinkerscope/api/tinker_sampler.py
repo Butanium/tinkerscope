@@ -12,6 +12,12 @@ Per-sample streaming: a chat request for n samples fans out n single-sample
 progressive fill + response-distribution chart). The renderer cache is keyed
 by (base_model, renderer_name), so toggling thinking mid-session picks the
 right renderer without the latteries cache-clear workaround.
+
+Liveness (see "Liveness" below): a sample call has no deadline, but it is never
+a black box either. Sampling runs in the SDK's per-request polling mode, so
+tinker answers each in-flight request every ~30 s; those answers are what the
+browser's wait readout shows, and a long SILENCE (not a long wait) is what
+triggers a reconnect + resubmit.
 """
 from __future__ import annotations
 
@@ -20,6 +26,8 @@ import functools
 import inspect
 import logging
 import re
+import time
+import weakref
 from typing import Any, AsyncIterator
 
 from .raw_view import format_request_response
@@ -476,6 +484,139 @@ async def _token_logprobs(
 
 
 # ---------------------------------------------------------------------------
+# Liveness: is tinker still answering for a sample, or is the connection dead?
+# ---------------------------------------------------------------------------
+# The SDK has two ways to wait for a sample. The server turns on the session
+# mode (`sample_use_retrieve_futures`): one long-poll per sampling session that
+# only ever reports FINISHED requests. It never asks about an individual
+# request, so a request tinker lost, a completion the poller missed and a dead
+# connection all look exactly like a slow sample — that is how :8767 sat on
+# "waiting on the model" for 40+ min on 2026-10-05 while the same checkpoints
+# answered a fresh process in 20 s. The other mode, which we force
+# (`_poll_each_request`), long-polls EACH request: tinker answers within ~30 s
+# with a 408 + queue state while it works, the result when done, and a 404
+# ("Promise not found") for a request it doesn't know. So:
+#   - any answer to a poll = tinker is alive for this sample (`_Liveness.heard`);
+#     a cold warmup keeps answering, so it is never mistaken for a hang;
+#   - the queue state (active / paused_capacity / paused_rate_limit) goes to the
+#     browser's wait readout;
+#   - a 404 → resubmit; silence for SILENT_S → fresh client stack + resubmit.
+# SILENT_S is ~4 poll windows (the SDK gives up on a poll at 45 s), i.e. a claim
+# about the protocol, not a guess about how fast a model is. Liveness is per
+# sampling CLIENT, not per request: one dead request on a client whose other
+# requests are answered is not detected — the incident that motivated this was
+# a whole stack going silent. If the SDK internals moved and the switch or the
+# hook can't be installed, liveness is OFF: no silence rule at all (a wait
+# without a signal must not be cut short), just the old unbounded wait.
+SILENT_S = 180.0
+MAX_RECONNECTS = 2
+MAX_LOST_RESUBMITS = 2
+STATUS_TICK_S = 5.0
+# A retired stack is closed this long after its last sample lets go, so the
+# server-side cancel of a sample we just abandoned still goes out first.
+RETIRE_GRACE_S = 30.0
+
+
+class _Liveness:
+    """What tinker last said for the requests in flight on ONE sampling client
+    (shared by every chat on that model). `heard` is time.monotonic()."""
+
+    def __init__(self) -> None:
+        self.heard: float = 0.0
+        self.state: str | None = None
+        self.reason: str | None = None
+        self.backoff_seen: float | None = None
+        # HTTP status of the last poll answer (408 = "still working"); a 5xx
+        # streak is tinker answering with errors, which is not silence.
+        self.last_code: int | None = None
+
+
+# SamplingClient → its _Liveness, for the poll hook (which only sees the SDK future).
+_LIVENESS: "weakref.WeakKeyDictionary[Any, _Liveness]" = weakref.WeakKeyDictionary()
+
+
+def _poll_each_request(service_client: Any) -> bool:
+    """Switch this ServiceClient's sampling to per-request polling (see above).
+    Must run before its first sampling client is created. Private SDK surface:
+    if it moves, say so and keep sampling (just without the liveness signal)."""
+    holder = getattr(service_client, "holder", None)
+    cfg = getattr(holder, "_client_config", None)
+    if cfg is None or "sample_use_retrieve_futures" not in getattr(type(cfg), "model_fields", {}):
+        log.warning("tinker SDK internals moved: sampling stays in session-poll mode — "
+                    "liveness off (no tinker status, no reconnect on a dead connection)")
+        return False
+    holder._client_config = cfg.model_copy(update={"sample_use_retrieve_futures": False})
+    return True
+
+
+def _install_poll_hook() -> bool:
+    """Record every answer tinker gives to a request poll as a heartbeat on the
+    owning client's _Liveness. A poll that got NO response (status 0: refused,
+    timed out) is not an answer — that is exactly the silence we watch for."""
+    try:
+        from tinker.lib.api_future_impl import _APIFuture, _TransportError
+    except ImportError:
+        return False
+    orig = getattr(_APIFuture, "_fetch_via_rest", None)
+    if orig is None:
+        return False
+    if getattr(orig, "_tinkerscope_hook", False):
+        return True
+
+    async def _fetch_via_rest(self: Any, *args: Any, **kwargs: Any) -> Any:
+        out = await orig(self, *args, **kwargs)
+        if not (isinstance(out, _TransportError) and out.status_code == 0):
+            observer = getattr(self, "_queue_state_observer", None)
+            live = _LIVENESS.get(observer) if observer is not None else None
+            if live is not None:
+                live.heard = time.monotonic()
+                live.last_code = out.status_code if isinstance(out, _TransportError) else 200
+        return out
+
+    _fetch_via_rest._tinkerscope_hook = True  # type: ignore[attr-defined]
+    _APIFuture._fetch_via_rest = _fetch_via_rest
+    return True
+
+
+def _watch(client: Any) -> _Liveness:
+    """Attach a _Liveness to a fresh sampling client: the poll hook feeds
+    `heard`, the SDK's queue-state observer feeds `state` (and still logs)."""
+    live = _Liveness()
+    _LIVENESS[client] = live
+    sdk_observer = client.on_queue_state_change
+
+    def observe(queue_state: Any, reason: str | None) -> None:
+        live.heard = time.monotonic()
+        live.state = getattr(queue_state, "value", str(queue_state))
+        live.reason = reason
+        sdk_observer(queue_state, reason)
+
+    client.on_queue_state_change = observe
+    return live
+
+
+def _note_backoff(client: Any, live: _Liveness) -> None:
+    """A 429 on submit is tinker answering too ("slow down"): the SDK records it
+    only as a holder-wide backoff deadline, so read that as a heartbeat."""
+    until = getattr(getattr(client, "holder", None), "_sample_backoff_until", None)
+    # The deadline is set to 1–5 s after the 429 and never cleared, so only a
+    # recent one is news (an old one would read as a fresh "throttled").
+    if until is not None and until != live.backoff_seen and until > time.monotonic() - 2 * STATUS_TICK_S:
+        live.backoff_seen = until
+        live.heard = time.monotonic()
+        live.state, live.reason = "throttled", None
+
+
+def _is_lost_request(e: Exception) -> bool:
+    """The per-request poll's 404: tinker has no promise for this request id."""
+    return isinstance(e, ValueError) and "Promise not found" in str(e)
+
+
+class _Silent(Exception):
+    pass
+
+
+# ---------------------------------------------------------------------------
 # Sampler manager: caches ServiceClient, sampling clients, renderers, tokenizers
 # ---------------------------------------------------------------------------
 def _tinker_detail(e: Exception) -> str:
@@ -497,37 +638,167 @@ class SamplerManager:
         self._renderers: dict[tuple[str, str], Any] = {}
         self._tokenizers: dict[str, Any] = {}
         self._base_models: dict[str, str] = {}
+        self._liveness: dict[str, _Liveness] = {}
+        # A reconnect retires the whole client stack (ServiceClient + its
+        # sampling clients = its connections). A retired stack is closed only
+        # once nothing HOLDS it (`_acquire` … `_release`, client creation
+        # included) — it also serves other models' chats, which may be healthy.
+        # Keyed by the stack object itself, so a sample can never be counted
+        # against a stack it isn't using.
+        self._inflight: dict[Any, int] = {}
+        self._retired: set[Any] = set()
+        self._liveness_on = False
 
     async def _service(self) -> Any:
         async with self._lock:
             if self._service_client is None:
                 import tinker
 
-                # Sync SDK constructor — run off the event loop (deadlock-safe).
-                self._service_client = await _bounded(
-                    asyncio.to_thread(tinker.ServiceClient), CLIENT_TIMEOUT_S, "connecting"
-                )
+                def connect() -> tuple[Any, bool]:
+                    # `.holder` is built lazily on first access — config fetch,
+                    # auth, session: blocking round-trips — so touch it HERE, in
+                    # the worker thread, never on the event loop.
+                    sc = tinker.ServiceClient()
+                    return sc, _poll_each_request(sc)
+
+                sc, polled = await _bounded(asyncio.to_thread(connect), CLIENT_TIMEOUT_S, "connecting")
+                self._liveness_on = polled and _install_poll_hook()
+                if polled and not self._liveness_on:
+                    log.warning("tinker SDK internals moved: no poll hook — liveness off "
+                                "(no reconnect on a dead connection)")
+                self._service_client = sc
             return self._service_client
 
-    async def _sampling_client(self, base_model: str | None, sampler_path: str | None) -> Any:
+    def _hold(self, sc: Any) -> None:
+        self._inflight[sc] = self._inflight.get(sc, 0) + 1
+
+    def _release(self, sc: Any) -> None:
+        left = self._inflight.get(sc, 0) - 1
+        if left > 0:
+            self._inflight[sc] = left
+            return
+        self._inflight.pop(sc, None)
+        if sc in self._retired:
+            self._retired.discard(sc)
+            asyncio.get_running_loop().call_later(RETIRE_GRACE_S, self._close_stack, sc)
+
+    @staticmethod
+    def _close_stack(sc: Any) -> None:
+        holder = getattr(sc, "holder", None)
+        if holder is not None:
+            try:
+                holder.close()  # non-blocking: schedules cleanup on the SDK loop
+            except Exception:
+                log.exception("closing a retired tinker client stack failed")
+
+    async def _reconnect(self, sc: Any, why: str) -> bool:
+        """Retire stack `sc` so the next call opens fresh connections. Only the
+        first caller per stack acts (n samples of a chat going silent together
+        must not rebuild n times); returns whether this call did. The caller
+        holds `sc`, so it is closed by `_release`, never here."""
+        async with self._lock:
+            if sc is not self._service_client:
+                return False
+            self._service_client = None
+            self._sampling_clients.clear()
+            self._liveness.clear()
+            self._retired.add(sc)
+        log.warning("tinker: %s — reconnecting with a fresh client stack", why)
+        return True
+
+    async def _acquire(self, base_model: str | None, sampler_path: str | None) -> tuple[Any, Any]:
+        """The sampling client for this model plus the stack it belongs to,
+        with the stack HELD — the caller must `_release(stack)`. A client whose
+        stack was retired while it was being created is dropped, not handed out."""
         key = sampler_path or base_model
-        async with self._lock:
-            if key in self._sampling_clients:
-                return self._sampling_clients[key]
-        sc = await self._service()
-        # create_sampling_client is sync — offload so it can't block the loop.
-        # base_model may be None for a loose sampler_path: the server resolves it
-        # (see probe_sampler_path), and the client samples fine either way.
-        if sampler_path:
-            create = functools.partial(sc.create_sampling_client, model_path=sampler_path, base_model=base_model)
-        else:
-            create = functools.partial(sc.create_sampling_client, base_model=base_model)
-        client = await _bounded(
-            asyncio.to_thread(create), CLIENT_TIMEOUT_S, f"creating a sampling client for {key}"
-        )
-        async with self._lock:
-            self._sampling_clients[key] = client
+        while True:
+            async with self._lock:
+                sc = self._service_client
+                client = self._sampling_clients.get(key) if sc is not None else None
+                if client is not None:
+                    self._hold(sc)
+                    return client, sc
+            sc = await self._service()
+            self._hold(sc)  # no await since _service returned: sc is current here
+            try:
+                # create_sampling_client is sync — offload so it can't block the loop.
+                # base_model may be None for a loose sampler_path: the server resolves
+                # it (see probe_sampler_path), and the client samples fine either way.
+                if sampler_path:
+                    create = functools.partial(sc.create_sampling_client, model_path=sampler_path, base_model=base_model)
+                else:
+                    create = functools.partial(sc.create_sampling_client, base_model=base_model)
+                client = await _bounded(
+                    asyncio.to_thread(create), CLIENT_TIMEOUT_S, f"creating a sampling client for {key}"
+                )
+            except BaseException:
+                self._release(sc)
+                raise
+            live = _watch(client)
+            async with self._lock:
+                if self._service_client is sc:
+                    self._sampling_clients[key] = client
+                    self._liveness[key] = live
+                    return client, sc
+            self._release(sc)  # retired meanwhile — go again on the fresh stack
+
+    async def _sampling_client(self, base_model: str | None, sampler_path: str | None) -> Any:
+        client, sc = await self._acquire(base_model, sampler_path)
+        self._release(sc)
         return client
+
+    def liveness(self, key: str) -> _Liveness | None:
+        return self._liveness.get(key)
+
+    async def _sample_live(
+        self, base_model: str | None, sampler_path: str | None, report: Any,
+        track: Any = None, **sample_kw: Any,
+    ) -> Any:
+        """`sample_async` under the liveness rules (module section "Liveness"):
+        no deadline while tinker keeps answering; a 404'd request is resubmitted;
+        SILENT_S without any answer retires the client stack and resubmits on a
+        fresh one. `report(kind)` hears each "resubmit" / "reconnect" (a rebuild
+        THIS sample triggered) for the wait readout; `track(live)` is handed the
+        _Liveness of the client each attempt runs on."""
+        key = sampler_path or base_model
+        silences = lost = 0
+        while True:
+            client, sc = await self._acquire(base_model, sampler_path)
+            live = _LIVENESS.get(client) or _Liveness()
+            if track is not None:
+                track(live)
+            call = asyncio.ensure_future(client.sample_async(**sample_kw))
+            started = time.monotonic()
+            try:
+                if not self._liveness_on:
+                    return await call  # no signal, so no silence rule
+                while not call.done():
+                    await asyncio.wait({call}, timeout=STATUS_TICK_S)
+                    if call.done():
+                        break
+                    _note_backoff(client, live)
+                    if time.monotonic() - max(started, live.heard) > SILENT_S:
+                        raise _Silent()
+                return call.result()
+            except _Silent:
+                if silences >= MAX_RECONNECTS:
+                    raise RuntimeError(
+                        f"no answer from tinker for {SILENT_S:.0f}s on {key}, even after "
+                        f"{MAX_RECONNECTS} fresh connections — tinker or the network is down"
+                    ) from None
+                silences += 1
+                if await self._reconnect(sc, f"no answer for {SILENT_S:.0f}s on {key}"):
+                    report("reconnect")
+            except Exception as e:
+                if not _is_lost_request(e) or lost >= MAX_LOST_RESUBMITS:
+                    raise
+                lost += 1
+                report("resubmit")
+                log.warning("tinker lost a request on %s (%s) — resubmitting", key, e)
+            finally:
+                if not call.done():
+                    call.cancel()  # → the SDK's server-side cancel for a sample
+                self._release(sc)
 
     async def probe_sampler_path(self, sampler_path: str) -> dict:
         """Can tinker sample this loose sampler path, and against which base model?
@@ -630,6 +901,11 @@ class SamplerManager:
         is yielded; pass logprobs=False to skip it. `think` sets the thinking
         effort for renderers that take one (tml_v0 / Inkling).
 
+        Interleaved with the samples: ``{"tinker_status": {...}}`` items — what
+        tinker last said about this chat's requests (state / reason /
+        heard_ago_s / reconnects / resubmits; see "Liveness"), yielded whenever it
+        changes. Not a sample: consumers route it to the wait readout.
+
         `continue_tokens` (the LOOM): token ids appended VERBATIM after the
         rendered prompt — a stored sample's generated prefix plus a picked
         alternative, so the model continues from that exact token state with no
@@ -647,7 +923,8 @@ class SamplerManager:
         import tinker
         from tinker import types as tt
 
-        client = await self._sampling_client(base_model, sampler_path)
+        # Up front so a bad path fails the chat once, not as n per-sample errors.
+        await self._sampling_client(base_model, sampler_path)
         # First-load of a tokenizer/renderer (transformers) is CPU-heavy; offload
         # so it doesn't stall the event loop for other in-flight requests.
         renderer = await asyncio.to_thread(self._renderer, base_model, renderer_name)
@@ -728,9 +1005,27 @@ class SamplerManager:
             },
         }
 
+        events = {"reconnect": 0, "resubmit": 0}
+        # The _Liveness our samples run on. Not `self.liveness(key)`: another
+        # chat's reconnect clears that map while our samples still run on the
+        # old stack's client.
+        tracked: list[_Liveness | None] = [None]
+
+        def report(kind: str) -> None:
+            events[kind] += 1
+
+        def track(live: _Liveness) -> None:
+            tracked[0] = live
+
         async def one(idx: int) -> dict:
             try:
-                resp = await client.sample_async(prompt=model_input, num_samples=1, sampling_params=params)
+                resp = await self._sample_live(
+                    base_model, sampler_path, report, track,
+                    prompt=model_input, num_samples=1, sampling_params=params,
+                )
+                # Re-score on the CURRENT client: a reconnect may have retired the
+                # stack that produced this sample.
+                client = await self._sampling_client(base_model, sampler_path)
                 seq = resp.sequences[0]
                 to_parse = (region_ids + seq.tokens) if region_ids is not None else seq.tokens
                 parsed, termination = renderer.parse_response(to_parse)
@@ -782,14 +1077,50 @@ class SamplerManager:
             except Exception as e:  # surface per-sample failure, keep the rest
                 return {"sample_index": idx, "error": f"{type(e).__name__}: {e}"}
 
+        stream_started = time.monotonic()
+        last_status: dict | None = None
+
+        def status() -> dict:
+            live = tracked[0]
+            heard = live is not None and live.heard >= stream_started
+            return {
+                "state": live.state if heard else None,
+                "reason": live.reason if heard else None,
+                "heard_ago_s": round(time.monotonic() - live.heard, 1) if heard else None,
+                "http": live.last_code if heard else None,
+                "reconnects": events["reconnect"],
+                "resubmits": events["resubmit"],
+            }
+
+        def changed(cur: dict, prev: dict | None) -> bool:
+            # A fresh heartbeat is a change (heard_ago_s dropped); mere ageing isn't —
+            # the browser ages the readout itself.
+            if prev is None:
+                return cur["heard_ago_s"] is not None or cur["reconnects"] or cur["resubmits"]
+            if cur["heard_ago_s"] is not None and (
+                prev["heard_ago_s"] is None or cur["heard_ago_s"] < prev["heard_ago_s"] - 1
+            ):
+                return True
+            return any(cur[k] != prev[k] for k in ("state", "reason", "http", "reconnects", "resubmits"))
+
         tasks = [asyncio.create_task(one(i)) for i in range(n)]
         try:
-            for fut in asyncio.as_completed(tasks):
-                yield await fut
+            pending = set(tasks)
+            while pending:
+                done, pending = await asyncio.wait(
+                    pending, timeout=STATUS_TICK_S, return_when=asyncio.FIRST_COMPLETED
+                )
+                for t in done:
+                    yield t.result()
+                if pending:
+                    cur = status()
+                    if changed(cur, last_status):
+                        yield {"tinker_status": cur}
+                    last_status = cur
         finally:
             # Consumer gone (CLI Ctrl-C / browser tab closed): cancel in-flight
-            # samples so we stop waiting on output nobody reads. The remote call runs
-            # on: the SDK drives it on its own loop, so this only stops us listening.
+            # samples so we stop waiting on output nobody reads. The cancel reaches
+            # the SDK's task on its own loop, which asks tinker to drop the sample.
             for t in tasks:
                 if not t.done():
                     t.cancel()

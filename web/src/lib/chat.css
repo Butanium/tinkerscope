@@ -44,7 +44,7 @@
 .samples-progress-bar { height: 6px; background: var(--color-surface-alt); border-radius: 3px; overflow: hidden; margin-bottom: var(--space-2); }
 .samples-progress-fill { height: 100%; background: var(--color-accent); border-radius: 3px; transition: width 0.2s ease; }
 .samples-progress-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
-.samples-progress-text { font-size: 0.78rem; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.samples-progress-text { flex-shrink: 0; white-space: nowrap; font-size: 0.78rem; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 
 /* ── Per-panel stop (streaming turn) ──────────────────────────────────
    Global, not scoped: it sits on ChatMessage's rows AND on +page's

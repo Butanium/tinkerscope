@@ -8,6 +8,30 @@ WIRE contract, not on the UI (`docs/RELEASING.md`).
 `docs/MIGRATIONS.md` covers every release that moved the wire or on-disk shape;
 `ENGINEERING_LOGS.md` carries the dated narrative behind the decisions.
 
+## [1.4.0] — 2026-10-05
+
+A waiting sample is no longer a black box. Additive on the wire (one SSE event,
+one bus event); the on-disk shape is untouched.
+
+### Added
+
+- **What tinker says, next to "waiting on the model"**: "tinker: working",
+  "queued, short on capacity", "answering with errors (HTTP 502)", "no answer from
+  tinker for 1m20s", "reconnected ×1", "resent ×1". Tinker re-confirms a live request every ~30 s, so a slow warmup
+  and a dead connection no longer look the same. `tinkpg` prints the
+  non-routine ones to stderr. Wire: `event: status` on the caller's `/api/chat`
+  stream, `chat_status` on the bus.
+
+### Fixed
+
+- **A dead connection to tinker no longer hangs every later sample.** Sampling
+  now polls each request (the SDK's per-request mode instead of the server-chosen
+  session mode, which only ever reports finished requests). After 3 min with no
+  answer at all, tinkerscope opens fresh connections and resends (up to twice,
+  then the sample fails with "no answer from tinker"); a request tinker reports
+  as unknown (404) is resent. Found on a 4-day-old instance whose every sample
+  hung for 40+ min while the same checkpoints answered a fresh process in 20 s.
+
 ## [1.3.0] — 2026-10-01
 
 A run of CLI conveniences and sampling-fidelity fixes. Everything is additive on
