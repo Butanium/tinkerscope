@@ -2663,7 +2663,10 @@ Something kept writing ~80 B every 10 s on them (unidentified). A THIRD
 connection from the same process to the same IP — the session heartbeat — was
 healthy throughout, so it was per-connection, not the network path. The SDK's
 connection pool only ever replaces a client on a bare 400, so every new request
-kept landing on the dead connections.
+kept landing on the dead connections. They had closed by ~18:10 PDT, yet a fresh
+90 s probe through :8767 still hung — so they may not be the whole story (a
+session long-poll stuck on one would look the same). A new ServiceClient
+recovers either way, which is what the fix does.
 
 Why it was invisible: as of SDK 0.30.0 the server turns on
 `ClientConfigResponse.sample_use_retrieve_futures`, which makes a sample wait on
@@ -2717,6 +2720,11 @@ live smoke against the real SDK (`tests/small-smokes/tinker_liveness_live.py` �
 the switch takes, a poll answer lands at 34.7 s of a 49 s sample with state
 `active`), and the readout looked at on an isolated instance with a scripted
 status sequence, wide and narrow.
+
+Release sweep (v1.4.0, with the sidebar fold): 19/20 — `browser_ops_convergence`
+failed once on its contended two-tab click (server canonical stayed `P1-s0`: neither
+click had landed in the 1.5 s settle) and passed 2/2 run alone. Timing flake, not
+these changes; noted in case it recurs.
 
 Not verified: a genuinely COLD model's warmup. Every candidate checkpoint was
 either deleted or warm (all answered in <15 s), so "a warmup keeps answering

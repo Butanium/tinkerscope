@@ -10,8 +10,8 @@ WIRE contract, not on the UI (`docs/RELEASING.md`).
 
 ## [1.4.0] — 2026-10-05
 
-A waiting sample is no longer a black box. Additive on the wire (one SSE event,
-one bus event); the on-disk shape is untouched.
+A waiting sample is no longer a black box, and the sidebar folds. Additive on the
+wire (one SSE event, one bus event); the on-disk shape is untouched.
 
 ### Added
 
@@ -21,6 +21,9 @@ one bus event); the on-disk shape is untouched.
   and a dead connection no longer look the same. `tinkpg` prints the
   non-routine ones to stderr. Wire: `event: status` on the caller's `/api/chat`
   stream, `chat_status` on the bus.
+
+- **The sidebar folds away**: « beside Stop collapses it to a thin rail (» brings
+  it back, Stop stays reachable), and the fold is remembered across reloads.
 
 ### Fixed
 

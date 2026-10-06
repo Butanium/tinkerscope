@@ -73,7 +73,7 @@ shape does this version mark" index.
 
 | version | what it marks |
 |---|---|
-| `v1.4.0` | sample liveness: per-request polling, the tinker status beside "waiting on the model", reconnect + resend on 3 min of silence or a lost request. Additive: one SSE event (`status`), one bus event (`chat_status`); disk untouched. |
+| `v1.4.0` | sample liveness: per-request polling, the tinker status beside "waiting on the model", reconnect + resend on 3 min of silence or a lost request; a foldable sidebar. Additive: one SSE event (`status`), one bus event (`chat_status`); disk untouched. |
 | `v1.3.0` | CLI conveniences + sampling fidelity: `--timeout` on the sampling verbs (the tinker sample call itself is unbounded again), `tinkpg open` for any model selector, `battery --ws/--new-ws`, `pack export --highlights`, `running_chats` on the bus, the waiting-on-the-model readout. Additive: one SSE event (`start`), one state field; disk untouched. |
 | `v1.2.0` | vLLM as a native model kind (`vllm:<name>`) + `serve --multi-user` (one state bus per session). Additive: disk untouched, and a single-user instance's wire is byte-identical to 1.1.0. |
 | `v1.1.0` | **server-authoritative trees** — all mutation as ops on `POST /api/workspaces/{id}/ops` with a per-workspace `rev`, chats folded server-side, the bus transcript echo removed. WIRE moved (old browser bundles must reload); one CLI app (`tinkerscope` / `tinkpg`). |
