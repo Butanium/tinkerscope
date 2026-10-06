@@ -50,7 +50,6 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 ### Models: discovery, availability, renderers
 
 - [Sample liveness: the two open ends](liveness-open-ends.md) — a cold warmup answering polls is UNTESTED, the wedge's root cause is half-known (#151), liveness is per client not per request
-
 - [Availability auto-refresh](availability-auto-refresh.md) — the servable set only refetches on the manual button; a TTL or a send-404 hook would keep grey/⚠ honest
 - [Continuous thinking-effort slider for tml models](tml-effort-slider.md) — tml_v0 has an `effort` dial in [0, 1); we map it to a binary {0.0, 0.9}
 - [Gate the whole-conversation continue path by CAPABILITY](continue-gate-by-capability.md) — `renderer_name.startswith("tml")` is brittle; YAGNI until a 2nd such renderer
