@@ -8,6 +8,16 @@ WIRE contract, not on the UI (`docs/RELEASING.md`).
 `docs/MIGRATIONS.md` covers every release that moved the wire or on-disk shape;
 `ENGINEERING_LOGS.md` carries the dated narrative behind the decisions.
 
+## [1.4.1] — 2026-10-05
+
+### Fixed
+
+- **A tab no longer stays "offline" after a server restart.** Behind an `ssh -L`
+  tunnel, the browser gave up reconnecting the live stream after the restart's
+  first failed retry, so every restart meant a manual refresh. The page now
+  reconnects by itself (a fresh stream every 5 s while offline), and also
+  reopens a stream that went silent (e.g. after sleep/wake).
+
 ## [1.4.0] — 2026-10-05
 
 A waiting sample is no longer a black box, and the sidebar folds. Additive on the

@@ -2731,3 +2731,24 @@ either deleted or warm (all answered in <15 s), so "a warmup keeps answering
 polls" rests on the protocol (the poll returns within ~30 s whatever the request
 is doing), not on an observed warmup. If a cold model ever shows "no answer from
 tinker" while it is in fact warming, this is the assumption that broke.
+
+### 2026-10-05 — Reconnecting the live stream is the page's job, not the browser's
+
+Every :8767 restart left Clément's tab "offline" until a refresh. In headless
+Chrome the browser's own EventSource retry recovers from a direct restart and
+through an `ssh -L` lookalike, but NOT through a forwarder answering 502 during
+the downtime (readyState goes CLOSED and is never retried). And his real browser
+behind `ssh -L` made ZERO reconnect attempts: a per-second `ss` log of
+:8767 across a restart showed the SSE socket close and nothing come back in 85 s,
+even in a fresh private window, while `/api/health` loaded fine through the same
+tunnel. Whatever that browser does with the refused retry, it stops.
+
+So `LiveStore` (`state.svelte.ts`) no longer trusts the browser: while
+disconnected it opens a fresh EventSource every 5 s until a snapshot lands, and a
+connected stream silent past two 15 s server pings is reopened (half-open socket
+after sleep/wake — previously the watchdog only flipped the dot to offline and
+nothing ever reconnected). Headless: back to "live" within 5 s of the server's
+return in all three setups. Verified live on :8767: server back at 18:56:49, the
+private tab's stream re-established and the bus re-primed by 18:56:50. Which
+browser it was is not recorded; the fix doesn't depend on it.
+

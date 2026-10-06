@@ -64,6 +64,7 @@ class LiveStore {
    *  "was live, lost it" in the topbar. */
   everConnected = $state(false);
   #lastEventAt = 0;
+  #openedAt = 0;
   #watchdog: ReturnType<typeof setInterval> | null = null;
   /** Per-panel sample accumulation, driven by chat_start/sample/chat_done. Open-keyed
    *  by panel id and LAZILY vivified on chat_start (no pre-seeded slots), so any
@@ -133,21 +134,33 @@ class LiveStore {
   /** Open the global SSE state stream once. Idempotent. */
   start(): void {
     if (this.#stop) return;
-    // onerror fires when the connection drops AND on each failed reconnect
-    // attempt (EventSource retries on its own; a fresh snapshot on success
-    // flips us back). The watchdog covers the quiet deaths onerror misses — a
-    // half-open socket after sleep/wake never errors, it just goes silent,
-    // and the server heartbeats every 15s, so 35s of silence is two missed
-    // heartbeats plus slack.
+    this.#open();
+    this.#lastEventAt = Date.now();
+    // Reconnecting is OURS, not the browser's. Headless Chrome retries a
+    // dropped stream on its own, but Clément's browser behind `ssh -L` made
+    // ZERO reconnect attempts after a server restart (2026-10-05, logged
+    // server-side) and sat "offline" until a refresh. So: while
+    // disconnected, open a fresh stream every 5 s until a snapshot lands; while
+    // connected but silent past two server heartbeats (15 s pings), the socket
+    // is half-open (sleep/wake) and never errors — reopen it too. A fresh
+    // stream's snapshot re-primes the bus.
+    this.#watchdog = setInterval(() => {
+      const now = Date.now();
+      if (this.connected ? now - this.#lastEventAt > 35_000 : now - this.#openedAt >= 5_000) {
+        this.connected = false;
+        this.#open();
+      }
+    }, 1_000);
+  }
+
+  #open(): void {
+    this.#stop?.();
+    this.#openedAt = Date.now();
     this.#stop = sse(
       '/api/state/events',
       (event, data) => this.#onEvent(event, data),
       () => (this.connected = false)
     );
-    this.#lastEventAt = Date.now();
-    this.#watchdog = setInterval(() => {
-      if (this.connected && Date.now() - this.#lastEventAt > 35_000) this.connected = false;
-    }, 5_000);
   }
 
   stop(): void {

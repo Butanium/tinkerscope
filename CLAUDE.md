@@ -217,7 +217,11 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     lockstep + restart re-prime. `live.connected` drives the topbar
     dot and DEGRADES (EventSource onerror + a 35s heartbeat watchdog over the
     server's 15s pings) — it is the bus link to the tinkerscope backend, not a
-    claim about the tinker upstream. Smoke: `browser_state_reprime.py` §4.
+    claim about the tinker upstream. **Reconnecting is the store's job, not the
+    browser's**: while disconnected it opens a fresh EventSource every 5 s, and
+    a connected-but-silent stream is reopened (some browsers behind `ssh -L`
+    never retry after a restart — ENGINEERING_LOGS 2026-10-05). Smoke:
+    `browser_state_reprime.py` §4.
   - `lib/workspaces.svelte.ts` → `ws` — owner of the per-panel **branch
     trees**, the **panel layout** (`ws.layout` — THE authoritative model-per-
     panel list; rendering, saves, session prefs and every bus claim read it,
