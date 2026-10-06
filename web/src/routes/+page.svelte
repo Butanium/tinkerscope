@@ -157,6 +157,14 @@
     localStorage.setItem('playground-view-collapsed', viewCollapsed ? '1' : '0');
   }
 
+  // The whole sidebar folds to a rail (the « beside Stop) to give the panels
+  // the width. Persisted like the section folds.
+  let sidebarFolded = $state(false);
+  function toggleSidebarFolded() {
+    sidebarFolded = !sidebarFolded;
+    localStorage.setItem('playground-sidebar-folded', sidebarFolded ? '1' : '0');
+  }
+
   // Whether shift is currently held — drives the alternate-action affordance on
   // the regenerate/edit buttons (icon + tooltip swap). Wired in onMount.
   let shiftDown = $state(false);
@@ -1863,6 +1871,7 @@
     modelsCollapsed = localStorage.getItem('playground-models-collapsed') === '1';
     samplingCollapsed = localStorage.getItem('playground-sampling-collapsed') === '1';
     viewCollapsed = localStorage.getItem('playground-view-collapsed') === '1';
+    sidebarFolded = localStorage.getItem('playground-sidebar-folded') === '1';
     try {
       const h = localStorage.getItem(HISTORY_KEY);
       if (h) promptHistory = JSON.parse(h);
@@ -2047,7 +2056,7 @@
 
   <div class="main-layout">
     <!-- Sidebar -->
-    <aside class="sidebar">
+    <aside class="sidebar" class:folded={sidebarFolded}>
       <div class="sidebar-top-actions">
         <button
           class="theme-toggle"
@@ -2091,6 +2100,19 @@
             <Icon name="stop" size={14} />
           </button>
         {/if}
+        <!-- Pinned to the sidebar's right edge, so Stop stays the rightmost
+             ACTION. Folded, the row turns into the rail: this on top, Stop below. -->
+        <button
+          class="sidebar-fold-btn"
+          onclick={toggleSidebarFolded}
+          data-tooltip={sidebarFolded ? 'Unfold the sidebar' : 'Fold the sidebar'}
+          use:tip
+          aria-label={sidebarFolded ? 'Unfold the sidebar' : 'Fold the sidebar'}
+          aria-expanded={!sidebarFolded}
+          data-testid="sidebar-fold"
+        >
+          <Icon name={sidebarFolded ? 'sidebar-unfold' : 'sidebar-fold'} size={16} />
+        </button>
       </div>
 
       {#if readOnly}
@@ -2968,6 +2990,16 @@
   .sidebar-select option:disabled { color: var(--color-text-muted); }
   .sidebar-slider { width: 100%; accent-color: var(--color-accent); }
   .sidebar-top-actions { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+  .sidebar-fold-btn { background: none; border: 1px solid transparent; border-radius: var(--radius); padding: 5px 3px; margin-left: auto; color: var(--color-text-muted); display: flex; align-items: center; }
+  .sidebar-fold-btn:hover { color: var(--color-text); border-color: var(--color-border); }
+  /* Folded: a rail with only the unfold button and Stop (the one control you may
+     need mid-generation). The rest stays MOUNTED, just hidden, so the sections'
+     own state (open pickers, editors, scroll) survives the round trip. */
+  .sidebar.folded { width: 46px; padding: var(--space-4) var(--space-2); overflow: hidden; }
+  .sidebar.folded > :global(*:not(.sidebar-top-actions)) { display: none; }
+  .sidebar.folded .sidebar-top-actions { flex-direction: column; flex-wrap: nowrap; }
+  .sidebar.folded .sidebar-top-actions > :global(*:not(.sidebar-fold-btn):not(.btn-stop-sidebar)) { display: none; }
+  .sidebar.folded .sidebar-fold-btn { order: -1; margin-left: 0; padding: 5px; }
   /* `.sidebar-section-toggle` / `.section-chevron` are global (app.css) —
      HighlightRules draws one too. */
   /* The controls a foldable heading owns: tighter than the sidebar's own gap so

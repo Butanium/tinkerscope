@@ -57,7 +57,9 @@ editor.
 
 The icon row at the top of the sidebar, left to right: **theme**, **distribution
 chart**, **pins slideshow**, **rescan runs**, **help (`?`)**, **undo last
-delete**, **stop all generation**.
+delete**, **stop all generation**, and at the far right edge **«, fold the
+sidebar**: it collapses to a thin rail (more width for the panels) holding just
+» to bring it back and the stop button. The fold is remembered across reloads.
 
 Undo (↺, greyed out when there's nothing to undo) reverses the last *destructive*
 thing done in this workspace — a delete, a discard-others, a thread reset. It does

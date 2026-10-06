@@ -19,7 +19,7 @@
     | 'use-sample' | 'discard-others'
     // sidebar / chrome
     | 'chart' | 'pins' | 'dataset' | 'help' | 'stop' | 'undo' | 'plus' | 'minus'
-    | 'new-blank' | 'arrow-right'
+    | 'new-blank' | 'arrow-right' | 'sidebar-fold' | 'sidebar-unfold'
     | 'theme-light' | 'theme-dark' | 'theme-auto' | 'eye' | 'upload' | 'external';
 </script>
 
@@ -92,6 +92,10 @@
 {:else if name === 'arrow-right'}
   <!-- "push it that way": unfold a reduced panel, send a draft into a panel -->
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+{:else if name === 'sidebar-fold' || name === 'sidebar-unfold'}
+  <!-- a stylized « (fold the sidebar away) / » (bring it back): the leading
+       chevron solid, the trailing one fainter, so it reads as motion -->
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" style={name === 'sidebar-unfold' ? 'transform: scaleX(-1)' : undefined}><path d="M8 3.5 3.5 8 8 12.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /><path d="M13 3.5 8.5 8l4.5 4.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" opacity="0.45" /></svg>
 {:else if name === 'new-blank'}
   <!-- blank page + plus: a fresh workspace with no model -->
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M4 1.5h5L12.5 5v6.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /><path d="M8.5 1.5V5h3.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /><path d="M7.5 7v3M6 8.5h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" /></svg>

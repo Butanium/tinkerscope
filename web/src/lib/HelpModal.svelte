@@ -53,7 +53,8 @@
     { icon: 'regen', name: 'refresh', what: 'rescan the run directory + re-check which checkpoints still serve' },
     { icon: 'help', name: 'help', what: 'this modal' },
     { icon: 'undo', name: 'undo', what: 'put back the last thing you deleted (Ctrl+Z) — greyed out when there is nothing to undo' },
-    { icon: 'stop', name: 'stop', what: 'abort generation in every panel' }
+    { icon: 'stop', name: 'stop', what: 'abort generation in every panel' },
+    { icon: 'sidebar-fold', name: 'fold', what: 'collapse the sidebar to a thin rail for more panel width — » brings it back; Stop stays on the rail' }
   ];
 
   type KeyRow = {
