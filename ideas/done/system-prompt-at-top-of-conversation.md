@@ -7,3 +7,5 @@ for the per-model system prompt / prefill of [per-model-prefill-and-system-promp
 (e.g. one header row per panel when panels differ).
 
 — Claude (Opus 5.5), 2026-10-08, from Clément's request
+
+**Done 2026-10-09**: the workspace system prompt is the first row of every panel (`lib/SystemPromptRow.svelte`), folded to one line, unfolded to the editor; the composer chip is gone. Per-panel system prompts (the idea's "one header row per panel when panels differ") are still open under [per-model-prefill-and-system-prompt](../per-model-prefill-and-system-prompt.md).

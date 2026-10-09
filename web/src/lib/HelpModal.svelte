@@ -83,7 +83,7 @@
       rows: [
         { keys: ['↑ / ↓'], what: 'Move the focus ring up/down that panel' },
         { keys: ['← / →'], what: "Cycle the focused row's ‹k/N› sibling branches" },
-        { keys: ['Esc'], what: 'Drop the focus ring' }
+        { keys: ['Esc'], what: 'Drop the focus ring — with none, leave a focused panel' }
       ]
     },
     {
@@ -345,7 +345,15 @@ codex plugin add tinkerscope@tinkerscope</pre>
         With more than one panel, a send fans out to all of them. The <b>Send to</b> chips above the composer
         narrow that to a subset; the small box at the bottom of a column continues <em>that</em> column alone.
         A column header has a grip to drag it into a new position and a <b>−</b> to fold it out of the way
-        (folded panels are skipped by the chart unless you ask for them).
+        (folded panels are skipped by the chart unless you ask for them). Its <Icon name="focus" /> shows
+        that panel <b>alone</b>, full width, and the composer then sends to it only — <Icon name="unfocus" />,
+        Esc or Back returns to every panel. The focus is in the URL, so a reload or a pasted link keeps it.
+      </p>
+      <p class="help-note">
+        Each column header also has its own <b>prefill</b> pill. A panel prefill replaces the composer's
+        prefill for every send to that panel (composer, the column's own box, regenerate) — the way to give
+        two model families the opening each needs. It has its own All / Think only / Non-think only toggle;
+        when that doesn't fit the thinking mode, the panel gets no prefill at all.
       </p>
       <p class="help-note">
         Holding Ctrl/⌘ while clicking a row button applies it to every panel at that depth — the way to
@@ -385,6 +393,11 @@ codex plugin add tinkerscope@tinkerscope</pre>
         message rather than a reply — a second <b>thread</b> in the same workspace. The switcher beside it
         lists every thread across all panels so you can jump between them; a dot tells you whether a thread
         exists in every panel or only some.
+      </p>
+      <p class="help-note">
+        The <b>system prompt</b> is the first row of every panel's conversation: click it to unfold the
+        editor; its dot applies or mutes it (muting keeps the text). It is one prompt for the whole workspace,
+        so every panel's row edits the same text.
       </p>
       <p class="help-note">
         With ⑂ on you also get a <b>thread system prompt</b>: recorded on that thread's first message and

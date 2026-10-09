@@ -24,12 +24,13 @@ someone through the screen, or to answer a specific "what does this do".
 │  [icon row]  │                                                │
 │              │   panel: run A        panel: run B             │
 │  Workspace ▾ │   ┌──────────────┐    ┌──────────────┐         │
+│              │   │ system: …    │    │ system: …    │         │
 │              │   │ user: …      │    │ user: …      │         │
 │ ▾ Models     │   │ asst: … ‹2/3›│    │ asst: …      │         │
 │   panel 1 ▾  │   └──────────────┘    └──────────────┘         │
 │   panel 2 ▾  │                                                │
 │              │  ┌──────────────────────────────────────────┐  │
-│ ▾ Sampling   │  │ ⑂ branch from start · system · prefill   │  │
+│ ▾ Sampling   │  │ ⑂ branch from start · prefill            │  │
 │   params     │  │ [ type a message…                      ] │  │
 │              │  └──────────────────────────────────────────┘  │
 │ ▾ View       │                                                │
@@ -90,7 +91,16 @@ probabilities, the loom, raw view), or an *OpenRouter
 reference model* for comparison against something known. Sending a message fires
 it into every panel at once, so the columns are the same prompt answered by
 different models. Drag a column header to reorder; the sidebar pickers and the
-send chips follow. Beside each model's name is a **copy button** for the string
+send chips follow. A header's **focus** button (corner arrows, next to the `−`
+fold) shows that panel alone, full width, with the composer sending to it only —
+the same button, `Esc` or browser Back returns to all panels; it's in the URL
+(`?focus=<panel>`), so a reload keeps it. Each header also has its own
+**prefill** pill: a panel prefill replaces the composer prefill for every send to
+that panel (composer, the column's own box, regenerate), so two model families
+can each get the opening they need (e.g. `Hmm,` for one, `The user is` for the
+other). It has its own All / Think only / Non-think only toggle, like the
+composer's; when that doesn't fit the thinking mode, the panel gets no prefill
+(not the composer's). Browser-local and per workspace, like the composer prefill. Beside each model's name is a **copy button** for the string
 you'd paste into your own script — the selected checkpoint's `tinker://…`
 sampler path, or a base model's id. Hold `Shift` on a discovered run and it
 copies the absolute path of the **training JSONL** that run was trained on
@@ -359,8 +369,10 @@ repetition penalties — some of these only apply on some backends, and those ar
 marked. Params are global across panels on purpose: a comparison where the panels
 had different temperatures wouldn't be a comparison.
 
-The **system prompt** lives in the composer row as a split chip: the left dot
-applies or mutes it (muting keeps the text), the label expands the editor. With
+The **system prompt** is the first row of every panel's conversation (where it
+sits in the request): click it to unfold the editor; its left dot applies or
+mutes it (muting keeps the text). It's one prompt per workspace, so every
+panel's row edits the same text. With
 `⑂ branch from start` on you get a second chip, the **thread system prompt** —
 recorded on that thread's first message and appended to the global one.
 Continuing an existing thread always reuses that thread's own recorded prompt, so
@@ -383,7 +395,7 @@ Chat rows — **click a row first** to give it the focus ring:
 |---|---|
 | `↑` / `↓` | Move the focus ring within that panel |
 | `←` / `→` | Cycle the focused row's `‹k/N›` sibling branches |
-| `Esc` | Drop the focus ring |
+| `Esc` | Drop the focus ring — with none, leave a focused panel |
 
 Anywhere:
 

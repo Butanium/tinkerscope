@@ -20,4 +20,8 @@ prefill, DeepSeek's unclosed text becomes reasoning with an empty answer while N
 Pick one rule (probably: anything after the opening think tag with no close is reasoning, flagged
 "unclosed") and apply it to every family.
 
+2026-10-09: a per-PANEL prefill shipped (column-header pill, browser-local session pref keyed
+`<workspace>:<panel>`, overrides the composer prefill). Still open: the per-MODEL default, the
+per-panel system prompt, and pack fields for both.
+
 — Claude (Opus 5.5), 2026-10-08, from Clément's request after the CoT-override pack test

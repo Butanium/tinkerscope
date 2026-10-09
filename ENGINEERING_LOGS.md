@@ -2752,3 +2752,41 @@ return in all three setups. Verified live on :8767: server back at 18:56:49, the
 private tab's stream re-established and the bus re-primed by 18:56:50. Which
 browser it was is not recorded; the fix doesn't depend on it.
 
+
+### 2026-10-09 — System prompt at the top, panel prefill, focus a panel
+
+Three asks from Clément in one dev deploy (web-only, no restart):
+
+- **System prompt → the first row of every panel** (`lib/SystemPromptRow.svelte`),
+  out of the composer row: the composer put it next to the NEXT message, while in
+  the request it is the first turn. It is rendered OUTSIDE `buildPanelView`, before
+  the `{#each view}` loop, so kbnav's row indices, the unkeyed row reconciliation
+  and `panel-view.test.ts` stay untouched. The text is still the workspace-global
+  prompt (one per workspace, all panels); only the fold is per panel. The
+  `system-power` / `system-fold` testids and the "Optional system prompt..."
+  placeholder moved with it, so `browser_system_chip` / `browser_sysprompt_switch`
+  kept their meaning and pass unchanged. Not done: editing the THREAD system prompt
+  from this row. Clément's words were "rather than being gated behind editing the
+  first message"; the thread prompt is still edited there (or via ⑂). If that was
+  the one he meant, the row is where it goes, but a changed thread prompt forks a
+  sibling thread, so it can't be a live text field.
+  `.prefill-textarea` / `.prefill-offhint` moved to global `app.css` (the row is
+  its own component, scoped `+page` styles don't reach it).
+- **Per-panel prefill** (column-header split pill): overrides the composer prefill
+  for every fire to that panel — `withPrefill(msgs, panel)`, which also feeds
+  branchOps' regenerate seam — and sends its OWN All/Think/Non-think scope as the
+  fire's `prefill_scope` (Clément asked for the tri-state the composer prefill
+  has). A panel prefill whose scope doesn't fit the thinking mode means NO prefill
+  for that panel, not a fallback to the composer's: the panel setting governs the
+  panel. Compare mode only: a single panel has no header, and its prefill IS
+  the composer one. Stored BROWSER-LOCAL in the session pref (`panel_prefills`,
+  keyed `<workspace>:<panel>` because panel ids repeat across workspaces, pruned to
+  200 non-empty entries) — deliberately not a workspace meta field: that is a
+  wire/disk-contract change (`META_FIELDS`, types, API_CONTRACT) that the
+  per-model / pack-carried version in `ideas/per-model-prefill-and-system-prompt.md`
+  should design once, not this.
+- **Focus a panel** (`?focus=<panel>`, pushed so Back leaves it): a RENDER filter
+  over `panelSels` (`visibleSels`) plus a `targetSels` override. Never written to
+  `reducedPanels` / `sendTargets` — those are persisted `set_meta` fields every
+  tab and the CLI see, and focusing is one viewer's view. `setWsUrl` drops it with
+  `node`/`panel`. Esc leaves it when no row has the focus ring.

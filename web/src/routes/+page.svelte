@@ -49,6 +49,7 @@
   import WaitTimer from '$lib/WaitTimer.svelte';
   import PickerDropdown from '$lib/PickerDropdown.svelte';
   import SplitChip from '$lib/SplitChip.svelte';
+  import SystemPromptRow from '$lib/SystemPromptRow.svelte';
   import TruncLabel from '$lib/TruncLabel.svelte';
   import { loadHighlightRules, highlightStore, colorRules } from '$lib/highlights.svelte';
   import { logprobView, logprobHighlight, type TokenTintMode } from '$lib/logprobs.svelte';
@@ -207,9 +208,27 @@
   $effect(() => {
     ws.syncPanels(panelSels.map((p) => p.panel));
   });
+  // Focus (`?focus=<panel>`): ONE panel shown alone, and the only send target. A
+  // render filter over panelSels — never written to reducedPanels / sendTargets,
+  // which are persisted meta every tab and the CLI see. An id not in the layout
+  // is ignored.
+  let focusPanel = $derived.by<Panel | null>(() => {
+    const f = page.url.searchParams.get('focus');
+    return f && isComparing && panelSels.some((p) => p.panel === f) ? f : null;
+  });
+  let visibleSels = $derived(focusPanel ? panelSels.filter((p) => p.panel === focusPanel) : panelSels);
+  /** Pushed, so Back leaves focus mode. */
+  function setFocusUrl(panel: Panel | null): void {
+    const url = new URL(page.url);
+    if (panel) url.searchParams.set('focus', panel);
+    else url.searchParams.delete('focus');
+    if (url.href !== new URL(page.url).href) void goto(url, { keepFocus: true, noScroll: true });
+  }
   /** Panels a send will actually fire to (selected targets; fall back to all). */
   let targetSels = $derived(
-    ws.sendTargets.size ? panelSels.filter((p) => ws.sendTargets.has(p.panel)) : panelSels
+    focusPanel
+      ? visibleSels
+      : ws.sendTargets.size ? panelSels.filter((p) => ws.sendTargets.has(p.panel)) : panelSels
   );
 
   let anySupportsThinking = $derived(
@@ -476,6 +495,16 @@
   let prefsLoaded = $state(false); // set true after restore; gates saving over our own defaults
   let sessionSaveTimer: ReturnType<typeof setTimeout> | null = null;
   let lastSessionJson = ''; // skip redundant PUTs (the effect re-fires on every SSE event)
+  /** Drop empty entries (and anything malformed); keep the newest 200 — an entry
+   *  per workspace panel ever given a prefill would otherwise grow forever. */
+  function prunePanelPrefills(m: Record<string, unknown>): Record<string, PanelPrefill> {
+    const kept = Object.entries(m).filter(
+      (e): e is [string, PanelPrefill] =>
+        !!e[1] && typeof (e[1] as PanelPrefill).text === 'string' && (e[1] as PanelPrefill).text !== ''
+    );
+    const scopeOf = (x: unknown): PrefillScope => (x === 'think' || x === 'non_think' ? x : 'all');
+    return Object.fromEntries(kept.slice(-200).map(([k, v]) => [k, { text: v.text, on: !!v.on, scope: scopeOf(v.scope) }]));
+  }
   function persistSession() {
     if (!prefsLoaded) return;
     if (sessionSaveTimer) clearTimeout(sessionSaveTimer);
@@ -489,7 +518,8 @@
         temperature: s.temperature, max_tokens: s.max_tokens, n_samples: s.n_samples,
         thinking: s.thinking, top_p: s.top_p,
         top_k: topK, presence_penalty: presencePenalty, repetition_penalty: repetitionPenalty,
-        prefill: prefillInput, prefill_on: prefillOn, prefill_open: showPrefill, prefill_scope: prefillScope
+        prefill: prefillInput, prefill_on: prefillOn, prefill_open: showPrefill, prefill_scope: prefillScope,
+        panel_prefills: prunePanelPrefills(panelPrefills)
       });
       if (json === lastSessionJson) return; // selection/params unchanged (e.g. mid-stream)
       lastSessionJson = json;
@@ -502,6 +532,7 @@
     void s.temperature; void s.max_tokens; void s.n_samples; void s.thinking; void s.top_p;
     void topK; void presencePenalty; void repetitionPenalty;
     void prefillInput; void prefillOn; void showPrefill; void prefillScope;
+    void JSON.stringify(panelPrefills); // deep touch: an edit reassigns one key
     persistSession();
   });
   /** Restore the saved selection/params — only when the process state is fresh
@@ -540,6 +571,8 @@
           prefillScope = sess.prefill_scope;
         else if (typeof sess.prefill_think_only === 'boolean') // migrate the deprecated bool
           prefillScope = sess.prefill_think_only ? 'think' : 'all';
+        if (sess.panel_prefills && typeof sess.panel_prefills === 'object')
+          panelPrefills = prunePanelPrefills(sess.panel_prefills);
       }
       if (raw && freshState) {
         const sess = JSON.parse(raw);
@@ -583,19 +616,19 @@
   // empty field auto-expands.
   let prefillOn = $state(false);
   let showPrefill = $state(false);
-  // System prompt lives next to the prefill chip (moved out of the sidebar), with
-  // per-workspace persistence (setSystemPrompt → patchState + save). Its power
+  // System prompt: the first row of every panel's conversation (SystemPromptRow),
+  // with per-workspace persistence (setSystemPrompt → patchState + save). Its power
   // flag is SHARED state (s.system_enabled — persisted with the workspace, so
   // the CLI sees mute); null = legacy/flag-less → derive from text presence.
-  // `showSystem` is transient disclosure.
-  let showSystem = $state(false);
+  // `systemOpen` is transient disclosure, per panel (the text is shared).
+  let systemOpen = $state<Partial<Record<Panel, boolean>>>({});
   let systemOn = $derived(s.system_enabled ?? (s.system_prompt ?? '').trim().length > 0);
   let systemActive = $derived(systemOn && (s.system_prompt ?? '').trim().length > 0);
-  function toggleSystemOn() {
+  function toggleSystemOn(panel: Panel) {
     const next = !systemOn;
     patchState({ system_enabled: next });
     ws.save({ system_enabled: next }); // explicit — see setSystemPrompt
-    if (next && !(s.system_prompt ?? '').trim()) showSystem = true;
+    if (next && !(s.system_prompt ?? '').trim()) systemOpen[panel] = true;
   }
   function togglePrefillOn() {
     prefillOn = !prefillOn;
@@ -614,19 +647,68 @@
    *  'think' scope needs thinking on the table (on / both); 'non_think' needs the
    *  non-thinking side (off / both). A single-mode send that's all-thinking or
    *  all-non-thinking on the wrong side ⇒ the prefill doesn't apply at all. */
-  let prefillEffective = $derived(
-    prefillActive &&
-      !(prefillScope === 'think' && s.thinking === false) &&
-      !(prefillScope === 'non_think' && s.thinking === true)
-  );
+  function scopeApplies(scope: PrefillScope): boolean {
+    return !(scope === 'think' && s.thinking === false) && !(scope === 'non_think' && s.thinking === true);
+  }
+  let prefillEffective = $derived(prefillActive && scopeApplies(prefillScope));
   /** Append the active prefill (if any) as a trailing assistant turn so the model
    *  EXTENDS it; the returned `prefill` is prepended to each folded sample. Whitespace
    *  is preserved (a trailing `</think>\n\n` matters). Muted (power off) ⇒ no-op.
    *  A scope that doesn't apply to the current thinking mode is a no-op too — mirror
    *  of the backend's per-half drop, kept symmetric across think / non_think. */
-  function withPrefill(msgs: ChatMessage[]): { fireMsgs: ChatMessage[]; prefill?: string } {
+  function withPrefill(
+    msgs: ChatMessage[],
+    panel?: Panel
+  ): { fireMsgs: ChatMessage[]; prefill?: string; paramsOverride?: Partial<ChatParams> } {
+    // An active panel prefill governs that panel outright: when its scope doesn't
+    // fit the thinking mode, the panel gets NO prefill, not the composer's.
+    const own = panel != null && panelPrefillActive(panel) ? panelPrefillOf(panel)! : null;
+    if (own) {
+      if (!scopeApplies(own.scope)) return { fireMsgs: msgs };
+      return {
+        fireMsgs: [...msgs, { role: 'assistant', content: own.text }],
+        prefill: own.text,
+        paramsOverride: { prefill_scope: own.scope }
+      };
+    }
     if (!prefillEffective) return { fireMsgs: msgs };
     return { fireMsgs: [...msgs, { role: 'assistant', content: prefillInput }], prefill: prefillInput };
+  }
+  // Per-panel prefill (compare mode only — a lone panel's prefill IS the composer
+  // one): overrides the composer prefill for every fire to that panel. Different
+  // model families need different prefills to behave as in their eval. Browser-
+  // local like the composer prefill (session pref), keyed `<workspace>:<panel>`
+  // since panel ids repeat across workspaces.
+  type PanelPrefill = { text: string; on: boolean; scope: PrefillScope };
+  let panelPrefills = $state<Record<string, PanelPrefill>>({});
+  let panelPrefillOpen = $state<Record<string, boolean>>({});
+  const panelPrefillKey = (panel: Panel) => `${ws.activeId}:${panel}`;
+  function panelPrefillOf(panel: Panel): PanelPrefill | undefined {
+    return ws.activeId ? panelPrefills[panelPrefillKey(panel)] : undefined;
+  }
+  function panelPrefillActive(panel: Panel): boolean {
+    const pp = panelPrefillOf(panel);
+    return isComparing && !!pp && pp.on && pp.text.trim().length > 0;
+  }
+  function setPanelPrefillText(panel: Panel, v: string) {
+    const cur = panelPrefillOf(panel);
+    // empty→non-empty auto-enables, like the composer chip
+    const on = (cur?.on ?? false) || (!!v.trim() && !(cur?.text ?? '').trim());
+    panelPrefills[panelPrefillKey(panel)] = { text: v, on, scope: cur?.scope ?? 'all' };
+  }
+  function setPanelPrefillScope(panel: Panel, scope: PrefillScope) {
+    const cur = panelPrefillOf(panel);
+    panelPrefills[panelPrefillKey(panel)] = { text: cur?.text ?? '', on: cur?.on ?? false, scope };
+  }
+  function togglePanelPrefillOn(panel: Panel) {
+    const cur = panelPrefillOf(panel);
+    const on = !(cur?.on ?? false);
+    panelPrefills[panelPrefillKey(panel)] = { text: cur?.text ?? '', on, scope: cur?.scope ?? 'all' };
+    if (on && !(cur?.text ?? '').trim()) panelPrefillOpen[panelPrefillKey(panel)] = true;
+  }
+  function togglePanelPrefillOpen(panel: Panel) {
+    const k = panelPrefillKey(panel);
+    panelPrefillOpen[k] = !panelPrefillOpen[k];
   }
   // Per-panel composer drafts for the "continue this panel" bubbles (compare).
   let panelDraft = $state<Partial<Record<Panel, string>>>({});
@@ -681,8 +763,8 @@
       });
       const msgs = activeMessages(ws.treeFor(p.panel)) as ChatMessage[];
       chat.clearPanelBucket(p.panel);
-      const { fireMsgs, prefill } = withPrefill(msgs);
-      fireOne(p, nodeId, fireMsgs, prefill);
+      const { fireMsgs, prefill, paramsOverride } = withPrefill(msgs, p.panel);
+      fireOne(p, nodeId, fireMsgs, prefill, paramsOverride);
       panelScroll.snap(p.panel); // show the new user turn + arm stream-follow
     }
   }
@@ -705,8 +787,8 @@
     });
     const msgs = activeMessages(ws.treeFor(panel)) as ChatMessage[];
     chat.clearPanelBucket(panel);
-    const { fireMsgs, prefill } = withPrefill(msgs);
-    fireOne(pSel, nodeId, fireMsgs, prefill);
+    const { fireMsgs, prefill, paramsOverride } = withPrefill(msgs, panel);
+    fireOne(pSel, nodeId, fireMsgs, prefill, paramsOverride);
     panelScroll.snap(panel); // show the new user turn + arm stream-follow
   }
 
@@ -852,6 +934,7 @@
     // them to another workspace would make the URL claim a jump it never did.
     url.searchParams.delete('node');
     url.searchParams.delete('panel');
+    url.searchParams.delete('focus');
     return goto(url, { replaceState: !push, keepFocus: true, noScroll: true });
   }
 
@@ -1358,12 +1441,15 @@
       if (kbFocus) {
         kbFocus = null;
         e.preventDefault();
+      } else if (focusPanel) {
+        setFocusUrl(null);
+        e.preventDefault();
       }
       return;
     }
     if (!kbFocus) return;
-    const pSel = panelSels.find((x) => x.panel === kbFocus!.panel);
-    if (!pSel || ws.reducedPanels.has(pSel.panel)) {
+    const pSel = visibleSels.find((x) => x.panel === kbFocus!.panel);
+    if (!pSel || (ws.reducedPanels.has(pSel.panel) && pSel.panel !== focusPanel)) {
       kbFocus = null; // panel gone/reduced under the focus — drop it
       return;
     }
@@ -2568,9 +2654,9 @@
 
     <!-- Chat area -->
     <div class="chat-area">
-      <div class="chat-columns" class:multi={isComparing}>
-        {#each panelSels as p, i (p.panel)}
-          {#if ws.reducedPanels.has(p.panel)}
+      <div class="chat-columns" class:multi={visibleSels.length > 1}>
+        {#each visibleSels as p, i (p.panel)}
+          {#if ws.reducedPanels.has(p.panel) && p.panel !== focusPanel}
             <div
               class="chat-column reduced"
               class:drop-left={panelDrag.showAt(ws.layout, i)}
@@ -2601,6 +2687,7 @@
           >
             {#if isComparing}
               <div class="column-header">
+                {#if !focusPanel}
                 <span
                   class="drag-grip"
                   draggable="true"
@@ -2613,13 +2700,77 @@
                 >
                   <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor"><circle cx="2.5" cy="3" r="1.2" /><circle cx="7.5" cy="3" r="1.2" /><circle cx="2.5" cy="7" r="1.2" /><circle cx="7.5" cy="7" r="1.2" /><circle cx="2.5" cy="11" r="1.2" /><circle cx="7.5" cy="11" r="1.2" /></svg>
                 </span>
+                {/if}
                 <span class="column-title"><TruncLabel label={panelLabel(p)} /></span>
-                <button class="reduce-panel" onclick={() => ws.reducePanel(p.panel)} data-tooltip="Fold this panel away" use:tip aria-label="Reduce panel">
-                  <Icon name="minus" size={12} />
-                </button>
+                {#if !readOnly}
+                  {@const pp = panelPrefillOf(p.panel)}
+                  <SplitChip
+                    label="prefill"
+                    active={panelPrefillActive(p.panel)}
+                    enabled={pp?.on ?? false}
+                    open={!!panelPrefillOpen[panelPrefillKey(p.panel)]}
+                    testid="panel-prefill"
+                    powerTip="Apply / mute this panel's prefill (hollow dot = muted)"
+                    editTip="This panel's prefill — replaces the composer prefill here"
+                    onpower={() => togglePanelPrefillOn(p.panel)}
+                    onfold={() => togglePanelPrefillOpen(p.panel)}
+                  />
+                {/if}
+                {#if focusPanel}
+                  <button class="reduce-panel" data-testid="unfocus-panel" onclick={() => setFocusUrl(null)} data-tooltip="Back to all panels (Esc)" use:tip aria-label="Back to all panels">
+                    <Icon name="unfocus" size={12} />
+                  </button>
+                {:else}
+                  <button class="reduce-panel" data-testid="focus-panel" onclick={() => setFocusUrl(p.panel)} data-tooltip="Focus: show only this panel and chat with it" use:tip aria-label="Focus this panel">
+                    <Icon name="focus" size={12} />
+                  </button>
+                  <button class="reduce-panel" onclick={() => ws.reducePanel(p.panel)} data-tooltip="Fold this panel away" use:tip aria-label="Reduce panel">
+                    <Icon name="minus" size={12} />
+                  </button>
+                {/if}
               </div>
+              {#if !readOnly && panelPrefillOpen[panelPrefillKey(p.panel)]}
+                {@const pp = panelPrefillOf(p.panel)}
+                <div class="panel-prefill">
+                  <div class="panel-prefill-scope">
+                    <span class="seg-toggle seg-mini" data-tooltip="Which half of a thinking=Both send gets this prefill" use:tip>
+                      <button class="seg-btn" class:active={(pp?.scope ?? 'all') === 'all'} onclick={() => setPanelPrefillScope(p.panel, 'all')}>All</button>
+                      <button class="seg-btn" class:active={pp?.scope === 'think'} onclick={() => setPanelPrefillScope(p.panel, 'think')}>Think only</button>
+                      <button class="seg-btn" class:active={pp?.scope === 'non_think'} onclick={() => setPanelPrefillScope(p.panel, 'non_think')}>Non-think only</button>
+                    </span>
+                    {#if panelPrefillActive(p.panel) && pp && !scopeApplies(pp.scope)}
+                      <span class="prefill-inactive-note">inactive — thinking is {s.thinking === false ? 'off' : 'on'}</span>
+                    {/if}
+                  </div>
+                  <textarea
+                    class="prefill-textarea"
+                    class:muted={!pp?.on}
+                    data-testid="panel-prefill-input"
+                    value={pp?.text ?? ''}
+                    oninput={(e) => setPanelPrefillText(p.panel, (e.target as HTMLTextAreaElement).value)}
+                    rows="2"
+                    placeholder="Prefill for this panel only — the model continues from your text"
+                  ></textarea>
+                  {#if pp?.text && !pp.on}<div class="prefill-offhint">muted — kept, not applied to sends</div>{/if}
+                </div>
+              {/if}
             {/if}
             <div class="messages" use:scrollRegister={p.panel}>
+              <!-- disabled until the workspace is OPEN: an edit in the load window
+                   would race the open claim (its flush can be stamped null / get
+                   wiped by the claim) and ws.save() silently drops pre-open dirt —
+                   a sub-second gate beats silent-late loss (task #7's A-half). -->
+              <SystemPromptRow
+                text={s.system_prompt ?? ''}
+                enabled={systemOn}
+                open={!!systemOpen[p.panel]}
+                shared={isComparing && !focusPanel}
+                {readOnly}
+                disabled={!ws.activeId}
+                onpower={() => toggleSystemOn(p.panel)}
+                onfold={() => (systemOpen[p.panel] = !systemOpen[p.panel])}
+                oninput={setSystemPrompt}
+              />
               <!-- Rows are deliberately UNKEYED: they reconcile by position, so
                    cycling a branch updates the row's props IN PLACE instead of
                    remounting it (keying by nodeId made every cycle a destroy+mount
@@ -2633,7 +2784,7 @@
                   {shiftDown}
                   {ctrlDown}
                   busy={panelBusy(p.panel)}
-                  showRegenAll={isComparing}
+                  showRegenAll={isComparing && !focusPanel}
                   thinking={s.thinking}
                   {sampleView}
                   onRegenerate={(allPanels, replace) => (allPanels ? branchOps.regenerateAll(p.panel, msg, replace) : branchOps.regenerate(p.panel, msg, replace))}
@@ -2683,7 +2834,7 @@
                 </div>
               {/if}
             </div>
-            {#if isComparing && ws.activeId && panelCanChat(p) && !readOnly}
+            {#if isComparing && !focusPanel && ws.activeId && panelCanChat(p) && !readOnly}
               <!-- Per-panel composer: continue ONLY this panel, independent of the
                    other panel and of whatever it's doing. Lives OUTSIDE the
                    scrollable .messages so it stays stationary when branch cycling
@@ -2722,7 +2873,7 @@
         {/if}
       {:else}
       <div class="input-bar">
-        {#if panelSels.length > 1}
+        {#if panelSels.length > 1 && !focusPanel}
           <div class="send-targets">
             <span class="send-targets-label">Send to</span>
             {#each panelSels as p (p.panel)}
@@ -2730,22 +2881,11 @@
             {/each}
           </div>
         {/if}
-        <!-- System prompt + assistant prefill split-pills (system prompt moved
-             here from the sidebar so it sits next to prefill above the composer).
-             SplitChip: left power dot = apply/mute, right label+chevron =
-             expand/fold — the two axes are orthogonal (fold never mutes). -->
+        <!-- Assistant prefill split-pill (the system prompt moved to the top of
+             each panel's conversation — SystemPromptRow). SplitChip: left power
+             dot = apply/mute, right label+chevron = expand/fold — the two axes
+             are orthogonal (fold never mutes). -->
         <div class="prefill-row">
-          <SplitChip
-            label="system prompt"
-            active={systemActive}
-            enabled={systemOn}
-            open={showSystem}
-            testid="system"
-            powerTip="Apply / mute the workspace system prompt (hollow dot = muted)"
-            editTip="Edit the workspace system prompt"
-            onpower={toggleSystemOn}
-            onfold={() => (showSystem = !showSystem)}
-          />
           <SplitChip
             label="prefill"
             active={prefillActive}
@@ -2796,22 +2936,6 @@
             <button class="prefill-clear" onclick={() => { prefillInput = ''; prefillOn = false; showPrefill = false; }}>clear</button>
           {/if}
         </div>
-        {#if showSystem}
-          <!-- disabled until the workspace is OPEN: an edit in the load window
-               would race the open claim (its flush can be stamped null / get
-               wiped by the claim) and ws.save() silently drops pre-open dirt —
-               a sub-second gate beats silent-late loss (task #7's A-half). -->
-          <textarea
-            class="prefill-textarea"
-            class:muted={!systemOn}
-            disabled={!ws.activeId}
-            value={s.system_prompt ?? ''}
-            oninput={(e) => setSystemPrompt((e.target as HTMLTextAreaElement).value)}
-            rows="3"
-            placeholder="Optional system prompt..."
-          ></textarea>
-          {#if !systemOn}<div class="prefill-offhint">muted — kept, not applied to sends</div>{/if}
-        {/if}
         {#if branchFromRoot && showThreadSystem}
           <textarea
             class="prefill-textarea thread-system-textarea"
@@ -3079,6 +3203,9 @@
   .column-title { flex: 1; min-width: 0; display: flex; overflow: hidden; }
   .reduce-panel { display: flex; align-items: center; padding: 2px; background: none; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--color-text-muted); cursor: pointer; flex-shrink: 0; }
   .reduce-panel:hover { color: var(--color-accent); border-color: var(--color-border); }
+  .column-header :global(.split-chip) { font-weight: 400; }
+  .panel-prefill { padding: var(--space-2) var(--space-4); background: var(--color-surface); border-bottom: 1px solid var(--color-border); }
+  .panel-prefill-scope { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
   /* ── Composer send-targeting chips ─────────────────────────────── */
   .send-targets { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-2) 0 0; }
   .send-targets-label { font-size: 0.68rem; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
@@ -3097,15 +3224,8 @@
   .prefill-peek.live { color: var(--color-accent); opacity: 0.9; }
   .prefill-clear { font-size: 0.66rem; padding: 1px 6px; border: 1px solid transparent; border-radius: var(--radius-sm); background: none; color: var(--color-text-muted); cursor: pointer; flex-shrink: 0; }
   .prefill-clear:hover { color: var(--color-accent); border-color: var(--color-border); }
-  .prefill-textarea { width: 100%; margin-top: var(--space-2); padding: var(--space-2) var(--space-3); background: var(--color-bg); border: 1px solid var(--color-accent); border-radius: var(--radius); color: var(--color-text); font-family: var(--font-mono, monospace); font-size: 0.8rem; line-height: 1.45; resize: vertical; }
-  .prefill-textarea:focus { outline: none; box-shadow: 0 0 0 1px var(--color-accent); }
-  /* muted (power off): border drops to neutral so "editing but not applied" is visible */
-  .prefill-textarea.muted { border-color: var(--color-border); }
-  .prefill-textarea.muted:focus { box-shadow: 0 0 0 1px var(--color-border); }
-  .prefill-offhint { font-size: 0.66rem; color: var(--color-text-muted); font-style: italic; margin-top: 2px; }
   /* Thread-system input: system-role tint so it reads as "prompt", not prefill. */
   .thread-system-textarea { background: var(--color-system-bg); }
-  .prefill-textarea::placeholder { color: var(--color-text-muted); opacity: 0.7; white-space: pre; }
   /* Scrollbar hidden app-wide (see app.css's scrollbar block); scrolling
      itself is unchanged. Only .chat-columns keeps a visible bar. */
   .messages { flex: 1; overflow-y: auto; padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); }

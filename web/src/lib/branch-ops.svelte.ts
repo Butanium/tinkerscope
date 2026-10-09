@@ -53,8 +53,12 @@ export type BranchOpsDeps = {
   panelSels: () => PanelSel[];
   /** Per-panel busy gate (the panel's bus `running` flag). */
   panelBusy: (panel: Panel) => boolean;
-  /** Wrap messages with the active composer prefill (if any) for a fire. */
-  withPrefill: (msgs: ChatMessage[]) => { fireMsgs: ChatMessage[]; prefill?: string };
+  /** Wrap messages with the prefill (if any) a fire to `panel` gets: the panel's
+   *  own prefill, else the composer's. */
+  withPrefill: (
+    msgs: ChatMessage[],
+    panel: Panel
+  ) => { fireMsgs: ChatMessage[]; prefill?: string; paramsOverride?: Partial<ChatParams> };
   /** Fire one panel's generation with the current model + params. `paramsOverride`
    *  patches over the composer's params bundle for THIS fire; `modelOverride`
    *  replaces the panel-selection model resolution (loom fires anchor to the
@@ -93,12 +97,12 @@ class BranchOps {
   }
 
   /** Fire a (re)generation for one panel, folding the reply under `userParentId`.
-   *  Regenerate respects the current composer prefill, exactly like a fresh send. */
+   *  Regenerate respects the current prefill, exactly like a fresh send. */
   #fireForPanel(panel: Panel, userParentId: string, messages: ChatMessage[]) {
     const pSel = this.#d.panelSels().find((x) => x.panel === panel);
     if (!pSel) return;
-    const { fireMsgs, prefill } = this.#d.withPrefill(messages);
-    this.#d.fireOne(pSel, userParentId, fireMsgs, prefill);
+    const { fireMsgs, prefill, paramsOverride } = this.#d.withPrefill(messages, panel);
+    this.#d.fireOne(pSel, userParentId, fireMsgs, prefill, paramsOverride);
   }
 
   /** Compute a panel's regen plan: plain = fork a sibling; replace = drop the

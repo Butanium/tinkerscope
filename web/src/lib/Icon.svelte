@@ -19,6 +19,7 @@
     | 'use-sample' | 'discard-others'
     // sidebar / chrome
     | 'chart' | 'pins' | 'dataset' | 'help' | 'stop' | 'undo' | 'plus' | 'minus'
+    | 'focus' | 'unfocus'
     | 'new-blank' | 'arrow-right' | 'sidebar-fold' | 'sidebar-unfold'
     | 'theme-light' | 'theme-dark' | 'theme-auto' | 'eye' | 'upload' | 'external';
 </script>
@@ -89,6 +90,12 @@
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
 {:else if name === 'minus'}
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+{:else if name === 'focus'}
+  <!-- corners pointing out: show this panel alone -->
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+{:else if name === 'unfocus'}
+  <!-- corners pointing in: back to every panel -->
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M6 2.5V6H2.5M13.5 6H10V2.5M10 13.5V10h3.5M2.5 10H6v3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'arrow-right'}
   <!-- "push it that way": unfold a reduced panel, send a draft into a panel -->
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
