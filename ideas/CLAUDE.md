@@ -57,6 +57,8 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 
 ### UI affordances & consistency
 
+- [Per-model prefill and system prompt, carried by packs](per-model-prefill-and-system-prompt.md) — Clément's; model organisms need family-specific prefills to behave as in their eval; includes the unclosed-think classification bug in `tinker_sampler.py`
+- [System prompt at the top of the conversation](system-prompt-at-top-of-conversation.md) — Clément's; it sits next to the send box today, but it's the first turn of the request
 - [Search palette follow-ups](search-palette-followups.md) — sidebar icon for discoverability, a `pins` scope (pins are the un-searchable "samples worth keeping"), thread links, regex toggles; all waiting for pull
 - [A "Deleted — Undo" toast](undo-toast.md) — the undo affordance is off in the sidebar exactly when you want it under the cursor
 - [Hunt the rest of the DOM-held UI state](dom-held-ui-state-sweep.md) — the tell is state a person SET that no store knows about, inside a re-derived `{#each}`
