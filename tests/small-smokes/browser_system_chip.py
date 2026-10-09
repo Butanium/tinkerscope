@@ -1,4 +1,5 @@
-"""System-prompt SPLIT-CHIP smoke — the composer's system-prompt control is a
+"""System-prompt SPLIT-CHIP smoke — the system-prompt control (since 2026-10-09 the
+first row of each panel, lib/SystemPromptRow.svelte; it was in the composer row) is a
 split pill (lib/SplitChip.svelte): left POWER zone = apply/mute (persisted as
 `system_enabled` on state + workspace), right label+chevron = expand/fold.
 The two axes are orthogonal: folding never mutes; muting keeps the text.
