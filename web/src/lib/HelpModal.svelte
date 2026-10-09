@@ -280,8 +280,8 @@ codex plugin add tinkerscope@tinkerscope</pre>
       </p>
       <p class="help-note">
         Delete is the exception that really does remove something. <Icon name="undo" /> in the sidebar
-        icon row — or <kbd>Ctrl/⌘</kbd>+<kbd>Z</kbd> — puts back the last delete, discard-others or
-        thread reset in this workspace, up to 50 of them, for as long as the tab stays open.
+        icon row — or <kbd>Ctrl/⌘</kbd>+<kbd>Z</kbd> — puts back the last delete, discard-others,
+        thread reset or closed panel (model, slot and conversation) in this workspace, up to 50 of them, for as long as the tab stays open.
       </p>
     </section>
 

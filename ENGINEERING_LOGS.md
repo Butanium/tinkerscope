@@ -2790,3 +2790,18 @@ Three asks from Clément in one dev deploy (web-only, no restart):
   `reducedPanels` / `sendTargets` — those are persisted `set_meta` fields every
   tab and the CLI see, and focusing is one viewer's view. `setWsUrl` drops it with
   `node`/`panel`. Esc leaves it when no row has the focus ring.
+
+### 2026-10-09 — Undo reopens a closed panel
+
+Clément closed a panel on :8767 by mistake and Ctrl+Z did nothing: the undo stack
+held tree snapshots only, and `undo()` skipped any panel no longer in `ws.trees`
+on purpose ("panel drops are the trash journal's job"). The trash journal did have
+it (`kind: "panel"` + `layout` + `layout_index`), so `tinkpg trash restore` brought
+it back, but only from a terminal. Now `removePanel` captures the column
+(`UndoStack.captureRemoval`: tree + layout row + slot + fold/send-target flags)
+and undo reopens it: `setTree` first, then `applyLayout` with the row spliced back
+at its index (the order addPanel seeds a column in), then `reinstatePanelUi`,
+because `syncPanels` won't re-default an id already in `#seenPanels`. The captured
+tree is LIGHT; `replace_tree` keeps `has_*` flags on nodes with no inline heavy
+field and blobs are write-once, so token data comes back too. Verified on an
+isolated instance: close → Ctrl+Z → same slot, 113/113 nodes, survives a reload.

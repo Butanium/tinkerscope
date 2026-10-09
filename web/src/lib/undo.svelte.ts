@@ -6,7 +6,7 @@
 // and dies with the tab. Its durable twin is the server-side trash journal,
 // which covers restore across sessions, tabs and browsers.
 import { panelScroll } from './scroll.svelte';
-import { restoreInto, UndoStack } from './undo';
+import { restoreInto, UndoStack, type RemovedPanel } from './undo';
 import type { Panel } from './types';
 import type { ConvTree } from './tree';
 
@@ -17,6 +17,9 @@ export type UndoDeps = {
   treeFor: (panel: Panel) => ConvTree;
   setTree: (panel: Panel, tree: ConvTree) => void;
   hasPanel: (panel: Panel) => boolean;
+  /** Re-open a closed column: its tree, its layout row at its old index, its
+   *  fold / send-target state. */
+  reopenPanel: (removed: RemovedPanel, tree: ConvTree) => void;
 };
 
 class UndoStore {
@@ -60,6 +63,16 @@ class UndoStore {
     this.#version++;
   }
 
+  /** Snapshot a column about to be closed (see UndoStack.captureRemoval). */
+  captureRemoval(panel: Panel, removed: RemovedPanel): void {
+    const deps = this.#deps;
+    if (!deps) return;
+    this.#stack.group(this.#wsId(), 'close panel', () =>
+      this.#stack.captureRemoval(panel, deps.treeFor(panel), removed)
+    );
+    this.#version++;
+  }
+
   /** Reverse the most recent destructive op in the active workspace. */
   undo(): boolean {
     const deps = this.#deps;
@@ -67,8 +80,13 @@ class UndoStore {
     if (!deps || !entry) return false;
     this.#version++;
     for (const [panel, tree] of Object.entries(entry.trees)) {
-      // A panel removed since the capture is not resurrected: panel drops are the
-      // trash journal's job, and setTree would mint a tree for a gone column.
+      const removed = entry.removed?.[panel];
+      if (removed && !deps.hasPanel(panel)) {
+        deps.reopenPanel(removed, tree);
+        continue;
+      }
+      // A panel closed by some OTHER op since this capture stays closed: setTree
+      // would mint a tree for a gone column (the trash journal can bring it back).
       if (!deps.hasPanel(panel)) continue;
       const current = deps.treeFor(panel);
       const next = restoreInto(current, tree);

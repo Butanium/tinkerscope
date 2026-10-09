@@ -389,6 +389,14 @@
   }
   function removePanel(panel: Panel) {
     if (ws.layout.length <= 1) return; // keep at least one panel (any id — 'primary' is not special)
+    const index = ws.layout.findIndex((p) => p.id === panel);
+    if (index >= 0)
+      undo.captureRemoval(panel, {
+        row: { ...ws.layout[index] },
+        index,
+        reduced: ws.reducedPanels.has(panel),
+        target: ws.sendTargets.has(panel)
+      });
     chat.stopGeneration(panel);
     ws.applyLayout(ws.layout.filter((p) => p.id !== panel));
     ws.dropTree(panel);
@@ -1330,7 +1338,15 @@
     activeId: () => ws.activeId,
     treeFor: (panel) => ws.treeFor(panel),
     setTree: (panel, tree) => ws.setTree(panel, tree),
-    hasPanel: (panel) => panel in ws.trees
+    hasPanel: (panel) => panel in ws.trees,
+    // Tree first, then the layout row — the same order addPanel seeds a column in.
+    reopenPanel: (r, tree) => {
+      ws.setTree(r.row.id, tree);
+      const next = ws.layout.filter((p) => p.id !== r.row.id);
+      next.splice(Math.min(r.index, next.length), 0, r.row);
+      ws.applyLayout(next);
+      ws.reinstatePanelUi(r.row.id, r.reduced, r.target);
+    }
   });
 
   const undoTip = $derived(

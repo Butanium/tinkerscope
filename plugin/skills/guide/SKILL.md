@@ -63,7 +63,8 @@ sidebar**: it collapses to a thin rail (more width for the panels) holding just
 » to bring it back and the stop button. The fold is remembered across reloads.
 
 Undo (↺, greyed out when there's nothing to undo) reverses the last *destructive*
-thing done in this workspace — a delete, a discard-others, a thread reset. It does
+thing done in this workspace — a delete, a discard-others, a thread reset, a closed
+panel (it comes back with its model, in its old slot, conversation intact). It does
 not step back through sends or edits, which add branches rather than remove them.
 
 The `● live` dot (top right) is the health of the tab's connection to the
@@ -402,7 +403,7 @@ Anywhere:
 | Key | What |
 |---|---|
 | `Ctrl`/`⌘`+`K` | Search across ALL workspaces (messages, thinking, system prompts, names) — Enter jumps to the match |
-| `Ctrl`/`⌘`+`Z` | Undo the last delete / discard-others / thread reset in this workspace |
+| `Ctrl`/`⌘`+`Z` | Undo the last delete / discard-others / thread reset / closed panel in this workspace |
 | `Esc` (modal open) | Close the modal |
 
 `Ctrl+K` is the "I have a screenshot of a sample but no idea which workspace it

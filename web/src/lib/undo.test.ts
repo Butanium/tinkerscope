@@ -44,6 +44,22 @@ test('a captured panel comes back as the SAME ref', () => {
   ok(!s.canUndo('w1'), 'stack empties');
 });
 
+test('a closed panel carries its layout row + tree in one entry', () => {
+  const s = new UndoStack();
+  const before = tree('p5');
+  const removed = { row: { id: 'p-5', run_id: 'run', checkpoint: 'final' }, index: 4, reduced: false, target: true };
+  s.group('w1', 'close panel', () => s.captureRemoval('p-5', before, removed));
+  const entry = s.pop('w1')!;
+  ok(entry.trees['p-5'] === before, 'tree ref kept');
+  eq(entry.removed?.['p-5'], removed);
+});
+
+test('captureRemoval outside a group is a no-op', () => {
+  const s = new UndoStack();
+  s.captureRemoval('p-5', tree('p5'), { row: { id: 'p-5', run_id: null, checkpoint: null }, index: 0, reduced: false, target: false });
+  ok(!s.canUndo('w1'));
+});
+
 test('nothing captured ⇒ no entry pushed', () => {
   const s = new UndoStack();
   s.group('w1', 'delete', () => {

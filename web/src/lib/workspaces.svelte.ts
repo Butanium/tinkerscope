@@ -490,6 +490,13 @@ class ConversationsStore {
     this.sendTargets = new Set([...this.sendTargets].filter((t) => t !== panel));
     this.save();
   }
+  /** Undo of a panel close: put its fold / send-target flags back. syncPanels
+   *  won't — the id is already in #seenPanels, so it is not "new". */
+  reinstatePanelUi(panel: Panel, reduced: boolean, target: boolean): void {
+    if (reduced) this.reducedPanels = new Set([...this.reducedPanels, panel]);
+    if (target) this.sendTargets = new Set([...this.sendTargets, panel]);
+    if (reduced || target) this.save();
+  }
   /** Reconcile against the current panel list: default each NEWLY-seen panel into
    *  sendTargets (unless reduced). Purely additive — removed panels are left in the
    *  sets (harmless: every reader filters by the live panel list) and pruned only on

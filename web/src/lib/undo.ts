@@ -8,11 +8,16 @@
 // Cheap because `ws.trees` is $state.raw replaced wholesale per commit: an entry
 // holds the PRE-mutation tree refs of the panels one op touched, and structural
 // sharing means unchanged nodes are never copied.
-import type { Panel } from './types';
+import type { Panel, PanelLayout } from './types';
 import { ROOT, selectedChildId, type ConvTree } from './tree.ts';
 
-/** One undoable op: the trees as they were, for every panel the op touched. */
-export type UndoEntry = { label: string; trees: Record<Panel, ConvTree> };
+/** A closed column: enough to put it back bound to its model, in its old slot,
+ *  with its fold / send-target state. Its tree rides in `UndoEntry.trees`. */
+export type RemovedPanel = { row: PanelLayout; index: number; reduced: boolean; target: boolean };
+
+/** One undoable op: the trees as they were, for every panel the op touched,
+ *  plus the layout rows of any panel it closed. */
+export type UndoEntry = { label: string; trees: Record<Panel, ConvTree>; removed?: Record<Panel, RemovedPanel> };
 
 /** Older entries fall off the bottom — an undo stack is a safety net for the
  *  last few clicks, not a history. */
@@ -49,6 +54,15 @@ export class UndoStack {
     const open = this.#open;
     if (!open || panel in open.entry.trees) return;
     open.entry.trees[panel] = tree;
+  }
+
+  /** capture() for a whole column about to be closed: its tree AND its layout
+   *  row, so undo re-opens the column rather than refilling a tree with no panel. */
+  captureRemoval(panel: Panel, tree: ConvTree, removed: RemovedPanel): void {
+    const open = this.#open;
+    if (!open) return;
+    this.capture(panel, tree);
+    open.entry.removed = { ...open.entry.removed, [panel]: removed };
   }
 
   #push(wsId: string, entry: UndoEntry): void {
