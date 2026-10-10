@@ -370,14 +370,17 @@ repetition penalties — some of these only apply on some backends, and those ar
 marked. Params are global across panels on purpose: a comparison where the panels
 had different temperatures wouldn't be a comparison.
 
-The **system prompt** is the first row of every panel's conversation (where it
-sits in the request): click it to unfold the editor; its left dot applies or
-mutes it (muting keeps the text). It's one prompt per workspace, so every
-panel's row edits the same text. With
-`⑂ branch from start` on you get a second chip, the **thread system prompt** —
-recorded on that thread's first message and appended to the global one.
-Continuing an existing thread always reuses that thread's own recorded prompt, so
-old threads don't silently change meaning when you edit the global prompt.
+Two system prompts. The **system prompt** chip above the composer is the
+workspace-wide default (left dot applies or mutes it; muting keeps the text).
+A thread can have its **own** system prompt, which REPLACES the workspace one
+for that thread: it's the **system** row at the top of each panel, drawn like a
+message. On an empty panel click **+ system prompt** and type it — it goes out
+with your first message, so each panel can start under a different prompt. On
+an existing thread, editing it works like editing the first message: Save forks
+a new thread under the new prompt and regenerates the first reply, `Shift`
+forks a copy of the conversation without generating, `Ctrl` does it in every
+panel; the old thread stays one ‹k/N› away. With `⑂ branch from start` on, a
+**thread system** chip sets the new thread's own prompt.
 
 ## Keyboard
 

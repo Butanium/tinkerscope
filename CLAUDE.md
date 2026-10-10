@@ -849,18 +849,20 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     that carries the master Off/On (`highlightsOn`) next to `+ new`. While it's
     off the rules stay listed, dimmed (`.hr-root.master-off`) and still editable —
     a hidden list would read as "they're gone".
-  - `lib/SystemPromptRow.svelte` — the workspace **system prompt as the first row
-    of every panel** (folded = one line, unfolded = the editor, SplitChip dot =
-    apply/mute). Rendered in +page BEFORE the `{#each view}` loop, never as a
-    `ViewMessage`, so kbnav indices and `buildPanelView` don't see it. The text is
-    workspace-global (`setSystemPrompt`); only the fold is per panel
-    (`systemOpen`). Keeps the old composer chip's `system-power`/`system-fold`
-    testids + placeholder — `browser_system_chip` / `browser_sysprompt_switch`
-    address it by those. Siblings in the same +page area: the column-header
-    **panel prefill** pill (`panelPrefills`, session pref keyed
-    `<workspace>:<panel>`, overrides the composer prefill via
-    `withPrefill(msgs, panel)`) and **focus** (`?focus=<panel>` → `visibleSels` /
-    `targetSels`; a render filter, never written to reduced/send-target meta).
+  - `lib/ThreadSystemRow.svelte` — the THREAD's own **system prompt as the first
+    row of every panel**, drawn like a message (optional). It is the root node's
+    `system_prompt` and OVERRIDES the workspace prompt (the composer chip) server-
+    side (`compose_system`: thread or global). Empty panel → a field whose text
+    (+page `pendingThreadSystem[panel]`) is stamped on the first send (`appendUserTurn`
+    stamps any ROOT-level turn); existing thread → edit = `saveThreadSystem` =
+    `branchOps.applyEdit` on the root user node (fork + regen; Shift fork-copy;
+    Ctrl every panel, each on its own root). Rendered before the `{#each view}`
+    loop, never as a `ViewMessage`. Carries `thread-system-strip` (the old root-row
+    strip's testid — `browser_thread_system` addresses it). Siblings in +page: the
+    **panel prefill** (`panelPrefills`, session pref keyed `<workspace>:<panel>`,
+    overrides the composer prefill via `withPrefill(msgs, panel)`) and **focus**
+    (`?focus=<panel>` → `visibleSels` / `targetSels`; a render filter, never written
+    to reduced/send-target meta).
   - `lib/ThreadSwitcher.svelte` — the composer-row **cross-panel thread jump**:
     a popover (next to the ⑂ branch-from-start toggle) listing
     `threadStarts(convo.trees)` — every root thread across all panels with its

@@ -292,8 +292,9 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
                           // part ("" when muted/empty).
   "thread_system_prompt": null, // optional; the THREAD's system-prompt part, recorded on the
                           // thread's first message (browser tree root / `tinkpg send --new-thread
-                          // --system`). The SERVER composes the effective system message:
-                          //   effective = "\n".join(p for p in (global, thread) if p)
+                          // --system`). The SERVER picks the effective system message —
+                          // the thread part OVERRIDES the global one (since 2026-10-10;
+                          // newline-joined before):  effective = thread or global
                           // Tri-state: null/absent = inherit the panel's mirrored thread system
                           // (PanelState.thread_system_prompt — how a mid-thread CLI send stays
                           // under the thread's prompt); "" = explicitly no thread part; "X" = X.

@@ -104,8 +104,8 @@ every value is a live child of that key.
 ## 2b. Thread system prompts (shipped 2026-07-21)
 
 A thread's ROOT user node may carry `system_prompt` — the thread's own
-system-prompt part, composed over the workspace's global one **server-side**
-(`effective = "\n".join(p for p in (global, thread) if p)`; see
+system prompt, which OVERRIDES the workspace's global one **server-side**
+(`effective = thread or global` — newline-joined until 2026-10-10; see
 `docs/API_CONTRACT.md` → ChatRequest.thread_system_prompt). Design invariants:
 
 - **A field of the first message, not a system node** — no new role for the

@@ -49,7 +49,7 @@
   import WaitTimer from '$lib/WaitTimer.svelte';
   import PickerDropdown from '$lib/PickerDropdown.svelte';
   import SplitChip from '$lib/SplitChip.svelte';
-  import SystemPromptRow from '$lib/SystemPromptRow.svelte';
+  import ThreadSystemRow from '$lib/ThreadSystemRow.svelte';
   import TruncLabel from '$lib/TruncLabel.svelte';
   import { loadHighlightRules, highlightStore, colorRules } from '$lib/highlights.svelte';
   import { logprobView, logprobHighlight, type TokenTintMode } from '$lib/logprobs.svelte';
@@ -624,19 +624,20 @@
   // empty field auto-expands.
   let prefillOn = $state(false);
   let showPrefill = $state(false);
-  // System prompt: the first row of every panel's conversation (SystemPromptRow),
-  // with per-workspace persistence (setSystemPrompt → patchState + save). Its power
+  // WORKSPACE system prompt: the composer chip — the default every thread runs
+  // under unless its own (ThreadSystemRow, top of each panel) overrides it.
+  // Per-workspace persistence (setSystemPrompt → patchState + save). Its power
   // flag is SHARED state (s.system_enabled — persisted with the workspace, so
   // the CLI sees mute); null = legacy/flag-less → derive from text presence.
-  // `systemOpen` is transient disclosure, per panel (the text is shared).
-  let systemOpen = $state<Partial<Record<Panel, boolean>>>({});
+  // `showSystem` is transient disclosure.
+  let showSystem = $state(false);
   let systemOn = $derived(s.system_enabled ?? (s.system_prompt ?? '').trim().length > 0);
   let systemActive = $derived(systemOn && (s.system_prompt ?? '').trim().length > 0);
-  function toggleSystemOn(panel: Panel) {
+  function toggleSystemOn() {
     const next = !systemOn;
     patchState({ system_enabled: next });
     ws.save({ system_enabled: next }); // explicit — see setSystemPrompt
-    if (next && !(s.system_prompt ?? '').trim()) systemOpen[panel] = true;
+    if (next && !(s.system_prompt ?? '').trim()) showSystem = true;
   }
   function togglePrefillOn() {
     prefillOn = !prefillOn;
@@ -718,6 +719,29 @@
     const k = panelPrefillKey(panel);
     panelPrefillOpen[k] = !panelPrefillOpen[k];
   }
+  // A THREAD's own system prompt (ThreadSystemRow, top of each panel; overrides
+  // the workspace one). Empty panel: what its first send will be stamped with —
+  // per panel, so two models can start under different prompts.
+  let pendingThreadSystem = $state<Partial<Record<Panel, string>>>({});
+  /** The root-node system prompt a send to `panel` should stamp, if it starts a
+   *  thread: ⑂ uses the composer's thread-system chip, an empty panel its row. */
+  function newThreadSystem(panel: Panel, atRoot: boolean): string | undefined {
+    if (atRoot) return threadSystemActive ? threadSystemInput.trim() : undefined;
+    if (activePath(ws.treeFor(panel)).length) return undefined;
+    return pendingThreadSystem[panel]?.trim() || undefined;
+  }
+  /** Edit the active thread's system prompt = edit its first message's: fork a
+   *  sibling thread (regenerating the first reply, or Shift: copying the
+   *  conversation). Ctrl: every panel, each on its OWN first message. */
+  function saveThreadSystem(panel: Panel, text: string, copyDownstream: boolean, allPanels: boolean) {
+    const want = text.trim();
+    for (const pid of allPanels ? panelSels.map((x) => x.panel) : [panel]) {
+      const root = activePath(ws.treeFor(pid))[0];
+      if (!root || root.role !== 'user' || (root.system_prompt ?? '').trim() === want) continue;
+      const msg = { nodeId: root.id, role: 'user', content: root.content, isRoot: true } as ViewMessage;
+      void branchOps.applyEdit(pid, msg, root.content, undefined, copyDownstream, want);
+    }
+  }
   // Per-panel composer drafts for the "continue this panel" bubbles (compare).
   let panelDraft = $state<Partial<Record<Panel, string>>>({});
   // Branch-from-start mode: while ON, each send starts a NEW root-level branch
@@ -726,7 +750,7 @@
   // reload never silently reopens a mode where sends stop extending the thread.
   let branchFromRoot = $state(false);
   // THREAD system prompt for the next branch-from-start send: stamped on the new
-  // thread's root node and composed over the global prompt server-side. Only
+  // thread's root node; it overrides the global prompt server-side. Only
   // settable while ⑂ is armed (the composer is authoring a root node then);
   // continuing a thread reuses ITS root's prompt automatically (chat store walk).
   // Same split-pill semantics as the prefill chip (enabled ⊥ expanded, client-only).
@@ -764,8 +788,9 @@
         ws.treeFor(p.panel),
         text,
         branchFromRoot,
-        branchFromRoot && threadSystemActive ? threadSystemInput.trim() : undefined
+        newThreadSystem(p.panel, branchFromRoot)
       );
+      if (!branchFromRoot) pendingThreadSystem[p.panel] = '';
       ws.setTree(p.panel, tree, {
         ops: [{ op: 'add_nodes', nodes: [opNode(tree, nodeId)], select: true }]
       });
@@ -789,7 +814,8 @@
     // The per-panel bubble ALWAYS continues this panel's active thread; ⑂
     // branch-from-start is a main-composer-only affordance (locked decision).
     samplesOpen[panel] = null; // same reason as sendMessage: the reply lands below the hidden region
-    const { tree, nodeId } = appendUserTurn(ws.treeFor(panel), text);
+    const { tree, nodeId } = appendUserTurn(ws.treeFor(panel), text, false, newThreadSystem(panel, false));
+    pendingThreadSystem[panel] = '';
     ws.setTree(panel, tree, {
       ops: [{ op: 'add_nodes', nodes: [opNode(tree, nodeId)], select: true }]
     });
@@ -2689,6 +2715,7 @@
             </div>
           {:else}
           {@const view = panelView(p)}
+          {@const threadRoot = activePath(ws.treeFor(p.panel))[0]}
           {@const run = live.panels[p.panel] ?? emptyPanel()}
           <div
             class="chat-column"
@@ -2772,20 +2799,17 @@
               {/if}
             {/if}
             <div class="messages" use:scrollRegister={p.panel}>
-              <!-- disabled until the workspace is OPEN: an edit in the load window
-                   would race the open claim (its flush can be stamped null / get
-                   wiped by the claim) and ws.save() silently drops pre-open dirt —
-                   a sub-second gate beats silent-late loss (task #7's A-half). -->
-              <SystemPromptRow
-                text={s.system_prompt ?? ''}
-                enabled={systemOn}
-                open={!!systemOpen[p.panel]}
-                shared={isComparing && !focusPanel}
+              <ThreadSystemRow
+                system={threadRoot?.system_prompt}
+                empty={!threadRoot}
+                pending={pendingThreadSystem[p.panel] ?? ''}
                 {readOnly}
-                disabled={!ws.activeId}
-                onpower={() => toggleSystemOn(p.panel)}
-                onfold={() => (systemOpen[p.panel] = !systemOpen[p.panel])}
-                oninput={setSystemPrompt}
+                busy={panelBusy(p.panel) || !ws.activeId}
+                comparing={isComparing && !focusPanel}
+                {shiftDown}
+                {ctrlDown}
+                onPending={(v) => (pendingThreadSystem[p.panel] = v)}
+                onSave={(text, copy, all) => saveThreadSystem(p.panel, text, copy, all)}
               />
               <!-- Rows are deliberately UNKEYED: they reconcile by position, so
                    cycling a branch updates the row's props IN PLACE instead of
@@ -2897,11 +2921,22 @@
             {/each}
           </div>
         {/if}
-        <!-- Assistant prefill split-pill (the system prompt moved to the top of
-             each panel's conversation — SystemPromptRow). SplitChip: left power
-             dot = apply/mute, right label+chevron = expand/fold — the two axes
-             are orthogonal (fold never mutes). -->
+        <!-- Workspace system prompt + assistant prefill split-pills. SplitChip:
+             left power dot = apply/mute, right label+chevron = expand/fold — the
+             two axes are orthogonal (fold never mutes). A thread's own system
+             prompt (ThreadSystemRow, top of each panel) overrides this one. -->
         <div class="prefill-row">
+          <SplitChip
+            label="system prompt"
+            active={systemActive}
+            enabled={systemOn}
+            open={showSystem}
+            testid="system"
+            powerTip="Apply / mute the workspace system prompt (hollow dot = muted)"
+            editTip="Workspace system prompt — threads with their own override it"
+            onpower={toggleSystemOn}
+            onfold={() => (showSystem = !showSystem)}
+          />
           <SplitChip
             label="prefill"
             active={prefillActive}
@@ -2929,7 +2964,7 @@
               open={showThreadSystem}
               testid="thread-system"
               powerTip="Apply / mute the THREAD system prompt (hollow dot = muted)"
-              editTip="Edit the next new thread's system prompt — appended to the global one"
+              editTip="Edit the next new thread's system prompt — replaces the workspace one"
               onpower={toggleThreadSystemOn}
               onfold={() => (showThreadSystem = !showThreadSystem)}
             />
@@ -2952,6 +2987,22 @@
             <button class="prefill-clear" onclick={() => { prefillInput = ''; prefillOn = false; showPrefill = false; }}>clear</button>
           {/if}
         </div>
+        {#if showSystem}
+          <!-- disabled until the workspace is OPEN: an edit in the load window
+               would race the open claim (its flush can be stamped null / get
+               wiped by the claim) and ws.save() silently drops pre-open dirt —
+               a sub-second gate beats silent-late loss (task #7's A-half). -->
+          <textarea
+            class="prefill-textarea"
+            class:muted={!systemOn}
+            disabled={!ws.activeId}
+            value={s.system_prompt ?? ''}
+            oninput={(e) => setSystemPrompt((e.target as HTMLTextAreaElement).value)}
+            rows="3"
+            placeholder="Optional system prompt..."
+          ></textarea>
+          {#if !systemOn}<div class="prefill-offhint">muted — kept, not applied to sends</div>{/if}
+        {/if}
         {#if branchFromRoot && showThreadSystem}
           <textarea
             class="prefill-textarea thread-system-textarea"
@@ -2960,7 +3011,7 @@
             value={threadSystemInput}
             oninput={(e) => setThreadSystemInput((e.target as HTMLTextAreaElement).value)}
             rows="2"
-            placeholder="Thread system prompt — recorded on the NEW thread's first message, appended to the global system prompt."
+            placeholder="Thread system prompt — recorded on the NEW thread's first message; replaces the workspace system prompt."
           ></textarea>
           {#if !threadSystemOn}<div class="prefill-offhint">muted — kept, not applied to sends</div>{/if}
         {/if}

@@ -1,7 +1,7 @@
 """Thread-level system prompts — the backend surface.
 
 A thread's system prompt lives on its ROOT tree node (browser-side) and rides
-the wire as ChatRequest.thread_system_prompt; the server composes it OVER the
+the wire as ChatRequest.thread_system_prompt; the server lets it OVERRIDE the
 global part (compose_system) at the one system-prepend site, mirrors the
 resolved value on the panel (PanelState.thread_system_prompt), and stamps it on
 the chat_start / terminal broadcasts so folds keep provenance. Resolution +
@@ -90,7 +90,7 @@ def _spy_broadcasts(monkeypatch):
     return events
 
 
-def test_chat_composes_thread_over_global_and_mirrors_panel(client, monkeypatch):
+def test_chat_thread_overrides_global_and_mirrors_panel(client, monkeypatch):
     _lay(client, ids=("primary",))
     client.post("/api/state", json={"system_prompt": "GLOBAL"})
     calls = _capture_producer(monkeypatch)
@@ -100,9 +100,9 @@ def test_chat_composes_thread_over_global_and_mirrors_panel(client, monkeypatch)
         params_scope="call", thread_system_prompt="THREAD", broadcast=True))
     assert r.status_code == 200, r.text
 
-    # The model sees ONE system message: global + "\n" + thread.
+    # The model sees ONE system message: the thread's, which overrides the global.
     for c in calls:
-        assert c["messages"][0] == {"role": "system", "content": "GLOBAL\nTHREAD"}
+        assert c["messages"][0] == {"role": "system", "content": "THREAD"}
     # chat_begin routed the resolved thread part onto the panel mirror.
     assert client.get("/api/state").json()["panels"][0]["thread_system_prompt"] == "THREAD"
     # chat_start AND the terminal carry it for the browser's foreign-fold stamp.
@@ -150,7 +150,7 @@ def test_global_scope_never_writes_system_back(client, monkeypatch):
     r = client.post("/api/chat", json=_chat_body(
         system_prompt="G2", thread_system_prompt="T", broadcast=False))
     assert r.status_code == 200, r.text
-    assert calls[0]["messages"][0] == {"role": "system", "content": "G2\nT"}
+    assert calls[0]["messages"][0] == {"role": "system", "content": "T"}
     st = client.get("/api/state").json()
     assert st["system_prompt"] == "KEPT" and st["system_enabled"] is False
 

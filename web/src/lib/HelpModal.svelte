@@ -395,13 +395,15 @@ codex plugin add tinkerscope@tinkerscope</pre>
         exists in every panel or only some.
       </p>
       <p class="help-note">
-        The <b>system prompt</b> is the first row of every panel's conversation: click it to unfold the
-        editor; its dot applies or mutes it (muting keeps the text). It is one prompt for the whole workspace,
-        so every panel's row edits the same text.
+        A thread can have its <b>own system prompt</b>: the <b>system</b> row at the top of each panel. On an
+        empty panel click <b>+ system prompt</b> and type it; it's sent with your first message (each panel
+        can get a different one). On an existing thread, editing it works like editing the first message:
+        Save forks a new thread under the new prompt and regenerates the first reply, <kbd>Shift</kbd>
+        forks a copy of the whole conversation without generating, <kbd>Ctrl</kbd> does it in every panel.
       </p>
       <p class="help-note">
-        With ⑂ on you also get a <b>thread system prompt</b>: recorded on that thread's first message and
-        appended to the global one. Continuing an existing thread always reuses that thread's own prompt.
+        The <b>system prompt</b> chip above the composer is the workspace-wide default; a thread with its
+        own prompt uses that one instead. With ⑂ on, a <b>thread system</b> chip sets the new thread's own.
       </p>
     </section>
 

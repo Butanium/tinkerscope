@@ -90,8 +90,8 @@ export type TreeNode = {
    *  NOT inherit them (no blob exists under the new id). */
   has_token_logprobs?: boolean;
   has_raw_meta?: boolean;
-  /** Thread system prompt — ROOT user nodes only. Composed over the workspace's
-   *  global system prompt at fire time (server-side: global + "\n" + this).
+  /** Thread system prompt — ROOT user nodes only. Overrides the workspace's
+   *  global system prompt at fire time (server-side: this, else the global).
    *  Part of thread IDENTITY: two roots with the same content but different
    *  system prompts are distinct threads (threadStarts / reconcile key on the
    *  pair). Absent ⇒ the thread runs under the global prompt alone (legacy). */
@@ -291,8 +291,9 @@ function downstreamActivePath(t: ConvTree, id: string): TreeNode[] {
 // ── mutations (immutable) ────────────────────────────────────────────
 /** Append a user turn under the active leaf — or, with `atRoot`, as a NEW
  *  root-level branch (a sibling first message) that becomes the active path.
- *  `systemPrompt` (atRoot only) stamps the new thread's system prompt on the
- *  root node; ignored for mid-thread appends (the field is root-only). */
+ *  `systemPrompt` stamps the new thread's system prompt on the root node — when
+ *  the turn IS a root (atRoot, or the tree's first message); ignored for
+ *  mid-thread appends (the field is root-only). */
 export function appendUserTurn(
   t0: ConvTree,
   content: string,
@@ -308,7 +309,7 @@ export function appendUserTurn(
     id,
     role: 'user',
     content,
-    ...(atRoot && systemPrompt ? { system_prompt: systemPrompt } : {}),
+    ...(!leaf && systemPrompt ? { system_prompt: systemPrompt } : {}),
     parent: leaf ? leaf.id : null,
     children: []
   };

@@ -284,8 +284,6 @@
   // content — forks a sibling THREAD; "same question, new prompt" is just an edit.
   let editSystem = $state('');
   let editHasSystem = $derived(msg.role === 'user' && !!msg.isRoot);
-  // The in-row thread-system strip's expand/collapse (collapsed one-liner by default).
-  let sysExpanded = $state(false);
   function startEdit(shift: boolean, all: boolean) {
     if (!canEdit) return;
     editing = true;
@@ -348,7 +346,6 @@
     editShift = false;
     editAll = false;
     editSystem = '';
-    sysExpanded = false;
     copiedMsg = false;
     copiedWs = false;
     copiedId = false;
@@ -728,22 +725,6 @@
         {#if showSampleCycler}{@render sampleCycler()}{:else}{@render cycler()}{/if}
       </div>
     </div>
-    {#if msg.role === 'user' && msg.system_prompt && !editing}
-      <!-- Thread-system strip (root rows): the prompt this THREAD runs under,
-           composed over the workspace's global one. Part of the node, so the
-           ‹k/N› cycler swaps it together with the content. Click to expand. -->
-      <button
-        class="sys-strip"
-        class:expanded={sysExpanded}
-        data-testid="thread-system-strip"
-        data-tooltip={sysExpanded ? 'Collapse' : 'This thread\'s system prompt — click to expand'}
-        use:tip
-        onclick={(e) => { e.stopPropagation(); sysExpanded = !sysExpanded; onFocusRow?.(); }}
-      >
-        <span class="sys-strip-tag">system</span>
-        <span class="sys-strip-text">{sysExpanded ? msg.system_prompt : msg.system_prompt.replace(/\s+/g, ' ')}</span>
-      </button>
-    {/if}
     {#if msg.role === 'assistant' && msg.reasoning && !isMultiSample && !tokView}
       <details class="sample-reasoning-block reasoning-primary" open={thinkingView.open || isLastAssistant || revealOpen}>
         <summary class="sample-reasoning-toggle">
@@ -827,13 +808,13 @@
       {#if editHasSystem}
         <!-- Thread-system editor (root rows): saving with a changed system forks a
              sibling THREAD, exactly like a content edit. Empty = global only. -->
-        <div class="edit-field-label">Thread system prompt <span class="edit-field-hint">(optional — appended to the global one; changing it forks a sibling thread)</span></div>
+        <div class="edit-field-label">Thread system prompt <span class="edit-field-hint">(optional — replaces the workspace one; changing it forks a sibling thread)</span></div>
         <textarea
           class="edit-textarea edit-system"
           data-testid="edit-thread-system"
           bind:value={editSystem}
           rows="2"
-          placeholder="none — global system prompt only"
+          placeholder="none — the workspace system prompt applies"
           onkeydown={(e) => {
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commitEdit(); }
             else if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }

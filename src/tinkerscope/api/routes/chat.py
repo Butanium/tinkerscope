@@ -135,9 +135,9 @@ class ChatRequest(BaseModel):
     # transiently-empty UI input can't 422 the request)
     messages: list[ChatMessage]
     system_prompt: str | None = None
-    # Thread-level system prompt, composed OVER the global/call system part at
-    # sample time (compose_system: "\n"-join, empty parts skipped) and recorded
-    # on the thread's ROOT node. None ≡ "" = no thread part. (Until the P3
+    # Thread-level system prompt: REPLACES the global/call system part at sample
+    # time when non-empty (compose_system) and is recorded on the thread's ROOT
+    # node. None ≡ "" = no thread part. (Until the P3
     # review fixes, None inherited the target panel's mirrored
     # PanelState.thread_system_prompt — retired: every client sends the field
     # explicitly, and the one omitter was `tinkpg probe`, silently sampling
@@ -474,10 +474,12 @@ def resolve_params(req: ChatRequest, st: Any) -> dict:
 
 
 def compose_system(global_part: str | None, thread_part: str | None) -> str:
-    """The effective system prompt for one chat: the global/call part with the
-    thread part appended (newline join, empty/None parts skipped). "" ⇒ no
-    system message at all. The ONE compose site for browser + CLI."""
-    return "\n".join(p for p in (global_part, thread_part) if p)
+    """The effective system prompt for one chat: the thread part when it has one
+    (a thread's own prompt OVERRIDES the workspace/call one — it is how a first
+    message gets a custom prompt), else the global/call part. "" ⇒ no system
+    message at all. The ONE compose site for browser + CLI. (Until 2026-10-10 the
+    two were newline-joined; Clément asked for override.)"""
+    return thread_part or global_part or ""
 
 
 @router.post("/chat")

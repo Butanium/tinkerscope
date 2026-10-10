@@ -235,8 +235,8 @@ export type ChatRequest = {
   openrouter_model?: string | null;
   messages: ChatMessage[];
   system_prompt?: string | null;
-  /** The THREAD's system prompt, composed over the global part server-side
-   *  (global + "\n" + thread; empty parts skipped). Tri-state: absent/null =
+  /** The THREAD's system prompt, which overrides the global part server-side
+   *  (thread if non-empty, else global). Tri-state: absent/null =
    *  inherit the panel's mirrored thread system; '' = explicitly none; the
    *  browser always sends it explicitly (root-node walk) so a stale mirror can
    *  never leak into a browser fire. */

@@ -2805,3 +2805,27 @@ because `syncPanels` won't re-default an id already in `#seenPanels`. The captur
 tree is LIGHT; `replace_tree` keeps `has_*` flags on nodes with no inline heavy
 field and blobs are write-once, so token data comes back too. Verified on an
 isolated instance: close → Ctrl+Z → same slot, 113/113 nodes, survives a reload.
+
+### 2026-10-10 — The top row is the THREAD's system prompt; a thread prompt overrides the workspace one
+
+Same-day follow-up to the 2026-10-09 entry, from Clément's next round: he wanted
+the system prompt "like a normal message — can be edited, sent etc, but not
+obligatory", and the workspace-wide prompt kept as a default at the bottom
+("keep it like it was at the bottom for prompt submitting"). So:
+
+- The composer chip is back, unchanged (testids, placeholder, load-window gate).
+- The top row (`lib/ThreadSystemRow.svelte`, replacing `SystemPromptRow`) is now
+  the active thread's ROOT-node `system_prompt`, i.e. the per-thread prompt
+  that the 2026-07-21 thread-system work introduced and that was only editable
+  through the first message's edit form or ⑂. Editing it = editing the first
+  message: fork + regen, Shift fork-copy, Ctrl all panels. On an empty panel it's
+  a pending field per panel, stamped on the first send. That needed
+  `appendUserTurn` to stamp any ROOT-level turn, not only ⑂ ones.
+- **Semantics change, server-side:** `compose_system` was `global ⏎ thread`; it is
+  now `thread or global` (Clément: the workspace prompt "is overridden by the one
+  in the thread"). Existing threads that carry a thread prompt AND sat under a
+  global one now sample under the thread prompt alone. Probe batteries (`tinkpg
+  battery`, `send --system`) were the main writer of thread prompts and were
+  always meant as "this probe's prompt", so the change matches their intent.
+- The root-row `system` strip in ChatMessage is gone (the top row shows the same
+  thing one row up); its testid moved to the row's text.

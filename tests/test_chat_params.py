@@ -8,7 +8,7 @@ CURRENT global state, nothing is written back. system_prompt="" is an explicit
 
 thread_system_prompt resolves independently of params_scope: explicit wins
 ("" = explicitly none), None inherits the target panel's mirror (→ "" when the
-panel has none / doesn't exist). compose_system joins the two parts.
+panel has none / doesn't exist). compose_system: the thread part overrides the global one.
 """
 from tinkerscope.api.routes.chat import ChatRequest, compose_system, resolve_params
 from tinkerscope.api.state import PlaygroundState
@@ -114,10 +114,10 @@ def test_thread_system_unknown_panel_resolves_empty():
 
 
 # --------------------------------------------------------------------------- #
-# compose_system: newline join, empty/None parts skipped
+# compose_system: the thread part overrides the global one; empty/None skipped
 # --------------------------------------------------------------------------- #
-def test_compose_system_joins_both_parts():
-    assert compose_system("global", "thread") == "global\nthread"
+def test_compose_system_thread_overrides_global():
+    assert compose_system("global", "thread") == "thread"
 
 
 def test_compose_system_skips_empty_parts():

@@ -82,7 +82,7 @@ class PanelState:
     id: str = DEFAULT_PANEL_ID
     run_id: str | None = None
     checkpoint: str | None = None         # checkpoint name, e.g. "final"
-    # The ACTIVE thread's system prompt (composed OVER the global one at sample
+    # The ACTIVE thread's system prompt (OVERRIDES the global one at sample
     # time — see routes/chat.py compose_system). Mirrored by the browser so a
     # CLI send that doesn't say otherwise extends the thread under the prompt
     # it was started with. None/"" = no thread part.

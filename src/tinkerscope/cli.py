@@ -1149,7 +1149,7 @@ def cmd_chat(
     _post("/api/state", {"panels": [_panel_obj(pid, r["id"], ckpt)]})
     think: "bool | str | None" = "both" if thinking_both else thinking
     # Like `send`, --system authors the THREAD prompt (recorded on the root node,
-    # composed over the global) — a `chat` is a new thread now, so its prompt is
+    # overriding the global) — a `chat` is a new thread now, so its prompt is
     # thread identity, not a call-scoped global override.
     system, thread_system = _new_thread_system(_resolve_sys(system, no_system))
     body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, think, system, pid, prefill)
@@ -1296,7 +1296,7 @@ def _panel_body(
     ancestry). Decodes the panel's model sentinel; a trailing assistant message in
     `messages` is the server's prefill convention (the model extends it).
 
-    `thread_system` is the THREAD system prompt (composed over the global part
+    `thread_system` is the THREAD system prompt (overrides the global part
     server-side, recorded on the thread's root node). None = omit from the body,
     which the server treats as "" — the panel-mirror inherit retired with the P3
     review fixes; every live caller passes an explicit str."""
@@ -1410,7 +1410,7 @@ def _send_targets(
 def _new_thread_system(resolved: Optional[str]) -> tuple[Optional[str], str]:
     """Split a `_resolve_sys` result for a NEW-THREAD fire (`send` / `battery`
     probes): --system authors the THREAD system prompt (recorded on the thread's
-    root node, composed over the global — `tinkpg params --system` owns the
+    root node, overriding the global — `tinkpg params --system` owns the
     global part). No flag (None) → thread part explicit "", so a fresh thread
     never inherits the panel mirror's prompt; "" (--no-system) suppresses BOTH
     parts. Returns (global_part, thread_part)."""

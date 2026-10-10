@@ -213,11 +213,11 @@ power dot: text kept, not applied) — `params`/`state` then show it as
 re-enables; an explicit per-call `--system` applies regardless of the mute.
 
 **Thread system prompts (`send --system`).** A thread's first message can carry
-its OWN system prompt, composed over the global one at fire time (`global ⏎
-thread` — the global is the shared base, never clobbered). On `send` (always a
+its OWN system prompt, which REPLACES the global one for that thread at fire
+time (the global stays the default for threads without one, never clobbered). On `send` (always a
 new-thread fire) `--system` sets the THREAD prompt: durable (recorded on the
-thread's first message, shown in the browser as a `system` strip on the row +
-in the ⑂ threads popover) instead of ephemeral. This is THE way to run a probe
+thread's first message, shown in the browser as the `system` row at the top of
+the panel + in the ⑂ threads popover) instead of ephemeral. This is THE way to run a probe
 battery: `tinkpg send --file q.txt --system "Answer with only the letter"`,
 then again with other framings — same first message under different prompts =
 distinct, cycleable threads. On `continue`, `--system` keeps its per-call
