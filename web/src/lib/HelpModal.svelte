@@ -355,7 +355,8 @@ codex plugin add tinkerscope@tinkerscope</pre>
         two model families the opening each needs. Beside it, <Icon name="think" /><Icon name="answer" /> /
         <Icon name="think" /> / <Icon name="answer" /> pick which samples get it: thinking and non-thinking,
         thinking only, non-thinking only. When that doesn't fit the thinking mode the line greys out and the
-        panel gets no prefill at all. The line stays when you focus the panel.
+        panel gets no prefill at all. The line stays when you focus the panel. Hold <kbd>Ctrl/⌘</kbd> on a
+        scope glyph or the pill's dot to set every panel at once (arming only the panels that have text).
       </p>
       <p class="help-note">
         Holding Ctrl/⌘ while clicking a row button applies it to every panel at that depth — the way to
@@ -536,8 +537,10 @@ codex plugin add tinkerscope@tinkerscope</pre>
         one prefill.
       </p>
       <p class="help-note">
-        With thinking set to <b>Both</b> (n samples each way in one send), the scope toggle picks which half
-        the prefill applies to; the other half is left un-prefilled.
+        With thinking set to <b>Both</b> (n samples each way in one send), the glyphs beside the pill pick
+        which half the prefill applies to — <Icon name="think" /><Icon name="answer" /> both,
+        <Icon name="think" /> thinking only, <Icon name="answer" /> non-thinking only; the other half is left
+        un-prefilled. If the current thinking mode never samples the picked half, the prefill greys out.
       </p>
       <p class="help-note">
         Some OpenRouter providers don't continue a prefill: they start the reply over (it repeats your

@@ -218,6 +218,8 @@
     return f && isComparing && panelSels.some((p) => p.panel === f) ? f : null;
   });
   let visibleSels = $derived(focusPanel ? panelSels.filter((p) => p.panel === focusPanel) : panelSels);
+  /** Ctrl/⌘ held over a panel prefill control: the click fans out to every panel. */
+  let prefillFanOut = $derived(ctrlDown && !focusPanel);
   /** Pushed, so Back leaves focus mode. */
   function setFocusUrl(panel: Panel | null): void {
     const url = new URL(page.url);
@@ -661,6 +663,7 @@
     return !(scope === 'think' && s.thinking === false) && !(scope === 'non_think' && s.thinking === true);
   }
   let prefillEffective = $derived(prefillActive && scopeApplies(prefillScope));
+  let prefillSkipped = $derived(prefillActive && !prefillEffective);
   /** Append the active prefill (if any) as a trailing assistant turn so the model
    *  EXTENDS it; the returned `prefill` is prepended to each folded sample. Whitespace
    *  is preserved (a trailing `</think>\n\n` matters). Muted (power off) ⇒ no-op.
@@ -706,14 +709,22 @@
     const on = (cur?.on ?? false) || (!!v.trim() && !(cur?.text ?? '').trim());
     panelPrefills[panelPrefillKey(panel)] = { text: v, on, scope: cur?.scope ?? 'all' };
   }
-  function setPanelPrefillScope(panel: Panel, scope: PrefillScope) {
-    const cur = panelPrefillOf(panel);
-    panelPrefills[panelPrefillKey(panel)] = { text: cur?.text ?? '', on: cur?.on ?? false, scope };
+  // `all` = Ctrl/⌘-click: the same change lands on every panel of the workspace.
+  function setPanelPrefillScope(panel: Panel, scope: PrefillScope, all = false) {
+    for (const t of all ? panelSels.map((p) => p.panel) : [panel]) {
+      const cur = panelPrefillOf(t);
+      panelPrefills[panelPrefillKey(t)] = { text: cur?.text ?? '', on: cur?.on ?? false, scope };
+    }
   }
-  function togglePanelPrefillOn(panel: Panel) {
+  function togglePanelPrefillOn(panel: Panel, all = false) {
     const cur = panelPrefillOf(panel);
     const on = !(cur?.on ?? false);
-    panelPrefills[panelPrefillKey(panel)] = { text: cur?.text ?? '', on, scope: cur?.scope ?? 'all' };
+    for (const t of all ? panelSels.map((p) => p.panel) : [panel]) {
+      const c = panelPrefillOf(t);
+      // arming only panels that have text: an empty one would just sprout an editor
+      if (t !== panel && (on ? !(c?.text ?? '').trim() : !c)) continue;
+      panelPrefills[panelPrefillKey(t)] = { text: c?.text ?? '', on, scope: c?.scope ?? 'all' };
+    }
     if (on && !(cur?.text ?? '').trim()) panelPrefillOpen[panelPrefillKey(panel)] = true;
   }
   function togglePanelPrefillOpen(panel: Panel) {
@@ -2843,24 +2854,27 @@
               <!-- This panel's prefill: kept in focus mode too (it still governs
                    the composer's sends here), unlike the continue box below. -->
               <div class="panel-prefill-line" class:skipped={ppSkipped}>
-                <SplitChip
-                  label="prefill"
-                  active={panelPrefillActive(p.panel)}
-                  enabled={pp?.on ?? false}
-                  open={ppOpen}
-                  testid="panel-prefill"
-                  powerTip="Apply / mute this panel's prefill (hollow dot = muted)"
-                  editTip="This panel's prefill — replaces the composer prefill here"
-                  onpower={() => togglePanelPrefillOn(p.panel)}
-                  onfold={() => togglePanelPrefillOpen(p.panel)}
-                />
+                <span class="all-host pwr" class:all={prefillFanOut}>
+                  <SplitChip
+                    label="prefill"
+                    active={panelPrefillActive(p.panel)}
+                    enabled={pp?.on ?? false}
+                    open={ppOpen}
+                    testid="panel-prefill"
+                    powerTip={prefillFanOut ? "Apply / mute the prefill — in ALL panels" : "Apply / mute this panel's prefill (hollow dot = muted)"}
+                    editTip="This panel's prefill — replaces the composer prefill here"
+                    onpower={(e) => togglePanelPrefillOn(p.panel, !focusPanel && (e.ctrlKey || e.metaKey))}
+                    onfold={() => togglePanelPrefillOpen(p.panel)}
+                  />
+                </span>
                 {#if ppOpen || pp?.on || pp?.text.trim()}
                   <PrefillScopeToggle
                     scope={pp?.scope ?? 'all'}
                     dim={!panelPrefillActive(p.panel)}
                     skipped={ppSkipped ? `thinking is ${s.thinking === false ? 'off' : 'on'}` : null}
+                    all={prefillFanOut}
                     testid="panel-prefill-scope"
-                    onpick={(sc) => setPanelPrefillScope(p.panel, sc)}
+                    onpick={(sc, all) => setPanelPrefillScope(p.panel, sc, all && !focusPanel)}
                   />
                 {/if}
                 {#if !ppOpen && pp?.text.trim()}
@@ -2942,17 +2956,28 @@
             onpower={toggleSystemOn}
             onfold={() => (showSystem = !showSystem)}
           />
-          <SplitChip
-            label="prefill"
-            active={prefillActive}
-            enabled={prefillOn}
-            open={showPrefill}
-            testid="prefill"
-            powerTip="Apply / mute the prefill, keeping the text (hollow dot = muted)"
-            editTip="Edit the prefill — the model continues from your text"
-            onpower={togglePrefillOn}
-            onfold={() => (showPrefill = !showPrefill)}
-          />
+          <span class="prefill-group" class:skipped={prefillSkipped}>
+            <SplitChip
+              label="prefill"
+              active={prefillActive}
+              enabled={prefillOn}
+              open={showPrefill}
+              testid="prefill"
+              powerTip="Apply / mute the prefill, keeping the text (hollow dot = muted)"
+              editTip="Edit the prefill — the model continues from your text"
+              onpower={togglePrefillOn}
+              onfold={() => (showPrefill = !showPrefill)}
+            />
+            {#if showPrefill || prefillOn || prefillInput.trim()}
+              <PrefillScopeToggle
+                scope={prefillScope}
+                dim={!prefillActive}
+                skipped={prefillSkipped ? `thinking is ${s.thinking === false ? 'off' : 'on'}` : null}
+                testid="prefill-scope"
+                onpick={(sc) => (prefillScope = sc)}
+              />
+            {/if}
+          </span>
           <button
             class="prefill-toggle"
             class:on={branchFromRoot}
@@ -2975,18 +3000,8 @@
             />
           {/if}
           <ThreadSwitcher />
-          {#if showPrefill}
-            <span class="prefill-scope seg-toggle" data-tooltip="Which half of a thinking=Both send gets the prefill" use:tip>
-              <button class="seg-btn" class:active={prefillScope === 'all'} onclick={() => (prefillScope = 'all')}>All</button>
-              <button class="seg-btn" class:active={prefillScope === 'think'} onclick={() => (prefillScope = 'think')}>Think only</button>
-              <button class="seg-btn" class:active={prefillScope === 'non_think'} onclick={() => (prefillScope = 'non_think')}>Non-think only</button>
-            </span>
-            {#if prefillActive && !prefillEffective}
-              <span class="prefill-inactive-note">inactive — thinking is {s.thinking === false ? 'off' : 'on'}</span>
-            {/if}
-          {/if}
           {#if prefillInput.trim() && !showPrefill}
-            <button class="prefill-peek" class:live={prefillActive} data-tooltip="Prefill {prefillOn ? 'applied' : 'muted'} — click to edit" use:tip onclick={() => (showPrefill = true)}>{prefillInput.replace(/\s+/g, ' ').slice(0, 80)}{prefillInput.length > 80 ? '…' : ''}</button>
+            <button class="prefill-peek" class:live={prefillEffective} class:skipped={prefillSkipped} data-tooltip="Prefill {prefillOn ? 'applied' : 'muted'} — click to edit" use:tip onclick={() => (showPrefill = true)}>{prefillInput.replace(/\s+/g, ' ').slice(0, 80)}{prefillInput.length > 80 ? '…' : ''}</button>
           {/if}
           {#if prefillInput.length > 0}
             <button class="prefill-clear" onclick={() => { prefillInput = ''; prefillOn = false; showPrefill = false; }}>clear</button>
@@ -3293,11 +3308,10 @@
   .send-chip.reduced { opacity: 0.6; font-style: italic; }
   /* ── Assistant prefill field ───────────────────────────────────── */
   .prefill-row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0 0; }
+  .prefill-group { display: inline-flex; align-items: stretch; gap: var(--space-2); flex-shrink: 0; }
+  .prefill-group.skipped, .prefill-peek.skipped { opacity: 0.55; }
   .prefill-toggle { font-size: 0.7rem; padding: 2px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: var(--color-bg); color: var(--color-text-muted); cursor: pointer; flex-shrink: 0; }
   .prefill-toggle.on { background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent); }
-  .prefill-scope { flex-shrink: 0; }
-  .prefill-scope .seg-btn { padding: 2px 9px; font-size: 0.68rem; letter-spacing: normal; }
-  .prefill-inactive-note { font-size: 0.66rem; color: var(--color-warn, #b45309); font-style: italic; flex-shrink: 0; }
   .prefill-peek { font-size: 0.68rem; color: var(--color-text-muted); font-family: var(--font-mono, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; border: none; background: none; text-align: left; cursor: pointer; padding: 0; opacity: 0.75; }
   .prefill-peek:hover { color: var(--color-accent); opacity: 1; }
   .prefill-peek.live { color: var(--color-accent); opacity: 0.9; }

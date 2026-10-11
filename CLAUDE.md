@@ -863,7 +863,9 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     overrides the composer prefill via `withPrefill(msgs, panel)`; drawn as the
     column-FOOTER line above the continue box, kept in focus mode where that box
     hides, with `lib/PrefillScopeToggle.svelte` — the brain/bubble glyph scope
-    switch, `Icon` names `think`/`answer`) and **focus**
+    switch, `Icon` names `think`/`answer`, also the composer prefill's; Ctrl/⌘ on
+    a panel's glyph or dot fans out to every panel, badged by `.all-host` in
+    app.css) and **focus**
     (`?focus=<panel>` → `visibleSels` / `targetSels`; a render filter, never written
     to reduced/send-target meta).
   - `lib/ThreadSwitcher.svelte` — the composer-row **cross-panel thread jump**:

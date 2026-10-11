@@ -102,11 +102,12 @@ column's own box, regenerate), so two model families can each get the opening
 they need (e.g. `Hmm,` for one, `The user is` for the other). Next to the pill, a
 three-way switch drawn as glyphs picks which samples get it — brain + speech
 bubble = thinking and non-thinking, brain = thinking only, bubble = non-thinking
-only (the composer's own prefill has the same choice in words). The switch shows
-once the prefill is unfolded, armed or has text; folded, the text itself is
-previewed on the line. When the scope doesn't fit the thinking mode the line
-greys out and the panel gets no prefill (not the composer's). The line stays in
-focus mode, where the continue box is hidden. Browser-local and per workspace,
+only (the composer's own prefill has the same switch). The switch shows once the
+prefill is unfolded, armed or has text; folded, the text itself is previewed on
+the line. When the scope doesn't fit the thinking mode the line greys out and the
+panel gets no prefill (not the composer's). The line stays in focus mode, where
+the continue box is hidden. `Ctrl`/`⌘`+click on a scope glyph or the pill's dot
+sets every panel at once — arming only the panels that have text. Browser-local and per workspace,
 like the composer prefill. Beside each model's name is a **copy button** for the string
 you'd paste into your own script — the selected checkpoint's `tinker://…`
 sampler path, or a base model's id. Hold `Shift` on a discovered run and it
@@ -318,7 +319,10 @@ doesn't travel to another machine or into a share pack.
 the composer is text the assistant is treated as having already started; the
 model extends it (type a raw `<think>` to force a reasoning opening, or a whole
 think block to jump straight to an answer). Prefill persists across sends, so you
-can draw N samples off one prefill. Some OpenRouter providers ignore a prefill and
+can draw N samples off one prefill. With thinking on **Both**, the glyph switch
+beside the pill picks which half gets it (brain + bubble = both, brain = thinking
+only, bubble = non-thinking only); a scope the current thinking mode never
+samples greys the prefill out. Some OpenRouter providers ignore a prefill and
 start the reply over (it repeats the prefill's opening); tinkerscope keeps such a
 turn as written and tags it **prefill ignored** instead of gluing it onto the
 prefill — pick a model that continues (DeepSeek or Llama did in a Sept 2026 check;
@@ -461,7 +465,7 @@ Hold a modifier, then click a row-toolbar button:
 
 | Modifier | What |
 |---|---|
-| `Ctrl`/`⌘` | Do it in ALL panels at once — edit · regenerate · delete · continue. Only live with more than one panel on screen; with one panel the modifier does nothing |
+| `Ctrl`/`⌘` | Do it in ALL panels at once — edit · regenerate · delete · continue, and a panel prefill's scope glyph or dot. Only live with more than one panel on screen; with one panel the modifier does nothing |
 | `Shift` + edit | Fork a full editable copy — the turns below come along, and nothing is generated (either role) |
 | `Shift` + regenerate | Replace this branch in place instead of adding a sibling |
 | `Shift` + delete | Delete every branch at this turn |

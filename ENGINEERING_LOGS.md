@@ -2855,3 +2855,23 @@ first mockup terrible, so this one was iterated on screenshots in both themes).
   the focused panel), the continue box doesn't (the composer already sends there).
 - The textarea's right edge matches the continue box, not its send button: both
   read `--panel-send-btn-w` (chat.css), which now also sets the button's width.
+
+### 2026-10-10 — Composer prefill gets the glyph switch; Ctrl/⌘ fans a panel prefill out
+
+Two follow-ups Clément approved from the footer work:
+
+- **Composer:** its All / Think only / Non-think only words and the italic
+  "inactive — thinking is off" sentence are gone; it uses `PrefillScopeToggle`
+  with the panel line's rules (shown once unfolded, armed or non-empty; a scope
+  the thinking mode never samples dims pill + switch + peek). The switch now sits
+  right after the prefill pill instead of after the thread switcher, so the scope
+  reads as part of the prefill.
+- **Ctrl/⌘ on a panel's scope glyph or power dot** applies to every panel (not in
+  focus mode, like the row toolbar). Arming fans out only to panels that HAVE
+  text — arming an empty one would just pop its editor open; muting reaches all.
+  Feedback is the row toolbar's ⧉ badge + "— in ALL panels" tooltip suffix, but
+  the badge shows on HOVER only: these controls are always on screen, so an
+  always-on badge would flash across every footer on each Ctrl+C / Ctrl+K.
+  `SplitChip`'s `onpower` now receives the click event (it always did at runtime;
+  only the type was `() => void`).
+

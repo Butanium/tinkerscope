@@ -9,6 +9,7 @@
     scope,
     dim = false,
     skipped = null,
+    all = false,
     testid = '',
     onpick
   }: {
@@ -17,8 +18,10 @@
     dim?: boolean;
     /** why the picked scope matches no sample right now (e.g. "thinking is off") */
     skipped?: string | null;
+    /** Ctrl/⌘ is held and a click would set every panel's scope */
+    all?: boolean;
     testid?: string;
-    onpick: (scope: PrefillScope) => void;
+    onpick: (scope: PrefillScope, all: boolean) => void;
   } = $props();
 
   const OPTS: { id: PrefillScope; tip: string }[] = [
@@ -28,22 +31,24 @@
   ];
 </script>
 
-<span class="seg-toggle seg-icons" class:dim data-testid={testid || undefined}>
-  {#each OPTS as o (o.id)}
-    {@const on = scope === o.id}
-    <button
-      class="seg-btn"
-      class:active={on}
-      class:skipped={on && !!skipped}
-      aria-pressed={on}
-      aria-label={o.tip}
-      data-scope={o.id}
-      data-tooltip={on && skipped ? `${o.tip} — none now, ${skipped}` : o.tip}
-      use:tip
-      onclick={() => onpick(o.id)}
-    >
-      {#if o.id !== 'non_think'}<Icon name="think" size={13} />{/if}
-      {#if o.id !== 'think'}<Icon name="answer" size={13} />{/if}
-    </button>
-  {/each}
+<span class="all-host" class:all>
+  <span class="seg-toggle seg-icons" class:dim data-testid={testid || undefined}>
+    {#each OPTS as o (o.id)}
+      {@const on = scope === o.id}
+      <button
+        class="seg-btn"
+        class:active={on}
+        class:skipped={on && !!skipped}
+        aria-pressed={on}
+        aria-label={o.tip}
+        data-scope={o.id}
+        data-tooltip={(on && skipped ? `${o.tip} — none now, ${skipped}` : o.tip) + (all ? ' — in ALL panels' : '')}
+        use:tip
+        onclick={(e) => onpick(o.id, e.ctrlKey || e.metaKey)}
+      >
+        {#if o.id !== 'non_think'}<Icon name="think" size={13} />{/if}
+        {#if o.id !== 'think'}<Icon name="answer" size={13} />{/if}
+      </button>
+    {/each}
+  </span>
 </span>

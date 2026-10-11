@@ -28,7 +28,7 @@
     powerTip: string;
     editTip: string;
     testid?: string;
-    onpower: () => void;
+    onpower: (e: MouseEvent) => void;
     onfold: () => void;
   } = $props();
 </script>
