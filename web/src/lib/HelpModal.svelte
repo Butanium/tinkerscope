@@ -350,10 +350,12 @@ codex plugin add tinkerscope@tinkerscope</pre>
         Esc or Back returns to every panel. The focus is in the URL, so a reload or a pasted link keeps it.
       </p>
       <p class="help-note">
-        Each column header also has its own <b>prefill</b> pill. A panel prefill replaces the composer's
+        Above each column's own box is its <b>prefill</b> pill. A panel prefill replaces the composer's
         prefill for every send to that panel (composer, the column's own box, regenerate) — the way to give
-        two model families the opening each needs. It has its own All / Think only / Non-think only toggle;
-        when that doesn't fit the thinking mode, the panel gets no prefill at all.
+        two model families the opening each needs. Beside it, <Icon name="think" /><Icon name="answer" /> /
+        <Icon name="think" /> / <Icon name="answer" /> pick which samples get it: thinking and non-thinking,
+        thinking only, non-thinking only. When that doesn't fit the thinking mode the line greys out and the
+        panel gets no prefill at all. The line stays when you focus the panel.
       </p>
       <p class="help-note">
         Holding Ctrl/⌘ while clicking a row button applies it to every panel at that depth — the way to

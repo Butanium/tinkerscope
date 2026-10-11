@@ -49,6 +49,7 @@
   import WaitTimer from '$lib/WaitTimer.svelte';
   import PickerDropdown from '$lib/PickerDropdown.svelte';
   import SplitChip from '$lib/SplitChip.svelte';
+  import PrefillScopeToggle from '$lib/PrefillScopeToggle.svelte';
   import ThreadSystemRow from '$lib/ThreadSystemRow.svelte';
   import TruncLabel from '$lib/TruncLabel.svelte';
   import { loadHighlightRules, highlightStore, colorRules } from '$lib/highlights.svelte';
@@ -2745,20 +2746,6 @@
                 </span>
                 {/if}
                 <span class="column-title"><TruncLabel label={panelLabel(p)} /></span>
-                {#if !readOnly}
-                  {@const pp = panelPrefillOf(p.panel)}
-                  <SplitChip
-                    label="prefill"
-                    active={panelPrefillActive(p.panel)}
-                    enabled={pp?.on ?? false}
-                    open={!!panelPrefillOpen[panelPrefillKey(p.panel)]}
-                    testid="panel-prefill"
-                    powerTip="Apply / mute this panel's prefill (hollow dot = muted)"
-                    editTip="This panel's prefill — replaces the composer prefill here"
-                    onpower={() => togglePanelPrefillOn(p.panel)}
-                    onfold={() => togglePanelPrefillOpen(p.panel)}
-                  />
-                {/if}
                 {#if focusPanel}
                   <button class="reduce-panel" data-testid="unfocus-panel" onclick={() => setFocusUrl(null)} data-tooltip="Back to all panels (Esc)" use:tip aria-label="Back to all panels">
                     <Icon name="unfocus" size={12} />
@@ -2772,31 +2759,6 @@
                   </button>
                 {/if}
               </div>
-              {#if !readOnly && panelPrefillOpen[panelPrefillKey(p.panel)]}
-                {@const pp = panelPrefillOf(p.panel)}
-                <div class="panel-prefill">
-                  <div class="panel-prefill-scope">
-                    <span class="seg-toggle seg-mini" data-tooltip="Which half of a thinking=Both send gets this prefill" use:tip>
-                      <button class="seg-btn" class:active={(pp?.scope ?? 'all') === 'all'} onclick={() => setPanelPrefillScope(p.panel, 'all')}>All</button>
-                      <button class="seg-btn" class:active={pp?.scope === 'think'} onclick={() => setPanelPrefillScope(p.panel, 'think')}>Think only</button>
-                      <button class="seg-btn" class:active={pp?.scope === 'non_think'} onclick={() => setPanelPrefillScope(p.panel, 'non_think')}>Non-think only</button>
-                    </span>
-                    {#if panelPrefillActive(p.panel) && pp && !scopeApplies(pp.scope)}
-                      <span class="prefill-inactive-note">inactive — thinking is {s.thinking === false ? 'off' : 'on'}</span>
-                    {/if}
-                  </div>
-                  <textarea
-                    class="prefill-textarea"
-                    class:muted={!pp?.on}
-                    data-testid="panel-prefill-input"
-                    value={pp?.text ?? ''}
-                    oninput={(e) => setPanelPrefillText(p.panel, (e.target as HTMLTextAreaElement).value)}
-                    rows="2"
-                    placeholder="Prefill for this panel only — the model continues from your text"
-                  ></textarea>
-                  {#if pp?.text && !pp.on}<div class="prefill-offhint">muted — kept, not applied to sends</div>{/if}
-                </div>
-              {/if}
             {/if}
             <div class="messages" use:scrollRegister={p.panel}>
               <ThreadSystemRow
@@ -2874,7 +2836,49 @@
                 </div>
               {/if}
             </div>
-            {#if isComparing && !focusPanel && ws.activeId && panelCanChat(p) && !readOnly}
+            {#if isComparing && ws.activeId && panelCanChat(p) && !readOnly}
+              {@const pp = panelPrefillOf(p.panel)}
+              {@const ppOpen = !!panelPrefillOpen[panelPrefillKey(p.panel)]}
+              {@const ppSkipped = panelPrefillActive(p.panel) && !scopeApplies(pp?.scope ?? 'all')}
+              <!-- This panel's prefill: kept in focus mode too (it still governs
+                   the composer's sends here), unlike the continue box below. -->
+              <div class="panel-prefill-line" class:skipped={ppSkipped}>
+                <SplitChip
+                  label="prefill"
+                  active={panelPrefillActive(p.panel)}
+                  enabled={pp?.on ?? false}
+                  open={ppOpen}
+                  testid="panel-prefill"
+                  powerTip="Apply / mute this panel's prefill (hollow dot = muted)"
+                  editTip="This panel's prefill — replaces the composer prefill here"
+                  onpower={() => togglePanelPrefillOn(p.panel)}
+                  onfold={() => togglePanelPrefillOpen(p.panel)}
+                />
+                {#if ppOpen || pp?.on || pp?.text.trim()}
+                  <PrefillScopeToggle
+                    scope={pp?.scope ?? 'all'}
+                    dim={!panelPrefillActive(p.panel)}
+                    skipped={ppSkipped ? `thinking is ${s.thinking === false ? 'off' : 'on'}` : null}
+                    testid="panel-prefill-scope"
+                    onpick={(sc) => setPanelPrefillScope(p.panel, sc)}
+                  />
+                {/if}
+                {#if !ppOpen && pp?.text.trim()}
+                  <button class="prefill-peek" class:live={panelPrefillActive(p.panel) && !ppSkipped} data-tooltip="Prefill {pp.on ? 'applied' : 'muted'} — click to edit" use:tip onclick={() => togglePanelPrefillOpen(p.panel)}>{pp.text.replace(/\s+/g, ' ')}</button>
+                {/if}
+              </div>
+              {#if ppOpen}
+                <textarea
+                  class="prefill-textarea panel-prefill-input"
+                  class:muted={!pp?.on}
+                  data-testid="panel-prefill-input"
+                  value={pp?.text ?? ''}
+                  oninput={(e) => setPanelPrefillText(p.panel, (e.target as HTMLTextAreaElement).value)}
+                  rows="2"
+                  placeholder="The model continues from this text"
+                ></textarea>
+              {/if}
+              {#if !focusPanel}
               <!-- Per-panel composer: continue ONLY this panel, independent of the
                    other panel and of whatever it's doing. Lives OUTSIDE the
                    scrollable .messages so it stays stationary when branch cycling
@@ -2896,6 +2900,7 @@
                   <Icon name="arrow-right" size={14} />
                 </button>
               </div>
+              {/if}
             {/if}
           </div>
           {/if}
@@ -3270,9 +3275,16 @@
   .column-title { flex: 1; min-width: 0; display: flex; overflow: hidden; }
   .reduce-panel { display: flex; align-items: center; padding: 2px; background: none; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--color-text-muted); cursor: pointer; flex-shrink: 0; }
   .reduce-panel:hover { color: var(--color-accent); border-color: var(--color-border); }
-  .column-header :global(.split-chip) { font-weight: 400; }
-  .panel-prefill { padding: var(--space-2) var(--space-4); background: var(--color-surface); border-bottom: 1px solid var(--color-border); }
-  .panel-prefill-scope { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+  /* Per-panel prefill: one line above the continue box, on its left edge. */
+  .panel-prefill-line { display: flex; align-items: stretch; gap: var(--space-2); flex-shrink: 0; margin: var(--space-2) var(--space-4) 0; padding: 0 var(--space-1); }
+  .panel-prefill-line.skipped { opacity: 0.55; }
+  .panel-prefill-line .prefill-peek { align-self: center; }
+  /* right edge = the continue box's, not its send button's */
+  .panel-prefill-input { display: block; width: auto; margin: var(--space-2) calc(var(--space-4) + var(--space-1) * 2 + var(--panel-send-btn-w)) 0 calc(var(--space-4) + var(--space-1)); flex-shrink: 0; }
+  .panel-prefill-input::placeholder { white-space: pre-wrap; }
+  /* focus mode drops the continue box below them */
+  .panel-prefill-line:last-child, .panel-prefill-input:last-child { margin-bottom: var(--space-3); }
+  .panel-prefill-input:last-child { margin-right: calc(var(--space-4) + var(--space-1)); }
   /* ── Composer send-targeting chips ─────────────────────────────── */
   .send-targets { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-2) 0 0; }
   .send-targets-label { font-size: 0.68rem; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.04em; }

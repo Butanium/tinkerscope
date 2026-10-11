@@ -95,13 +95,19 @@ different models. Drag a column header to reorder; the sidebar pickers and the
 send chips follow. A header's **focus** button (corner arrows, next to the `−`
 fold) shows that panel alone, full width, with the composer sending to it only —
 the same button, `Esc` or browser Back returns to all panels; it's in the URL
-(`?focus=<panel>`), so a reload keeps it. Each header also has its own
-**prefill** pill: a panel prefill replaces the composer prefill for every send to
-that panel (composer, the column's own box, regenerate), so two model families
-can each get the opening they need (e.g. `Hmm,` for one, `The user is` for the
-other). It has its own All / Think only / Non-think only toggle, like the
-composer's; when that doesn't fit the thinking mode, the panel gets no prefill
-(not the composer's). Browser-local and per workspace, like the composer prefill. Beside each model's name is a **copy button** for the string
+(`?focus=<panel>`), so a reload keeps it. At the bottom of each column, above its
+"continue this panel" box, is the panel's own **prefill** pill: a panel prefill
+replaces the composer prefill for every send to that panel (composer, the
+column's own box, regenerate), so two model families can each get the opening
+they need (e.g. `Hmm,` for one, `The user is` for the other). Next to the pill, a
+three-way switch drawn as glyphs picks which samples get it — brain + speech
+bubble = thinking and non-thinking, brain = thinking only, bubble = non-thinking
+only (the composer's own prefill has the same choice in words). The switch shows
+once the prefill is unfolded, armed or has text; folded, the text itself is
+previewed on the line. When the scope doesn't fit the thinking mode the line
+greys out and the panel gets no prefill (not the composer's). The line stays in
+focus mode, where the continue box is hidden. Browser-local and per workspace,
+like the composer prefill. Beside each model's name is a **copy button** for the string
 you'd paste into your own script — the selected checkpoint's `tinker://…`
 sampler path, or a base model's id. Hold `Shift` on a discovered run and it
 copies the absolute path of the **training JSONL** that run was trained on

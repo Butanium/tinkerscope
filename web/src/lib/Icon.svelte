@@ -20,6 +20,8 @@
     // sidebar / chrome
     | 'chart' | 'pins' | 'dataset' | 'help' | 'stop' | 'undo' | 'plus' | 'minus'
     | 'focus' | 'unfocus'
+    // prefill scope: the thinking half / the answer (non-thinking) half
+    | 'think' | 'answer'
     | 'new-blank' | 'arrow-right' | 'sidebar-fold' | 'sidebar-unfold'
     | 'theme-light' | 'theme-dark' | 'theme-auto' | 'eye' | 'upload' | 'external';
 </script>
@@ -96,6 +98,13 @@
 {:else if name === 'unfocus'}
   <!-- corners pointing in: back to every panel -->
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M6 2.5V6H2.5M13.5 6H10V2.5M10 13.5V10h3.5M2.5 10H6v3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
+{:else if name === 'think'}
+  <!-- brain: the thinking half of a send -->
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M8 3.2a2.2 2.2 0 0 0-4.1.6A2.6 2.6 0 0 0 2.3 8.1a2.5 2.5 0 0 0 .8 3.3A2.4 2.4 0 0 0 8 12.6Z" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /><path d="M8 3.2a2.2 2.2 0 0 1 4.1.6A2.6 2.6 0 0 1 13.7 8.1a2.5 2.5 0 0 1-.8 3.3A2.4 2.4 0 0 1 8 12.6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /><path d="M3.9 3.8c.2 1 .8 1.6 1.7 1.8M12.1 3.8c-.2 1-.8 1.6-1.7 1.8M2.3 8.1c.7-.4 1.5-.5 2.3-.2M13.7 8.1c-.7-.4-1.5-.5-2.3-.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /></svg>
+{:else if name === 'answer'}
+  <!-- speech bubble with text: the answer (non-thinking) half. Pointed tail on
+       purpose — the thought bubble (`continue-think`) trails circles -->
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M4.5 3h7A2.5 2.5 0 0 1 14 5.5v3a2.5 2.5 0 0 1-2.5 2.5H8.2L5 13.4V11h-.5A2.5 2.5 0 0 1 2 8.5v-3A2.5 2.5 0 0 1 4.5 3Z" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" /><path d="M5.3 6h5.4M5.3 8h3.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>
 {:else if name === 'arrow-right'}
   <!-- "push it that way": unfold a reduced panel, send a draft into a panel -->
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>

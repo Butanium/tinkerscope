@@ -860,7 +860,10 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     loop, never as a `ViewMessage`. Carries `thread-system-strip` (the old root-row
     strip's testid — `browser_thread_system` addresses it). Siblings in +page: the
     **panel prefill** (`panelPrefills`, session pref keyed `<workspace>:<panel>`,
-    overrides the composer prefill via `withPrefill(msgs, panel)`) and **focus**
+    overrides the composer prefill via `withPrefill(msgs, panel)`; drawn as the
+    column-FOOTER line above the continue box, kept in focus mode where that box
+    hides, with `lib/PrefillScopeToggle.svelte` — the brain/bubble glyph scope
+    switch, `Icon` names `think`/`answer`) and **focus**
     (`?focus=<panel>` → `visibleSels` / `targetSels`; a render filter, never written
     to reduced/send-target meta).
   - `lib/ThreadSwitcher.svelte` — the composer-row **cross-panel thread jump**:

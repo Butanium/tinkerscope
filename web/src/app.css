@@ -186,3 +186,8 @@ select {
 /* Compact variant for in-row use (the think/no-think sample filter lives in a
    message header, where the sidebar sizing reads as a slab). */
 .seg-toggle.seg-mini .seg-btn { padding: 1px 7px; font-size: 0.65rem; letter-spacing: 0.02em; }
+/* Glyph-only segments (PrefillScopeToggle): sized to share a line with a SplitChip. */
+.seg-toggle.seg-icons { flex-shrink: 0; background: var(--color-bg); }
+.seg-toggle.seg-icons .seg-btn { display: inline-flex; align-items: center; gap: 2px; padding: 0 6px; line-height: 1; }
+.seg-toggle.seg-icons.dim .seg-btn.active { background: var(--color-border); color: var(--color-text-secondary); }
+.seg-toggle.seg-icons .seg-btn.skipped { background: none; color: var(--color-accent); box-shadow: inset 0 0 0 1px var(--color-accent); }

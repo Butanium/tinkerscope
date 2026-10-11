@@ -2829,3 +2829,29 @@ obligatory", and the workspace-wide prompt kept as a default at the bottom
   always meant as "this probe's prompt", so the change matches their intent.
 - The root-row `system` strip in ChatMessage is gone (the top row shows the same
   thing one row up); its testid moved to the row's text.
+
+### 2026-10-10 — Panel prefill moves to the column footer; the scope switch becomes glyphs
+
+Clément picked, from three footer mockups, the prefill pill on its own line just
+above each column's "continue this panel" box, with the scope switch on the same
+line drawn as symbols instead of All / Think only / Non-think only (he called the
+first mockup terrible, so this one was iterated on screenshots in both themes).
+
+- **Glyphs:** `Icon` gained `think` (a brain) and `answer` (a speech bubble with
+  two text lines). The pointed tail and the text lines keep it apart from the
+  existing `continue-think` THOUGHT bubble (trailing circles). Brain variants were rendered at 12–16 px; only the
+  one with lobe folds still read as a brain at 13 px.
+- **`lib/PrefillScopeToggle.svelte`** + `.seg-icons` in `app.css`: the line is
+  `align-items: stretch`, so the switch takes the SplitChip's height (both 20 px,
+  measured). The composer's own word toggle is unchanged; it can adopt the
+  component later.
+- **When it shows** (Clément's call): the switch is hidden while the prefill is
+  empty, unarmed and folded — the pill alone says "no prefill here". Folded with
+  text, the text is previewed after the switch (the composer's `.prefill-peek`).
+- **Scope that doesn't fit the thinking mode:** the whole line drops to 55%
+  opacity and the picked glyph turns outlined; its tooltip names the reason. This
+  replaces the italic "inactive — thinking is off" sentence in the panel.
+- **Focus mode:** the prefill line stays (it still governs the composer's sends to
+  the focused panel), the continue box doesn't (the composer already sends there).
+- The textarea's right edge matches the continue box, not its send button: both
+  read `--panel-send-btn-w` (chat.css), which now also sets the button's width.
