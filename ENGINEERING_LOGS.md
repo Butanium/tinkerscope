@@ -2875,3 +2875,28 @@ Two follow-ups Clément approved from the footer work:
   `SplitChip`'s `onpower` now receives the click event (it always did at runtime;
   only the type was `() => void`).
 
+### 2026-10-10 — Glyph pass: one stroke weight, one grid, four redrawn icons, a style doc
+
+Clément asked which glyphs I'd improve, then said do it. I rendered the whole set
+and found:
+
+- **Collisions.** `edit-copy` (Shift+edit) was two overlapping sheets, nearly
+  `copy`. It is now a pencil on a sheet's corner. `continue` was the same `+` as
+  add-panel. It is now `••→`, and its Shift twin `continue-think` is a thought
+  bubble with the same dots in it.
+- **`trash-all`**: the back can was one stray stroke at 13 px. It is now two whole
+  cans.
+- **Weights**: strokes ran from 1.1 to 2.0, and five glyphs drew on a 14 box (so
+  1.5 there ≈ 1.71 on 16). Every glyph is now on the 16 grid with stroke 1.4 and
+  round caps/joins. The only exception is 1.2 for text lines inside a frame. The
+  14→16 conversion scaled coordinates (arc rotation and flags left alone), not a
+  `<g transform>`. The before/after was checked in place: sidebar, column header,
+  row toolbar plain and with Shift held. The `+` and `−` buttons don't look weak
+  at 1.4, so they got no exception.
+- **`tag-quick`'s hole** was a `var(--color-bg)` dot, which shows as a coloured
+  dot on the tinted Shift/hover button. It is now an evenodd hole.
+
+The rules are in `docs/GLYPHS.md`. `scripts/glyph_sheet.py` renders the set
+(`--icon` for a before-sheet). The one-shot rewrite script isn't kept. The diff
+is the record.
+

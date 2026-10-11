@@ -447,7 +447,7 @@ answer to "which one is that"):
 |---|---|---|
 | Raw | the word `Raw`, leftmost | the model's untouched output, tags and all |
 | regenerate | circular arrows | sample this turn again → a new sibling branch |
-| continue | `+` | the model EXTENDS this message instead of replying |
+| continue | two dots and an arrow (`••→`) | the model EXTENDS this message instead of replying |
 | edit | pencil | change the text; forks, never overwrites |
 | delete | trash can | prune this branch and its subtree |
 | bookmark | tag/label outline | pin this sample with a note |
@@ -458,7 +458,7 @@ answer to "which one is that"):
 | copy node handle | `#` | `<ws>:<panel>:<node>` — paste into `tinkpg samples/continue --node …` in any terminal |
 
 Sample cards (an n>1 draw) add: **make active** (circled check — picks that
-branch and drops back to the thread), **continue this sample** (`+`), **discard
+branch and drops back to the thread), **continue this sample** (`••→`), **discard
 others** (a page with an ✕).
 
 Hold a modifier, then click a row-toolbar button:
