@@ -484,6 +484,17 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   request tinker lost and the server resent, or a reconnect after 3 min of no
   answer at all (the server's own recovery from a dead connection; after 2 it
   fails the sample with "no answer from tinker"). No line = tinker is working.
+- **A stopped fire exits 130 and says who stopped it.** The human's Stop button
+  in the browser cancels a CLI-fired chat too; `tinkpg` then fails with
+  "stopped from outside this CLI … K of N sample(s) finished" (exit 130, the
+  finished K are saved — their handles print above). Ctrl+C in your terminal
+  cancels every chat server-side and exits 130 the same way ("interrupted
+  here"). Either way the user turn stays saved: draw the rest with `continue
+  --node <user-turn handle> --n K`, never a re-`send`. Any other shortfall (N
+  promised, fewer arrived, no reason given) or an all-errored fan-out exits 1.
+  `--json`'s `done` line carries `n` / `n_ok` / `n_error`, `cancelled`, the
+  `user_turn` handle and a `handle` per folded sample. A `battery` stops at the
+  probe that was stopped (exit 130) instead of firing the rest.
 - **Sequential waves**: fire → `tinkpg wait [--timeout N]` → read → fire again
   (no sleep/check dances). Reading loop: `tinkpg samples --node <id> --this`
   isolates the one sample a qualified handle names; `samples --export-ancestry

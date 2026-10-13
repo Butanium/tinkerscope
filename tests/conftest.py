@@ -216,3 +216,32 @@ def ops_tree_write(client, cid, body):
     if meta:
         ops.append({"op": "set_meta", "fields": meta})
     return client.post(f"/api/workspaces/{cid}/ops", json={"ops": ops})
+
+
+def _free_port() -> int:
+    import socket
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+@pytest.fixture
+def live_server(backend):
+    """The backend app on a real port (uvicorn in a thread) — for tests that need
+    true HTTP streaming + a second concurrent client (cancel, timeout)."""
+    import threading
+    import time
+
+    import uvicorn
+
+    port = _free_port()
+    server = uvicorn.Server(uvicorn.Config(backend[1].app, host="127.0.0.1", port=port, log_level="warning"))
+    t = threading.Thread(target=server.run, daemon=True)
+    t.start()
+    deadline = time.monotonic() + 10
+    while not server.started:
+        assert time.monotonic() < deadline, "uvicorn did not start"
+        time.sleep(0.02)
+    yield f"http://127.0.0.1:{port}"
+    server.should_exit = True
+    t.join(timeout=5)

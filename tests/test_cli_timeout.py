@@ -5,35 +5,9 @@ hang below outlives nothing on the server, only the client's deadline ends it.""
 from __future__ import annotations
 
 import asyncio
-import socket
-import threading
 import time
 
-import pytest
-import uvicorn
-
 from tinkerscope.api.state import DEFAULT_PANEL_ID
-
-
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-@pytest.fixture
-def live_server(backend):
-    port = _free_port()
-    server = uvicorn.Server(uvicorn.Config(backend[1].app, host="127.0.0.1", port=port, log_level="warning"))
-    t = threading.Thread(target=server.run, daemon=True)
-    t.start()
-    deadline = time.monotonic() + 10
-    while not server.started:
-        assert time.monotonic() < deadline, "uvicorn did not start"
-        time.sleep(0.02)
-    yield f"http://127.0.0.1:{port}"
-    server.should_exit = True
-    t.join(timeout=5)
 
 
 def test_timeout_cancels_a_hung_chat(live_server, monkeypatch):

@@ -8,6 +8,19 @@ WIRE contract, not on the UI (`docs/RELEASING.md`).
 `docs/MIGRATIONS.md` covers every release that moved the wire or on-disk shape;
 `ENGINEERING_LOGS.md` carries the dated narrative behind the decisions.
 
+## [Unreleased]
+
+### Fixed
+
+- **A stopped fire no longer exits 0.** A Stop in the browser on a CLI-fired chat
+  used to leave `tinkpg` reporting a clean run with whatever samples had finished
+  (1 of 10, silently). It now fails with "stopped from outside this CLI — K of N
+  sample(s) finished" and exits **130**; Ctrl+C cancels the chats server-side and
+  exits 130 too (it used to print "Aborted!" while sampling went on). A fan-out
+  that returns fewer samples than promised, or only errors, exits 1. `battery`
+  stops at a stopped probe. Wire: `start` gains `n`, the caller's `done`/`error`
+  gain `cancelled` (additive; the bus is unchanged).
+
 ## [1.5.0] — 2026-10-13
 
 System prompts become part of the conversation, prefills become per panel, and a

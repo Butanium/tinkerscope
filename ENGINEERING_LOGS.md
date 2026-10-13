@@ -2900,3 +2900,34 @@ The rules are in `docs/GLYPHS.md`. `scripts/glyph_sheet.py` renders the set
 (`--icon` for a before-sheet). The one-shot rewrite script isn't kept. The diff
 is the record.
 
+
+### 2026-10-13 — A stopped fire no longer exits 0: `cancelled` on the terminal, `n` on start, exit 130
+
+An agent rolling a conversation turn by turn (`continue --n 5 --thinking-both`,
+10 samples expected) got 1 sample back and exit 0, with nothing on stdout or
+stderr about the other 9. The server log showed `POST /api/chat/5/cancel`
+mid-fire: Clément had pressed Stop in the browser. The server knew —
+`inflight.cancelled` — but `_terminal` collapses "cancelled with ≥1 sample" into
+a plain `chat_done` (correct for the bus: the browser's fold reconcile keys on
+it), and the caller's `done` carried only the fold manifest. The CLI had no way
+to tell the stop from a clean n=1: it never learned how many samples were
+coming (thinking=both may be inherited, so it can't compute 2n itself).
+
+- Server: `start` carries `n` (the resolved total); `done`/`error` carry
+  `cancelled: true` when the cancel endpoint stopped the chat. Caller stream
+  only — the bus wire is unchanged.
+- CLI (`_shortfall`): `cancelled` → "stopped from outside this CLI …, K of N
+  finished", exit 130 (`_EXIT_STOPPED`, the SIGINT convention, so a wrapper can
+  tell stopped from broken). N promised but fewer arrived with no reason → exit
+  1 (an older server's stop lands here). All samples errored → exit 1 (it used
+  to exit 0 too).
+- Ctrl+C: Click turned it into "Aborted!" exit 1 while the non-daemon stream
+  threads went on sampling unseen. `_join_fires` now cancels every chat
+  server-side (a stream still before `start` cancels itself when the id
+  arrives), waits for the terminals, and the fan-out exits 130 naming what
+  finished. The single-chat path does the same from inside `_stream_chat`.
+- `battery` stops at a stopped probe instead of firing the rest: a Stop means the
+  battery.
+- The resample hint ("the user turn is already saved — `continue --node … --n
+  K`") now covers `continue` and `compare`, and a stop that kept samples, not only
+  a send that lost its fire.

@@ -391,9 +391,11 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
 `{"status":"started"}` and NO stream — every event goes to the bus only.
 
 ### /api/chat SSE (the caller's stream — what the CLI prints)
-- `event: start` → `data: {chat_id}` — first event, once the chat is registered;
-  the id to `POST /api/chat/{chat_id}/cancel` with (how `tinkpg --timeout` stops
-  a chat). Consumers that don't cancel ignore it.
+- `event: start` → `data: {chat_id, n}` — first event, once the chat is registered;
+  `chat_id` is the id to `POST /api/chat/{chat_id}/cancel` with (how `tinkpg
+  --timeout` and Ctrl+C stop a chat), `n` how many samples to expect (2×n_samples
+  for `thinking:"both"`, resolved server-side, so it holds when thinking is
+  inherited). Consumers that don't cancel ignore it.
 - `event: status` → `data: {state, reason, heard_ago_s, http, reconnects, resubmits}` —
   native tinker producers only (`run_id` / `base_model` / loose `sampler_path`),
   zero or more times while samples are pending, whenever it CHANGES: what tinker
@@ -447,6 +449,11 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
   replaced mid-fire). The direct-stream consumer — the headless CLI — cannot
   read the bus or the server log, so this is its only persistence signal;
   `tinkpg` exits non-zero on a missing manifest after ≥1 completed sample.
+  `cancelled: true` is added when the chat was stopped through the cancel
+  endpoint (the browser's Stop on a chat it didn't fire, `tinkpg --timeout`,
+  Ctrl+C) — CALLER stream only: the bus still says `chat_done` for a stop that
+  kept samples. Without it a stop after sample 1 of 10 read as a clean 1-sample
+  run; `tinkpg` now exits 130 on it and names how many of `n` finished.
 - `event: error` → `data: {error, …}` (whole request failed, e.g. unsampleable
   run; a mid-stream producer fault after ≥1 completed sample also carries the
   fold-outcome fields above — partial data is real data and folds)

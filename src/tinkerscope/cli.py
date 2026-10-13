@@ -654,6 +654,91 @@ class _StreamResult:
         # handle) — named on failure, so a retry re-samples it instead of
         # re-sending a duplicate thread.
         self.user_turn: Optional[str] = None
+        # From the `start` event: the cancel handle + how many samples are coming.
+        self.chat_id: Optional[int] = None
+        self.n_expected: Optional[int] = None
+        # A PERSON stopped this chat — `cancelled`: from outside (the browser's
+        # Stop button, another client); `interrupted`: Ctrl+C in this terminal.
+        # Either one exits _EXIT_STOPPED instead of 1.
+        self.cancelled: bool = False
+        self.interrupted: bool = False
+
+
+# Exit code when a person stopped the sampling (browser Stop or Ctrl+C) — the
+# shell's SIGINT convention, so a wrapper can tell "stopped" from "broken" (1).
+_EXIT_STOPPED = 130
+
+
+def _expected_samples(body: dict) -> int:
+    """Client-side fallback for the `start` event's `n` (servers before it): an
+    UNDERcount when thinking=both is inherited from the global params, so a
+    shortfall computed from it never false-alarms."""
+    return int(body.get("n_samples") or 1) * (2 if body.get("thinking") == "both" else 1)
+
+
+def _shortfall(res: "_StreamResult", done_data: dict, n_ok: int, n_err: int) -> Optional[str]:
+    """Why a terminal that LOOKS clean isn't — None when it is. Sets the
+    stopped-by-a-person flags on `res`. The check behind the 2026-10-13 bug: a
+    browser Stop after sample 1 of 10 exited 0 with no word about the other 9."""
+    n = res.n_expected
+    of = f" of {n}" if n else ""
+    if res.interrupted:
+        return f"interrupted here (Ctrl+C): chat cancelled — {n_ok}{of} sample(s) finished"
+    if done_data.get("cancelled"):
+        res.cancelled = True
+        return (f"stopped from outside this CLI (the browser's Stop button, or another "
+                f"client's cancel) — {n_ok}{of} sample(s) finished")
+    if n and n_ok + n_err < n:
+        hint = _server_skew_hint()
+        return (f"only {n_ok + n_err}{of} sample(s) came back and the server gave no reason — "
+                "most likely a Stop in the browser" + (f". {hint}" if hint else ""))
+    if n_ok == 0 and n_err:
+        return f"every sample errored ({n_err}{of}) — see the ERROR blocks above"
+    return None
+
+
+def _cancel_chat(chat_id: int) -> None:
+    try:
+        with _client() as c:
+            c.post(f"/api/chat/{chat_id}/cancel")
+    except httpx.HTTPError:
+        pass  # the stream's own end (or its transport error) reports it
+
+
+def _join_fires(threads: list[threading.Thread], results: list[tuple[str, Any, "_StreamResult"]]) -> None:
+    """Join a fan-out's per-panel stream threads. Ctrl+C cancels every chat
+    server-side (finished samples still fold) and keeps waiting — each stream
+    then reports its terminal, so the caller's summary covers the interruption
+    instead of Click's bare "Aborted!" while the threads sample on unseen.
+    A second Ctrl+C aborts outright."""
+    try:
+        for t in threads:
+            t.join()
+    except KeyboardInterrupt:
+        print("\n^C — cancelling the chat(s); finished samples are kept …", file=sys.stderr, flush=True)
+        for _pid, _p, res in results:
+            res.interrupted = True  # a stream still before `start` cancels itself there
+            if res.chat_id is not None:
+                _cancel_chat(res.chat_id)
+        for t in threads:
+            t.join()
+
+
+def _fire_failures(results: list[tuple[str, Any, "_StreamResult"]], label) -> tuple[list[str], int]:
+    """(failure lines, exit code) for a joined fan-out; `label(pid, model)` names
+    a panel. The resample hint covers BOTH a lost fire and a stop that kept some
+    samples — either way the user turn is already saved, so re-sending would
+    add a duplicate thread."""
+    failed = [(pid, m, res) for (pid, m, res) in results if not res.ok]
+    lines = [f"{label(pid, m)}: {res.error or 'unknown error'}" for (pid, m, res) in failed]
+    turns = [res.user_turn for (_pid, _m, res) in failed if res.user_turn]
+    if turns:
+        lines.append(
+            "the user turn is already saved (" + ", ".join(turns) + ") — draw more samples there with "
+            f"`tinkpg continue --node {turns[0]} --n K` rather than re-sending, which adds a duplicate thread"
+        )
+    stopped = any(res.cancelled or res.interrupted for (_pid, _m, res) in failed)
+    return lines, (_EXIT_STOPPED if stopped else 1)
 
 
 # Per-chat wall-clock cap set by a sampling command's --timeout (None = wait as
@@ -825,6 +910,18 @@ def _done_lines(body: dict, done_data: dict) -> list[str]:
     return lines
 
 
+def _json_done(body: dict, done_data: dict) -> dict:
+    """The `--json` twin of _done_lines: the terminal payload with each folded
+    sample's paste-ready `handle` and the parent `user_turn` handle added."""
+    out = dict(done_data)
+    parent, folded = body.get("parent_node"), done_data.get("folded")
+    if parent and folded:
+        ws, panel = body.get("workspace_id"), body.get("panel", "")
+        out["user_turn"] = _qualified_handle(ws, panel, parent)
+        out["folded"] = [{**m, "handle": _qualified_handle(ws, panel, m["node_id"])} for m in folded]
+    return out
+
+
 def _stream_chat(
     body: dict,
     label: Optional[str] = None,
@@ -861,10 +958,13 @@ def _stream_chat(
         only controls the HUMAN-readable text rendering).
 
     On failure: if `result` is supplied (compare threads), record the error
-    there instead of calling _die; otherwise _die directly.
+    there instead of calling _die; otherwise _die directly. A terminal that
+    arrives with samples missing is a failure too (`_shortfall`): stopped by a
+    person → exit _EXIT_STOPPED, unexplained → 1.
     """
     prefix = f"[{label}] " if label else ""
     panel_id = body.get("panel")
+    st = result if result is not None else _StreamResult()
 
     def emit_block(*parts: str) -> None:
         block = "\n".join(prefix + p for p in parts)
@@ -894,13 +994,15 @@ def _stream_chat(
         if result is not None:
             result.error = msg
         else:
-            _die(msg)  # single (non-threaded) chat: JSON line (if any) is already out — now exit non-zero
+            # single (non-threaded) chat: JSON line (if any) is already out — now exit non-zero
+            _die(msg, _EXIT_STOPPED if (st.cancelled or st.interrupted) else 1)
 
     # Inline-streaming bookkeeping (single chat only).
     streamed: set[int] = set()  # sample indices that received delta chunks
     hdr_printed: set[int] = set()  # indices we printed a "--- sample N ---" header for
     last_kind: dict[int, str] = {}  # idx -> last delta kind, to insert separators
     n_ok = 0  # completed (non-error) samples — the fold-failure check needs the count
+    n_err = 0  # samples that came back as errors (the shortfall check needs both)
     last_status: list[str | None] = [None]  # last tinker-status line printed (stderr)
 
     # --timeout: on expiry, cancel server-side by chat_id (from the `start` event);
@@ -930,7 +1032,12 @@ def _stream_chat(
                     return
                 for ev in event_source.iter_sse():
                     if ev.event == "start":
-                        chat_id = json.loads(ev.data).get("chat_id") if ev.data else None
+                        start = json.loads(ev.data) if ev.data else {}
+                        chat_id = start.get("chat_id")
+                        st.chat_id = chat_id
+                        st.n_expected = start.get("n") or _expected_samples(body)
+                        if st.interrupted and chat_id is not None:
+                            _cancel_chat(chat_id)  # Ctrl+C landed before we had the handle
                         if _TIMEOUT_S is not None and chat_id is not None:
                             remaining = max(0.0, _TIMEOUT_S - (time.monotonic() - t0))
                             timer = threading.Timer(remaining, _cancel, args=(chat_id,))
@@ -943,8 +1050,10 @@ def _stream_chat(
                         except json.JSONDecodeError:
                             done_data = {}
                         if json_out:
-                            # carries folded/fold_rev or fold_error for scripts
-                            emit_json({"event": "done", **done_data})
+                            # carries folded/fold_rev or fold_error (+ cancelled) for
+                            # scripts, plus the counts and paste-ready handles
+                            emit_json({"event": "done", **_json_done(body, done_data),
+                                       "n": st.n_expected, "n_ok": n_ok, "n_error": n_err})
                         else:
                             emit_block(*_done_lines(body, done_data))
                         fold_fail = _fold_failure(body, done_data, n_ok)
@@ -957,11 +1066,20 @@ def _stream_chat(
                         if timed_out.is_set():
                             fail(timeout_msg())
                             return
+                        short = _shortfall(st, done_data, n_ok, n_err)
+                        if short is not None:
+                            if n_ok and done_data.get("folded"):
+                                short += " — those are saved (handles above)"
+                            fail(short)
+                            return
                         break
                     if ev.event == "error":
                         err = ev.data
                         try:
-                            err = json.loads(ev.data).get("error", ev.data)
+                            err_data = json.loads(ev.data)
+                            err = err_data.get("error", ev.data)
+                            if err_data.get("cancelled") and not timed_out.is_set():
+                                st.cancelled = not st.interrupted
                         except (json.JSONDecodeError, AttributeError):
                             pass
                         fail(timeout_msg() if timed_out.is_set() else f"{err}")
@@ -1002,7 +1120,9 @@ def _stream_chat(
                         continue
                     payload = json.loads(ev.data)
                     idx = payload.get("sample_index")
-                    if not payload.get("error"):
+                    if payload.get("error"):
+                        n_err += 1
+                    else:
                         n_ok += 1
                     if result is not None and not payload.get("error"):
                         result.samples.append(payload)
@@ -1040,6 +1160,20 @@ def _stream_chat(
             f"could not reach tinkerscope server at {_base_url()}: {e}\n"
             "is the server running? check --base-url / $TINKERSCOPE_BASE_URL."
         )
+        return
+    except KeyboardInterrupt:
+        # Single chat only — a fan-out's Ctrl+C lands in the main thread
+        # (_join_fires). Leaving the stream already cancels server-side
+        # (disconnect), and the server still folds what finished; the explicit
+        # cancel makes that not depend on disconnect detection.
+        st.interrupted = True
+        if st.chat_id is not None:
+            _cancel_chat(st.chat_id)
+        of = f" of {st.n_expected}" if st.n_expected else ""
+        where = (f" — finished ones are saved under {_qualified_handle(body.get('workspace_id'), panel_id or '', body['parent_node'])}"
+                 if body.get("parent_node") and n_ok else "")
+        print(file=sys.stderr)
+        fail(f"interrupted here (Ctrl+C): chat cancelled — {n_ok}{of} sample(s) finished{where}")
         return
     finally:
         if timer is not None:
@@ -1249,16 +1383,11 @@ def cmd_compare(
         results.append((pid, r, res))
         threads.append(t)
         t.start()
-    for t in threads:
-        t.join()
+    _join_fires(threads, results)
 
-    failures = [
-        f"{pid} ({r['id']}): {res.error or 'unknown error'}"
-        for (pid, r, res) in results
-        if not res.ok
-    ]
+    failures, code = _fire_failures(results, lambda pid, r: f"{pid} ({r['id']})")
     if failures:
-        _die("compare failed:\n  " + "\n  ".join(failures))
+        _die(f"compare {'stopped' if code == _EXIT_STOPPED else 'failed'}:\n  " + "\n  ".join(failures), code)
 
 
 def _bind_panel_model(body: dict, panel: dict) -> None:
@@ -1543,8 +1672,7 @@ def _fire_send(
         results.append((p["id"], p, res))
         threads.append(t)
         t.start()
-    for t in threads:
-        t.join()
+    _join_fires(threads, results)
     return results
 
 
@@ -1631,19 +1759,9 @@ def cmd_send(
                          thread_system=thread_system, conv_id=conv_id)
     if first_token:
         _print_first_token_tables(results, json_out)
-    failures = [
-        f"{pid} ({_short_run(p.get('run_id'))}): {res.error or 'unknown error'}"
-        for (pid, p, res) in results
-        if not res.ok
-    ]
-    stranded = [res.user_turn for (_pid, _p, res) in results if not res.ok and res.user_turn]
-    if stranded:
-        failures.append(
-            "the user turn is already saved (" + ", ".join(stranded) + ") — re-sample it with "
-            f"`tinkpg continue --node {stranded[0]}` rather than re-sending, which adds a duplicate thread"
-        )
+    failures, code = _fire_failures(results, lambda pid, p: f"{pid} ({_short_run(p.get('run_id'))})")
     if failures:
-        _die("send failed:\n  " + "\n  ".join(failures))
+        _die(f"send {'stopped' if code == _EXIT_STOPPED else 'failed'}:\n  " + "\n  ".join(failures), code)
 
 
 def _node_prefix_hits(nodes: dict, node: str) -> list[dict]:
@@ -2006,27 +2124,23 @@ def cmd_continue(
     for (p, msgs, ts, _anchor) in plans:
         body = _panel_body(p, msgs, n, temperature, max_tokens, think, system, prefill_scope,
                            thread_system=ts)
+        res = _StreamResult()
         if c is not None and p["id"] in fire_parent:
             body["workspace_id"] = c["id"]
             body["parent_node"] = fire_parent[p["id"]]
-        res = _StreamResult()
+            res.user_turn = _qualified_handle(c["id"], p["id"], fire_parent[p["id"]])
         label = f"{p['id']} {_short_run(p.get('run_id'))}"
         t = threading.Thread(target=_stream_chat, args=(body, label, lock, res, False, show_logprobs, json_out))
         results.append((p["id"], p, res))
         threads.append(t)
         t.start()
-    for t in threads:
-        t.join()
+    _join_fires(threads, results)
 
     if first_token:
         _print_first_token_tables(results, json_out)
-    failures = [
-        f"{pid} ({_short_run(p.get('run_id'))}): {res.error or 'unknown error'}"
-        for (pid, p, res) in results
-        if not res.ok
-    ]
+    failures, code = _fire_failures(results, lambda pid, p: f"{pid} ({_short_run(p.get('run_id'))})")
     if failures:
-        _die("continue failed:\n  " + "\n  ".join(failures))
+        _die(f"continue {'stopped' if code == _EXIT_STOPPED else 'failed'}:\n  " + "\n  ".join(failures), code)
 
 
 _PROBE_KEYS = {"system", "no-system", "prefill", "n", "temperature", "max-tokens",
@@ -2187,13 +2301,28 @@ def cmd_battery(
         if first_token:
             _print_first_token_tables([r for r in results if r[2].ok], json_out=False)
         print(flush=True)
+        if any(res.cancelled or res.interrupted for _, _, res in results):
+            # A person pressed Stop (or Ctrl+C): that means the battery, not one probe.
+            print(f"battery stopped at probe {k}/{len(probes)} — "
+                  f"{len(probes) - k} probe(s) not fired", flush=True)
+            stopped = True
+            break
         if k < len(probes):
-            time.sleep(pause)
+            try:
+                time.sleep(pause)
+            except KeyboardInterrupt:
+                print(f"\n^C — battery stopped after probe {k}/{len(probes)}", flush=True)
+                stopped = True
+                break
+    else:
+        stopped = False
 
-    print("battery done:")
+    print("battery done:" if not stopped else "battery stopped:")
     for stem, n_ok, fails in summary:
         print(f"  {stem}: {n_ok} sample(s)" + (f", {len(fails)} FAILED panel(s)" if fails else ""))
     print(f"JSONL per probe in {out_dir}")
+    if stopped:
+        raise typer.Exit(code=_EXIT_STOPPED)
     if any(fails for _, _, fails in summary):
         raise typer.Exit(code=1)
 

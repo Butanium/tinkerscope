@@ -992,8 +992,10 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
 
         prod_error: str | None = None
         try:
-            # The caller's handle for POST /api/chat/{chat_id}/cancel (`tinkpg --timeout`).
-            yield {"event": "start", "data": json.dumps({"chat_id": chat_id})}
+            # The caller's handle for POST /api/chat/{chat_id}/cancel (`tinkpg --timeout`),
+            # and how many samples to expect — a caller can't otherwise tell a stop
+            # that kept 1 of 10 from a clean n=1 (thinking may be inherited).
+            yield {"event": "start", "data": json.dumps({"chat_id": chat_id, "n": total})}
             if req.broadcast:
                 await bus.broadcast(
                     "chat_start",
@@ -1035,12 +1037,16 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
                 yield {"event": "message", "data": json.dumps(item)}
                 if req.broadcast:
                     await bus.broadcast("sample", {"chat_id": chat_id, "panel": req.panel, **item})
+            # `cancelled` rides the CALLER stream only: the bus keeps chat_done for a
+            # stop that kept samples (the browser's fold reconcile keys on it), so
+            # without this flag the CLI read a stopped 1-of-10 as a clean run.
+            stopped = {"cancelled": True} if inflight.cancelled else {}
             if prod_error is not None:
                 await _terminal(error=prod_error)
-                yield {"event": "error", "data": json.dumps({"error": prod_error, **fold_outcome})}
+                yield {"event": "error", "data": json.dumps({"error": prod_error, **fold_outcome, **stopped})}
             else:
                 await _terminal(cancelled=inflight.cancelled)
-                yield {"event": "done", "data": json.dumps(fold_outcome)}
+                yield {"event": "done", "data": json.dumps({**fold_outcome, **stopped})}
         finally:
             _INFLIGHT.pop(chat_id, None)
             if not worker.done():
