@@ -73,6 +73,7 @@ shape does this version mark" index.
 
 | version | what it marks |
 |---|---|
+| `v1.5.0` | thread system prompt as the first row of each panel (and it now OVERRIDES the workspace prompt instead of being appended), per-panel prefill, focus a panel, undo reopens a closed panel. Wire and disk shapes untouched; the override is a behavior change. |
 | `v1.4.1` | hotfix: the page reconnects its live stream itself after a server restart (a browser behind `ssh -L` never retried). Browser-only; no wire or disk change. |
 | `v1.4.0` | sample liveness: per-request polling, the tinker status beside "waiting on the model", reconnect + resend on 3 min of silence or a lost request; a foldable sidebar. Additive: one SSE event (`status`), one bus event (`chat_status`); disk untouched. |
 | `v1.3.0` | CLI conveniences + sampling fidelity: `--timeout` on the sampling verbs (the tinker sample call itself is unbounded again), `tinkpg open` for any model selector, `battery --ws/--new-ws`, `pack export --highlights`, `running_chats` on the bus, the waiting-on-the-model readout. Additive: one SSE event (`start`), one state field; disk untouched. |

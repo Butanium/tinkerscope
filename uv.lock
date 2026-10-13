@@ -2772,7 +2772,7 @@ dependencies = [
 
 [[package]]
 name = "tinkerscope"
-version = "1.4.1"
+version = "1.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },

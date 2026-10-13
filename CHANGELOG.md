@@ -8,6 +8,37 @@ WIRE contract, not on the UI (`docs/RELEASING.md`).
 `docs/MIGRATIONS.md` covers every release that moved the wire or on-disk shape;
 `ENGINEERING_LOGS.md` carries the dated narrative behind the decisions.
 
+## [1.5.0] — 2026-10-13
+
+System prompts become part of the conversation, prefills become per panel, and a
+panel can be focused alone. The wire and on-disk shapes are unchanged; one
+behavior changes (a thread's own system prompt now replaces the workspace one).
+
+### Added
+
+- **A thread's system prompt is the first row of each panel**, drawn like a
+  message and optional. On an empty panel, **+ system prompt** opens a field
+  whose text goes out with the first message (each panel can start under a
+  different prompt). On an existing thread, editing it works like editing the
+  first message: a new thread under the new prompt with the first reply
+  regenerated; `Shift` copies the conversation without generating; `Ctrl` does it
+  in every panel. The workspace-wide prompt stays the composer chip.
+- **Per-panel prefill**: a prefill line above each column's "continue this panel"
+  box (compare mode), with a thinking + answer / thinking / answer switch and a
+  preview of the text. It replaces the composer prefill for every send to that
+  panel; `Ctrl`/`⌘`+click sets it in every panel. The composer prefill uses the
+  same switch.
+- **Focus a panel**: a header button shows one panel alone, full width, as the
+  only send target (`?focus=<panel>`; `Esc`, Back or the same button return).
+- **Undo reopens a closed panel** — its model, its slot, its conversation.
+
+### Changed
+
+- **A thread's own system prompt REPLACES the workspace prompt** instead of being
+  appended after it (`compose_system`: thread, else workspace). Threads that
+  carry both now sample under the thread prompt alone.
+- The button glyphs are redrawn on one grid and stroke (`docs/GLYPHS.md`).
+
 ## [1.4.1] — 2026-10-05
 
 ### Fixed
