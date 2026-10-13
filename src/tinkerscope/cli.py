@@ -1373,10 +1373,11 @@ def cmd_compare(
         body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, think, system, pid, prefill)
         if thread_system is not None:
             body["thread_system_prompt"] = thread_system
+        res = _StreamResult()
         if conv_id and pid in parents:
             body["workspace_id"] = conv_id
             body["parent_node"] = parents[pid]
-        res = _StreamResult()
+            res.user_turn = _qualified_handle(conv_id, pid, parents[pid])
         label = f"{pid} {r['id']}" + (f"@{ckpt}" if ckpt else "")
         t = threading.Thread(target=_stream_chat,
                              args=(body, label, lock, res, False, show_logprobs, json_out))
