@@ -2931,3 +2931,54 @@ coming (thinking=both may be inherited, so it can't compute 2n itself).
 - The resample hint ("the user turn is already saved — `continue --node … --n
   K`") now covers `continue` and `compare`, and a stop that kept samples, not only
   a send that lost its fire.
+
+### 2026-10-13 — think / no-think as glyphs; prefill editors fold; scope switch only when unfolded
+
+- **After sampling** (cards in All and Cycle, a row's mode chip, the per-turn filter),
+  "think" / "no think" are now glyphs: brain vs a new `no-think` (the same brain,
+  dimmed and struck through). My first cut reused the `answer` speech bubble for
+  "no think". Clément rejected it: here the question is think vs no-think, not think
+  vs answer. GLYPHS.md now keeps the two apart. The filter's `all` stays a word.
+  `no-think` dims with `opacity`, not a mask: a mask id repeats per Icon instance
+  and resolves to the first copy, which breaks when that copy is hidden.
+  Smokes read `data-mode` / `data-pick` now (`browser_thinking_both`,
+  `browser_samples_view`), since the chips have no text.
+- **Fold animation** (`lib/motion.ts`): svelte `slide` + a real fade, 180 ms,
+  instant under prefers-reduced-motion. On the panel textarea and on a wrapper
+  around each composer editor (textarea + its muted hint), so the hint leaves with
+  its box. A child's local transition wouldn't play when the parent `{#if}` closes.
+  Measured per animation frame on a panel: `.messages` scrollTop and message
+  positions don't change while the footer grows or shrinks. Only the visible
+  height changes.
+- **The scope switch shows only while the prefill is unfolded** (Clément). Before,
+  it also showed when the prefill was armed or folded with text. Folded = pill +
+  text preview. A scope that the thinking mode never samples still greys the
+  folded line.
+
+
+### 2026-10-13 — Provenance and `grep --scope` in the CLI
+
+Same session as the stop fix. Clément asked "was the Nemotron conversation sampled
+on-policy?". Answering took four steps by hand: `node --meta --json` per turn,
+regex the `tinker://` path out of raw_meta, curl `/api/models` to map the path to
+a run, then diff contents against the Inkling panel because the copied turns had
+no raw_meta at all. The skill told agents to do exactly that with curl.
+
+- `_raw_meta_producer` is the Python twin of `loom.ts parseRawMetaModel`, plus
+  OpenRouter's top-level `model`. It reads the REQUEST section only, because an
+  OpenRouter response repeats `model` with the served id.
+- `_Producers` maps a raw_meta producer AND a panel binding to one label, so the
+  "is this the panel's model" check is a string compare. A panel with no explicit
+  checkpoint is compared as the server default (last checkpoint with a sampler).
+- A blobless turn is matched by exact content to a recorded turn elsewhere in the
+  workspace (`copy of …`). That is the observed graft pattern: turns copied
+  between panels keep their text but lose their blob, because the copy mints new
+  node ids. Exact match only; an edited copy stays "unverified".
+- The verdict is worded "= this panel" / "≠ this panel", not "on-policy". The
+  context a turn was sampled under isn't checked (that would mean comparing
+  raw_meta's prompt_text with the ancestry), so "same model" is all it claims.
+- `node-blobs` takes `fields`: a 50-sample fan-out's logprobs are MBs, and a
+  provenance lookup needs none of them.
+- `grep --scope user` would have taken "find the conversation where I asked it
+  to remember" from 275 hits to the right thread in one call. The endpoint
+  already had `scopes`; only the flag was missing.

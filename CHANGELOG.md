@@ -10,6 +10,20 @@ WIRE contract, not on the UI (`docs/RELEASING.md`).
 
 ## [Unreleased]
 
+### Added
+
+- **Provenance in the CLI.** `tinkpg node` prints `produced by: <run>@<ckpt>` for
+  an assistant turn, and `tinkpg ws … --provenance` does it for every assistant
+  turn of the walked conversation, ending with "k/N assistant turn(s) sampled by
+  this panel's model". It reads each turn's `raw_meta`. A turn with no record is
+  matched to a recorded turn with the same text in the workspace (`copy of
+  <handle> ← <model>`), which is how a conversation grafted from another panel
+  shows up. `--json` carries it as `produced_by`.
+- **`tinkpg grep --scope`** (`user`, `assistant`, `thinking`, `system`, `name`,
+  `model`; repeatable) — the search endpoint already took scopes, the CLI didn't.
+- `POST /api/workspaces/{id}/node-blobs` takes `fields` (e.g. `["raw_meta"]`) so
+  a provenance lookup doesn't pull MBs of `token_logprobs`.
+
 ### Fixed
 
 - **A stopped fire no longer exits 0.** A Stop in the browser on a CLI-fired chat

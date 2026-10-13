@@ -308,7 +308,9 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   workspaces there's …". **`--link` (also on `tinkpg node`) appends a
   `?w=<id>&panel=<p>&node=<n>` deep-link URL per hit** — hand the human that
   instead of a location table: clicking it opens their browser at the exact
-  sample, cyclers flipped, row flashed (works on hidden branches).
+  sample, cyclers flipped, row flashed (works on hidden branches). `--scope`
+  (repeatable: `user`, `assistant`, `thinking`, `system`, `name`, `model`)
+  narrows which fields are searched.
 - `tinkpg node <id>` is the FIND primitive for a NODE ID: when you hold a bare id
   (the human pasted one from the browser's Copy-node-id button, or `grep`/`samples
   --json` printed it) it locates the workspace · panel · thread with no other
@@ -403,7 +405,9 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
 
 - **"Find the conversation where the model did X"** (the human half-remembers a chat
   across 20+ workspaces): `tinkpg threads --min-turns 2 [--model SUB]` to get every
-  multi-turn candidate with a locator → `tinkpg grep "<phrase>"` if you have a phrase →
+  multi-turn candidate with a locator → `tinkpg grep "<phrase>"` if you have a phrase
+  (`--scope user` when the phrase is something the HUMAN typed — it skips the
+  model's replies, which otherwise bury the hit) →
   read each candidate with `tinkpg ws <ws_id> --panel P --thread K --deepest --full`.
   Fan the reads out over subagents when there are more than a handful — they're
   read-only and each report comes back with verbatim quotes.
@@ -420,12 +424,17 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   bound to NOW; a turn in its tree may have been produced by another model (pasted,
   loomed, or committed by a chat that named this panel while sampling something else).
   Real saved workspaces on this box contain exactly that. Before quoting a stored turn
-  as evidence about a model, check the node's `raw_meta`, which records the sampler
-  that produced it: `POST /api/workspaces/<id>/node-blobs {"nodes": [...]}` returns
-  `{node_id: {raw_meta, token_logprobs?}}`, and the `tinker://<uuid>:train:0/
-  sampler_weights/<ckpt>` path in its request section maps to a run via
-  `/api/models` (each checkpoint's `sampler_path`). Nodes with no blob have NO
-  provenance — treat them as unverified, and re-`probe` rather than trust them.
+  as evidence about a model, ask who sampled it: `tinkpg node <handle>` prints a
+  `produced by:` line, and `tinkpg ws <id> --panel P --thread K --deepest
+  --provenance` does it for every assistant turn of a conversation, ending with
+  "k/N assistant turn(s) sampled by this panel's model" — the "was this
+  conversation on-policy?" check in one command. Both read the turn's `raw_meta`
+  (the sampler record) and map its `sampler_path` to `<run>@<ckpt>`. A turn with
+  no record that matches a recorded turn's text elsewhere in the workspace prints
+  as `copy of <handle> ← <model>` (the usual graft: turns copied from another
+  panel). A turn with neither is unverified — re-`probe` rather than trust it.
+  `--json` carries the same as `produced_by` (on `ws --provenance` messages and
+  on `node`).
 - **Survey the human's probe workspace** (many panels, several prompts):
   `tinkpg state` (which models are live now — folded panels collapse to stubs) →
   `tinkpg ws <id>` (per-panel thread index + forks) → `tinkpg samples --panel P
@@ -697,6 +706,7 @@ tinkpg ws [selector] [options]
   --thread INTEGER                  walk root thread K (the `threads:` index / `tinkpg threads`) instead of the active one
   --deepest                         walk the thread's LONGEST branch instead of its selected one
   --json                            emit the selected transcript(s) as structured JSON (untruncated content + CoT + node ids)
+  --provenance                      say which model sampled each assistant turn on the walked path (from its raw_meta; a blobless turn is matched to an identical recorded one) and whether it is the panel's model — the on-policy check
 tinkpg samples [selector] [options]
   # Show every sibling response (the n-sample fan-out) at ONE fork, each with its CoT, plus a...
   --ws TEXT                         same as the positional selector, for symmetry with `grep`/`node`/`threads` (which can only take it as an option)
@@ -722,6 +732,7 @@ tinkpg grep <pattern> [options]
   --max-hits INTEGER                stop printing after this many hits (count continues)  [default: 200]
   --json                            hits as a JSON array (full match text, not a snippet) instead of human text — for scripts
   --link                            append a clickable deep link per hit (?w=…&node=… opens the browser AT the match)
+  --scope TEXT (repeatable)         search only these fields (repeatable): user, assistant, thinking, system, name, model — e.g. `--scope user` finds what the human typed
 tinkpg node <node_id> [options]
   # Locate a NODE ID anywhere in the saved workspaces and dump its record — the reverse index...
   --ws TEXT                         restrict the search to one workspace (id-prefix or name substring)

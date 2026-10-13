@@ -839,9 +839,10 @@ def get_body(cid: str) -> dict | None:
     return _with_rev(_load_body(cid))
 
 
-def get_blobs(cid: str, node_ids: list[str]) -> dict[str, dict]:
-    """`POST /api/workspaces/{id}/node-blobs` — {node_id: blob} for known ids.
-    Unknown / unsafe / unreadable ids are omitted (never an error)."""
+def get_blobs(cid: str, node_ids: list[str], fields: list[str] | None = None) -> dict[str, dict]:
+    """`POST /api/workspaces/{id}/node-blobs` — {node_id: blob} for known ids,
+    narrowed to `fields` when given. Unknown / unsafe / unreadable ids are
+    omitted (never an error)."""
     out: dict[str, dict] = {}
     if not _is_safe_id(cid) or not _blobs_dir(cid).exists():
         return out
@@ -851,9 +852,10 @@ def get_blobs(cid: str, node_ids: list[str]) -> dict[str, dict]:
         f = _blob_file(cid, nid)
         if f.exists():
             try:
-                out[nid] = json.loads(f.read_text())
+                blob = json.loads(f.read_text())
             except (json.JSONDecodeError, OSError):
                 continue
+            out[nid] = blob if fields is None else {k: v for k, v in blob.items() if k in fields}
     return out
 
 

@@ -17,7 +17,7 @@ owns the on-disk layout, the boot migration, the in-memory summary cache, and th
   GET    /api/workspaces           → summaries (no trees); ?bodies=1 → light bodies
   GET    /api/workspaces/{id}       → one light body
   GET    /api/workspaces/{id}/layout-history → past panel layouts, oldest first
-  POST   /api/workspaces/{id}/node-blobs {nodes:[...]} → {id: {token_logprobs?, raw_meta?}}
+  POST   /api/workspaces/{id}/node-blobs {nodes:[...], fields?} → {id: {token_logprobs?, raw_meta?}}
   POST   /api/workspaces            → create (unchanged shape; server strips blobs)
   POST   /api/workspaces/{id}/ops   → apply an op batch atomically → {rev, results}
   PATCH  /api/workspaces/{id}       → layout-only metadata (sugar over the set_meta op)
@@ -84,6 +84,9 @@ class WorkspacePatch(BaseModel):
 class NodeBlobsRequest(BaseModel):
     # Node ids to fetch heavy blobs for (POST, not GET, because the list can be long).
     nodes: list[str] = []
+    # Only these blob fields (e.g. ["raw_meta"] for provenance) — None = all. A
+    # fan-out's token_logprobs run to MBs; a who-sampled-this lookup needs none.
+    fields: list[str] | None = None
 
 
 class OpsRequest(BaseModel):
@@ -162,7 +165,7 @@ def purge_trash(workspace_id: str) -> dict:
 def get_node_blobs(workspace_id: str, req: NodeBlobsRequest) -> dict:
     """Heavy blobs for a batch of node ids: {node_id: {token_logprobs?, raw_meta?}}.
     Unknown ids are omitted (not an error)."""
-    return store.get_blobs(workspace_id, req.nodes)
+    return store.get_blobs(workspace_id, req.nodes, req.fields)
 
 
 @router.post("")

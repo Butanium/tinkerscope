@@ -2937,7 +2937,8 @@ def _resolve_walk(tree: dict, thread: Optional[int], deepest: bool, pid: str) ->
 
 
 def _workspace_json(
-    c: dict, panel: Optional[str], include_folded: bool, thread: Optional[int], deepest: bool
+    c: dict, panel: Optional[str], include_folded: bool, thread: Optional[int], deepest: bool,
+    provenance: bool = False,
 ) -> dict:
     """The selected transcript(s) as STRUCTURED data — untruncated content, CoT,
     node ids and fork position. This is the export path for rendering a
@@ -2946,6 +2947,7 @@ def _workspace_json(
     trees = c.get("trees") or {}
     layout = {p["id"]: p for p in (c.get("panels") or [])}
     reduced = set(c.get("reduced_panels") or [])
+    prods = _Producers() if provenance else None
     panels_out = []
     for pid, t in trees.items():
         if panel and pid != panel:
@@ -2954,6 +2956,8 @@ def _workspace_json(
             continue
         lay = layout.get(pid, {})
         path, which = _resolve_walk(t, thread, deepest, pid)
+        pv = (_turn_provenance(c, [nd["id"] for nd in path if nd.get("role") == "assistant"], prods)
+              if prods is not None else {})
         roots = t.get("rootChildren", [])
         root_id = _root_of(t, path[0]["id"]) if path else None
         msgs = []
@@ -2967,6 +2971,7 @@ def _workspace_json(
                 "sibling_index": (sibs.index(nd["id"]) + 1) if nd.get("id") in sibs else None,
                 "n_siblings": len(sibs),
                 "system_prompt": nd.get("system_prompt"),
+                **({"produced_by": pv[nd["id"]]} if nd.get("id") in pv else {}),
             })
         panels_out.append({
             "panel": pid,
@@ -2978,6 +2983,7 @@ def _workspace_json(
             "thread_k": (thread if thread is not None else (roots.index(root_id) + 1 if root_id in roots else None)),
             "n_threads": len(roots),
             "user_turns": _uturns(path),
+            **({"panel_model": prods.of_panel(lay)} if prods is not None else {}),
             "messages": msgs,
         })
     if panel and not panels_out:
@@ -2992,10 +2998,30 @@ def _workspace_json(
     }
 
 
+def _print_provenance(c: dict, path: list[dict], lay: dict, prods: _Producers) -> None:
+    """Who sampled each assistant turn on `path`, and whether it was the model
+    this panel is bound to — the on-policy check, without a script."""
+    turns = [nd for nd in path if nd.get("role") == "assistant"]
+    if not turns:
+        return
+    pv = _turn_provenance(c, [nd["id"] for nd in turns], prods)
+    bound = prods.of_panel(lay)
+    print(f"   provenance (this panel ← {bound or '?'}):")
+    users = 0
+    for nd in path:
+        if nd.get("role") == "user":
+            users += 1
+        elif nd.get("role") == "assistant":
+            print(f"     turn {users:<2} {nd['id']:<9} {_fmt_provenance(pv[nd['id']], bound)}")
+    same = sum(1 for nd in turns if pv[nd["id"]]["by"] == bound)
+    print(f"   → {same}/{len(turns)} assistant turn(s) sampled by this panel's model")
+
+
 def _show_workspace(
     c: dict, panel: Optional[str], full: bool, show_tree: bool, width: int, include_folded: bool = False,
-    thread: Optional[int] = None, deepest: bool = False,
+    thread: Optional[int] = None, deepest: bool = False, provenance: bool = False,
 ) -> None:
+    prods = _Producers() if provenance else None
     trees = c.get("trees") or {}
     layout = {p["id"]: p for p in (c.get("panels") or [])}
     reduced = set(c.get("reduced_panels") or [])
@@ -3032,6 +3058,8 @@ def _show_workspace(
                 print(line)
             for line in _digest(ap, lambda nd, w, fl: _fmt_node(t, nd, w, fl), full, width):
                 print(line)
+        if prods is not None:
+            _print_provenance(c, ap, lay, prods)
         print()
     if panel and shown == 0:
         _die(f"workspace has no panel {panel!r}; panels: {', '.join(trees) or '(none)'}")
@@ -3058,6 +3086,9 @@ def cmd_ws(
     ),
     json_out: bool = typer.Option(
         False, "--json", help="emit the selected transcript(s) as structured JSON (untruncated content + CoT + node ids)"
+    ),
+    provenance: bool = typer.Option(
+        False, "--provenance", help="say which model sampled each assistant turn on the walked path (from its raw_meta; a blobless turn is matched to an identical recorded one) and whether it is the panel's model — the on-policy check"
     ),
 ) -> None:
     """Browse saved WORKSPACES (multi-panel, branchable; `conv` is a back-compat alias). No
@@ -3086,9 +3117,9 @@ def cmd_ws(
         return
     c = _resolve_workspace(selector, convs)
     if json_out:
-        _print_json(_workspace_json(c, panel, include_folded, thread, deepest))
+        _print_json(_workspace_json(c, panel, include_folded, thread, deepest, provenance))
         return
-    _show_workspace(c, panel, full, tree, width, include_folded, thread, deepest)
+    _show_workspace(c, panel, full, tree, width, include_folded, thread, deepest, provenance)
 
 
 # Back-compat alias: `conv` was the primary name before the v1.0.0 workspaces
@@ -3393,6 +3424,109 @@ def _thread_of(tree: dict, node_id: str) -> Optional[int]:
     return None
 
 
+# ── provenance: which model actually sampled a stored turn ─────────────────────
+# A panel's label says what it is bound to NOW; a turn in its tree may have been
+# pasted, grafted from another panel, or committed by another model. The only
+# record of the sampler is the turn's raw_meta blob.
+
+_PRODUCER_KEYS = ("base_model", "sampler_path", "renderer", "vllm_model", "model")
+
+
+def _raw_meta_producer(raw: Optional[str]) -> Optional[dict]:
+    """The sampler fields of a raw_meta blob's REQUEST section (the Python twin of
+    web/src/lib/loom.ts `parseRawMetaModel`, plus OpenRouter's top-level `model`).
+    None = no record. Top-level keys only: format_request_response indents them
+    by exactly two spaces, and the response section may repeat `model`."""
+    if not raw:
+        return None
+    request = raw.split("── response", 1)[0]
+    out: dict = {}
+    for key in _PRODUCER_KEYS:
+        m = re.search(rf'^  "{key}": ("(?:[^"\\]|\\.)*"|null),?$', request, re.M)
+        if m and m.group(1) != "null":
+            out[key] = json.loads(m.group(1))
+    return out if any(k in out for k in ("base_model", "sampler_path", "vllm_model", "model")) else None
+
+
+class _Producers:
+    """Maps a raw_meta producer AND a panel binding to one comparable label
+    (`<run>@<ckpt>`, `base:…`, `vllm:…`, `openrouter:…`, `ckpt:<path>`) — so "was
+    this turn sampled by the model this panel is bound to?" is a string compare."""
+
+    def __init__(self) -> None:
+        self.runs = {r["id"]: r for r in _models()}
+        self.by_sampler = {
+            ck["sampler_path"]: f"{_short_run(r['id'])}@{ck['name']}"
+            for r in self.runs.values() for ck in (r.get("checkpoints") or []) if ck.get("sampler_path")
+        }
+
+    def of_meta(self, prod: dict) -> str:
+        if prod.get("sampler_path"):
+            return self.by_sampler.get(prod["sampler_path"], f"ckpt:{prod['sampler_path']}")
+        if prod.get("vllm_model"):
+            return f"vllm:{prod['vllm_model']}"
+        if prod.get("base_model"):
+            return f"base:{prod['base_model']}"
+        return f"openrouter:{prod.get('model')}"
+
+    def of_panel(self, lay: dict) -> Optional[str]:
+        rid = lay.get("run_id")
+        if not rid:
+            return None
+        if rid.startswith("ckpt:"):
+            return self.by_sampler.get(rid[len("ckpt:"):], rid)
+        if rid.startswith(("base:", "vllm:", "openrouter:")):
+            return rid
+        run = self.runs.get(rid)
+        ck = lay.get("checkpoint")
+        if ck is None and run is not None:  # the server's default: last checkpoint with a sampler
+            ck = next((c["name"] for c in reversed(run.get("checkpoints") or []) if c.get("sampler_path")), None)
+        return f"{_short_run(rid)}@{ck}" if ck else _short_run(rid)
+
+
+def _turn_provenance(c: dict, node_ids: list[str], prods: _Producers) -> dict[str, dict]:
+    """{node_id: {"by": label | None, "copy_of": handle | None}} for stored
+    assistant turns. A turn with no raw_meta gets `copy_of` when a turn with the
+    SAME text and a record exists elsewhere in the workspace — the usual story of
+    a blobless turn is a graft copied out of another panel."""
+    ws_id = c.get("id")
+
+    def metas(ids: list[str]) -> dict[str, Optional[dict]]:
+        blobs = _post(f"/api/workspaces/{ws_id}/node-blobs", {"nodes": ids, "fields": ["raw_meta"]}) or {}
+        return {nid: _raw_meta_producer((blobs.get(nid) or {}).get("raw_meta")) for nid in ids}
+
+    own = metas(node_ids)
+    out = {nid: {"by": prods.of_meta(p) if p else None, "copy_of": None} for nid, p in own.items()}
+    orphans = {nid for nid, p in own.items() if p is None}
+    if not orphans:
+        return out
+    nodes_by_id = {nid: nd for t in (c.get("trees") or {}).values() for nid, nd in (t.get("nodes") or {}).items()}
+    wanted = {nodes_by_id[nid].get("content") for nid in orphans if nid in nodes_by_id}
+    sources: dict[str, tuple[str, str]] = {}  # content → (panel, node) of a recorded twin
+    for pid, t in (c.get("trees") or {}).items():
+        for nid, nd in (t.get("nodes") or {}).items():
+            if (nid not in orphans and nd.get("has_raw_meta") and nd.get("content") in wanted
+                    and nd.get("content") not in sources):
+                sources[nd["content"]] = (pid, nid)
+    src_meta = metas([nid for _pid, nid in sources.values()]) if sources else {}
+    for nid in orphans:
+        src = sources.get((nodes_by_id.get(nid) or {}).get("content"))
+        if src and src_meta.get(src[1]):
+            out[nid] = {"by": prods.of_meta(src_meta[src[1]]),
+                        "copy_of": _qualified_handle(ws_id, src[0], src[1])}
+    return out
+
+
+def _fmt_provenance(pv: dict, bound: Optional[str]) -> str:
+    """One line: who sampled the turn, and whether that is the panel's model."""
+    if pv["by"] is None:
+        return "no sampling record (pasted, copied or authored) — unverified"
+    who = f"copy of {pv['copy_of']} ← {pv['by']}" if pv["copy_of"] else pv["by"]
+    if bound is None:
+        return who
+    return f"{who}   {'= this panel' if pv['by'] == bound else '≠ this panel'}"
+
+
 @app.command("grep")
 def cmd_grep(
     pattern: str = typer.Argument(..., help="text to find (fixed string; --regex for a regex)"),
@@ -3403,6 +3537,7 @@ def cmd_grep(
     max_hits: int = typer.Option(200, "--max-hits", help="stop printing after this many hits (count continues)"),
     json_out: bool = typer.Option(False, "--json", help="hits as a JSON array (full match text, not a snippet) instead of human text — for scripts"),
     link: bool = typer.Option(False, "--link", help="append a clickable deep link per hit (?w=…&node=… opens the browser AT the match)"),
+    scope: list[str] = typer.Option([], "--scope", help="search only these fields (repeatable): user, assistant, thinking, system, name, model — e.g. `--scope user` finds what the human typed"),
 ) -> None:
     """Search EVERY branch of saved workspaces — message content, thinking
     (`reasoning`) and thread system prompts of all nodes, active or not; the view
@@ -3422,6 +3557,13 @@ def cmd_grep(
                     "max_hits": max_hits, "width": width}
     if ws_id is not None:
         params["ws"] = ws_id
+    if scope:
+        aliases = {"assistant": "reply", "reply": "reply", "user": "user", "thinking": "thinking",
+                   "system": "system", "name": "name", "model": "model"}
+        bad = [x for x in scope if x not in aliases]
+        if bad:
+            _die(f"unknown --scope {', '.join(bad)} (known: user, assistant, thinking, system, name, model)")
+        params["scopes"] = ",".join(sorted({aliases[x] for x in scope}))
     out = _get("/api/search", params=params)
     if link:
         base = _base_url()
@@ -3512,6 +3654,7 @@ def cmd_node(
         _die(f"ambiguous node prefix {node_id!r} — {len(hits)} matches:\n{listing}")
 
     want_blobs = logprobs or meta
+    prods = _Producers() if any(nd.get("role") == "assistant" for _c, _p, nd in hits) else None
     json_matches: list[dict] = []
     for k, (c, pid, nd) in enumerate(hits):
         t = c["trees"][pid]
@@ -3523,12 +3666,18 @@ def cmd_node(
         sib_k = sibs.index(nid) + 1 if nid in sibs else None
         thread_k = _thread_of(t, nid)
         lay = {p["id"]: p for p in (c.get("panels") or [])}.get(pid, {})
+        produced: Optional[dict] = None
+        if prods is not None and nd.get("role") == "assistant":
+            produced = {**_turn_provenance(c, [nid], prods)[nid], "panel_model": prods.of_panel(lay)}
         if json_out:
             json_matches.append({
                 "workspace_id": c.get("id"), "workspace_name": c.get("name"),
+                # run_id/checkpoint = what the PANEL is bound to now; who sampled
+                # this turn is `produced_by` (from its raw_meta)
                 "panel": pid, "run_id": lay.get("run_id"), "checkpoint": lay.get("checkpoint"),
                 "thread": thread_k, "sibling_index": sib_k, "n_siblings": len(sibs),
                 **({"link": f"{_base_url()}/?w={c.get('id')}&panel={pid}&node={nid}"} if link else {}),
+                **({"produced_by": produced} if produced is not None else {}),
                 "node": nd,
                 **({"token_logprobs": blobs.get("token_logprobs")} if logprobs else {}),
                 **({"raw_meta": blobs.get("raw_meta")} if meta else {}),
@@ -3557,6 +3706,8 @@ def cmd_node(
                 if nd.get(flag) or blobs.get(name)]
         facts.append("blobs: " + (", ".join(have) or "none"))
         print("  ".join(facts))
+        if produced is not None:
+            print(f"produced by: {_fmt_provenance(produced, produced['panel_model'])}")
 
         def field(label: str, text: Optional[str]) -> None:
             if not text:
