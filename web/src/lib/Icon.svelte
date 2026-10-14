@@ -37,9 +37,9 @@
   <!-- open a file FROM this computer: an arrow rising out of a tray -->
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M8 10.5V2.5M5 5.5L8 2.5l3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M2.5 10v3.5h11V10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'regen'}
-  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M1.714 8a6.286 6.286 0 0 1 11.314 -3.771M14.286 8a6.286 6.286 0 0 1 -11.314 3.771" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M13.143 1.143v3.429h-3.429M2.857 14.857v-3.429h3.429" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M1.714 8a6.286 6.286 0 0 1 11.314 -3.771M14.286 8a6.286 6.286 0 0 1 -11.314 3.771" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M13.143 1.7v2.872h-2.872M2.857 14.3v-2.872h2.872" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'replace'}
-  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M1.714 8a6.286 6.286 0 0 1 11.314 -3.771M14.286 8a6.286 6.286 0 0 1 -11.314 3.771" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M13.143 1.143v3.429h-3.429M2.857 14.857v-3.429h3.429" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><rect x="5.829" y="5.829" width="4.343" height="4.343" rx="0.686" fill="currentColor" /></svg>
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M1.714 8a6.286 6.286 0 0 1 11.314 -3.771M14.286 8a6.286 6.286 0 0 1 -11.314 3.771" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M13.143 1.7v2.872h-2.872M2.857 14.3v-2.872h2.872" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><rect x="5.829" y="5.829" width="4.343" height="4.343" rx="0.686" fill="currentColor" /></svg>
 {:else if name === 'edit'}
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M10.5 2.5l3 3L6 13l-3.5.5L3 10l7.5-7.5Z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'edit-copy'}
@@ -61,14 +61,14 @@
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><circle cx="2.6" cy="8" r="1" fill="currentColor" /><circle cx="5.6" cy="8" r="1" fill="currentColor" /><path d="M8.5 8h5M11 5.5 13.5 8 11 10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'continue-think'}
   <!-- thought bubble with an ellipsis: resume INSIDE the think block -->
-  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="8.4" rx="4.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><circle cx="5.5" cy="6.2" r=".95" fill="currentColor" /><circle cx="8" cy="6.2" r=".95" fill="currentColor" /><circle cx="10.5" cy="6.2" r=".95" fill="currentColor" /><circle cx="5" cy="12.5" r="1.15" fill="currentColor" /><circle cx="2.8" cy="14.4" r="0.75" fill="currentColor" /></svg>
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><rect x="2.6" y="3" width="11.4" height="7.6" rx="3.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><circle cx="5.8" cy="6.8" r=".95" fill="currentColor" /><circle cx="8.3" cy="6.8" r=".95" fill="currentColor" /><circle cx="10.8" cy="6.8" r=".95" fill="currentColor" /><circle cx="3.5" cy="12.3" r="1" fill="currentColor" /><circle cx="2" cy="13.6" r="0.55" fill="currentColor" /></svg>
 {:else if name === 'copy'}
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><rect x="5" y="5" width="8.5" height="8.5" rx="1.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M3 10.5A1.5 1.5 0 0 1 2.5 9.5V3.5A1.5 1.5 0 0 1 4 2h6a1.5 1.5 0 0 1 1.1.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'copy-all'}
   <!-- copy + text lines = "copy the FULL conversation as markdown" -->
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><rect x="5" y="4.5" width="8.5" height="9" rx="1.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M7 7.3h4.5M7 9.3h4.5M7 11.3h2.6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" /><path d="M3 10.5A1.5 1.5 0 0 1 2.5 9.5V3.5A1.5 1.5 0 0 1 4 2h6a1.5 1.5 0 0 1 1.1.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'check'}
-  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5L13 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M3 8l3.5 3.5L13 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'hash'}
   <!-- node-id glyph (a # = "this row's id") -->
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M6.2 2.5L4.8 13.5M11.2 2.5L9.8 13.5M2.8 6h10.5M2.5 10h10.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
@@ -84,19 +84,19 @@
 {:else if name === 'chart'}
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><rect x="2" y="9" width="3" height="5" rx="0.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><rect x="6.5" y="5" width="3" height="9" rx="0.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><rect x="11" y="2" width="3" height="12" rx="0.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'pins'}
-  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M3 2.5h10a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H3A1.5 1.5 0 0 1 1.5 12V4A1.5 1.5 0 0 1 3 2.5Z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M6.5 6l4 2-4 2V6Z" fill="currentColor" /></svg>
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M3.2 2.5h9.6a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H3.2A1.5 1.5 0 0 1 1.7 12V4a1.5 1.5 0 0 1 1.5-1.5Z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M6.5 6l4 2-4 2V6Z" fill="currentColor" /></svg>
 {:else if name === 'external'}
   <!-- hand this off to another app: arrow leaving an open-cornered box -->
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M8.571 2.857H2.857a1.143 1.143 0 0 0 -1.143 1.143v9.143a1.143 1.143 0 0 0 1.143 1.143h9.143a1.143 1.143 0 0 0 1.143 -1.143v-5.714" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M9.714 1.714h4.571v4.571M14.286 1.714L7.429 8.571" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'dataset'}
-  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M3.429 1.714h5.714l4 4v8.571a1.143 1.143 0 0 1 -1.143 1.143H3.429a1.143 1.143 0 0 1 -1.143 -1.143v-11.429a1.143 1.143 0 0 1 1.143 -1.143Z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M9.143 1.714v4h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M5.714 9.143h4.571M5.714 11.429h3.429" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M3.886 1.843h5.143l3.6 3.6v7.714a1.029 1.029 0 0 1 -1.029 1.029H3.886a1.029 1.029 0 0 1 -1.029 -1.029v-10.286a1.029 1.029 0 0 1 1.029 -1.029Z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M9.029 1.843v3.6h3.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M5.943 8.529h4.114M5.943 10.586h3.086" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'help'}
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.25" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M6.2 6.1a1.85 1.85 0 1 1 2.3 1.85c-.35.1-.5.35-.5.75v.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><circle cx="8" cy="11.4" r="0.75" fill="currentColor" /></svg>
 {:else if name === 'stop'}
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><rect x="2.286" y="2.286" width="11.429" height="11.429" rx="1.714" fill="currentColor" /></svg>
 {:else if name === 'undo'}
   <!-- counter-clockwise arrow: put back what was just removed -->
-  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M3 7.5a5 5 0 1 1 1.6 3.7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M2.2 4v3.6h3.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M3 7.95a5 5 0 1 1 1.6 3.7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M2.2 4.45v3.6h3.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'plus'}
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'minus'}
@@ -131,9 +131,9 @@
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none" style={name === 'sidebar-unfold' ? 'transform: scaleX(-1)' : undefined}><path d="M8 3.5 3.5 8 8 12.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M13 3.5 8.5 8l4.5 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" opacity="0.45" /></svg>
 {:else if name === 'new-blank'}
   <!-- blank page + plus: a fresh workspace with no model -->
-  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M4 1.5h5L12.5 5v6.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M8.5 1.5V5h3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M7.5 7v3M6 8.5h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M4 2.5h5L12.5 6v6.5a1 1 0 0 1 -1 1H4a1 1 0 0 1 -1 -1v-9a1 1 0 0 1 1 -1Z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M8.5 2.5V6h3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M7.5 8v3M6 9.5h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'theme-light'}
-  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M8 1.7v1.6M8 12.7v1.6M1.7 8h1.6M12.7 8h1.6M3.55 3.55l1.13 1.13M11.32 11.32l1.13 1.13M3.55 12.45l1.13-1.13M11.32 4.68l1.13-1.13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'theme-dark'}
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M14 9.2A6 6 0 0 1 6.8 2 6 6 0 1 0 14 9.2Z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'theme-auto'}
@@ -143,5 +143,5 @@
 {:else if name === 'eye'}
   <!-- "view": the read-only badge (static site) AND the row-toolbar
        view-all-samples toggle -->
-  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8Z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><circle cx="8" cy="8" r="1.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M1.7 8s2.3-4.5 6.3-4.5S14.3 8 14.3 8s-2.3 4.5-6.3 4.5S1.7 8 1.7 8Z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><circle cx="8" cy="8" r="1.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {/if}

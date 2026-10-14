@@ -13,7 +13,7 @@ it applies.
   sits low in its box looks low next to text even when the box is centred perfectly.
   The brain sat 0.25 low and 1.25px under the baseline beside "ASSISTANT" until it was
   re-centred (2026-10-13). `scripts/glyph_sheet.py` prints every glyph that breaks
-  this. Several older ones still do; fixing them is open.
+  this; since 2026-10-14 none does.
 - **Stroke: `stroke="currentColor" stroke-width="1.4"`, round caps and joins,
   `fill="none"` on the svg.** A mix of 1.2 to 2.0 made some buttons look bold and
   others faint in the same toolbar. 1.4 is ~1.1 px at the 13 px default.
@@ -62,6 +62,23 @@ The app draws glyphs at 11–16 px and 13 px by default (row toolbar 12–13,
 sidebar 15–16, the stop chip 11). Design at 16 but judge at 12 and 13. Detail
 that only reads at 40 px isn't really there.
 
+## Placing one
+
+- **The icon sits on a whole pixel: in its button, and its button in its row.**
+  Chrome draws an `<svg>` at a whole CSS pixel even at dpr 2, so a box inset x.5 px
+  is drawn half a pixel off-centre. Keep the parities matched: 12 or 14 px in a
+  28 px button, 16 px buttons in the 30 px sidebar row, 13 px icons in the 21 px
+  toolbar buttons (a 12 px tag made a 20 px button that sat half a pixel off among
+  them). `scripts/icon_halfpx_check.py <url>` lists every icon that breaks either.
+- **An icon inline in prose is centred on the caps,** not left on the baseline,
+  where it rides about 2 px high: the Help modal does it with
+  `vertical-align: calc(0.36em - 6.5px)` for its 13 px icons.
+- **Judge in place, not only on the sheet.** Undo passed the sheet's rule after its
+  fix and came out half a pixel worse in the app: its old 0.4 px-high drawing had
+  been cancelling its button's half pixel. Measure the ink against the button's
+  DRAWN border (Chrome rounds a button and its icon together), and against the
+  caps of the text an icon sits beside.
+
 ## Adding or changing one
 
 1. Add the name to `IconName`, plus a one-line `<!-- comment -->` above the svg
@@ -70,6 +87,7 @@ that only reads at 40 px isn't really there.
    12, 13 and 40 px, light over dark. `--icon <old Icon.svelte>` draws a
    before-sheet. Look at the new glyph next to its neighbours.
 3. Look at it in place: the row toolbar plain and with Shift held, the sidebar,
-   and a column header, in both themes. The `?` modal draws the real glyphs
+   and a column header, in both themes, and run `scripts/icon_halfpx_check.py`
+   against an isolated instance. The `?` modal draws the real glyphs
    through `<Icon>`, so it updates by itself. Prose that names a shape doesn't
    update by itself: the guide skill's button table (`plugin/skills/guide/`) does.

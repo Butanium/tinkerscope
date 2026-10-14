@@ -28,3 +28,5 @@ whose thin strokes sit at its top (arcs, rays) reads lower than its geometric
 centre at 11–13px, so geometric centring is the floor, not the finish.
 
 *(opus-5.5, 2026-10-13, prefill/glyph session)*
+
+**Done 2026-10-14**: all ten pass `glyph_sheet.py`; checked in the app, where it also took ten icon-size fixes (half-pixel placement) and centring the Help modal's inline icons. Story and method in `ENGINEERING_LOGS.md` 2026-10-14; the placement rule is in `docs/GLYPHS.md` §Placing one.

@@ -658,6 +658,8 @@ codex plugin add tinkerscope@tinkerscope</pre>
   .help-sec li { font-size: 0.82rem; color: var(--color-text-secondary); line-height: 1.6; margin-bottom: var(--space-1); }
   .help-steps li { line-height: 1.9; }
   .help-sec b { color: var(--color-text); font-weight: 600; }
+  /* An icon inline in prose sits on the baseline by default, so it rode ~2px high; this centres a 13px icon on the caps. */
+  p > :global(svg), li > :global(svg) { vertical-align: calc(0.36em - 6.5px); }
   .help-note { font-size: 0.78rem !important; color: var(--color-text-muted) !important; border-left: 2px solid var(--color-border); padding-left: var(--space-3); }
   code { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.94em; background: var(--color-surface-alt); padding: 0.05em 0.3em; border-radius: var(--radius-sm); }
 

@@ -485,15 +485,15 @@
       </button>
       {#if !readOnly}
         <button class="btn-act sample-continue" data-tooltip="Continue THIS sample — makes it active, then extends it" use:tip aria-label="Continue this sample" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onContinueSample(idx)}>
-          <Icon name="continue" size={12} />
+          <Icon name="continue" size={13} />
         </button>
       {/if}
       <button class="btn-tag" class:shift-alt={shiftDown} data-tooltip={shiftDown ? 'Bookmark instantly (no note)' : 'Bookmark with a note'} use:tip onclick={(e) => onTag(sample.content, idx, msg.totalSamples ?? null, sample.reasoning || '', e.shiftKey)}>
-        {#if shiftDown}<Icon name="tag-quick" size={12} />{:else}<Icon name="tag" size={12} />{/if}
+        {#if shiftDown}<Icon name="tag-quick" size={13} />{:else}<Icon name="tag" size={13} />{/if}
       </button>
       {#if !readOnly}
         <button class="btn-act btn-act-danger sample-del" data-tooltip="Delete this sample" use:tip aria-label="Delete this sample" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onDeleteSample(idx)}>
-          <Icon name="trash" size={12} />
+          <Icon name="trash" size={13} />
         </button>
         <button class="btn-act btn-act-danger" class:shift-alt-danger={shiftDown} class:btn-act-all={allActive} data-tooltip={`${shiftDown ? "Keep only this sample's path — every other branch in the thread goes" : 'Keep only this sample — discard the others'}${allActive ? ' — in ALL panels' : ''}`} use:tip aria-label="Discard others" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={(e) => onDiscardOthers(idx, e.ctrlKey || e.metaKey, e.shiftKey)}>
           {#if shiftDown}<Icon name="discard-path" />{:else}<Icon name="discard-others" />{/if}
@@ -904,7 +904,7 @@
           {/if}
           {#if msg.role === 'assistant' && msg.content}
             <button class="btn-tag" class:shift-alt={shiftDown} data-tooltip={shiftDown ? 'Bookmark instantly (no note)' : 'Bookmark with a note'} use:tip onclick={(e) => onTag(msg.content, null, null, msg.reasoning || '', e.shiftKey)}>
-              {#if shiftDown}<Icon name="tag-quick" size={12} />{:else}<Icon name="tag" size={12} />{/if}
+              {#if shiftDown}<Icon name="tag-quick" size={13} />{:else}<Icon name="tag" size={13} />{/if}
             </button>
           {/if}
           {@render copyMsgBtn()}

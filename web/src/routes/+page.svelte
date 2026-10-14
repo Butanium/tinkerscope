@@ -2164,11 +2164,11 @@
       use:tip
     >
       {#if themeMode === 'light'}
-        <Icon name="theme-light" size={15} />
+        <Icon name="theme-light" size={16} />
       {:else if themeMode === 'dark'}
-        <Icon name="theme-dark" size={15} />
+        <Icon name="theme-dark" size={16} />
       {:else}
-        <Icon name="theme-auto" size={15} />
+        <Icon name="theme-auto" size={16} />
       {/if}
     </button>
     <div class="topbar-title">tinkerscope</div>
@@ -2212,7 +2212,7 @@
       {/if}
     </div>
     <button class="topbar-btn" onclick={() => (showHelp = true)} data-tooltip="Help and keyboard shortcuts" use:tip aria-label="Help">
-        <Icon name="help" size={15} />
+        <Icon name="help" size={16} />
       </button>
   </header>
 
@@ -2244,7 +2244,7 @@
         {#if !readOnly}
           <!-- Undo stays neutral-styled, apart from the red stop. -->
           <button class="theme-toggle" onclick={() => undo.undo()} data-tooltip={undoTip} use:tip disabled={!undo.canUndo} aria-label="Undo last delete">
-            <Icon name="undo" size={15} />
+            <Icon name="undo" size={16} />
           </button>
           <button class="btn-stop-sidebar" class:active={anyRunning} onclick={() => chat.stopGeneration()} data-tooltip="Stop all generation" use:tip disabled={!anyRunning}>
             <Icon name="stop" size={14} />
@@ -2252,7 +2252,7 @@
         {/if}
         <!-- right of Stop (Clément's placement); a static site searches too -->
         <button class="theme-toggle" onclick={() => (showSearch = true)} data-tooltip="Search all workspaces (Ctrl+K)" use:tip aria-label="Search all workspaces" data-testid="search-open">
-          <Icon name="search" size={15} />
+          <Icon name="search" size={16} />
         </button>
         <!-- Pinned to the sidebar's right edge. Folded, the row turns into the rail:
              this on top, Stop below. -->
@@ -2324,27 +2324,27 @@
             {#if !readOnly}
               <button class="ws-icon-btn" class:shift-alt={shiftDown} data-tooltip={shiftDown ? 'New BLANK workspace (no models)' : 'New workspace · keeps current models (Shift: blank)'} use:tip disabled={anyRunning || ws.busy} aria-label="New workspace" onclick={newWorkspace}>
                 {#if shiftDown}
-                  <Icon name="new-blank" />
+                  <Icon name="new-blank" size={12} />
                 {:else}
-                  <Icon name="plus" />
+                  <Icon name="plus" size={12} />
                 {/if}
               </button>
               <button class="ws-icon-btn" data-tooltip="Rename workspace" use:tip disabled={anyRunning || ws.busy} aria-label="Rename workspace" onclick={startRenameWorkspace}>
-    <Icon name="edit" />
+    <Icon name="edit" size={12} />
               </button>
             {/if}
             <!-- Delete stays for a workspace the VISITOR installed from a pack link
                  (it's theirs, in localStorage); a baked one has no delete. -->
             {#if !readOnly || (ws.activeId && staticIsOverlay(ws.activeId))}
               <button class="ws-icon-btn ws-icon-danger" data-tooltip="Delete workspace" use:tip disabled={anyRunning || ws.busy} aria-label="Delete workspace" onclick={onDeleteWorkspace}>
-    <Icon name="trash" />
+    <Icon name="trash" size={12} />
               </button>
             {/if}
             <!-- Static only: a published site is the one place with no other way in.
                  A live instance reads a path straight off disk via ?w=<path>. -->
             {#if isStatic}
               <button class="ws-icon-btn" data-tooltip="Open a share pack (.yaml / .yaml.gz)" use:tip aria-label="Open a pack file" onclick={() => packFileInput?.click()}>
-                <Icon name="upload" />
+                <Icon name="upload" size={12} />
               </button>
               <input
                 bind:this={packFileInput}
@@ -2367,7 +2367,7 @@
           aria-expanded={!modelsCollapsed}
           onclick={toggleModelsCollapsed}
         >
-          <svg class="section-chevron" class:open={!modelsCollapsed} width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+          <svg class="section-chevron" class:open={!modelsCollapsed} width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
           <span>Models</span>
         </button>
         {#if !modelsCollapsed}
@@ -2531,7 +2531,7 @@
         {#if !readOnly}
         <button class="btn-add-model" class:shift-alt={shiftDown} onclick={addPanel}
             data-tooltip={shiftDown ? 'Add an empty panel' : 'Add panel with the same conversation (Shift: empty)'} use:tip>
-<Icon name="plus" size={12} />
+<Icon name="plus" size={13} />
             {panelSels.length < 2 ? 'Compare' : 'Add panel'}
           </button>
         {/if}
@@ -2551,7 +2551,7 @@
           aria-expanded={!samplingCollapsed}
           onclick={toggleSamplingCollapsed}
         >
-          <svg class="section-chevron" class:open={!samplingCollapsed} width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+          <svg class="section-chevron" class:open={!samplingCollapsed} width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
           <span>Sampling params</span>
         </button>
         {#if !samplingCollapsed}
@@ -2604,7 +2604,7 @@
           aria-expanded={!viewCollapsed}
           onclick={toggleViewCollapsed}
         >
-          <svg class="section-chevron" class:open={!viewCollapsed} width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+          <svg class="section-chevron" class:open={!viewCollapsed} width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
           <span>View</span>
         </button>
         {#if !viewCollapsed}
@@ -2929,7 +2929,7 @@
                   disabled={panelBusy(p.panel) || !(panelDraft[p.panel] ?? '').trim()}
                   onclick={() => sendToPanel(p.panel)}
                 >
-                  <Icon name="arrow-right" size={14} />
+                  <Icon name="arrow-right" size={13} />
                 </button>
               </div>
               {/if}

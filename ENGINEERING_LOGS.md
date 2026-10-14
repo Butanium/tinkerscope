@@ -3107,3 +3107,41 @@ FILTER (all / brain / struck brain, with counts) stays: it is a control, not a
 label. `browser_thinking_both` now reads CoT presence per card instead of the
 marker. (Lesson in the same exchange: I twice answered "not new" from the code's
 comment without opening the turn he showed — the data check took one query.)
+
+### 2026-10-14 — The glyph ink pass, judged in the app instead of on the sheet
+
+The idea (`ideas/done/glyph-ink-centering-pass.md`) listed ten glyphs that broke the
+1–15 / centre-8 rule. All ten pass now: new-blank, check, undo moved; dataset scaled
+0.9; continue-think redrawn; regen/replace arrowheads, the pins frame, the sun's rays
+and the eye's corners pulled in rather than shrinking the whole glyph.
+
+What the sheet couldn't show, and the app did:
+
+- **continue-think was off the other way.** Its bounding box was centred; the bubble,
+  most of its ink, sat a unit high. Moving it by its box would have made it worse. The
+  redraw lowers the bubble and tucks the dots in, matching `answer`'s proportions.
+- **Chrome draws an `<svg>` at a whole CSS pixel even at dpr 2** (measured: an icon at
+  y+0.5 renders at y+1), while a button's border is drawn at device pixels. So an icon
+  inset x.5 px in its button, or a button sitting x.5 px in its row, comes out half a
+  pixel off. Ten sites did: undo, search and the two topbar icons (15 px in 30 / 32 px
+  rows), the workspace row (13 px in 28 px buttons), the add-panel plus, the sidebar
+  section chevrons, the toolbar tag (12 px → a 20 px button among 21 px ones), the panel
+  continue arrow, the sample-card continue/delete. Fixed by size, keeping parities
+  matched (the card buttons also lost 1 px of side padding, so a narrow card folds
+  exactly as before — the first try at 13 px pushed delete into the fold).
+- **Undo was the trap.** After its glyph fix it passed the sheet and came out half a
+  pixel WORSE in the sidebar: the old drawing, 0.4 px high, had been cancelling its
+  button's half pixel. Fixing the button size is what fixed it.
+- **Help prose icons rode ~2 px high** — an inline svg sits on the baseline. Now
+  `vertical-align: calc(0.36em - 6.5px)` centres a 13 px icon on the caps.
+
+How it was measured, for next time: sub-pixel ink edges (area method on per-row
+coverage) inside each svg's own box, against the button's DRAWN border (the layout
+rect's centre is off by Chrome's rounding) or, beside text, the text's caps. Two
+limits: the area method reads a pointed tip or a faded part as thin ink
+(discard-others measures 0.5 px low with a centred outline), and anything drawn
+without guide lines got it wrong — my first before/after showed only a centre line
+and hid the undo regression. `scripts/icon_halfpx_check.py` is the cheap DOM-only
+check for the rounding class; it found the tag, the card buttons and the continue
+arrow after I'd called the pass done.
+

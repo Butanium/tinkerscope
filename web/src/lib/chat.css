@@ -169,7 +169,7 @@ mark.hl-mark.hl-join-r { padding-right: 0; border-top-right-radius: 0; border-bo
 .btn-act-danger.btn-act-all:hover::after, .btn-act-danger.btn-act-all.shift-alt-danger::after { color: #ef4444; }
 /* Copy button just flashed → confirm with green ✓. */
 .btn-act.copied { color: #10b981; border-color: #10b981; background: #10b98112; }
-.sample-del, .sample-continue { padding: 2px 5px; }
+.sample-del, .sample-continue { padding: 2px 4px; }
 .sample-continue:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Per-panel "continue this panel" composer (compare mode). Sits OUTSIDE the

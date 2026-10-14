@@ -189,7 +189,7 @@
       aria-expanded={!collapsed}
       onclick={toggleCollapsed}
     >
-      <svg class="section-chevron" class:open={!collapsed} width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+      <svg class="section-chevron" class:open={!collapsed} width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
       <span>Highlights</span>
     </button>
     <!-- Both controls stay in the header while the section is folded: the master
