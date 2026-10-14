@@ -215,3 +215,18 @@ def test_ws_thread_selects_a_non_active_root(monkeypatch):
 
     res = runner.invoke(cli.app, ["ws", "22222222", "--panel", "p-2", "--thread", "7"])
     assert res.exit_code == 1 and "out of range" in res.output
+
+
+def test_ws_tree_respects_thread(monkeypatch):
+    """`--tree --thread K` draws thread K only. It used to ignore --thread and
+    print every thread, so a `| tail` read the wrong thread's branches."""
+    monkeypatch.setattr(cli, "_workspaces", lambda: [_ws({"p-2": _two_thread_tree()}, wid="22222222")])
+    out = runner.invoke(cli.app, ["ws", "22222222", "--panel", "p-2", "--thread", "1", "--tree"]).output
+    tree = out[out.index("thread 1:"):]
+    assert "first thread" in tree and "follow up" not in tree
+
+    out = runner.invoke(cli.app, ["ws", "22222222", "--panel", "p-2", "--tree"]).output
+    assert "first thread" in out and "follow up" in out  # no --thread: every thread
+
+    res = runner.invoke(cli.app, ["ws", "22222222", "--tree", "--deepest"])
+    assert res.exit_code == 1 and "--deepest" in res.output

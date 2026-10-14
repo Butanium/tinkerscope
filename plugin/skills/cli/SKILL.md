@@ -700,7 +700,7 @@ tinkpg ws [selector] [options]
   --ws TEXT                         same as the positional selector, for symmetry with `grep`/`node`/`threads` (which can only take it as an option)
   --panel TEXT                      restrict to one panel id (p-1/p-2/… — older workspaces also have primary/compare); overrides folding
   --full                            show the whole active path, not just first/last-2
-  --tree                            show the full branch tree (all branches), `*` = active
+  --tree                            show the full branch tree (all branches; only thread K's with --thread K), `*` = active
   --width INTEGER                   per-message truncation width  [default: 160]
   --include-folded                  also expand panels folded in the browser UI (skipped by default)
   --thread INTEGER                  walk root thread K (the `threads:` index / `tinkpg threads`) instead of the active one

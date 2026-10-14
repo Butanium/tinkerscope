@@ -404,8 +404,9 @@ def _digest(items: list, fmt, full: bool, width: int, head: int = 2, tail: int =
     )
 
 
-def _render_tree(tree: dict, width: int) -> list[str]:
-    """Indented DFS of the WHOLE tree; `*` marks the active (selected) branch."""
+def _render_tree(tree: dict, width: int, roots: Optional[list[str]] = None) -> list[str]:
+    """Indented DFS of the tree — every root thread, or only `roots`; `*` marks
+    the active (selected) branch."""
     lines: list[str] = []
 
     def walk(node_id: str, depth: int) -> None:
@@ -418,7 +419,7 @@ def _render_tree(tree: dict, width: int) -> list[str]:
         for ch in node.get("children", []):
             walk(ch, depth + 1)
 
-    for rc in tree.get("rootChildren", []):
+    for rc in (tree.get("rootChildren", []) if roots is None else roots):
         walk(rc, 0)
     return lines
 
@@ -3052,7 +3053,10 @@ def _show_workspace(
         nf = sum(1 for nd in ap if len(_siblings(t, nd)) > 1)
         print(f"▸ {pid}  ← {bind}   ({which}: {len(ap)} msgs, {nf} fork{'' if nf == 1 else 's'} on path)")
         if show_tree:
-            for line in _render_tree(t, width):
+            # --thread narrows the tree to that thread (it used to be ignored here,
+            # so `--thread 2 --tree` printed every thread of the panel)
+            roots = None if thread is None else [t["rootChildren"][thread - 1]]
+            for line in _render_tree(t, width, roots):
                 print(line)
         else:
             for line in _thread_index(t, width):
@@ -3074,7 +3078,7 @@ def cmd_ws(
     ws_opt: Optional[str] = typer.Option(None, "--ws", "--conv", help="same as the positional selector, for symmetry with `grep`/`node`/`threads` (which can only take it as an option)"),
     panel: Optional[str] = typer.Option(None, "--panel", help="restrict to one panel id (p-1/p-2/… — older workspaces also have primary/compare); overrides folding"),
     full: bool = typer.Option(False, "--full", help="show the whole active path, not just first/last-2"),
-    tree: bool = typer.Option(False, "--tree", help="show the full branch tree (all branches), `*` = active"),
+    tree: bool = typer.Option(False, "--tree", help="show the full branch tree (all branches; only thread K's with --thread K), `*` = active"),
     width: int = typer.Option(160, "--width", help="per-message truncation width"),
     include_folded: bool = typer.Option(
         False, "--include-folded", help="also expand panels folded in the browser UI (skipped by default)"
@@ -3105,6 +3109,8 @@ def cmd_ws(
     finds them. --json exports the same transcript as structured data (for
     rendering a conversation in a report / artifact instead of reading it here)."""
     selector = _one_selector(selector, ws_opt)
+    if tree and deepest:
+        _die("--tree already shows every branch — --deepest picks one; drop one of them")
     convs = _workspaces()
     if selector is None:
         if json_out:

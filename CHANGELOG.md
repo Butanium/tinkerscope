@@ -26,6 +26,7 @@ WIRE contract, not on the UI (`docs/RELEASING.md`).
 
 ### Fixed
 
+- **`tinkpg ws --tree --thread K` draws thread K only.** `--tree` ignored `--thread` and printed every thread of the panel; `--tree --deepest` (meaningless together) now errors instead of ignoring `--deepest`.
 - **A stopped fire no longer exits 0.** A Stop in the browser on a CLI-fired chat
   used to leave `tinkpg` reporting a clean run with whatever samples had finished
   (1 of 10, silently). It now fails with "stopped from outside this CLI — K of N
