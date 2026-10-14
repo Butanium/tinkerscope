@@ -75,7 +75,6 @@ DEFAULT=(
     # `MULTI_USER=0 uv run python tests/small-smokes/browser_multi_user.py`
     # (must pass by reproducing the single-bus leak) — run it when you touch
     # api/session.py / api/state.py.
-    browser_ops_convergence
     browser_multi_user
     browser_legacy_echo_graft
     browser_sysprompt_switch
@@ -103,6 +102,9 @@ DEFAULT=(
 # sidebar_folds, open_locally. And three NETWORK-dependent ones (a tinker metadata
 # probe or the live model list): tinker_custom_ckpt, ckpt_base_label,
 # model_availability.
+# Left DEFAULT 2026-10-13 as FLAKY (Clément: "disable the flaky smokes"):
+# ops_convergence timed out twice that day on tab B's 'DELETED' notice and passed
+# on rerun both times.
 # Known-stale: failures here carry NO signal. Repair when you next need the
 # coverage — not on their own account.
 declare -A STALE=(

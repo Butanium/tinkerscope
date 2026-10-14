@@ -38,6 +38,41 @@ WIRE contract, not on the UI (`docs/RELEASING.md`).
   stops at a stopped probe. Wire: `start` gains `n`, the caller's `done`/`error`
   gain `cancelled` (additive; the bus is unchanged).
 
+## [1.6.0] — 2026-10-13
+
+A tidier screen, and `tinkpg` that says when a fire was stopped. Additive on the
+wire (two fields on the caller's `/api/chat` stream); the on-disk shape is
+untouched.
+
+### Added
+
+- **Search button** in the sidebar icon row (opens Ctrl+K). Ctrl+K also jumps
+  straight to a pasted node handle (`ws:panel:node`).
+- **Discard others in the row toolbar**: `Ctrl` = every panel, `Shift` = keep
+  only the path on screen; one Ctrl+Z undoes it.
+- The all-samples card view gets a "back to thread" button, and `Esc` closes it.
+- `tinkpg node` prints who sampled an assistant turn, `tinkpg ws --provenance`
+  does it for every turn on the path, `tinkpg grep --scope` narrows a search.
+
+### Changed
+
+- After sampling, "think" / "no think" are glyphs (brain / struck brain).
+- The prefill scope switch sits inside the prefill pill and shows only while the
+  prefill is unfolded or enabled; prefill editors fold with a short animation.
+- Top bar: the theme toggle moved to the top-left corner, help sits next to the
+  live dot. ⑂'s tooltip is now "If enabled, each send starts a fresh conversation".
+- A fire stopped from the browser or with Ctrl+C makes `tinkpg` exit 130 and say
+  who stopped it and how many samples finished. Wire: `start` gains `n`, the
+  terminal events gain `cancelled`.
+
+### Fixed
+
+- Picking an alternative in a pinned loom card forks at the pinned token, not at
+  whatever token lay under the card.
+- `tinkpg ws --tree` honours `--thread`; `tinkpg compare` names the saved user
+  turn on a stopped or failed fire.
+- Tooltips near the right edge of the screen no longer wrap into narrow slabs.
+
 ## [1.5.0] — 2026-10-13
 
 System prompts become part of the conversation, prefills become per panel, and a
