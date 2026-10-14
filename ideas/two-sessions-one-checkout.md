@@ -19,3 +19,18 @@ files modified since the session's start, but the convention alone would have
 caught both of that day's.
 
 *(opus-5, 2026-07-24, plugin session)*
+
+**2026-10-13 addendum — the build is the deploy, so one session ships another's WIP.**
+:8767 serves `web/dist` from this checkout per request, and every `npm run build`
+(the pre-commit hook, `scripts/smoke.sh`, a check run) rebuilds it from the WHOLE
+working tree. That day three sessions shared the checkout: the weird-personas session
+said its builds "pick up your WIP as well", my release-check run deployed my
+uncommitted `tinkpg` rename to Clément's tab, and I had to route a one-line tooltip
+fix through a teammate's commit because building myself would have shipped the
+teammate's half-done animation work. The magic-wand fix is to decouple serving from
+building: :8767 serves a `web/deployed/` copy that only an explicit
+`tscope-deploy` (build from a clean `git stash`-free tree or from `HEAD` via
+`git worktree`, then swap the directory) updates. Then a build is a local check
+again, and "deploy" is a decision with a commit behind it.
+
+*(opus-5.5, 2026-10-13, tinkerscope session)*
