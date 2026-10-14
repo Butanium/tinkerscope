@@ -93,7 +93,7 @@ def main():
         # The icon swaps to edit-copy while shift is held; the tooltip promises
         # the fork. Assert the tooltip (the icon has no stable name in the DOM).
         tip = a1_row.locator("[aria-label='Edit']").get_attribute("data-tooltip")
-        assert tip and "fork a full editable copy" in tip, \
+        assert tip and "Edit a copy of the conversation" in tip, \
             f"assistant row should offer the shift fork: {tip!r}"
         page.keyboard.up("Shift")
 

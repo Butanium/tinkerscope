@@ -514,7 +514,7 @@
 {#snippet noTokTag()}
   <span
     class="mode-tag"
-    data-tooltip="No token logprobs on this turn — native tinker sampling only"
+    data-tooltip="No token probabilities recorded for this turn"
     use:tip>no token data</span>
 {/snippet}
 
@@ -562,8 +562,8 @@
     class:btn-act-all={allActive}
     class:shift-alt={shiftDown && canResumeThinking}
     data-tooltip={(shiftDown && canResumeThinking
-      ? 'Continue the REASONING — resume inside the think block'
-      : 'Continue this message (extends it; n-samples → pick one)') + (allActive ? ' — in ALL panels' : '')}
+      ? 'Continue the thinking'
+      : 'Continue writing this message') + (allActive ? ' — in ALL panels' : '')}
     use:tip
     aria-label="Continue this message"
     onclick={(e) => onContinue(e.ctrlKey || e.metaKey, e.shiftKey)}
@@ -675,7 +675,7 @@
     class="btn-act"
     class:shift-alt={shiftDown}
     class:btn-act-all={allActive}
-    data-tooltip={`${shiftDown ? 'Replace this branch in place (other siblings kept)' : 'Regenerate → new sibling branch'}${allActive ? ' — in ALL panels' : ''}`}
+    data-tooltip={`${shiftDown ? 'Regenerate in place (replaces this reply)' : 'Regenerate (keeps the old reply)'}${allActive ? ' — in ALL panels' : ''}`}
     use:tip
     aria-label="Regenerate"
     onclick={(e) => onRegenerate(e.ctrlKey || e.metaKey, e.shiftKey)}
@@ -885,10 +885,10 @@
               class:shift-alt={shiftDown}
               class:btn-act-all={allActive}
               data-tooltip={`${shiftDown
-                ? 'Edit → fork a full editable copy (no generation)'
+                ? 'Edit a copy of the conversation (no reply)'
                 : msg.role === 'user'
-                  ? 'Edit → fork + regenerate (shift: fork full copy)'
-                  : 'Edit → new branch (shift: fork full copy)'}${allActive ? ' — in ALL panels' : ''}`}
+                  ? 'Edit and regenerate (Shift: copy, no reply)'
+                  : 'Edit (keeps the original; Shift: copy)'}${allActive ? ' — in ALL panels' : ''}`}
               use:tip
               aria-label="Edit"
               onclick={(e) => startEdit(e.shiftKey, e.ctrlKey || e.metaKey)}

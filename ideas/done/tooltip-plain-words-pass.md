@@ -29,3 +29,5 @@ Left alone on purpose: the CLI-facing ones (session id, copy node handle), whose
 audience knows the `tinkerscope` vocabulary.
 
 *(opus-5.5, 2026-10-13, tinkerscope session)*
+
+**Done 2026-10-13**: all 15 applied as proposed (Clément: "u can implement yes"), plus each control's Shift variant so one button never mixes the two vocabularies (edit: "Edit a copy of the conversation (no reply)" / "Edit (keeps the original; Shift: copy)"; add panel: "Add an empty panel"; system-row Shift: "Copy the conversation under a new prompt"). The panel prefill's power dot got the same "Apply or mute — the text is kept". Smokes that matched the old text: `browser_continue_scope` (now by aria-label), `browser_shift_edit_assistant`.

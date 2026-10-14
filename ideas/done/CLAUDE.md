@@ -35,3 +35,4 @@ happened.
 - [System power toggle: rapid off→on can lose flag AND text](system-chip-power-race.md) — the open-claim wipe + the mirror-read set_meta amplifier; fixed by explicit-fields meta writes + gating the editor until open — **done 2026-08-12** (fix-system-chip)
 - [README / skill mention of Copy node id](document-copy-node-id.md) — one README sentence + the CLI help / cli skill corrected to the full `<ws>:<panel>:<node>` form — **done 2026-09-26**
 - [System prompt at the top of the conversation](system-prompt-at-top-of-conversation.md) — the first row of every panel, foldable; composer chip removed — **done 2026-10-09**
+- [A plain-words pass over the remaining tooltips](tooltip-plain-words-pass.md) — 15 tooltips + their Shift variants without thread/fork/sibling jargon — **done 2026-10-13**

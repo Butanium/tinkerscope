@@ -2530,7 +2530,7 @@
         {/each}
         {#if !readOnly}
         <button class="btn-add-model" class:shift-alt={shiftDown} onclick={addPanel}
-            data-tooltip={shiftDown ? 'Add a BLANK panel (empty thread)' : 'Add panel · clones the first panel\u2019s thread (Shift: blank)'} use:tip>
+            data-tooltip={shiftDown ? 'Add an empty panel' : 'Add panel with the same conversation (Shift: empty)'} use:tip>
 <Icon name="plus" size={12} />
             {panelSels.length < 2 ? 'Compare' : 'Add panel'}
           </button>
@@ -2612,7 +2612,7 @@
             <div class="sidebar-section">
               <label class="sidebar-label thinking-toggle-row">
                 <span>Layout</span>
-                <span class="seg-toggle" data-tooltip="All = every sample stacked; Cycle = one at a time with ‹/›" use:tip>
+                <span class="seg-toggle" data-tooltip="Show samples stacked, or one at a time" use:tip>
                   <button class="seg-btn" class:active={sampleView === 'all'} onclick={() => setSampleView('all')}>All</button>
                   <button class="seg-btn" class:active={sampleView === 'cycle'} onclick={() => setSampleView('cycle')}>Cycle</button>
                 </span>
@@ -2625,7 +2625,7 @@
               <label class="sidebar-label thinking-toggle-row">
                 <span>Thinking blocks</span>
                 <span class="seg-toggle" data-testid="thinking-fold-toggle"
-                  data-tooltip="Whether think/reasoning blocks start folded or already open" use:tip>
+                  data-tooltip="Show thinking folded or open by default" use:tip>
                   <button class="seg-btn" class:active={!thinkingView.open} onclick={() => thinkingView.set(false)}>Folded</button>
                   <button class="seg-btn" class:active={thinkingView.open} onclick={() => thinkingView.set(true)}>Open</button>
                 </span>
@@ -2667,7 +2667,7 @@
                       {/each}
                     </div>
                     <label class="sidebar-label thinking-toggle-row lp-hl-ramp"
-                      data-tooltip="0 = opacity tracks match mass, 1 = any match at full tint" use:tip>
+                      data-tooltip="Higher = any match shows at full color" use:tip>
                       <span>Contrast</span>
                       <span class="lp-hl-ramp-val">{logprobHighlight.sharpness.toFixed(2)}</span>
                     </label>
@@ -2887,7 +2887,7 @@
                     enabled={pp?.on ?? false}
                     open={ppOpen}
                     testid="panel-prefill"
-                    powerTip={prefillFanOut ? "Apply / mute the prefill — in ALL panels" : "Apply / mute this panel's prefill (hollow dot = muted)"}
+                    powerTip={prefillFanOut ? "Apply / mute the prefill — in ALL panels" : "Apply or mute — the text is kept"}
                     editTip="This panel's prefill — replaces the composer prefill here"
                     onpower={(e) => togglePanelPrefillOn(p.panel, !focusPanel && (e.ctrlKey || e.metaKey))}
                     onfold={() => togglePanelPrefillOpen(p.panel)}
@@ -2969,8 +2969,8 @@
             enabled={systemOn}
             open={showSystem}
             testid="system"
-            powerTip="Apply / mute the workspace system prompt (hollow dot = muted)"
-            editTip="Workspace system prompt — threads with their own override it"
+            powerTip="Apply or mute — the text is kept"
+            editTip="Default system prompt (a conversation's own one wins)"
             onpower={toggleSystemOn}
             onfold={() => (showSystem = !showSystem)}
           />
@@ -2993,7 +2993,7 @@
               enabled={prefillOn}
               open={showPrefill}
               testid="prefill"
-              powerTip="Apply / mute the prefill, keeping the text (hollow dot = muted)"
+              powerTip="Apply or mute — the text is kept"
               editTip="Edit the prefill — the model continues from your text"
               onpower={togglePrefillOn}
               onfold={() => (showPrefill = !showPrefill)}
@@ -3022,8 +3022,8 @@
               enabled={threadSystemOn}
               open={showThreadSystem}
               testid="thread-system"
-              powerTip="Apply / mute the THREAD system prompt (hollow dot = muted)"
-              editTip="Edit the next new thread's system prompt — replaces the workspace one"
+              powerTip="Apply or mute — the text is kept"
+              editTip="System prompt for each fresh conversation"
               onpower={toggleThreadSystemOn}
               onfold={() => (showThreadSystem = !showThreadSystem)}
             />

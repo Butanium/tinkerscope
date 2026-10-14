@@ -582,7 +582,7 @@
         <button class="chart-mode-btn" class:active={mode === 'rules'} onclick={() => setMode('rules')}
           data-tooltip="Bucket samples by which highlight rules match them" use:tip>highlight rules</button>
         <button class="chart-mode-btn" class:active={mode === 'answers'} onclick={() => setMode('answers')}
-          data-tooltip="Bucket samples by exact answer text (short constrained answers)" use:tip>exact answers</button>
+          data-tooltip="Group samples by exact answer text" use:tip>exact answers</button>
         <button class="chart-mode-btn" class:active={mode === 'firsttoken'} disabled={!hasFirstToken}
           onclick={() => setMode('firsttoken')}
           data-tooltip={hasFirstToken

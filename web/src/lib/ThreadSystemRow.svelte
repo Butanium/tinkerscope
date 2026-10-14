@@ -133,7 +133,7 @@
             class:shift-alt={shiftDown}
             disabled={busy}
             data-testid="thread-system-edit-btn"
-            data-tooltip={shiftDown ? 'Fork a copy of the conversation under a new prompt' : 'Edit — forks a new thread and regenerates the first reply'}
+            data-tooltip={shiftDown ? 'Copy the conversation under a new prompt' : 'Edit and regenerate the first reply'}
             use:tip
             aria-label="Edit system prompt"
             onclick={startEdit}

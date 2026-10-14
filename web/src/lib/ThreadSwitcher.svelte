@@ -39,7 +39,7 @@
       class="switcher-toggle"
       data-testid="thread-switcher-btn"
       onclick={() => (open = !open)}
-      data-tooltip="Jump to another thread — switches every panel that has it"
+      data-tooltip="Switch conversation (in every panel that has it)"
       use:tip
     >⑂ threads ({starts.length}) ▾</button>
     {#if open}

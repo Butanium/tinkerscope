@@ -122,7 +122,7 @@ def main() -> None:
             # the send, so no bus event is ever emitted and the canned SSE body
             # below is never drained by anyone — the fold CANNOT happen here, and
             # waiting for it just times out (which is what made this smoke stale).
-            page.click('button[data-tooltip^="Continue this message"]')
+            page.click('button[aria-label="Continue this message"]')
             deadline = time.time() + 10
             while not captured and time.time() < deadline:
                 page.wait_for_timeout(100)

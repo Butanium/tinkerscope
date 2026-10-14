@@ -139,7 +139,7 @@
 <div class="ft-add">
   <input class="ft-add-input" type="text" placeholder="add a hidden token… (e.g. “ D”)"
     bind:value={query}
-    data-tooltip="Search tokens recorded for this turn and pull one out of the rest"
+    data-tooltip="Find a recorded token and give it its own chip"
     use:tip />
   {#if query.trim()}
     <div class="ft-matches">
