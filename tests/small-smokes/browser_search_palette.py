@@ -21,6 +21,9 @@ palette end-to-end:
   8. Deep link: a palette jump WRITES `?node=` into the URL, and opening a
      `?w=<id>&panel=<p>&node=<n>` URL cold reveals that node (flips the cycler
      to an off-path sibling).
+  9. A pasted node handle (`<ws-prefix>:<panel>:<node>`, the Copy-node-id /
+     tinkpg form) resolves to that one node — no text search — and Enter jumps
+     to it; a handle that doesn't resolve says why.
 
 No model calls.
 
@@ -193,6 +196,25 @@ def main():
         expect(flashed).to_contain_text("NEEDLE-OFFPATH")
         expect(page.locator(".chat-column .messages").first).to_contain_text(
             "NEEDLE-OFFPATH", timeout=5000)
+
+        # 9. a pasted node handle jumps to that node (off-path sample f2 of the fan)
+        open_palette()
+        page.keyboard.type(f"{ws_b[:8]}:primary:f2")
+        hit = page.locator("[data-testid=palette-hit]")
+        expect(hit).to_have_count(1, timeout=5000)
+        expect(hit).to_contain_text("variant 1")
+        expect(hit).to_contain_text("hidden branch")
+        page.keyboard.press("Enter")
+        page.wait_for_function(
+            "([want]) => document.querySelector('.ws-picker')?.dataset.wsId === want",
+            arg=[ws_b], timeout=10000)
+        flashed = page.locator(".message.reveal-flash")
+        expect(flashed).to_have_count(1, timeout=5000)
+        expect(flashed).to_contain_text("variant 1")
+        open_palette()
+        page.keyboard.type(f"{ws_b[:8]}:primary:nope")
+        expect(page.locator(".palette-error")).to_contain_text("no node nope", timeout=5000)
+        page.keyboard.press("Escape")
 
         browser.close()
     print("browser_search_palette: OK")

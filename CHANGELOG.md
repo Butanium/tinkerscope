@@ -12,6 +12,7 @@ WIRE contract, not on the UI (`docs/RELEASING.md`).
 
 ### Added
 
+- **Ctrl+K takes a node handle.** Paste `<ws>:<panel>:<node>` (the Copy-node-id button's output, and what every `tinkpg` printer emits) and the palette shows that one node instead of searching for the text; Enter jumps to it. A handle that doesn't resolve says why.
 - **Provenance in the CLI.** `tinkpg node` prints `produced by: <run>@<ckpt>` for
   an assistant turn, and `tinkpg ws … --provenance` does it for every assistant
   turn of the walked conversation, ending with "k/N assistant turn(s) sampled by

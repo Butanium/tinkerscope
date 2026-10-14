@@ -300,7 +300,9 @@ codex plugin add tinkerscope@tinkerscope</pre>
         opens its fold. The chip row under the search box narrows what's searched (model-id matches
         start off). After a jump the address bar carries <code>?w=…&amp;node=…</code> — copy it and the
         link opens the browser AT that exact sample. The same search is scriptable as
-        <code>tinkpg grep</code> (<code>--link</code> prints those URLs).
+        <code>tinkpg grep</code> (<code>--link</code> prints those URLs). Pasting a node id —
+        <code>ws:panel:node</code>, what the copy-node-id button and <code>tinkpg</code> print — skips
+        the search and jumps straight to that node.
       </p>
     </section>
 

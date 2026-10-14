@@ -431,7 +431,9 @@ visible, flashes the row, and opens the thinking fold when the match was in the
 CoT. After a jump the address bar reads `?w=<id>&node=<id>` — that URL is a
 shareable DEEP LINK that reopens the browser at that exact sample (`tinkpg grep
 --link` prints the same URLs from the terminal). The same engine drives `tinkpg
-grep` on the CLI side.
+grep` on the CLI side. Paste a node handle (`<ws>:<panel>:<node>` — what the
+Copy-node-id button and every `tinkpg` printer emit) and the palette skips the
+text search: it shows that one node, and Enter jumps to it.
 
 Inside a text box `Ctrl`/`⌘`+`Z` stays the browser's normal text undo — the
 workspace undo deliberately doesn't steal it. The stack holds the last 50 ops,

@@ -14,6 +14,7 @@
 -->
 <script lang="ts">
   import { api } from './api';
+  import { handleResponse, parseNodeHandle, resolveNodeHandle, type NodeHandle } from './node-handle';
   import type { SearchHit, SearchResponse, SearchWorkspaceHit } from './types';
 
   let {
@@ -74,7 +75,7 @@
       localStorage.setItem(SCOPES_KEY, JSON.stringify([...next]));
     } catch {}
     const q = query.trim();
-    if (q.length >= 2) {
+    if (q.length >= 2 && !parseNodeHandle(q)) {
       clearTimeout(timer);
       searching = true;
       void fire(q); // chip toggles re-query immediately — no debounce needed
@@ -85,6 +86,13 @@
   function onInput() {
     clearTimeout(timer);
     const q = query.trim();
+    const handle = parseNodeHandle(q);
+    if (handle) {
+      // a pasted node handle (Copy-node-id, tinkpg output) → that node, not a text search
+      searching = true;
+      void resolveHandle(q, handle);
+      return;
+    }
     if (q.length < 2) {
       res = null;
       error = null;
@@ -107,6 +115,26 @@
     } catch (e: any) {
       if (my !== seq) return;
       error = e?.message ?? String(e);
+    } finally {
+      if (my === seq) searching = false;
+    }
+  }
+
+  async function resolveHandle(q: string, h: NodeHandle) {
+    const my = ++seq;
+    try {
+      const r = await resolveNodeHandle(h, api.listWorkspaces, api.getWorkspace);
+      if (my !== seq) return;
+      if (typeof r === 'string') {
+        res = null;
+        error = r;
+      } else {
+        res = handleResponse(q, r);
+        error = null;
+        selIdx = 0;
+      }
+    } catch (e: any) {
+      if (my === seq) error = e?.message ?? String(e);
     } finally {
       if (my === seq) searching = false;
     }
@@ -217,7 +245,7 @@
       <div class="palette-status">no matches for “{res.query}”</div>
     {:else if !res && !searching}
       <div class="palette-status palette-hint">
-        finds any phrase across every workspace, panel and branch — folded samples included
+        finds any phrase across every workspace, panel and branch — or paste a ws:panel:node id
       </div>
     {/if}
     {#if items.length}
@@ -272,7 +300,7 @@
                 {/if}
               </span>
               <span class="palette-snippet">
-                {g.hit.before}<mark>{g.hit.match_display}</mark>{g.hit.after}
+                {g.hit.before}{#if g.hit.match_display}<mark>{g.hit.match_display}</mark>{/if}{g.hit.after}
               </span>
             </div>
           {/each}

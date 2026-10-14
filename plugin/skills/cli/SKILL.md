@@ -331,6 +331,8 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   / the workspace, and an explicit flag wins. A BARE id still works — `node`
   prints one block per copy, while `continue --node` / `samples --node` error and
   ask for `--panel`.
+  To SHOW the human a node, hand them the handle: pasted into the browser's
+  Ctrl+K palette it jumps straight to that node (no text search).
 - `tinkpg samples` answers "what did the model say across ALL n draws at this fork?"
   — the one view `state`/`conv` can't give you, since they only walk the linear active
   path. It prints every sibling response at ONE fork (default: the last user turn of the
