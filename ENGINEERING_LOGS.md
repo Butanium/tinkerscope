@@ -3121,9 +3121,10 @@ What the sheet couldn't show, and the app did:
   most of its ink, sat a unit high. Moving it by its box would have made it worse. The
   redraw lowers the bubble and tucks the dots in, matching `answer`'s proportions.
 - **Chrome draws an `<svg>` at a whole CSS pixel even at dpr 2** (measured: an icon at
-  y+0.5 renders at y+1), while a button's border is drawn at device pixels. So an icon
-  inset x.5 px in its button, or a button sitting x.5 px in its row, comes out half a
-  pixel off. Ten sites did: undo, search and the two topbar icons (15 px in 30 / 32 px
+  y+0.5 renders at y+1). A button and the icon inside it are rounded together, so a
+  fractional row position alone is harmless; what isn't is an icon inset x.5 px in its
+  button (off inside its border), or a button x.5 px in its row (off against its
+  neighbours). Ten sites did: undo, search and the two topbar icons (15 px in 30 / 32 px
   rows), the workspace row (13 px in 28 px buttons), the add-panel plus, the sidebar
   section chevrons, the toolbar tag (12 px → a 20 px button among 21 px ones), the panel
   continue arrow, the sample-card continue/delete. Fixed by size, keeping parities

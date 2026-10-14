@@ -70,6 +70,7 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 - [Screenshot-verify every UI change, not just plots](screenshot-verify-ui-changes.md) — smokes passed on both placements; only a picture found the wrong one
 - [Second independent vote for the same](screenshot-verify-second-vote.md) — different failure mode, same day: a whole region painting flat, invisible to every assertion
 - [For anything PAINTED, the assertion is pixel readback](pixel-readback-for-painted.md) — a COUNT for "did it draw", a single-pixel SAMPLE for "the right thing"
+- [Measure icons in place with a real script](icon-inplace-measure.md) — `scratch/glyph_inplace/` is the working prototype (ink vs drawn border / caps); the half-pixel check covers y only
 - [A migrating 404 fails one random smoke per sweep](anonymous-404-console-flake.md) — different victim each sweep, all functional checks green; every guard now names the URL (test-hygiene 2026-08-12), so the next occurrence identifies itself — do-not-hunt until then
 
 ### Codebase & workflow hygiene
