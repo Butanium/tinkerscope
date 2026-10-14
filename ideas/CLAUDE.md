@@ -40,6 +40,7 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 
 ### CLI (`tinkerscope`)
 
+- [`tinkerscope replay`: re-roll a thread's user turns on-policy for another model](cli-onpolicy-replay.md) — what "make this conversation on-policy" took by hand: N sequential fires + picks; `--pick ask` for curated runs
 - [Restore a deleted WORKSPACE](restore-a-deleted-workspace.md) — the soft delete sets it aside in `workspaces/.deleted/`, but only a manual directory move gets it back
 
 ### Multi-user sessions
