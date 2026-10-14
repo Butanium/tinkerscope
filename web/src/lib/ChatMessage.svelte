@@ -637,7 +637,7 @@
   {/if}
 {/snippet}
 
-<!-- Copy this node's handle — the CLI's addressing currency (`tinkpg
+<!-- Copy this node's handle — the CLI's addressing currency (`tinkerscope
      samples/continue/node --node <handle>`).
 
      `<ws-prefix>:<panel>:<node>` (§4.4, fully qualified since P3): the ws part
@@ -657,7 +657,7 @@
       class="btn-act"
       class:copied={copiedId}
       data-testid="copy-node-id"
-      data-tooltip={copiedId ? 'Copied!' : `Copy ${handle} — the tinkpg --node handle`}
+      data-tooltip={copiedId ? 'Copied!' : `Copy ${handle} — the tinkerscope --node handle`}
       use:tip
       aria-label="Copy node handle"
       onclick={() => { navigator.clipboard?.writeText(handle); flashCopied('id'); }}

@@ -1,4 +1,4 @@
-"""`tinkpg send` / `continue` as WRITERS (HANDOFF_SERVER_AUTHORITY §4.3, P2).
+"""`tinkerscope send` / `continue` as WRITERS (HANDOFF_SERVER_AUTHORITY §4.3, P2).
 
 With a workspace open on the bus, the CLI persists each user turn as its own
 `add_nodes` op BEFORE firing, and the fire carries `workspace_id` +
@@ -461,7 +461,7 @@ def test_failed_send_names_the_saved_user_turn(wired, monkeypatch):
     fire = next(c[1] for c in calls if c[0] == "fire")
     handle = f"ws1:p-1:{fire['parent_node']}"
     assert f"the user turn is already saved ({handle})" in r.output
-    assert f"tinkpg continue --node {handle}" in r.output
+    assert f"tinkerscope continue --node {handle}" in r.output
 
 
 def _battery_dir(tmp_path):

@@ -262,7 +262,7 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
     rules don't span turns. Trimmed vs samplescope: no column-scope / JS-condition.
 
 - [x] **Assistant prefill.** ✅ Composer prefill field (collapsible, above the send
-  box) + `tinkpg chat/compare --prefill`. Sends the prefill as a trailing
+  box) + `tinkerscope chat/compare --prefill`. Sends the prefill as a trailing
   `{role:'assistant'}` message; `tinker_sampler.render` treats it as a renderer
   prefill the model EXTENDS. Type raw `<think>` (Qwen/Kimi: open it yourself;
   DeepSeek auto-opens). Native tinker path parses `(assistant-region + completion)`
@@ -310,11 +310,11 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
 ## Later / optional
 
 - [x] **Two CLI entry points — MERGED 2026-08-12** (option (b), decided by Clément
-  mid-turn 2026-08-12: "merge tinkpg into tinkerscope the same way we did with
+  mid-turn 2026-08-12: "merge tinkerscope into tinkerscope the same way we did with
   samplescope"). One Typer app in `cli.py` behind both names: `tinkerscope`
   defaults to `serve` (bare-dir shorthand + leading serve options via
   `_DefaultToServe`; escape hatch `tinkerscope serve <dir>` for a scan root named
-  like a command), `tinkpg` stays the driver alias with no injection. pack/site
+  like a command), `tinkerscope` stays the driver alias with no injection. pack/site
   became Typer sub-apps (`publish_cli.py` bodies, lazy-imported), which unlocked
   the generated command reference (`_gen_cli_ref.py` + `tests/test_cli_docs.py`
   staleness gate). Skills stay plugin-based (deliberate divergence from
@@ -325,7 +325,7 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
   BROWSER loads and `restoreSession` pushes prefs (gated on freshState). Two costs: (a) after a
   restart the bus is empty until a browser re-primes it (the documented "re-prime after restart"
   pain — see the tinkerscope-server-machine-state memory); (b) a `--pack`-seeded instance shows
-  library defaults to `tinkpg params` until a browser loads, so a pure-CLI consumer never gets the
+  library defaults to `tinkerscope params` until a browser loads, so a pure-CLI consumer never gets the
   pack's params/panels. Fix direction: on startup, seed `PlaygroundState` from `prefs.json`
   `last_session` (panels + params) when present. Design caveat — this makes a restart "remember" the
   last layout even for CLI-only use, a behavior change to the empty-on-restart contract, so it's
@@ -336,17 +336,17 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
   for a full research cycle.** Ranked by how much hand-compensation they cost:
   1. ~~fold-full-fanout~~ — **CLOSED by P2 server-authored folds (2026-08-12)**:
      all `--n K` samples persist with CoT + blobs; `samples --node` shows them.
-  2. ~~`tinkpg workspace new`~~ — **subsumed 2026-08-12 (p3-cli)**: `send
+  2. ~~`tinkerscope workspace new`~~ — **subsumed 2026-08-12 (p3-cli)**: `send
      --new-ws NAME` + §4.4 auto-create mint correctly-shaped workspaces (real
      run_ids, seen_panels, panel_seq) and claim the bus.
-  3. **`tinkpg hold <workspace>`** (or a repo script) — the headless holder
+  3. **`tinkerscope hold <workspace>`** (or a repo script) — the headless holder
      browser is load-bearing for CLI-driven exploration and was hand-rolled
      from scratch twice. Promote the pattern to a primitive. (Post-P2 the
      holder is no longer needed for PERSISTENCE — the server folds — so what
      remains is the view-pinning use.)
   4. ~~`--export-ancestry`~~ — **shipped 2026-08-12 (p3-cli)** as `samples
      --export-ancestry OUT.json` (picks --sample K / --this, else active).
-  5. ~~`tinkpg wait`~~ — **shipped 2026-08-12 (p3-cli)** (`--timeout`, `--poll`).
+  5. ~~`tinkerscope wait`~~ — **shipped 2026-08-12 (p3-cli)** (`--timeout`, `--poll`).
   6. **Per-panel `running`** (or CLI-side queueing) — the GLOBAL flag blocks
      concurrent fires at different panels for no structural reason.
   Considered and NOT filed: a generic logprob-anchor analyzer verb — the

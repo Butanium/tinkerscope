@@ -8,7 +8,7 @@ Two scenarios, both against a slow free-OpenRouter generation (zero cost):
      guaranteed terminal → `running` clears (composer re-enables, Stop disables)
      PROMPTLY, and clicking Stop logs no console error.
 
-  B. CROSS-CLIENT chat — a raw POST /api/chat (unowned client_token, as tinkpg or
+  B. CROSS-CLIENT chat — a raw POST /api/chat (unowned client_token, as tinkerscope or
      another tab would fire) is streaming; the browser shows it running via the bus
      but has NO local controller. Click Stop → it must call the server cancel
      endpoint by chat_id and the chat dies too (running clears + the raw stream ends).
@@ -78,7 +78,7 @@ def _get(path):
 
 
 def _fire_raw_chat(token: str, flag: dict, panel: str = "primary") -> None:
-    """POST /api/chat as an EXTERNAL client (tinkpg / another tab). Reads the SSE
+    """POST /api/chat as an EXTERNAL client (tinkerscope / another tab). Reads the SSE
     stream to completion; when the browser's Stop cancels it server-side (or it
     pre-start-errors), the stream ends and this returns."""
     body = {

@@ -13,9 +13,9 @@ Two generated blocks, spliced between BEGIN/END markers (samplescope's
   so it cannot drift. `tests/test_cli_docs.py` fails when a CLI change lands
   without rerunning this.
 
-Display names: driver verbs print as `tinkpg <verb>` (the alias every doc and
-muscle memory uses); `serve`/`pack`/`site` print as `tinkerscope …` (the
-server-side surface — same binary, two names).
+Display name: every command prints as `tinkerscope <verb>`. (`tinkpg` is the
+same app installed under an old name; it is a deprecated alias and stays out
+of the docs — Clément, 2026-10-13.)
 
 Usage:
     python -m tinkerscope._gen_cli_ref            # rewrite marked blocks in place
@@ -43,12 +43,8 @@ _REPO = Path(__file__).resolve().parents[2]
 FULL_TARGET = _REPO / "plugin" / "skills" / "cli" / "SKILL.md"
 COMPACT_TARGET = _REPO / "README.md"
 
-# Sub-trees displayed under the `tinkerscope` name (the server-side surface).
-_SERVER_SIDE = {"serve", "pack", "site"}
-
-
 def _prefix_for(top_name: str) -> str:
-    return "tinkerscope" if top_name in _SERVER_SIDE else "tinkpg"
+    return "tinkerscope"
 
 
 def _metavar(p) -> str:

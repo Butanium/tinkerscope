@@ -527,7 +527,7 @@ def _trash_entry(
 
     `layout_index` is that row's POSITION, for the same reason each subtree root
     records its sibling index: appending instead would silently reorder the columns,
-    and panel order is load-bearing — it is the display order, and `tinkpg samples`
+    and panel order is load-bearing — it is the display order, and `tinkerscope samples`
     with no --panel reads the first non-folded panel in exactly this order."""
     prev_nodes = _nodes_of(prev_tree)
     roots = []
@@ -760,7 +760,7 @@ def restore_trash(cid: str, handle: str) -> dict:
             rows = [*(conv.get("panels") or [])]
             # Back at its old POSITION, like a subtree root goes back at its sibling
             # index. Appending would reorder the columns on screen and move which
-            # panel `tinkpg samples` picks by default. Absent / out-of-range (an old
+            # panel `tinkerscope samples` picks by default. Absent / out-of-range (an old
             # entry, or a layout that shrank since) ⇒ append, which is still valid.
             at = entry.get("layout_index")
             rows.insert(at if isinstance(at, int) and not isinstance(at, bool)

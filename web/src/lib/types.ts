@@ -180,7 +180,7 @@ export type PanelState = {
  *  per-panel. */
 export type PlaygroundState = {
   panels: PanelState[];
-  workspace_id: string | null; // the open workspace's id (browser `?c=`), for `tinkpg state`
+  workspace_id: string | null; // the open workspace's id (browser `?c=`), for `tinkerscope state`
   system_prompt: string | null;
   /** Power toggle for the global system prompt: false = kept but muted (skipped
    *  at fire time). null/absent (legacy state) → derive from text presence. */

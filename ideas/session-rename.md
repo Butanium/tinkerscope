@@ -22,7 +22,7 @@ Two smaller things that belong with it:
   script doing `--session $(uuidgen)` per call would grow it forever. A sweep
   dropping sessions with no subscriber and no activity for a day is enough;
   don't drop `default`.
-- **`tinkpg state` doesn't say WHICH session it read.** On a multi-user server
+- **`tinkerscope state` doesn't say WHICH session it read.** On a multi-user server
   its first line should carry `session=<id>` (one extra `/api/health` GET, or
   just print what `--session`/env resolved to and say "auto" otherwise), so an
   agent reading the wrong sidebar can tell.

@@ -97,7 +97,7 @@ test('own workspace: adopt wholesale', () => {
   eq(merged.panels.map((p) => p.id), ['primary', 'p-3'], 'a same-workspace layout change lands');
 });
 
-test('unstamped incoming (fresh process / CLI patch): adopt — keeps tinkpg driving', () => {
+test('unstamped incoming (fresh process / CLI patch): adopt — keeps tinkerscope driving', () => {
   const cli = state(null, [panel('primary', 'cli-picked-run')]);
   const merged = mergeBusState(MINE, cli, 'ws-mine');
   eq(merged.panels.map((p) => p.run_id), ['cli-picked-run']);

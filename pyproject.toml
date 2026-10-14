@@ -1,6 +1,6 @@
 [project]
 name = "tinkerscope"
-version = "1.6.0"
+version = "1.6.1"
 description = "Auto-discover Tinker training runs under a directory tree and chat with / sample from their checkpoints in the browser — driveable from the terminal."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -59,7 +59,8 @@ Issues = "https://github.com/Butanium/tinkerscope/issues"
 [project.scripts]
 # ONE unified Typer app, two names (samplescope's b2e1818 pattern, greenlit
 # 2026-08-12): as `tinkerscope` it defaults to `serve` (bare-dir shorthand via
-# cli._DefaultToServe); `tinkpg` is the driver alias with no injection.
+# cli._DefaultToServe); `tinkpg` is the old driver name, kept as a deprecated,
+# undocumented alias (no serve injection).
 tinkerscope = "tinkerscope.cli:app"
 tinkpg = "tinkerscope.cli:app"
 

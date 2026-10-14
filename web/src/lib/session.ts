@@ -3,11 +3,11 @@
 // params, `running`. Sent on every request (api.ts: a header on fetches, a query
 // param on the EventSource, which cannot set headers). Per BROWSER PROFILE, not
 // per tab (localStorage): two tabs of one person keep today's shared-bus
-// semantics (claim-on-focus, "the tab you last looked at is the one tinkpg
+// semantics (claim-on-focus, "the tab you last looked at is the one tinkerscope
 // drives"); two people are two profiles and never share one.
 //
 // `?u=<id>` in the URL SETS the id — join a colleague's session, or just name
-// yours so `tinkpg --session clement` reads well — and +page strips it once
+// yours so `tinkerscope --session clement` reads well — and +page strips it once
 // read, so a link copied from the address bar never carries a session: that
 // would be the one way to reintroduce the shared-sidebar clobber this exists
 // to remove.

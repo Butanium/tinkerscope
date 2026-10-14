@@ -451,7 +451,7 @@ def test_a_journaled_row_with_no_model_is_still_reported_unbound(client):
 
 
 def test_a_restored_column_goes_back_to_its_old_position(client):
-    """Panel order is display order, and `tinkpg samples` with no --panel reads the
+    """Panel order is display order, and `tinkerscope samples` with no --panel reads the
     first non-folded panel in it — so appending a restored column both reshuffles the
     screen and moves what the CLI answers with. Journaled roots record their sibling
     index for the same reason; the layout row now records its own."""

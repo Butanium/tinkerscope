@@ -38,6 +38,15 @@ WIRE contract, not on the UI (`docs/RELEASING.md`).
   stops at a stopped probe. Wire: `start` gains `n`, the caller's `done`/`error`
   gain `cancelled` (additive; the bus is unchanged).
 
+## [1.6.1] — 2026-10-13
+
+### Changed
+
+- **The CLI is documented as `tinkerscope` only.** Every verb is now written
+  `tinkerscope <verb>` (README, the plugin skills, `--help`, messages, the `?`
+  modal). `tinkpg` keeps working as a deprecated alias. A bare `tinkerscope` (or
+  `tinkerscope <dir>`) still means `serve`.
+
 ## [1.6.0] — 2026-10-13
 
 A tidier screen, and `tinkpg` that says when a fire was stopped. Additive on the

@@ -13,8 +13,12 @@
 #     (`--select F`) on the staged files. F catches undefined names (F821), unused
 #     imports/vars (F401/F841), redefinitions (F811) — i.e. the NameError-on-rename
 #     class. Per-staged-file is enough (F rules are intra-file).
+#  4. CLI reference — when the CLI, its generator or a generated target is staged,
+#     `python -m tinkerscope._gen_cli_ref --check` refuses a stale README table /
+#     CLI-skill reference. The one automated test kept as a GATE (2026-10-13): it
+#     compares two surfaces and costs a second.
 #
-# Any failure aborts the commit. All three stay instant when nothing relevant is
+# Any failure aborts the commit. All four stay instant when nothing relevant is
 # staged (a doc-only commit runs the NUL scan over its own files and nothing else).
 #
 # Bypass for a one-off WIP commit:  git commit --no-verify
@@ -75,6 +79,22 @@ if [ -n "$py_files" ]; then
 		echo "" >&2
 		echo "✗ pre-commit: ruff found errors — commit aborted." >&2
 		echo "  Fix them, or bypass with: git commit --no-verify" >&2
+		exit 1
+	fi
+fi
+
+# ── 4) Generated CLI reference is current ────────────────────────────────────
+if printf '%s\n' "$staged" | grep -qE '^(src/tinkerscope/cli\.py|src/tinkerscope/_gen_cli_ref\.py|README\.md|plugin/skills/cli/SKILL\.md)$'; then
+	py="$repo_root/.venv/bin/python"
+	echo "pre-commit: checking the generated CLI reference…"
+	if [ -x "$py" ] && ( cd "$repo_root" && "$py" -m tinkerscope._gen_cli_ref --check ) >/dev/null 2>&1; then
+		echo "✓ pre-commit: CLI reference current"
+	elif [ ! -x "$py" ]; then
+		echo "pre-commit: no .venv python — skipping the CLI reference check" >&2
+	else
+		echo "" >&2
+		echo "✗ pre-commit: README / CLI skill reference is stale — commit aborted." >&2
+		echo "  Run: python -m tinkerscope._gen_cli_ref   (then stage README.md + plugin/skills/cli/SKILL.md)" >&2
 		exit 1
 	fi
 fi

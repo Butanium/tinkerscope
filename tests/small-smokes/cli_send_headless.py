@@ -1,9 +1,9 @@
 """The server-authority migration's headline property (P2, §2c.5): a headless
-`tinkpg send -n 3` — NO browser attached, ever — persists EVERYTHING.
+`tinkerscope send -n 3` — NO browser attached, ever — persists EVERYTHING.
 
 Launches its own isolated instance (scratch XDG_STATE_HOME, empty scan dir),
 creates a workspace over the wire, claims the bus the way a browser would
-(POST /api/state with workspace_id + panels), then drives `tinkpg send -n 3`
+(POST /api/state with workspace_id + panels), then drives `tinkerscope send -n 3`
 with thinking ON against a tinker BASE model and asserts the STATE DIR on disk:
 
   - the user turn is a persisted root node (the CLI's own add_nodes op);
@@ -102,11 +102,11 @@ def main():
         })
 
         out = subprocess.run(
-            ["uv", "run", "tinkpg", "send", PROMPT, "--n", "3", "--thinking", "--json"],
+            ["uv", "run", "tinkerscope", "send", PROMPT, "--n", "3", "--thinking", "--json"],
             capture_output=True, text=True, timeout=600,
             env={**os.environ, "TINKERSCOPE_BASE_URL": BASE}, cwd=REPO,
         )
-        assert out.returncode == 0, f"tinkpg send failed:\n{out.stdout}\n{out.stderr}"
+        assert out.returncode == 0, f"tinkerscope send failed:\n{out.stdout}\n{out.stderr}"
         printed = [json.loads(line) for line in out.stdout.splitlines() if line.strip()]
         cli_samples = [p for p in printed if p.get("event") == "sample"]
         assert len(cli_samples) == 3, out.stdout
@@ -153,7 +153,7 @@ def main():
             "panels": [{"id": "p-1", "run_id": RUN_SENTINEL, "checkpoint": None}],
         })
         proc2 = subprocess.Popen(
-            ["uv", "run", "tinkpg", "send", "Name three colors.", "--n", "2",
+            ["uv", "run", "tinkerscope", "send", "Name three colors.", "--n", "2",
              "--no-thinking", "--max-tokens", "256"],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
             env={**os.environ, "TINKERSCOPE_BASE_URL": BASE}, cwd=REPO,
@@ -171,7 +171,7 @@ def main():
         urllib.request.urlopen(req, timeout=10)
         out2, _ = proc2.communicate(timeout=300)
         assert proc2.returncode != 0, (
-            "tinkpg send exited 0 with its workspace deleted mid-fire — the fold "
+            "tinkerscope send exited 0 with its workspace deleted mid-fire — the fold "
             f"failure was silent again:\n{out2}"
         )
         assert "NOT persisted" in out2, f"missing the fold-failure warning:\n{out2}"

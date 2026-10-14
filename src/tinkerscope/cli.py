@@ -1,4 +1,4 @@
-"""`tinkpg` CLI — drives tinkerscope through its HTTP API.
+"""`tinkerscope` CLI — drives tinkerscope through its HTTP API.
 
 Designed for two callers:
   - a human, from a terminal, as a real interactive tool.
@@ -12,7 +12,7 @@ whose scan root contains cwd); override with `TINKERSCOPE_BASE_URL` or
 `--base-url`.
 
 Run resolution: run ids CONTAIN slashes, so we never split on '/'. Use '@' as
-the run@checkpoint separator (`tinkpg chat foo/bar/run@final "hi"`) or the
+the run@checkpoint separator (`tinkerscope chat foo/bar/run@final "hi"`) or the
 `--checkpoint` flag. A run argument resolves by exact id match against
 `/api/models`, else a UNIQUE case-insensitive substring match on id or name
 (ambiguity errors, listing the candidates).
@@ -49,7 +49,7 @@ from httpx_sse import connect_sse
 # web/src/lib/tree.ts). These read helpers used to be a second copy here; they
 # moved so the two Python mirrors of tree.ts can't drift. Imported under their
 # old private names — every call site below is unchanged. tree_ops pulls in
-# stdlib only (its store imports are deferred), so `tinkpg --help` stays cheap.
+# stdlib only (its store imports are deferred), so `tinkerscope --help` stays cheap.
 from .api.tree_ops import ROOT  # noqa: F401  (re-exported: _aim_at_node & friends read it)
 from .api.tree_ops import active_path as _active_path
 from .api.tree_ops import ancestry as _ancestry
@@ -60,15 +60,15 @@ from .api.tree_ops import siblings as _siblings
 from .api.tree_ops import thread_path as _thread_path
 
 class _DefaultToServe(typer.core.TyperGroup):
-    """One app, two names (`[project.scripts]`): as **tinkerscope** it defaults
+    """One app, two installed names (`[project.scripts]`): as **tinkerscope** it defaults
     to `serve` — bare `tinkerscope` serves cwd, `tinkerscope ~/runs --port N`
     means `serve ~/runs --port N`, and a leading serve option (`tinkerscope
     --pack f`, the documented pack-consume one-liner) routes there too. A
     leading option the TOP app itself declares (`--base-url`, `--help`) is NOT
     injected — `tinkerscope --base-url X ls` must target a server, exactly as
-    the help advertises. As **tinkpg** (the driver alias) nothing is injected:
-    bare `tinkpg` keeps showing help, and an unknown verb stays an error
-    instead of becoming a scan-root.
+    the help advertises. As **tinkpg** (the old driver name, now a deprecated,
+    undocumented alias) nothing is injected: bare `tinkpg` keeps showing help,
+    and an unknown verb stays an error instead of becoming a scan-root.
 
     Trap this creates, by design: `tinkerscope <name>` where <name> collides
     with a command (`pack`, `send`, …) runs the COMMAND — a scan root that
@@ -88,14 +88,14 @@ app = typer.Typer(
     cls=_DefaultToServe,
     add_completion=False,
     no_args_is_help=True,
-    help="tinkerscope: serve Tinker training runs in the browser, and drive the playground from the terminal (the driver verbs are also installed as `tinkpg`).",
+    help="tinkerscope: serve Tinker training runs in the browser, and drive the playground from the terminal.",
 )
 
 
 TRUNCATE_AT = 4000
 HTTP_TIMEOUT = 60.0
 
-# Resolved lazily (and cached) so plain `tinkpg --help` never touches the
+# Resolved lazily (and cached) so plain `tinkerscope --help` never touches the
 # instance registry. Precedence: --base-url > $TINKERSCOPE_BASE_URL > discovery
 # via ~/.local/state/tinkerscope/instances.json (instance whose scan root
 # contains cwd).
@@ -104,9 +104,9 @@ _BASE_URL: str | None = None
 # The SESSION to drive on a `--multi-user` server (api/session.py): one sidebar
 # — selection, open workspace, params, running — per browser / per `--session`.
 # Sent as this header on every request; absent ⇒ the server resolves it (the
-# one live browser session, else `default`, else a 409 naming `tinkpg sessions`).
+# one live browser session, else `default`, else a 409 naming `tinkerscope sessions`).
 # A single-user server ignores it. Name kept in sync with api/session.py by hand
-# — that module pulls in fastapi, which `tinkpg --help` must not.
+# — that module pulls in fastapi, which `tinkerscope --help` must not.
 _SESSION_HEADER = "x-tinkerscope-session"
 _SESSION_OVERRIDE: str | None = None
 
@@ -121,7 +121,7 @@ def _global_options(
     session: Optional[str] = typer.Option(
         None,
         "--session",
-        help="on a --multi-user server: the session (one person's sidebar) to drive — the id on their topbar chip (default: $TINKERSCOPE_SESSION, else the one live browser session; `tinkpg sessions` lists them)",
+        help="on a --multi-user server: the session (one person's sidebar) to drive — the id on their topbar chip (default: $TINKERSCOPE_SESSION, else the one live browser session; `tinkerscope sessions` lists them)",
     ),
 ) -> None:
     global _BASE_URL_OVERRIDE, _SESSION_OVERRIDE
@@ -555,7 +555,7 @@ def _layout_panel_ids(n: int) -> list[str]:
 
     Reuse the ids currently on screen, then mint fresh ones for any extra position.
 
-    Reuse is what keeps repeated `tinkpg chat` pointed at the SAME column instead of
+    Reuse is what keeps repeated `tinkerscope chat` pointed at the SAME column instead of
     abandoning one per fire, and a live id is by construction not retired. Minting
     by POSITION (the old p-1, p-2, …) is what wasn't safe: fire `chat` at a workspace
     whose p-1 was closed and a new column bound to a different model answers to
@@ -736,7 +736,7 @@ def _fire_failures(results: list[tuple[str, Any, "_StreamResult"]], label) -> tu
     if turns:
         lines.append(
             "the user turn is already saved (" + ", ".join(turns) + ") — draw more samples there with "
-            f"`tinkpg continue --node {turns[0]} --n K` rather than re-sending, which adds a duplicate thread"
+            f"`tinkerscope continue --node {turns[0]} --n K` rather than re-sending, which adds a duplicate thread"
         )
     stopped = any(res.cancelled or res.interrupted for (_pid, _m, res) in failed)
     return lines, (_EXIT_STOPPED if stopped else 1)
@@ -1260,7 +1260,7 @@ def cmd_chat(
     run: str = typer.Argument(..., help="run id or unique substring; optional @checkpoint"),
     prompt: str = typer.Argument(..., help="user message"),
     n: int = typer.Option(1, "--n", help="number of samples to draw"),
-    temperature: Optional[float] = typer.Option(None, "--temperature", help="this call only; omit = inherit the global param (see `tinkpg params`)"),
+    temperature: Optional[float] = typer.Option(None, "--temperature", help="this call only; omit = inherit the global param (see `tinkerscope params`)"),
     max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="this call only; omit = inherit the global param"),
     thinking: Optional[bool] = typer.Option(None, "--thinking/--no-thinking", help="force the thinking renderer on/off for this call; omit = inherit the global param"),
     thinking_both: bool = typer.Option(False, "--thinking-both", help="draw n samples WITHOUT thinking + n WITH (2n total; overrides --thinking)"),
@@ -1479,7 +1479,7 @@ def _refuse_if_busy(st: dict, panel_ids: list[str], conv_id: Optional[str], forc
                    if c.get("panel") in panel_ids
                    and (conv_id is None or c.get("workspace_id") in (None, conv_id))})
     if busy:
-        _die(f"a generation is in flight on {', '.join(busy)} — `tinkpg wait` for it, or pass --force")
+        _die(f"a generation is in flight on {', '.join(busy)} — `tinkerscope wait` for it, or pass --force")
 
 
 def _send_targets(
@@ -1512,7 +1512,7 @@ def _send_targets(
     else:
         panels = st.get("panels", [])
         if not panels:
-            _die("no panels on screen — `tinkpg open <run>` or add panels in the browser first")
+            _die("no panels on screen — `tinkerscope open <run>` or add panels in the browser first")
     by_id = {p["id"]: p for p in panels}
     folded: set[str] = set()
     if conv_id and not include_folded and not panel:
@@ -1528,7 +1528,7 @@ def _send_targets(
     unbound = [p["id"] for p in targets if not p.get("run_id")]
     targets = [p for p in targets if p.get("run_id")]
     if not targets:
-        _die("no target panel has a model bound — pick models in the browser or `tinkpg open <run>`")
+        _die("no target panel has a model bound — pick models in the browser or `tinkerscope open <run>`")
     _refuse_if_busy(st, [p["id"] for p in targets], conv_id, force)
     skipped_bits = []
     if folded:
@@ -1541,7 +1541,7 @@ def _send_targets(
 def _new_thread_system(resolved: Optional[str]) -> tuple[Optional[str], str]:
     """Split a `_resolve_sys` result for a NEW-THREAD fire (`send` / `battery`
     probes): --system authors the THREAD system prompt (recorded on the thread's
-    root node, overriding the global — `tinkpg params --system` owns the
+    root node, overriding the global — `tinkerscope params --system` owns the
     global part). No flag (None) → thread part explicit "", so a fresh thread
     never inherits the panel mirror's prompt; "" (--no-system) suppresses BOTH
     parts. Returns (global_part, thread_part)."""
@@ -1700,7 +1700,7 @@ def _print_first_token_tables(results: list[tuple[str, dict, _StreamResult]], js
 def cmd_send(
     prompt: Optional[str] = typer.Argument(None, help="user message — fired as a NEW thread at the current panels (or --file)"),
     n: int = typer.Option(1, "--n", help="samples per panel"),
-    temperature: Optional[float] = typer.Option(None, "--temperature", help="this call only; omit = inherit the global param (see `tinkpg params`)"),
+    temperature: Optional[float] = typer.Option(None, "--temperature", help="this call only; omit = inherit the global param (see `tinkerscope params`)"),
     max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="this call only; omit = inherit the global param"),
     thinking: Optional[bool] = typer.Option(None, "--thinking/--no-thinking", help="force thinking on/off for this call; omit = inherit the global param"),
     thinking_both: bool = typer.Option(False, "--thinking-both", help="n samples WITHOUT thinking + n WITH, per panel (overrides --thinking)"),
@@ -1806,10 +1806,10 @@ def _continue_target(tree: dict, thread: Optional[int], turn: Optional[int], nod
         return hits[0]
     roots = tree.get("rootChildren", [])
     if not roots:
-        _die("panel has no threads yet — nothing to continue (use `tinkpg send` to start one)")
+        _die("panel has no threads yet — nothing to continue (use `tinkerscope send` to start one)")
     if thread is not None:
         if not (1 <= thread <= len(roots)):
-            _die(f"--thread {thread} out of range (panel has {len(roots)} thread(s) — see `tinkpg ws`)")
+            _die(f"--thread {thread} out of range (panel has {len(roots)} thread(s) — see `tinkerscope ws`)")
         root = roots[thread - 1]
     else:
         root = _selected_child(tree, ROOT)
@@ -1877,7 +1877,7 @@ def _continue_messages(ancestry: list[dict], prompt: Optional[str], prefill: Opt
 def cmd_continue(
     prompt: Optional[str] = typer.Argument(None, help="user message to append AFTER the target (turn-level loom / the probe). Omit to re-sample a user-turn target with only --prefill."),
     n: int = typer.Option(1, "--n", help="samples per panel"),
-    temperature: Optional[float] = typer.Option(None, "--temperature", help="this call only; omit = inherit the global param (see `tinkpg params`)"),
+    temperature: Optional[float] = typer.Option(None, "--temperature", help="this call only; omit = inherit the global param (see `tinkerscope params`)"),
     max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="this call only; omit = inherit the global param"),
     thinking: Optional[bool] = typer.Option(None, "--thinking/--no-thinking", help="force thinking on/off for this call; omit = inherit the global param"),
     thinking_both: bool = typer.Option(False, "--thinking-both", help="n samples WITHOUT thinking + n WITH, per panel (overrides --thinking)"),
@@ -1910,7 +1910,7 @@ def cmd_continue(
     """LOOM from an existing branch: rebuild the message history up to a target node
     and sample a continuation, WITHOUT touching the panel layout (the multi-turn twin
     of `send`). Default target = each panel's ACTIVE leaf in the open workspace's
-    saved tree — so `tinkpg continue "<follow-up>"` adds a turn to the current
+    saved tree — so `tinkerscope continue "<follow-up>"` adds a turn to the current
     threads across all panels: the user turn persists as the CLI's own op and the
     server folds every sample under it (the browser mirrors both live). Aim it
     elsewhere with --thread/--turn/--node (these reach non-active branches), or
@@ -2052,7 +2052,7 @@ def cmd_continue(
                 )
                 _die(
                     f"panel {p['id']} has no saved thread to continue {where} — "
-                    "start one with `tinkpg send`, or graft an external transcript "
+                    "start one with `tinkerscope send`, or graft an external transcript "
                     "with --ancestry-file"
                 )
             anchor = _continue_target(saved_tree, thread, turn, node)
@@ -2497,7 +2497,7 @@ def cmd_url(
     to itself, so 'give them a link' used to mean `ps aux | grep tinkerscope` and
     guessing which of several instances holds the workspaces you just read.
 
-    stdout is ONLY the URL, so `open $(tinkpg url)` works; the resolved workspace
+    stdout is ONLY the URL, so `open $(tinkerscope url)` works; the resolved workspace
     name goes to stderr. With a selector (or --live) it emits a `?w=<id>` deep
     link, which opens the workspace but points at no particular turn — for that,
     `grep --link` / `node --link` emit the `?w=…&panel=…&node=…` form."""
@@ -2567,7 +2567,7 @@ def cmd_sessions(
     selection, open workspace, params, running) per browser / `--session` — so
     you can pick which one to drive: `live` = a browser is attached; the human's
     id is on their topbar chip. Workspaces are shared across sessions, so
-    `tinkpg ws` / `grep` / `samples` need no session; `state`, `send`, `params`,
+    `tinkerscope ws` / `grep` / `samples` need no session; `state`, `send`, `params`,
     `open`, `continue`, `wait` act on ONE. A single-user server lists just
     `default` (every client drives it)."""
     sessions = _get("/api/sessions")
@@ -2585,7 +2585,7 @@ def cmd_sessions(
         flags = "running" if s.get("running") else ""
         print(f"{s['id']:<20} {live:<9} {flags:<8} {where}   last seen {_fmt_ago(s.get('last_seen'))}")
     if health.get("multi_user"):
-        print("\n(drive one: `tinkpg --session <id> …`, or export TINKERSCOPE_SESSION=<id>)")
+        print("\n(drive one: `tinkerscope --session <id> …`, or export TINKERSCOPE_SESSION=<id>)")
 
 
 @app.command("state")
@@ -2630,7 +2630,7 @@ def cmd_state(
     if conv_id:
         open_conv = next((c for c in convs if c.get("id") == conv_id), None)
         if open_conv:
-            print(f"open workspace: {open_conv.get('name')} ({conv_id[:8]})   → `tinkpg ws {conv_id[:8]}`")
+            print(f"open workspace: {open_conv.get('name')} ({conv_id[:8]})   → `tinkerscope ws {conv_id[:8]}`")
             reduced = set(open_conv.get("reduced_panels") or [])
         elif link:
             print(f"open workspace: {conv_id[:8]} (unsaved draft / not in saved set)")
@@ -2672,7 +2672,7 @@ def cmd_state(
         print()
     if skipped:
         print(f"{len(skipped)} folded panel(s) skipped: {', '.join(skipped)}   (--include-folded to expand)")
-    print("(branch trees: `tinkpg ws <id|name>`   ·   raw: `tinkpg state --json`)")
+    print("(branch trees: `tinkerscope ws <id|name>`   ·   raw: `tinkerscope state --json`)")
 
 
 def _workspaces() -> list[dict]:
@@ -2777,7 +2777,7 @@ def _list_workspaces(convs: list[dict]) -> None:
         })
     rows.sort(key=lambda r: r["updated"], reverse=True)
     _print_table(rows, ["id", "updated", "name", "panels", "nodes", "branches", "active"])
-    print(f"\n{len(rows)} workspace(s)   (expand: `tinkpg ws <id|name>`)")
+    print(f"\n{len(rows)} workspace(s)   (expand: `tinkerscope ws <id|name>`)")
 
 
 def _thread_index(tree: dict, width: int) -> list[str]:
@@ -2878,7 +2878,7 @@ def cmd_threads(
     as on the selected one (`turns`) — a long conversation often sits on a branch
     the panel no longer points at, so `ws`/`state` alone never show it. Filter with
     --min-turns / --model / --grep, then read one in full with
-    `tinkpg ws <ws_id> --panel <panel> --thread <k> --full --deepest`."""
+    `tinkerscope ws <ws_id> --panel <panel> --thread <k> --full --deepest`."""
     rows: list[dict] = []
     convs = _workspaces()
     if ws:
@@ -2918,7 +2918,7 @@ def cmd_threads(
     _print_table(table, ["ws", "ws_id", "panel", "model", "k", "deep", "turns", "n", "first message"])
     print(
         f"\n{len(rows)} thread(s)   deep = user turns on the DEEPEST branch, turns = on the selected one, "
-        "* = active\nread one: `tinkpg ws <ws_id> --panel <panel> --thread <k> --deepest --full`"
+        "* = active\nread one: `tinkerscope ws <ws_id> --panel <panel> --thread <k> --deepest --full`"
     )
 
 
@@ -3084,7 +3084,7 @@ def cmd_ws(
         False, "--include-folded", help="also expand panels folded in the browser UI (skipped by default)"
     ),
     thread: Optional[int] = typer.Option(
-        None, "--thread", help="walk root thread K (the `threads:` index / `tinkpg threads`) instead of the active one"
+        None, "--thread", help="walk root thread K (the `threads:` index / `tinkerscope threads`) instead of the active one"
     ),
     deepest: bool = typer.Option(
         False, "--deepest", help="walk the thread's LONGEST branch instead of its selected one"
@@ -3105,7 +3105,7 @@ def cmd_ws(
 
     --thread K reads a NON-active thread's transcript, and --deepest follows its
     longest branch rather than the selected (newest-child) one — together the way
-    to read a conversation that the panel no longer points at. `tinkpg threads`
+    to read a conversation that the panel no longer points at. `tinkerscope threads`
     finds them. --json exports the same transcript as structured data (for
     rendering a conversation in a report / artifact instead of reading it here)."""
     selector = _one_selector(selector, ws_opt)
@@ -3198,7 +3198,7 @@ def _show_samples(
             # An assistant node names one SAMPLE — show the fan-out it belongs to.
             unode = (t.get("nodes") or {}).get(nd.get("parent") or "")
             if not unode:
-                _die(f"node {nd.get('id')} is a root-level assistant — its siblings are whole threads; see `tinkpg ws --tree`")
+                _die(f"node {nd.get('id')} is a root-level assistant — its siblings are whole threads; see `tinkerscope ws --tree`")
         else:
             unode = nd
         roots = t.get("rootChildren", [])
@@ -3260,7 +3260,7 @@ def _show_samples(
         payload = [{"role": m.get("role"), "content": m.get("content", "")} for m in chain]
         export_ancestry.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
         print(f"wrote {len(payload)}-turn ancestry ({_qualified_handle(c.get('id'), pid, target_id)}) to {export_ancestry}")
-        print(f'  loom from it: tinkpg continue "<follow-up>" --ancestry-file {export_ancestry}')
+        print(f'  loom from it: tinkerscope continue "<follow-up>" --ancestry-file {export_ancestry}')
         return
 
     # --first-token: the per-sample position-0 records live server-side as heavy
@@ -3353,14 +3353,14 @@ def cmd_samples(
     selector: Optional[str] = typer.Argument(None, help="workspace id-prefix or name substring; omit → the workspace open in the browser"),
     ws_opt: Optional[str] = typer.Option(None, "--ws", "--conv", help="same as the positional selector, for symmetry with `grep`/`node`/`threads` (which can only take it as an option)"),
     panel: Optional[str] = typer.Option(None, "--panel", help="panel id (p-1/p-2/… — older workspaces also have primary/compare); default = the LEFTMOST non-folded panel (layout order, i.e. the column order on screen). Explicit --panel overrides folding"),
-    thread: Optional[int] = typer.Option(None, "--thread", help="1-indexed root thread (branch-from-start sibling) to walk; default = the active one. Thread numbers: the `threads:` index in `tinkpg ws <id>`"),
+    thread: Optional[int] = typer.Option(None, "--thread", help="1-indexed root thread (branch-from-start sibling) to walk; default = the active one. Thread numbers: the `threads:` index in `tinkerscope ws <id>`"),
     turn: Optional[int] = typer.Option(None, "--turn", help="1-indexed user turn on the thread's path whose responses to show; default = the last one"),
-    node: Optional[str] = typer.Option(None, "--node", help="node handle — `<node>`, `<panel>:<node>` or `<ws>:<panel>:<node>` (the browser's Copy-node-id button gives the last form; `tinkpg grep` prints ids). Pinpoints the fork directly, reaching NON-selected branches --thread/--turn can't. An assistant id shows the fan-out it belongs to"),
+    node: Optional[str] = typer.Option(None, "--node", help="node handle — `<node>`, `<panel>:<node>` or `<ws>:<panel>:<node>` (the browser's Copy-node-id button gives the last form; `tinkerscope grep` prints ids). Pinpoints the fork directly, reaching NON-selected branches --thread/--turn can't. An assistant id shows the fan-out it belongs to"),
     full: bool = typer.Option(False, "--full", help="each sample's COMPLETE answer + full CoT (default: answer + one-line CoT preview)"),
     width: int = typer.Option(240, "--width", help="per-sample truncation width in the default (non --full) view"),
     sample: Optional[int] = typer.Option(None, "--sample", help="show ONLY sibling K (1-indexed) — read one sample at a time"),
     this: bool = typer.Option(False, "--this", help="with an ASSISTANT --node id: show only THAT sample (the Copy-node-id → terminal round-trip in one paste, no counting siblings)"),
-    export_ancestry: Optional[Path] = typer.Option(None, "--export-ancestry", metavar="OUT.json", help="write the shown sample's root→sample transcript as a JSON `{role, content}` list — ready for `tinkpg continue --ancestry-file` (picks --sample K / --this, else the active sibling)"),
+    export_ancestry: Optional[Path] = typer.Option(None, "--export-ancestry", metavar="OUT.json", help="write the shown sample's root→sample transcript as a JSON `{role, content}` list — ready for `tinkerscope continue --ancestry-file` (picks --sample K / --this, else the active sibling)"),
     slice_spec: Optional[str] = typer.Option(None, "--slice", help="START[:LEN] character window of each shown sample (default LEN 2000) — read long samples in pieces instead of truncating; with --full the same window applies to the CoT"),
     json_out: bool = typer.Option(False, "--json", help="the fork as one JSON object (workspace/panel/thread/prompt/tally/samples) instead of human text — for scripts (--slice is ignored; content is never truncated)"),
     first_token: bool = typer.Option(False, "--first-token", help="the model's probability distribution over the FIRST generated token at this fork (stored top-K + each sample's sampled token — the CLI twin of the chart's first-token mode); with --json, adds per-sample `first` records + the aggregate"),
@@ -3371,8 +3371,8 @@ def cmd_samples(
     here' view that `state`/`conv` (active path only) can't give you. With no selector
     it targets the workspace the browser has open (via its pushed workspace_id);
     with no --panel, the leftmost non-folded one. --thread k aims it at a non-active
-    root thread (numbers from `tinkpg ws <id>`'s thread index); --node <id> (ids
-    from `tinkpg grep`) aims it at ANY fork, even on non-selected branches. Reading
+    root thread (numbers from `tinkerscope ws <id>`'s thread index); --node <id> (ids
+    from `tinkerscope grep`) aims it at ANY fork, even on non-selected branches. Reading
     ergonomics: --sample K isolates one sibling, --slice START[:LEN] pages through it,
     --json for scripts (untruncated content, no need to regex human-formatted text).
     --deepest resolves --turn against the thread's longest branch, so a fork below
@@ -3387,12 +3387,12 @@ def cmd_samples(
         if cid:
             c = next((x for x in convs if x.get("id") == cid), None)
             if c is None:
-                _die(f"open workspace {cid[:8]} isn't in the saved set yet (unsaved draft?). save it, or pass a saved id — see `tinkpg ws`.")
+                _die(f"open workspace {cid[:8]} isn't in the saved set yet (unsaved draft?). save it, or pass a saved id — see `tinkerscope ws`.")
         else:
             # Browserless bare --node: search every workspace (self-contained ids).
             c = _find_workspace_holding_node(node) if node is not None else None
             if c is None:
-                _die("no workspace open in the browser (state has no workspace_id). pass a workspace id/name — see `tinkpg ws`.")
+                _die("no workspace open in the browser (state has no workspace_id). pass a workspace id/name — see `tinkerscope ws`.")
     slice_rng: Optional[tuple[int, int]] = None
     if slice_spec is not None:
         m = re.fullmatch(r"(\d+)(?::(\d+))?", slice_spec)
@@ -3551,7 +3551,7 @@ def cmd_grep(
     `conv`/`samples` can't give you (they walk selected paths). One line per hit:
     workspace · panel · thread k · role · node id (tagged when the hit is in CoT
     or a system prompt) + snippet. Workspace-LEVEL matches (name / panel model id /
-    global system prompt) print first. Drill into a hit with `tinkpg samples <ws>
+    global system prompt) print first. Drill into a hit with `tinkerscope samples <ws>
     --node <id>` (works on non-selected branches too), `samples --panel P
     --thread k`, or `conv --tree`.
 
@@ -3652,7 +3652,7 @@ def cmd_node(
         _die(f"no node matching {node_id!r} in {len(convs)} workspace(s)"
              + (f" (restricted to panel {want_panel} by the handle — drop that part to search every panel)"
                 if want_panel else "")
-             + ("" if conv else " — `tinkpg ws` lists them; --ws to scope"))
+             + ("" if conv else " — `tinkerscope ws` lists them; --ws to scope"))
     if len({h[2].get("id") for h in hits}) > 1:
         listing = "\n".join(
             f"  - {nd.get('id')}  ·  {c.get('name')} ({(c.get('id') or '')[:8]}) · {pid} · {nd.get('role', '?')}"
@@ -3793,7 +3793,7 @@ def cmd_trash(
             print("nothing in the trash" + (f" for {targets[0].get('name')!r}" if workspace else ""))
             return
         _print_table(rows, ["ws", "entry", "when", "panel", "nodes", "node_id", "what"])
-        print("\nrestore with:  tinkpg trash restore <entry|node_id> -w <workspace>")
+        print("\nrestore with:  tinkerscope trash restore <entry|node_id> -w <workspace>")
         return
 
     if not workspace:
@@ -3805,7 +3805,7 @@ def cmd_trash(
         return
 
     if not handle:
-        _die("restore needs a handle — run `tinkpg trash list` to find one")
+        _die("restore needs a handle — run `tinkerscope trash list` to find one")
     out = _post(f"/api/workspaces/{cid}/trash/restore", {"handle": handle})
     if json_out:
         _print_json(out)
@@ -3844,7 +3844,7 @@ def cmd_wait(
     poll: float = typer.Option(1.0, "--poll", help="seconds between checks"),
 ) -> None:
     """Block until no generation is running — the sequential-wave primitive:
-    fire, `tinkpg wait`, read, fire again (replaces the sleep/check dance)."""
+    fire, `tinkerscope wait`, read, fire again (replaces the sleep/check dance)."""
     start = time.time()
     while True:
         if not _get("/api/state").get("running"):
@@ -3888,7 +3888,7 @@ def cmd_serve(
     ),
     multi_user: bool = typer.Option(
         False, "--multi-user",
-        help="several people on this one instance: each browser (and each `tinkpg --session <id>`) gets its OWN sidebar — panel selection, open workspace, sampling params, running — while workspaces, highlights and pins stay shared; same as TINKERSCOPE_MULTI_USER=1",
+        help="several people on this one instance: each browser (and each `tinkerscope --session <id>`) gets its OWN sidebar — panel selection, open workspace, sampling params, running — while workspaces, highlights and pins stay shared; same as TINKERSCOPE_MULTI_USER=1",
     ),
 ) -> None:
     """Serve the API + web UI for DIRS (bare `tinkerscope <dir>` is shorthand for this)."""

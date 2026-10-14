@@ -23,11 +23,12 @@ exactly the deal for the `conversations → workspaces` rename.
 
 ## Cutting a release
 
-1. Land the work; `uv run pytest -q`, `uv run ruff check`, `npm test`,
-   `npm run check` (0 errors), `scripts/smoke.sh` (the short state/wire set), and
-   click through what changed on a `scripts/dev-isolated.sh` instance, reading the
-   screenshots. No full browser-smoke sweep: it never caught anything at release
-   time (ENGINEERING_LOGS 2026-10-01).
+1. Land the work; `npm run check` (0 errors), and click through what changed on
+   a `scripts/dev-isolated.sh` instance, reading the screenshots. No test-suite or
+   smoke sweep: across ~1,400 recorded runs they caught one regression, and at
+   release time none — the 2026-10-13 sweeps failed only on a stale selector and
+   a flake (ENGINEERING_LOGS 2026-10-13). The pre-commit hook already gates the
+   build, ruff F and the generated CLI reference.
 2. Bump `version` in `pyproject.toml`.
 3. Add the `docs/MIGRATIONS.md` entry if the shape moved (what changed, what the
    automatic migration does, how to roll back — name the backup path it writes).
@@ -73,6 +74,7 @@ shape does this version mark" index.
 
 | version | what it marks |
 |---|---|
+| `v1.6.1` | docs: the CLI is documented as `tinkerscope` only; `tinkpg` is a deprecated alias. Release process: test suites are tools, not gates; the pre-commit hook checks the generated CLI reference. No code or contract change. |
 | `v1.6.0` | search button + pasted node handles in Ctrl+K, discard-others in the row toolbar, think/no-think and prefill-scope glyphs, top-bar tidy, `tinkpg` exits 130 on a stopped fire, provenance in `tinkpg node`/`ws`. Additive: two fields on the caller's `/api/chat` stream (`n`, `cancelled`); disk untouched. |
 | `v1.5.0` | thread system prompt as the first row of each panel (and it now OVERRIDES the workspace prompt instead of being appended), per-panel prefill, focus a panel, undo reopens a closed panel. Wire and disk shapes untouched; the override is a behavior change. |
 | `v1.4.1` | hotfix: the page reconnects its live stream itself after a server restart (a browser behind `ssh -L` never retried). Browser-only; no wire or disk change. |

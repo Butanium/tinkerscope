@@ -93,7 +93,7 @@ def test_headerless_request_resolves_to_the_one_live_session(multi_client):
     assert c.get("/api/health").json()["session"] == DEFAULT_SESSION, "no browser attached ⇒ default"
     _attach_fake_subscriber("alice")
     assert c.get("/api/health").json()["session"] == "alice"
-    # A bare `tinkpg params --temperature` lands on the human's sidebar.
+    # A bare `tinkerscope params --temperature` lands on the human's sidebar.
     c.post("/api/state", json={"temperature": 0.3})
     assert c.get("/api/state", headers=_as("alice")).json()["temperature"] == 0.3
     assert c.get("/api/state", headers=_as(DEFAULT_SESSION)).json()["temperature"] == 1.0

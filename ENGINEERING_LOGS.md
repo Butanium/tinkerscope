@@ -3054,3 +3054,44 @@ clicks the alternative and ↺ resample at a point with text beneath, and checks
 `continue_tokens`. Without the guard it fails (cuts 115 / 165 for a pin at 4). A
 version that clicked the buttons' centres passed even without the fix, because the
 click fell between lines, so the test now picks a point over a text line on purpose.
+
+### 2026-10-13 — `tinkerscope` is the one documented CLI name; `tinkpg` is a deprecated alias
+
+Clément asked (twice, across sessions) why the tool has two names. Since v1.1.0
+they are one Typer app installed under both; the only difference is that a bare
+`tinkerscope` / `tinkerscope <dir>` defaults to `serve`, a bare `tinkpg` prints
+help. His call: keep `tinkpg` as an UNDOCUMENTED alias, gone from every published
+skill, mentioned once as deprecated. Done as a scripted `\btinkpg\b` →
+`tinkerscope` over the current docs, skills, plugin manifests, UI strings, CLI
+messages/help and test docstrings, plus hand edits where a sentence explained the
+two names. `_gen_cli_ref` now prints every verb as `tinkerscope <verb>`, and
+`tests/test_cli_docs.py` asserts `tinkpg` never appears in the generated
+reference. Left as written: history (this file, old CHANGELOG entries, handoff /
+proposal / migration docs, `ideas/done/`, `deprecated/`). The smokes shell out
+to `tinkerscope` too now (Clément: "obviously update the smokes"), so nothing in
+the repo exercises the alias any more beyond its entry point. The one doc mention is a
+line under the README's command table. The trap to remember: a doc line that runs
+`tinkerscope` with no verb, or with a flag the top level doesn't own, now STARTS A
+SERVER where `tinkpg` printed help — every remaining bare mention was checked to
+be prose; `--session` / `--base-url` are top-level options, so
+`tinkerscope --session X send` still drives.
+
+### 2026-10-13 — Test suites stop being gates
+
+Clément asked whether the smokes and tests were ever useful before a publish, and
+told me to decide. The record: pytest never caught a regression from an unrelated
+change in ~430 recorded runs; the browser smokes caught one in ~930
+(`browser_highlight_master`, 2026-08-10); green suites sat over visibly broken UI
+at least five times (2026-09-01 audit). Today's two release sweeps failed only on
+`browser_continue_scope` (its selector went stale when the composer toggle became
+glyphs) and `browser_ops_convergence` (a flake, now out of DEFAULT), and two
+thread-system tests needed rewriting for an intended behavior change. So the
+suites cost time and caught nothing.
+
+Decision: the release checklist (`docs/RELEASING.md`) and CLAUDE.md §Build/verify
+no longer ask for pytest, `npm test`, repo-wide ruff or `scripts/smoke.sh`. They
+stay in the repo as tools for the surface you are changing. The gate is what the
+pre-commit hook runs plus looking: NUL bytes, the web build, ruff F on staged
+files, and — new — `python -m tinkerscope._gen_cli_ref --check` when the CLI, its
+generator or a generated target is staged (two-surface agreement, a second to
+run; the one kind of check this repo's record supports).

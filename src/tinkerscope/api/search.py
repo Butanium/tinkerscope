@@ -4,7 +4,7 @@ Searches EVERY branch of every saved workspace (active or not): node `content`,
 assistant `reasoning` (thinking), thread `system_prompt` (root user nodes), plus
 workspace-level matches (name, global system prompt, panel model ids) that the
 palette pins above node hits. One hit per (node, field) — the FIRST match in a
-field, like `tinkpg grep` always reported.
+field, like `tinkerscope grep` always reported.
 
 Cached scan, not an index. The corpus is light trees only (~tens of MB; blobs
 never hold text), and `workspace_store._bodies` already memoizes parsed bodies,

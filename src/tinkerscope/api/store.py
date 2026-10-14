@@ -45,7 +45,7 @@ def locked(name: str) -> Iterator[None]:
     `name` keys a dedicated lock file under STATE_HOME (e.g. "workspaces" ->
     workspaces.lock). Mirrors instances._locked; use it to wrap any
     read_json -> mutate -> write_json sequence that concurrent writers (two
-    browser tabs, a tab + the tinkpg CLI) could otherwise clobber — write_json's
+    browser tabs, a tab + the tinkerscope CLI) could otherwise clobber — write_json's
     atomic rename prevents torn files but NOT lost updates.
     """
     # Imported lazily so a test that reloads paths.py (new XDG_STATE_HOME) gets

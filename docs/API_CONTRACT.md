@@ -27,7 +27,7 @@ The full wire/disk rename is a deliberate staged migration, parked in
 ```
 src/tinkerscope/
   paths.py, instances.py, serve.py        # DONE: registry, port-pick, entrypoint
-  cli.py                                   # ← BUILD (tinkpg)
+  cli.py                                   # ← BUILD (tinkerscope)
   api/
     settings.py, main.py                   # DONE
     discovery.py, tinker_sampler.py        # DONE: scan + remote sampling
@@ -103,14 +103,14 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
 | POST | `/api/models/refresh` | — | `{status, count}` (rescans fs + capabilities) |
 | GET | `/api/tinker-models` | `?refresh` | `{available, error, models:[…]}` — everything sampleable through tinker, one filterable list. Each entry has `kind` + unified `id` + `label`. `kind:"base"` (+`base_model`, +`supports_thinking`) = raw base models from `get_server_capabilities` (no LoRA); `supports_thinking` = the family exposes a binary thinking toggle (so the composer can hide its thinking control for base picks with none). `kind:"checkpoint"` (+`sampler_path`,`created`) = every sampler checkpoint the account still has (the REST `list_user_checkpoints` sweep — not the 20-capped oai /v1/models), newest first, UUID-only (no `supports_thinking` — base/renderer unknown ⇒ the UI assumes thinking-capable). Base models first, then checkpoints. `?refresh=1` re-probes both the capabilities and the checkpoint sweep now (otherwise the same TTL cache as `/api/health`). Entries a **share pack** injected (see `docs/PACK.md`) are appended with `pack:true` and deduped by `id` against the sweep — these carry explicit sampler paths / base models the account sweep won't list (public checkpoints trained elsewhere), so they appear even offline / cross-account. A registry label **OVERRIDES** a sweep entry's derived one (same `id` ⇒ one row, not two) and sets `named:true`; an entry with no registry label has no `named` flag, which is how the UI knows its label is derived and offers to name it. |
 | GET | `/api/tinker-models/probe` | `?sampler_path=<path>` | `{available, base_model, error}` — does tinker serve this sampler path, and against which base model? `error` is tinker's own `detail` (a 400 names the expected path form, a 404 says the checkpoint is unknown), so a client can say WHY rather than just "no". One metadata call, no sampling; ~270 ms warm, cached per path for the process. Backs the picker's add-a-custom-checkpoint row: a path a collaborator sent you is in no local list, so asking tinker is the only way to tell a good path from a typo. |
-| POST | `/api/tinker-models/name` | `{kind:"ckpt"\|"base", ref, label}` | `{status:"ok", kind, ref, label}`, or `{status:"error", error}` on a blank label. Persists a human name into the same per-state-dir registry share packs write (`pack_models.json`), so the name survives a restart, shows in every tab, is visible to `tinkpg`, and travels in `pack export` — unlike the browser-local ◇/◆ recents. The label is stored stripped; re-posting the same `ref` replaces it. |
+| POST | `/api/tinker-models/name` | `{kind:"ckpt"\|"base", ref, label}` | `{status:"ok", kind, ref, label}`, or `{status:"error", error}` on a blank label. Persists a human name into the same per-state-dir registry share packs write (`pack_models.json`), so the name survives a restart, shows in every tab, is visible to `tinkerscope`, and travels in `pack export` — unlike the browser-local ◇/◆ recents. The label is stored stripped; re-posting the same `ref` replaces it. |
 | GET | `/api/openrouter-models` | — | `[{label, openrouter_model}]` (GLOBAL saved list, seeded once from `$TINKERSCOPE_OPENROUTER_MODELS`) |
 | POST | `/api/openrouter-models` | `{openrouter_model, label?}` | the updated saved list (upsert) |
 | DELETE | `/api/openrouter-models?model=<id>` | — | the updated saved list (model id in query; ids have slashes) |
 | GET | `/api/openrouter-models/available` | `?refresh` | `{available, error, models:[{openrouter_model, label}]}` — full OpenRouter catalog (their `/v1/models`) for typeahead |
 | GET | `/api/vllm-models` | `?refresh` | `{available, error, url, models:[{kind:"vllm", id, label, vllm_model, root, parent, max_model_len, supports_thinking?}]}` — what the configured vLLM server serves (its `/v1/models`), as panel-picker entries (`vllm:<id>` sentinel; `id === vllm_model`, the served name). `available:false` + `error:null` = no server configured; with an error = configured but unreachable. `root` = what vLLM loaded (HF id or a path on the GPU box); `supports_thinking` is read off the chat template (`enable_thinking`) when the tinkerscope box can load the tokenizer for `root`, absent otherwise (⇒ assume true). Cached ~30 s server-side; `?refresh=1` re-fetches now. Read-only — the list IS the `vllm serve` invocation. Sampling: `/api/chat` with `vllm_model` (`api/vllm_sampler.py`). |
 | POST | `/api/chat` | ChatRequest (below) | **SSE** (below) |
-| POST | `/api/chat/{chat_id}/cancel` | — | `{status, chat_id}` — cancel an in-flight chat by id (`status`: `"cancelling"` or `"not_found"`). How the browser's "Stop all" reaches a chat it doesn't own (fired by tinkpg / another tab, so no local AbortController): drives the SAME guaranteed terminal a client disconnect would — `chat_end` fires (`running` clears for every subscriber), any already-completed samples are still committed, and a cancel with 0 completed samples fires the **error**-flavored terminal so nothing folds an empty branch. Idempotent (already-ended chats are `not_found`). Best-effort remote-side: the tinker SDK runs sample calls on its own loop, so cancel stops us listening, never the remote compute in flight. |
+| POST | `/api/chat/{chat_id}/cancel` | — | `{status, chat_id}` — cancel an in-flight chat by id (`status`: `"cancelling"` or `"not_found"`). How the browser's "Stop all" reaches a chat it doesn't own (fired by tinkerscope / another tab, so no local AbortController): drives the SAME guaranteed terminal a client disconnect would — `chat_end` fires (`running` clears for every subscriber), any already-completed samples are still committed, and a cancel with 0 completed samples fires the **error**-flavored terminal so nothing folds an empty branch. Idempotent (already-ended chats are `not_found`). Best-effort remote-side: the tinker SDK runs sample calls on its own loop, so cancel stops us listening, never the remote compute in flight. |
 | POST | `/api/close` | — | `{status}` (drops cached sampling clients) |
 | GET | `/api/state` | — | PlaygroundState (below) — of the request's SESSION (`X-Tinkerscope-Session`, see "Sessions") |
 | POST | `/api/state` | any subset of StatePatch | new PlaygroundState (same session scoping) |
@@ -138,7 +138,7 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
 | GET | `/api/workspaces/{id}/trash` | — | `[{id, ts, panel, kind, count, roots, selected, layout?, layout_index?}]` NEWEST-first — one entry per save that made nodes disappear. Node BODIES excluded (a listing is for choosing; bodies can be MBs). `roots` = the deleted subtree anchors `{id, parent, index, role, preview}`. `kind` is `"nodes"` (branches vanished) or `"panel"` (the whole column did) — a `"panel"` entry also carries `layout`, that panel's layout row, and `layout_index`, its position in `panels`, so the column can come back bound to its model and in its old slot. Both absent on entries journaled before they were recorded. `[]` for unknown / never-deleted (never 404, same convention as node-blobs) |
 | POST | `/api/workspaces/{id}/trash/restore` | `{handle}` | `{ok, restored, panel, recreated_panel, unbound_panel, entry}` — splices a journaled subtree back at its recorded sibling `index`. `handle` = an entry id, a subtree-root node id, or any node id inside an entry. Blobs need no work (write-once, never removed), so logprobs come back too. `recreated_panel` = this restore re-added a whole column; its tree and its layout row are checked SEPARATELY because they drift (a stale tab's save wipes the row while the partial tree upsert keeps the tree), which is also what keeps restore re-runnable. `unbound_panel` = the re-added row binds no model, so the browser's phantom filter will drop it on load — the caller should say so rather than promise a re-bind. `{ok: false, error}` with **200** when nothing matches — that's an answer, not a transport failure |
 | DELETE | `/api/workspaces/{id}/trash` | — | `{ok}` — forget the journal (the deliberate-deletion escape hatch) |
-| GET | `/api/search` | `?q=<text>` + optional `regex=1`, `case=1` (case-SENSITIVE; default insensitive), `ws=<id>` (one workspace), `max_hits` (default 200), `width` (snippet chars, default 160), `scopes=<csv>` (subset of `reply,user,thinking,system,name,model`; omitted = all; unknown scope = 422 — the palette's filter chips send this so counts/truncation reflect the filter, with `model` off by default there) | Cross-workspace text search over EVERY branch of every saved workspace — node `content`, assistant `reasoning`, thread `system_prompt` (root user nodes) — plus workspace-LEVEL matches (name / global system prompt / a panel's model id). Engine: `api/search.py` (cached linear scan; wire shape deliberately index-agnostic). Returns `{query, workspace_hits[], hits[], workspace_totals[], total, truncated, workspaces_searched, workspaces_matched}`. Each node hit = full tree address (`workspace_id`, `panel`, `node_id`, `parent`, `role`, `field`, `thread` (1-indexed root thread), `on_active_path`, `sib_index`, `sib_count`) + the FIRST match in that field (`match` = matched text; `before`/`match_display`/`after` = the display snippet triple, each whitespace-collapsed separately so clients highlight without offset math). `hits` is capped at `max_hits`; `total`/`workspace_totals` keep counting past the cap. Workspaces ordered newest-`updated_at` first. Consumers: the browser's **Ctrl+K palette** and `tinkpg grep`. 400 on a bad regex. The static-site mirror is `web/src/lib/search-scan.ts` |
+| GET | `/api/search` | `?q=<text>` + optional `regex=1`, `case=1` (case-SENSITIVE; default insensitive), `ws=<id>` (one workspace), `max_hits` (default 200), `width` (snippet chars, default 160), `scopes=<csv>` (subset of `reply,user,thinking,system,name,model`; omitted = all; unknown scope = 422 — the palette's filter chips send this so counts/truncation reflect the filter, with `model` off by default there) | Cross-workspace text search over EVERY branch of every saved workspace — node `content`, assistant `reasoning`, thread `system_prompt` (root user nodes) — plus workspace-LEVEL matches (name / global system prompt / a panel's model id). Engine: `api/search.py` (cached linear scan; wire shape deliberately index-agnostic). Returns `{query, workspace_hits[], hits[], workspace_totals[], total, truncated, workspaces_searched, workspaces_matched}`. Each node hit = full tree address (`workspace_id`, `panel`, `node_id`, `parent`, `role`, `field`, `thread` (1-indexed root thread), `on_active_path`, `sib_index`, `sib_count`) + the FIRST match in that field (`match` = matched text; `before`/`match_display`/`after` = the display snippet triple, each whitespace-collapsed separately so clients highlight without offset math). `hits` is capped at `max_hits`; `total`/`workspace_totals` keep counting past the cap. Workspaces ordered newest-`updated_at` first. Consumers: the browser's **Ctrl+K palette** and `tinkerscope grep`. 400 on a bad regex. The static-site mirror is `web/src/lib/search-scan.ts` |
 | POST | `/api/pack/apply` | `{source, on_conflict?, force?}` | Install a **share pack** at runtime — what makes `?w=<path-or-url>` work (a launch-time `--pack` flag can't serve a link). `source` = local filesystem path (read by THIS server — the only way a path works at all) or http(s) URL; YAML or JSON. **Two-phase.** Omit `on_conflict` for a dry-run **preview**: `{status:"preview", pack, description, models, workspaces:[{id, name, exists}]}` — `id` is the deterministic `pack-<pack-slug>-<ws-slug>`, `exists` says it's already here. With `on_conflict:"overwrite"` (idempotent re-apply, historical behavior) or `"new"` (renames the incoming copy to `<name> (2)` ⇒ fresh id, existing untouched) it applies and returns `{status:"applied", pack, models, openrouter, workspaces, workspace_ids:[{id,name}], params}`. `workspace_ids` is in pack order — the browser opens the first, or the one `&open=` names. 404 unreadable source, 400 unparseable pack, 422 bad `on_conflict`. A **gzipped** pack (`.yaml.gz`) is accepted from either source — detection is by magic bytes, not extension — and a pack authored with `pack export --logprobs` carries per-node `token_logprobs_json` (a compact JSON string) which apply converts back into ordinary write-once logprob blobs. See `docs/STATIC_SITE.md` §2 and `docs/PACK.md` |
 
 ### Workspace (branchable chat; persisted per scan-root, NOT in PlaygroundState)
@@ -291,7 +291,7 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
                           // applies regardless. The browser always sends the EFFECTIVE
                           // part ("" when muted/empty).
   "thread_system_prompt": null, // optional; the THREAD's system-prompt part, recorded on the
-                          // thread's first message (browser tree root / `tinkpg send --new-thread
+                          // thread's first message (browser tree root / `tinkerscope send --new-thread
                           // --system`). The SERVER picks the effective system message —
                           // the thread part OVERRIDES the global one (since 2026-10-10;
                           // newline-joined before):  effective = thread or global
@@ -392,7 +392,7 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
 
 ### /api/chat SSE (the caller's stream — what the CLI prints)
 - `event: start` → `data: {chat_id, n}` — first event, once the chat is registered;
-  `chat_id` is the id to `POST /api/chat/{chat_id}/cancel` with (how `tinkpg
+  `chat_id` is the id to `POST /api/chat/{chat_id}/cancel` with (how `tinkerscope
   --timeout` and Ctrl+C stop a chat), `n` how many samples to expect (2×n_samples
   for `thinking:"both"`, resolved server-side, so it holds when thinking is
   inherited). Consumers that don't cancel ignore it.
@@ -448,12 +448,12 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
   samples, `{fold_error: "<reason>"}` when it could not (workspace deleted /
   replaced mid-fire). The direct-stream consumer — the headless CLI — cannot
   read the bus or the server log, so this is its only persistence signal;
-  `tinkpg` exits non-zero on a missing manifest after ≥1 completed sample.
+  `tinkerscope` exits non-zero on a missing manifest after ≥1 completed sample.
   `cancelled: true` is added when the chat was stopped through the cancel
-  endpoint (the browser's Stop on a chat it didn't fire, `tinkpg --timeout`,
+  endpoint (the browser's Stop on a chat it didn't fire, `tinkerscope --timeout`,
   Ctrl+C) — CALLER stream only: the bus still says `chat_done` for a stop that
   kept samples. Without it a stop after sample 1 of 10 read as a clean 1-sample
-  run; `tinkpg` now exits 130 on it and names how many of `n` finished.
+  run; `tinkerscope` now exits 130 on it and names how many of `n` finished.
 - `event: error` → `data: {error, …}` (whole request failed, e.g. unsampleable
   run; a mid-stream producer fault after ≥1 completed sample also carries the
   fold-outcome fields above — partial data is real data and folds)
@@ -478,7 +478,7 @@ just like a discovered run — same three artifacts.
 ### Server-authored folds (`parent_node` chats)
 
 At a `parent_node` chat's terminal the SERVER folds every completed sample into
-the workspace tree — the durable path a headless `tinkpg send -n 8` rides with
+the workspace tree — the durable path a headless `tinkerscope send -n 8` rides with
 zero browsers attached:
 
 - **What folds**: all non-error samples, as assistant siblings under
@@ -555,7 +555,7 @@ EXISTING panel (never auto-creates one).
 
 ### Workspace scoping on the state bus
 
-There is ONE PlaygroundState per server **process** — that is what lets `tinkpg`
+There is ONE PlaygroundState per server **process** — that is what lets `tinkerscope`
 drive what you are looking at. But the fields split in two, and the split is
 load-bearing:
 
@@ -621,9 +621,9 @@ store for everyone. Which session a request drives:
 
 | transport | who |
 |---|---|
-| header `X-Tinkerscope-Session: <id>` | every browser fetch (`lib/session.ts` — one id per browser profile, localStorage, `?u=<id>` sets it and is stripped), `tinkpg --session` / `$TINKERSCOPE_SESSION` |
+| header `X-Tinkerscope-Session: <id>` | every browser fetch (`lib/session.ts` — one id per browser profile, localStorage, `?u=<id>` sets it and is stripped), `tinkerscope --session` / `$TINKERSCOPE_SESSION` |
 | query `?session=<id>` | the browser's EventSource (`/api/state/events`) — it cannot set headers |
-| neither | resolved server-side: exactly one session has a live subscriber → that one (a bare `tinkpg send` keeps driving the human's screen); none → `default`; several → **409** naming the ids and `--session` |
+| neither | resolved server-side: exactly one session has a live subscriber → that one (a bare `tinkerscope send` keeps driving the human's screen); none → `default`; several → **409** naming the ids and `--session` |
 
 Ids match `^[A-Za-z0-9_.-]{1,64}$` (400 otherwise). A server started WITHOUT
 `--multi-user` maps every request to the one `default` session whatever it
@@ -675,7 +675,7 @@ in-flight chat is told apart from an external one by `client_token`.
 
 Two consequences of detached:
 - **A closed tab no longer cancels a browser-fired generation** — it runs to
-  completion server-side, exactly like a tinkpg-fired chat. "Stop all" (the cancel
+  completion server-side, exactly like a CLI-fired chat. "Stop all" (the cancel
   endpoint, by `chat_id`) remains the kill switch, reaching own AND foreign chats.
 - The fold is now **deterministic on the single bus `chat_done`** (no drain racing
   it), so an aborted chat's already-completed partials fold reliably.

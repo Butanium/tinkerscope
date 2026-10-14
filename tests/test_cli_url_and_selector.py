@@ -1,11 +1,11 @@
-"""`tinkpg url` + the positional-or-`--ws` workspace selector.
+"""`tinkerscope url` + the positional-or-`--ws` workspace selector.
 
 Both exist because of the same failure: the CLI auto-discovers its server, so an
 agent can read a whole workspace and still have no URL to hand the human — and
 `grep`/`node`/`threads` take the workspace as `--ws` while `ws`/`samples` take it
 positionally, which is easy to get backwards mid-session.
 
-The stdout-purity assertions are load-bearing: `open $(tinkpg url)` has to work,
+The stdout-purity assertions are load-bearing: `open $(tinkerscope url)` has to work,
 so the resolved workspace NAME must go to stderr, never stdout.
 """
 from __future__ import annotations
@@ -50,7 +50,7 @@ def _patch(monkeypatch, *, state: dict | None = None):
 
 
 def test_url_bare_is_only_the_base_url(monkeypatch):
-    """`open $(tinkpg url)` — stdout must be the URL and nothing else."""
+    """`open $(tinkerscope url)` — stdout must be the URL and nothing else."""
     _patch(monkeypatch)
     r = runner.invoke(cli.app, ["url"])
     assert r.exit_code == 0
@@ -236,7 +236,7 @@ def _patch_layout(monkeypatch, *, live, ws=None):
 
 
 def test_a_single_panel_fire_reuses_the_live_column(monkeypatch):
-    """Repeated `tinkpg chat` must stay on ONE column — minting each time would
+    """Repeated `tinkerscope chat` must stay on ONE column — minting each time would
     abandon (and journal) the previous tree on every fire."""
     _patch_layout(monkeypatch, live=["p-7"], ws={"id": WID, "panel_seq": 7})
     assert cli._layout_panel_ids(1) == ["p-7"]

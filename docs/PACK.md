@@ -91,7 +91,7 @@ removed, and default params are overwritten (implies `--force`). It only touches
 `pack-<name>-*` id namespace — a collaborator's own workspaces and other packs are untouched.
 
 On startup the server primes the live state bus's **global sampling params** from `prefs.json`
-so a pure-CLI consumer (`tinkerscope --pack …` then `tinkpg params`, never opening a browser)
+so a pure-CLI consumer (`tinkerscope --pack …` then `tinkerscope params`, never opening a browser)
 sees the pack's defaults, not the library defaults. Only params seed — panels stay at defaults
 so the browser's own restore (gated on all-null panels) still runs and restores the layout.
 

@@ -3,7 +3,7 @@
 Browser playground for **Tinker-trained checkpoints** that **auto-discovers
 training runs** under a directory tree (scans for `checkpoints.jsonl` /
 `config.json`), lets you chat with / sample from them, and is **drivable live
-from the terminal** via the `tinkpg` CLI. Forked from Harry Mayne's playground;
+from the terminal** via the `tinkerscope` CLI. Forked from Harry Mayne's playground;
 see `README.md` for the full feature list + credits.
 
 ## Doc map (read this first)
@@ -32,12 +32,14 @@ and in this file's reference section; HANDOFF.md itself is retired.
 ## Working conventions
 
 - **CLI changes ship with their docs, in the same commit — and the command/flag
-  surface is GENERATED.** `tinkpg` and `tinkerscope` are ONE Typer app
-  (`cli.py`, merged 2026-08-12; `tinkerscope` defaults to `serve`). After any
-  command/flag change run `python -m tinkerscope._gen_cli_ref` — it rewrites the
-  marked blocks in README.md §"Bring your agent" (compact table; the README is a
-  human pitch, option notes belong in the skill; Clément 2026-08-05) and the CLI
-  skill's "Command reference"; `tests/test_cli_docs.py` fails while stale.
+  surface is GENERATED.** The CLI is `tinkerscope` — one Typer app (`cli.py`);
+  a bare `tinkerscope` / `tinkerscope <dir>` means `serve`. It is also installed
+  as `tinkpg`, its old name: a DEPRECATED alias that stays out of every doc and
+  skill (Clément, 2026-10-13). After any command/flag change run
+  `python -m tinkerscope._gen_cli_ref` — it rewrites the marked blocks in
+  README.md §"Bring your agent" (compact table; the README is a human pitch,
+  option notes belong in the skill; Clément 2026-08-05) and the CLI skill's
+  "Command reference"; the pre-commit hook refuses a commit while they are stale.
   Behavior changes still update the skill's hand-written workflow prose. **The skills live in this repo at
   `plugin/skills/<name>/SKILL.md`** — `plugin/` is a Claude Code plugin
   (`.claude-plugin/marketplace.json` at the repo root makes the repo its own
@@ -129,7 +131,7 @@ and in this file's reference section; HANDOFF.md itself is retired.
   vLLM app through the module's `_transport` seam (`tests/test_vllm_sampler.py`
   — the response shapes there were probed live on vllm 0.19.1). Read-only
   catalog: `/api/vllm-models`, ~30 s cache.
-- **Shared-state bus / live-drive** (the `tinkpg` ↔ browser lockstep): see
+- **Shared-state bus / live-drive** (the `tinkerscope` ↔ browser lockstep): see
   `docs/HANDOFF_BRANCHING.md` §1 + `src/tinkerscope/api/state.py`. **One bus per
   SESSION since 2026-09-16** (`tinkerscope serve --multi-user`; `api/session.py`
   resolves which session a request drives — header `X-Tinkerscope-Session`,
@@ -169,7 +171,7 @@ and in this file's reference section; HANDOFF.md itself is retired.
   write channel passes through (a pack apply is one of them). The cross-impl
   contract is `tests/fixtures/tree_vectors/` (asserted by both engines; see its
   README before adding a vector).
-- **Cross-workspace search** (the Ctrl+K palette + `tinkpg grep`):
+- **Cross-workspace search** (the Ctrl+K palette + `tinkerscope grep`):
   `src/tinkerscope/api/search.py` — module docstring. Cached linear scan over
   the light trees (units cache keyed on each workspace's `updated_at` — sound
   because the server is the store's sole writer), NOT an index; the wire shape
@@ -712,7 +714,7 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     `<8 hex> · <segment> · <date>` is a label, not a name, and on a real account most
     read `<hex> · final · <date>`. The name goes SERVER-side via
     `POST /api/tinker-models/name` into `pack_models_store`, so it survives a restart,
-    reaches `tinkpg`, and travels in `pack export`; the ◇/◆ localStorage recents are
+    reaches `tinkerscope`, and travels in `pack export`; the ◇/◆ localStorage recents are
     updated too but are per-browser. Smoke:
     `tests/small-smokes/browser_tinker_custom_ckpt.py` (token-free, needs the API key).
     ChartModal is the smart one: it receives per-panel per-turn samples
@@ -757,7 +759,7 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     priority-ordered `OverflowRow` (**Raw leads — very left, never folds**
     per Clément; then the edit cluster; copy message/workspace,
     send-branch→panel, discard-others, **Copy node id** last — the id is the
-    `tinkpg` CLI's `--node` addressing handle, shown in the button's tooltip).
+    `tinkerscope` CLI's `--node` addressing handle, shown in the button's tooltip).
     When the row is too narrow the tail folds (clipped, folded by default)
     behind a chevron that expands it BELOW as 1+ more lines of the same
     buttons; when everything fits the chevron hides but KEEPS its slot
@@ -847,7 +849,7 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     (`setNodeUrl`), and an incoming `?w=…&node=…` reveals that node via the
     apply-once effect in +page's URL-sync section (`appliedNodeLink` — so
     cycling away later never yanks back; `setWsUrl` drops the params when `w`
-    changes). `tinkpg grep --link` / `node --link` print these URLs. Smoke:
+    changes). `tinkerscope grep --link` / `node --link` print these URLs. Smoke:
     `tests/small-smokes/browser_search_palette.py` (seeded, token-free).
   - `lib/HighlightRules.svelte` — the highlight-rules editor UI, and the header
     that carries the master Off/On (`highlightsOn`) next to `+ new`. While it's
@@ -941,21 +943,25 @@ extracted UI: `tests/small-smokes/browser_{chart_modal,modals}.py`.
   reintroduce tabs). No formatter; match surrounding style (incl. the compact
   one-line-per-rule CSS).
 - **Web** (from `web/`): `npm run check` (svelte-check; keep it at **0 errors** —
-  the ~25 a11y warnings are known), `npm test` (the frameworkless `src/lib/*.test.ts`
-  suites via node), `npm run build`. The pre-commit hook builds on web/ commits —
-  but **merge commits skip it**: after `git merge`, run `npm run build` yourself
-  or the served `web/dist` silently stays stale.
-- **Python**: `uv run pytest -q` (no remote calls — capabilities probe is stubbed)
-  and `uv run ruff check` (whole repo incl. `tests/`, kept at 0 — the pre-commit
-  hook only lints STAGED files with `--select F`, so a repo-wide run is what
-  catches latent errors in smokes nobody has touched).
+  the ~25 a11y warnings are known) and `npm run build`. The pre-commit hook builds
+  on web/ commits — but **merge commits skip it**: after `git merge`, run
+  `npm run build` yourself or the served `web/dist` silently stays stale.
 - **Verify a change by LOOKING.** On an isolated instance (below), drive the
   changed surface with Playwright as a scratch driver and READ a cropped
-  screenshot — that is the check. Green suites have sat over visibly broken UI
-  here at least five times; the 2026-09-01 audit is in `ENGINEERING_LOGS.md`
-  2026-10-01.
-- **`scripts/smoke.sh` is the short regression net** for STATE / WIRE / URL
-  agreement (the only class that ever caught a regression): it builds web/,
+  screenshot — that is the check, before a commit and before a release. Green
+  suites have sat over visibly broken UI here at least five times; the 2026-09-01
+  audit is in `ENGINEERING_LOGS.md` 2026-10-01.
+- **Test suites are tools, not gates (decided 2026-10-13).** `uv run pytest -q`,
+  `npm test` (the `src/lib/*.test.ts` suites), `uv run ruff check` (repo-wide) and
+  the browser smokes stay in the repo: run the ones covering the surface you are
+  changing when they help you, never as a ritual before a commit or a release.
+  The record: pytest never caught a regression from an unrelated change in ~430
+  runs, the smokes one in ~930, and on 2026-10-13 the release sweeps' only
+  failures were a stale selector and a flake. When you change a surface a test
+  pins, update that test in the same commit — rot is their main cost. What IS
+  enforced is what the pre-commit hook runs: NUL bytes, the web build, ruff F on
+  staged files, and the generated CLI reference (`_gen_cli_ref --check`).
+- **`scripts/smoke.sh`** (when you do run smokes) builds web/,
   launches a throwaway instance over the suite-owned fixture runs
   (`tests/run_fixtures.py`) and runs its DEFAULT set SERIALLY under a lock —
   never run two at once (`browser_state_reprime` restarts a server mid-run).

@@ -1,7 +1,7 @@
 """Live playground state: snapshot, SSE stream, and a generic patch endpoint.
 
 The browser opens `/api/state/events` once on load and renders from the pushed
-state. Both the browser and the `tinkpg` CLI POST `/api/state` to change the
+state. Both the browser and the `tinkerscope` CLI POST `/api/state` to change the
 selected run/checkpoint, the workspace, or sampling params — so terminal and
 browser stay in lockstep.
 

@@ -2,7 +2,7 @@
 // process-global. PURE — no Svelte imports (bus-scope.test.ts runs it under node).
 //
 // The state bus (src/tinkerscope/api/state.py) is ONE PlaygroundState per server
-// PROCESS. That is what makes `tinkpg` drive what you are looking at, and it was
+// PROCESS. That is what makes `tinkerscope` drive what you are looking at, and it was
 // right when a workspace was just "the panels on screen". Since then a workspace
 // gained its own persisted identity: its panel layout, per-panel
 // models and system prompt are saved with it and restored on open. A per-workspace
@@ -59,7 +59,7 @@ export function mergeBusState(
   if (myId == null) return incoming;
   // UNSTAMPED incoming: a fresh process, an older client, or a CLI patch that only
   // touched params. Nobody is claiming a different workspace, so it is ours to take;
-  // this is what keeps `tinkpg open <run>` driving the browser.
+  // this is what keeps `tinkerscope open <run>` driving the browser.
   if (incoming.workspace_id == null) return incoming;
   if (incoming.workspace_id === myId) return incoming;
   // Someone else's workspace is on the bus. Take the global fields, keep ours.

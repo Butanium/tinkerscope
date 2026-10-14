@@ -6,7 +6,7 @@ before sessions existed. Multi-user mode (`TINKERSCOPE_MULTI_USER=1`): the
 EPHEMERAL half of the playground — panel selection, the open workspace, the
 sampling params, `running` — is per session, keyed by an id the CLIENT chooses.
 The browser mints one per browser profile (localStorage; `?u=<id>` names it),
-`tinkpg` passes `--session`. The durable store — workspace trees, highlights,
+`tinkerscope` passes `--session`. The durable store — workspace trees, highlights,
 pins — stays shared, and its events (`ops`, `workspace_deleted`) fan out to
 every session (`state.broadcast_all`), so two people on one workspace still
 converge; only their sidebars are their own.
@@ -14,9 +14,9 @@ converge; only their sidebars are their own.
 Transport: the `X-Tinkerscope-Session` header, or `?session=` for the one
 client that cannot set headers (the browser's EventSource). A request carrying
 NEITHER resolves server-side rather than failing: exactly one session has a
-live subscriber → that one (a bare `tinkpg send` keeps driving the human's
+live subscriber → that one (a bare `tinkerscope send` keeps driving the human's
 screen — the single-user contract, unchanged); none → `default` (a headless
-script); several → 409 naming `--session` / `tinkpg sessions`. Silently
+script); several → 409 naming `--session` / `tinkerscope sessions`. Silently
 driving the wrong person's sidebar is the failure this mode exists to remove,
 so ambiguity is loud.
 """
@@ -70,7 +70,7 @@ def resolve_session(request: Request) -> str:
     raise HTTPException(
         409,
         f"several sessions are live on this --multi-user server ({ids}) — name one: "
-        f"tinkpg --session <id> (or $TINKERSCOPE_SESSION); `tinkpg sessions` lists them",
+        f"tinkerscope --session <id> (or $TINKERSCOPE_SESSION); `tinkerscope sessions` lists them",
     )
 
 

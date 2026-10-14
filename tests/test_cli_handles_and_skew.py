@@ -1,7 +1,7 @@
 """The CLI tells an agent where its samples landed, and why a server may not
 have honored the fire.
 
-Archive evidence (2026-09-16): an agent looped `tinkpg continue` and curl'ed the
+Archive evidence (2026-09-16): an agent looped `tinkerscope continue` and curl'ed the
 workspace JSON after every fire to find the node ids it had just created —
 `[done]` said nothing. And (2026-08-24) an editable-install CLI talking to a
 server started before an update got "NOT persisted … no fold manifest" with no

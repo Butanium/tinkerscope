@@ -4,8 +4,8 @@ Servers register themselves in `~/.local/state/tinkerscope/instances.json`
 on startup and unregister on exit. Entries whose pid is gone are pruned
 lazily on every read, so a SIGKILL'd server doesn't poison discovery.
 
-The `tinkpg` CLI uses `discover(cwd)` to pick the instance whose scan root
-contains the current directory — so `tinkpg ls` works from inside any project
+The `tinkerscope` CLI uses `discover(cwd)` to pick the instance whose scan root
+contains the current directory — so `tinkerscope ls` works from inside any project
 with discovered runs and zero configuration.
 """
 from __future__ import annotations

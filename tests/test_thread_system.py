@@ -113,7 +113,7 @@ def test_chat_thread_overrides_global_and_mirrors_panel(client, monkeypatch):
 
 def test_chat_absent_thread_field_never_inherits_panel_mirror(client, monkeypatch):
     # Inherit RETIRED (P3 review): every client sends the field explicitly; the
-    # one omitter was `tinkpg probe`, which sampled under the OPEN thread's
+    # one omitter was `tinkerscope probe`, which sampled under the OPEN thread's
     # prompt without a trace on stdout. Absent now means no thread part.
     _lay(client, ids=("primary",))
     client.post("/api/state", json={"system_prompt": "GLOBAL",

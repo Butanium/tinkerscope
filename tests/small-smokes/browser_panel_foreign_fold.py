@@ -2,7 +2,7 @@
 a weird random workspace" bug.
 
 Panel ids ('compare','p-2'…) are re-minted across workspaces, and PlaygroundState
-is a process-wide singleton shared by every tab + the tinkpg CLI. Before the fix,
+is a process-wide singleton shared by every tab + the tinkerscope CLI. Before the fix,
 `#onExternalDone` folded ANY chat_done into treeFor(panel) by the panel id string
 alone, so a chat generated in the context of workspace A grafted onto a
 freshly-reused panel of the workspace the browser had open (persisted into its

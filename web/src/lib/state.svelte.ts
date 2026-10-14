@@ -225,7 +225,7 @@ class LiveStore {
           // restart) while this tab still holds the richer picture. Assigning it
           // would collapse the UI to the default single panel — and a save landing
           // in that window would PERSIST the wrong layout. Keep our mirror and
-          // re-prime the server instead, so `tinkpg state` isn't blind until the
+          // re-prime the server instead, so `tinkerscope state` isn't blind until the
           // next workspace switch. Skip while the fresh server is mid-chat
           // (a CLI drive owns the bus then; last-writer-wins as usual).
           const wiped =

@@ -1,6 +1,6 @@
 """Probe-shaped /api/chat requests are BUS-SILENT (P3 review findings, 2026-08-12).
 
-`tinkpg probe` promises "off-workspace, nothing written". Pre-fix, the
+`tinkerscope probe` promises "off-workspace, nothing written". Pre-fix, the
 chat_begin state patch ran unconditionally — broadcast/commit only gated the
 ephemera — so a probe REBOUND the bus panel's model selection (which a browser
 tab then adopts into the SAVED layout via #adoptLayout: durable damage from a
@@ -181,7 +181,7 @@ def second_run(scan_root):
 
 
 def test_probe_then_send_fires_at_the_bound_model(second_run, wired, sampler, monkeypatch):
-    """End-to-end regression: after a probe of model B, `tinkpg send` must still
+    """End-to-end regression: after a probe of model B, `tinkerscope send` must still
     fire at the model p-1 is BOUND to — headless, the CLI reads its targets from
     the bus, so a rebinding probe misdirected every later fire."""
     fires: list[dict] = []

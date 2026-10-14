@@ -386,7 +386,7 @@ TOPK_LOGPROBS = 5
 # The SDK retries on its own for up to ~2 h, so an unbounded wedged call kept a
 # chat "running" that long. The SAMPLE call itself is deliberately NOT bounded:
 # a cold model's warmup is slow-but-healthy, and the caller stops it instead
-# (the browser's stop chip, `tinkpg --timeout`).
+# (the browser's stop chip, `tinkerscope --timeout`).
 CLIENT_TIMEOUT_S = 120.0
 LOGPROB_RESCORE_TIMEOUT_S = 180.0
 

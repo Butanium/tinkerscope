@@ -21,7 +21,7 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 
 - [Loom directly from an n>1 sample card](loom-on-sample-cards.md) — v1 is single-row only; cards need a sample-index onLoom variant (the onTag shape); wait for someone to reach for it
 - [A text bar in the pinned popover: continue from words you type](loom-freetext-continuation.md) — Clément's; the replay half already ships, the new piece is server-side tokenization under the turn's own tokenizer. Wants to land with [score-authored-ghosts](score-authored-ghosts.md) so the typed text gets real logprobs
-- [`tinkpg loom`](cli-loom.md) — the backend surface exists, the CLI verb doesn't; agents can see fork-worthy positions via `tinkpg node` but can't act on them
+- [`tinkerscope loom`](cli-loom.md) — the backend surface exists, the CLI verb doesn't; agents can see fork-worthy positions via `tinkerscope node` but can't act on them
 - [Score the CONTEXT, not just the completion](score-the-context.md) — `[0, L)` is discarded teacher-forced numbers we already paid for; design deliberately unsettled, Clément wants to think more
 - [Teacher-force the ghosts: score authored text](score-authored-ghosts.md) — Clément's loom variant: an edit/prefill gets real logprobs ("not sampled" ≠ "no data"), surprising insertions glow orange; the loom endpoint is the primitive, only trigger + per-entry provenance remain
 - [Make the top-K logprob capture configurable](topk-capture-configurable.md) — `TOPK_LOGPROBS = 5` means Color-by-match only answers "did it make the top *five*?"
@@ -38,13 +38,13 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 
 - [Forward history reasoning + read `supports_thinking` server-side](vllm-history-reasoning.md) — role/content only today, so a thinking model served through vLLM loses its own CoT across turns; `reasoning_content` is the template's slot, `/tokenizer_info` the flag's source when no local tokenizer loads
 
-### CLI (`tinkpg`)
+### CLI (`tinkerscope`)
 
 - [Restore a deleted WORKSPACE](restore-a-deleted-workspace.md) — the soft delete sets it aside in `workspaces/.deleted/`, but only a manual directory move gets it back
 
 ### Multi-user sessions
 
-- [Rename a session without losing its sidebar](session-rename.md) — `?u=<name>` mints a NEW session today; a server-side move (+ prefs key rename) keeps the setup. Also: `_BUSES` never shrinks; `tinkpg state` doesn't say which session it read
+- [Rename a session without losing its sidebar](session-rename.md) — `?u=<name>` mints a NEW session today; a server-side move (+ prefs key rename) keeps the setup. Also: `_BUSES` never shrinks; `tinkerscope state` doesn't say which session it read
 - [A foreign-workspace chat streams into a reused panel until chat_done](foreign-chat-start-render-hygiene.md) — two tabs of ONE person still share a bus; a one-line `chat_start` stamp guard fixes it, kept out of the multi-user change to stay behavior-identical
 
 ### Models: discovery, availability, renderers

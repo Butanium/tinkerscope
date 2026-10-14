@@ -1,4 +1,4 @@
-"""`tinkpg probe` — sampling a model no panel is bound to, writing nothing.
+"""`tinkerscope probe` — sampling a model no panel is bound to, writing nothing.
 
 The invariant under test is provenance safety. `/api/chat` always accepted an
 arbitrary `run_id`, but it also committed the representative turn into whatever

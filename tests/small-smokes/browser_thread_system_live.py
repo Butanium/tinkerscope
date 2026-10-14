@@ -3,11 +3,11 @@
 
 Point it at an ISOLATED instance (scripts/dev-isolated.sh), never the live one.
 Browser open on a workspace + CLI fires:
-  1. `tinkpg send --system "…BANANA…"` → the reply obeys the composed prompt
+  1. `tinkerscope send --system "…BANANA…"` → the reply obeys the composed prompt
      (proves the thread part reaches the model), the panel mirror holds it,
      AND the browser folds the foreign thread with its `system` strip (the
      chat_done thread_system_prompt → reconcile → root stamp path).
-  2. `tinkpg continue` (no --system) → the follow-up reply still obeys it
+  2. `tinkerscope continue` (no --system) → the follow-up reply still obeys it
      (proves the mid-thread panel-mirror inherit).
 
 First ran green 2026-07-21 (landing 7e90c24). Seeded/token-free twin:
@@ -25,7 +25,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8809"
-# The checkout whose `tinkpg` we shell out to. `scripts/smoke.sh --baseline <ref>`
+# The checkout whose `tinkerscope` we shell out to. `scripts/smoke.sh --baseline <ref>`
 # sets TSCOPE_APP_DIR to the baseline worktree; without honoring it this smoke
 # drives the WORKING TREE's CLI against the baseline server and proves nothing.
 # (Was a hard-coded /home/c.dumas path, which also broke on any other checkout.)
@@ -46,12 +46,12 @@ def _get(path):
     return json.load(urllib.request.urlopen(f"{BASE}{path}", timeout=10))
 
 
-def tinkpg(*args):
+def tinkerscope(*args):
     r = subprocess.run(
-        ["uv", "run", "tinkpg", "--base-url", BASE, *args],
+        ["uv", "run", "tinkerscope", "--base-url", BASE, *args],
         capture_output=True, text=True, timeout=120,
         cwd=REPO)
-    print(f"$ tinkpg {' '.join(args[:3])}… → rc={r.returncode}")
+    print(f"$ tinkerscope {' '.join(args[:3])}… → rc={r.returncode}")
     if r.returncode != 0:
         print(r.stdout[-2000:], r.stderr[-2000:], sep="\n---\n")
         sys.exit(1)
@@ -76,7 +76,7 @@ def main():
             timeout=15000)
 
         # ── 1. CLI new-thread probe with a thread system prompt ──
-        out = tinkpg("send", "Say hello in three words.", "--system", SYS,
+        out = tinkerscope("send", "Say hello in three words.", "--system", SYS,
                      "--n", "1", "--max-tokens", "60")
         assert "thread system" in out, f"send plan should print the thread prompt:\n{out[:400]}"
         # the model actually obeyed the composed prompt
@@ -91,7 +91,7 @@ def main():
         assert st["panels"][0]["thread_system_prompt"] == SYS, st["panels"][0].get("thread_system_prompt")
 
         # ── 2. mid-thread continue (no --system) inherits the thread's prompt ──
-        tinkpg("continue", "And goodbye in three words.", "--n", "1", "--max-tokens", "60")
+        tinkerscope("continue", "And goodbye in three words.", "--n", "1", "--max-tokens", "60")
         page.wait_for_function(
             "[...document.querySelectorAll('.message')].filter(m => m.textContent.includes('BANANA')).length >= 2",
             timeout=60000)

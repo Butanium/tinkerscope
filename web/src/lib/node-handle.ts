@@ -1,7 +1,7 @@
 // A node handle — `<ws>:<panel>:<node>`, the form the Copy-node-id button and
-// every `tinkpg` printer emit — typed into the Ctrl+K palette jumps straight to
+// every `tinkerscope` printer emit — typed into the Ctrl+K palette jumps straight to
 // that node instead of running a text search for it. The ws part is an id
-// PREFIX (tinkpg prints 8 chars), resolved against the workspace list.
+// PREFIX (tinkerscope prints 8 chars), resolved against the workspace list.
 
 import { ROOT, selectedChildId } from './tree.ts';
 import type { SearchHit, SearchResponse, Workspace, WorkspaceSummary } from './types';

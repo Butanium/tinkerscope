@@ -140,7 +140,7 @@ class ChatRequest(BaseModel):
     # node. None ≡ "" = no thread part. (Until the P3
     # review fixes, None inherited the target panel's mirrored
     # PanelState.thread_system_prompt — retired: every client sends the field
-    # explicitly, and the one omitter was `tinkpg probe`, silently sampling
+    # explicitly, and the one omitter was `tinkerscope probe`, silently sampling
     # under the OPEN thread's prompt. The mirror is display state now, never
     # an input.)
     thread_system_prompt: str | None = None
@@ -213,14 +213,14 @@ class ChatRequest(BaseModel):
     # persists the samples. FALSE makes the call a pure READ: nothing
     # panel-routes into the bus (a probe of model B must not rebind the panel
     # the human has bound to model A — the saved-layout rewrite chain, review
-    # 2026-08-12), no fold. Combined with broadcast=false (the `tinkpg probe`
+    # 2026-08-12), no fold. Combined with broadcast=false (the `tinkerscope probe`
     # shape) the chat is bus-SILENT: no chat_start/chat_end events, `running`
     # never flips.
     commit: bool = True
     # Detached (fire-and-forget) mode. The browser sets this so its POST returns
     # IMMEDIATELY instead of holding the SSE stream open for the whole generation:
     # the producer runs as a background task broadcasting ONLY to the bus, and the
-    # browser renders/folds the panel from /api/state/events like a tinkpg-driven
+    # browser renders/folds the panel from /api/state/events like a tinkerscope-driven
     # chat. This is what lets N panels generate at once — a held stream per panel
     # would exhaust the browser's ~6 per-host HTTP/1.1 connections. Requires
     # broadcast (there's no response stream to read). Stop reaches it via the
@@ -771,7 +771,7 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
         # chat (CLI probe) samples with them but leaves the shared state alone.
         # commit=false empties the patch entirely (pure read — see
         # ChatRequest.commit): panel-routing the probed selection is how a
-        # `tinkpg probe` used to rebind the panel the human had open, which a
+        # `tinkerscope probe` used to rebind the panel the human had open, which a
         # browser tab then adopted into the SAVED layout (review 2026-08-12).
         # With broadcast=false too, even the lifecycle stays off the bus:
         # chat_id allocates silently, `running` never flips, no fanout — and
@@ -992,7 +992,7 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
 
         prod_error: str | None = None
         try:
-            # The caller's handle for POST /api/chat/{chat_id}/cancel (`tinkpg --timeout`),
+            # The caller's handle for POST /api/chat/{chat_id}/cancel (`tinkerscope --timeout`),
             # and how many samples to expect — a caller can't otherwise tell a stop
             # that kept 1 of 10 from a clean n=1 (thinking may be inherited).
             yield {"event": "start", "data": json.dumps({"chat_id": chat_id, "n": total})}
@@ -1130,7 +1130,7 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
 @router.post("/chat/{chat_id}/cancel")
 async def cancel_chat(chat_id: int) -> dict:
     """Stop an in-flight chat by id. This is how the browser's "Stop all" reaches a
-    chat it doesn't own (fired by tinkpg or another tab, so it has no local AbortController
+    chat it doesn't own (fired by tinkerscope or another tab, so it has no local AbortController
     to trip): cancelling the producer task drives the SAME guaranteed terminal as a client
     disconnect — chat_end fires, `running` clears for every subscriber, and any samples
     that already completed are still committed. Idempotent: a chat that already ended

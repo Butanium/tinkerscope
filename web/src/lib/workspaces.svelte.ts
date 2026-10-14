@@ -271,7 +271,7 @@ class ConversationsStore {
 
   /** True when the bus currently describes OUR workspace. A tab that isn't the
    *  owner still renders and saves its own workspace (layout + trees are store-
-   *  owned) — it just isn't the one `tinkpg` is pointed at, and its incremental
+   *  owned) — it just isn't the one `tinkerscope` is pointed at, and its incremental
    *  workspace writes are dropped server-side until it claims. Decided on
    *  `live.busId` — the RAW bus stamp — not the mirror's `workspace_id`, which
    *  mergeBusState pins to our own id and so can never report a lost bus
@@ -976,7 +976,7 @@ class ConversationsStore {
     // Catch-up (the open/switch window): events for THIS workspace that arrived
     // between the body GET and now were workspace-filtered while it wasn't
     // active — if the stream has already shown a higher rev, the adopted body
-    // is stale (the tinkpg-send-finishing-as-you-open flow). The refetch loop
+    // is stale (the tinkerscope-send-finishing-as-you-open flow). The refetch loop
     // owns convergence + the restarted-rev-line escape.
     if ((this.#seenRevs.get(conv.id) ?? 0) > this.#rev) this.#refetchBody();
     // …unless a stored tree is PRESENT BUT MALFORMED: asTree renders it as an
@@ -1087,7 +1087,7 @@ class ConversationsStore {
       if (data?.client_token) this.endToken(data.client_token);
     };
     // Layout lockstep: a state stamped as OURS drives the store-owned layout
-    // (CLI `tinkpg open`, another tab on the same workspace). Strictly stamped —
+    // (CLI `tinkerscope open`, another tab on the same workspace). Strictly stamped —
     // see live.onOwnPanels' docstring for why unstamped states are excluded.
     live.onOwnPanels = (panels) =>
       this.#adoptLayout(

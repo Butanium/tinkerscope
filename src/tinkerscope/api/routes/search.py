@@ -4,7 +4,7 @@
     → {query, workspace_hits, hits, total, truncated,
        workspaces_searched, workspaces_matched}
 
-Consumers: the browser's Ctrl+K palette, and `tinkpg grep` (which used to fetch
+Consumers: the browser's Ctrl+K palette, and `tinkerscope grep` (which used to fetch
 every body via ?bodies=1 and scan client-side — same semantics, now shared).
 A bad regex is a 400 with the compile error, not a 500.
 """

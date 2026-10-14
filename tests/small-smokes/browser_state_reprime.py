@@ -2,7 +2,7 @@
 
 The live-drive bus (PlaygroundState) is in-memory: a backend restart wipes it,
 and until 2026-07-21 the tab never re-pushed (workspace_id / panels are only
-pushed on CHANGE), leaving `tinkpg state` blind — default single panel, no
+pushed on CHANGE), leaving `tinkerscope state` blind — default single panel, no
 workspace name — until the user happened to switch workspaces. The fix
 (state.svelte.ts snapshot interception): on an EventSource-reconnect snapshot
 whose state knows LESS than the tab (workspace_id null while ours is set),

@@ -139,7 +139,7 @@ def name_tinker_model(body: TinkerModelName) -> dict:
     """Give a checkpoint / base model a human name, persisted for this state dir.
 
     Writes the same registry share packs use, so a named checkpoint survives a
-    restart, shows in every tab, is visible to `tinkpg`, and travels in
+    restart, shows in every tab, is visible to `tinkerscope`, and travels in
     `pack export` — unlike the browser-local ◇/◆ recents, which are per-tab."""
     label = body.label.strip()
     if not label:

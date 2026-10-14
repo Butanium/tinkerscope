@@ -6,9 +6,9 @@ and aged out at 90 days. So the data is recoverable — but only by hand (move t
 directory back, restart the server so `_build_summaries` re-reads it), and
 nothing tells you the directory exists.
 
-The missing surface: `tinkpg trash workspaces` to list what's set aside (id,
+The missing surface: `tinkerscope trash workspaces` to list what's set aside (id,
 name, deleted-at, size, panel count — all readable from the saved light file
-without loading it into the store) and `tinkpg trash restore-workspace <id>` to
+without loading it into the store) and `tinkerscope trash restore-workspace <id>` to
 move it back and bust the cache. Maybe 40 lines, mostly the listing.
 
 Worth doing when someone actually deletes a workspace by accident. Until then the

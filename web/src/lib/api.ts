@@ -160,7 +160,7 @@ const httpApi = {
   deleteWorkspace: (id: string) =>
     j<{ status: string }>(`/api/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   // Cross-workspace text search (the Ctrl+K palette). Case-insensitive substring;
-  // regex/case knobs exist on the endpoint but only `tinkpg grep` uses them.
+  // regex/case knobs exist on the endpoint but only `tinkerscope grep` uses them.
   // `scopes` = which hit kinds to search (reply/user/thinking/system/name/model);
   // omitted = all. Sent server-side so counts + truncation reflect the filter.
   search: (

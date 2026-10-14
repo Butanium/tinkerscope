@@ -323,7 +323,7 @@
   // NB: there is deliberately NO "push ws.activeId onto the bus" effect here.
   // Every real transition (load/switch/create) already CLAIMS the bus with
   // workspace_id + panels together (ws.#loadTrees / create), which is how
-  // `tinkpg state` learns what's on screen. A bare `{workspace_id}` push can
+  // `tinkerscope state` learns what's on screen. A bare `{workspace_id}` push can
   // never restamp the bus anyway (state.py's anti-chimera rule: the stamp only
   // moves together with the panels it belongs to) — an earlier boot-time push of
   // exactly that shape helped mint the 2026-08-06 layout clobber.
@@ -987,7 +987,7 @@
 
   /** Write (or clear) the `?node=`/`?panel=` deep-link params: the address bar
    *  after a palette jump IS the shareable link (`?w=<id>&node=<n>&panel=<p>`),
-   *  and what `tinkpg grep --link` prints. */
+   *  and what `tinkerscope grep --link` prints. */
   function setNodeUrl(panel: Panel | null, nodeId: string | null): void {
     const url = new URL(page.url);
     if (nodeId) url.searchParams.set('node', nodeId);
@@ -2043,7 +2043,7 @@
     window.addEventListener('keydown', onSearchKeydown);
     // The bus describes ONE workspace at a time (bus-scope.ts), so make it the
     // one you're looking at: focusing a tab re-asserts its workspace, and
-    // `tinkpg` follows. No-op when we already own it or a chat is streaming.
+    // `tinkerscope` follows. No-op when we already own it or a chat is streaming.
     const onFocus = () => void ws.claimBus();
     window.addEventListener('focus', onFocus);
 
@@ -2200,11 +2200,11 @@
         <span class="status-text">{live.connected ? 'live' : live.everConnected ? 'offline' : '…'}</span>
         {#if health?.multi_user && health.session}
           <!-- --multi-user: this browser's sidebar is its own session; the id is
-               what a terminal needs (`tinkpg --session <id>`) to drive THIS screen. -->
+               what a terminal needs (`tinkerscope --session <id>`) to drive THIS screen. -->
           <button
             class="session-chip"
             data-testid="session-chip"
-            data-tooltip="your session id — pass it to tinkpg --session (click copies)"
+            data-tooltip="your session id — pass it to tinkerscope --session (click copies)"
             use:tip
             onclick={() => navigator.clipboard?.writeText(health!.session!).catch(() => {})}
           >session {health.session}</button>

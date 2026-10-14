@@ -1,13 +1,13 @@
-"""End-to-end smoke for `tinkpg send` — the layout-safe new-thread probe.
+"""End-to-end smoke for `tinkerscope send` — the layout-safe new-thread probe.
 
 Seeds a 2-panel workspace (both panels on the FREE OpenRouter router, one
 existing thread), opens it in a real browser, then drives the CLI:
 
-  1. `tinkpg send "PROBE-ONE …"` (no args) → BOTH panels fold the reply in as a
+  1. `tinkerscope send "PROBE-ONE …"` (no args) → BOTH panels fold the reply in as a
      NEW root thread (the ⑂ threads popover appears with 2 threads), the panel
      LAYOUT is untouched (the whole point vs `chat`/`compare`), and the browser's
      debounce-save persists 2 rootChildren per panel;
-  2. `tinkpg send "PROBE-TWO …" --panel primary` → only primary gains a third
+  2. `tinkerscope send "PROBE-TWO …" --panel primary` → only primary gains a third
      thread; compare stays at 2.
 
 Costs 3 free-router completions (n=1 each). Needs OPENROUTER_API_KEY.
@@ -25,7 +25,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8809"
-# The checkout whose `tinkpg` we shell out to. `scripts/smoke.sh --baseline <ref>`
+# The checkout whose `tinkerscope` we shell out to. `scripts/smoke.sh --baseline <ref>`
 # sets TSCOPE_APP_DIR to the baseline worktree; without honoring it this smoke
 # drives the WORKING TREE's CLI against the baseline server and proves nothing.
 REPO = Path(os.environ.get("TSCOPE_APP_DIR") or Path(__file__).resolve().parents[2])
@@ -56,14 +56,14 @@ def _post(path, body):
     return json.loads(urllib.request.urlopen(req, timeout=10).read() or b"{}")
 
 
-def tinkpg(*args):
+def tinkerscope(*args):
     out = subprocess.run(
-        ["uv", "run", "tinkpg", *args],
+        ["uv", "run", "tinkerscope", *args],
         capture_output=True, text=True, timeout=180,
         env={**os.environ, "TINKERSCOPE_BASE_URL": BASE},
         cwd=REPO,
     )
-    assert out.returncode == 0, f"tinkpg {args} failed:\n{out.stdout}\n{out.stderr}"
+    assert out.returncode == 0, f"tinkerscope {args} failed:\n{out.stdout}\n{out.stderr}"
     return out.stdout
 
 
@@ -102,7 +102,7 @@ def main():
         assert layout_before == ["primary", "compare"], f"seed layout: {layout_before}"
 
         # ── 1. default send → new thread on BOTH panels, layout untouched ──
-        out = tinkpg("send", "PROBE-ONE reply with exactly one word", "--n", "1", "--max-tokens", "30")
+        out = tinkerscope("send", "PROBE-ONE reply with exactly one word", "--n", "1", "--max-tokens", "30")
         assert "2 panel(s)" in out, f"send should target both panels:\n{out}"
         page.wait_for_function("document.body.innerText.includes('PROBE-ONE')", timeout=20000)
         assert [pp["id"] for pp in _get("/api/state")["panels"]] == layout_before, \
@@ -115,7 +115,7 @@ def main():
                  f"both panels saved with 2 root threads (got {saved_roots(conv['id'])})")
 
         # ── 2. --panel primary → third thread on primary only ──
-        out = tinkpg("send", "PROBE-TWO reply with exactly one word", "--n", "1",
+        out = tinkerscope("send", "PROBE-TWO reply with exactly one word", "--n", "1",
                      "--max-tokens", "30", "--panel", "primary")
         assert "1 panel(s)" in out, f"--panel should target one panel:\n{out}"
         page.wait_for_function("document.body.innerText.includes('PROBE-TWO')", timeout=20000)

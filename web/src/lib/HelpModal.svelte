@@ -36,7 +36,7 @@
     { icon: 'copy-all', name: 'copy conversation', what: 'the whole thread as markdown' },
     { icon: 'send-to', name: 'send to panel', what: "copy this branch's context into another panel" },
     { icon: 'eye', name: 'view all samples', what: "spread a turn's sibling branches out as cards (later turns hide meanwhile)" },
-    { icon: 'hash', name: 'copy node handle', what: '`<ws>:<panel>:<node>` — paste into `tinkpg samples --node …` or `tinkpg continue --node …` in ANY terminal (the ws prefix means no dependence on which workspace is open there)' }
+    { icon: 'hash', name: 'copy node handle', what: '`<ws>:<panel>:<node>` — paste into `tinkerscope samples --node …` or `tinkerscope continue --node …` in ANY terminal (the ws prefix means no dependence on which workspace is open there)' }
   ];
 
   /** Extra buttons that only exist on the cards of an n&gt;1 sample draw. */
@@ -302,8 +302,8 @@ codex plugin add tinkerscope@tinkerscope</pre>
         opens its fold. The chip row under the search box narrows what's searched (model-id matches
         start off). After a jump the address bar carries <code>?w=…&amp;node=…</code> — copy it and the
         link opens the browser AT that exact sample. The same search is scriptable as
-        <code>tinkpg grep</code> (<code>--link</code> prints those URLs). Pasting a node id —
-        <code>ws:panel:node</code>, what the copy-node-id button and <code>tinkpg</code> print — skips
+        <code>tinkerscope grep</code> (<code>--link</code> prints those URLs). Pasting a node id —
+        <code>ws:panel:node</code>, what the copy-node-id button and <code>tinkerscope</code> print — skips
         the search and jumps straight to that node.
       </p>
     </section>
@@ -607,13 +607,13 @@ codex plugin add tinkerscope@tinkerscope</pre>
     <section class="help-sec">
       <h3>Driven from the terminal</h3>
       <p>
-        Everything on this screen is live-shared with the <code>tinkpg</code> CLI, so an agent (or you) can
+        Everything on this screen is live-shared with the <code>tinkerscope</code> CLI, so an agent (or you) can
         select a run, fire a chat, or draw a distribution from a terminal and watch it land here — that's what
         the <code>tinkerscope:cli</code> skill above teaches Claude to do.
         {@render chip('hash')} on a row copies that node's id, which is how you point the CLI at a specific
         message. On a server started with <code>--multi-user</code> the top bar also shows a
         <code>session</code> chip: your sidebar (models, params, open workspace) is your own there, and
-        <code>tinkpg --session &lt;that id&gt;</code> is how a terminal drives <em>your</em> screen rather than
+        <code>tinkerscope --session &lt;that id&gt;</code> is how a terminal drives <em>your</em> screen rather than
         someone else's; workspaces stay shared. Add <code>?u=&lt;name&gt;</code> to the URL once to name yours.
       </p>
     </section>

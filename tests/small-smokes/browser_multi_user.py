@@ -2,7 +2,7 @@
 
 The bug this pins (diagnosed 2026-09-16 from a shared instance): the state bus
 is a process singleton, so with two browsers on it B's sampling params land in
-A's sidebar, A's workspace switch flips what `tinkpg` sees as "open", and the
+A's sidebar, A's workspace switch flips what `tinkerscope` sees as "open", and the
 shared `last_session` pref restores whoever wrote last. `--multi-user` keys the
 EPHEMERAL half of the bus by session (api/session.py + api/state.py) while the
 workspace trees stay one shared store.
@@ -17,9 +17,9 @@ in two Playwright CONTEXTS — two browser profiles, i.e. two people — as
   2. bob's Samples change stays out of alice's sidebar (DOM + /api/state per session);
   3. each session's /api/state names ITS open workspace — neither open flipped the other;
   4. an `add_nodes` op on B (any client) still renders in bob's page — trees are shared;
-  5. `tinkpg --session bob params --temperature` reaches bob only; a headerless
-     `tinkpg state` is refused (409 naming --session) while two sessions are live;
-     `tinkpg sessions` lists both as live;
+  5. `tinkerscope --session bob params --temperature` reaches bob only; a headerless
+     `tinkerscope state` is refused (409 naming --session) while two sessions are live;
+     `tinkerscope sessions` lists both as live;
   6. bob's sidebar persists under its OWN prefs key (`last_session@bob`).
 
 FALSIFICATION LEG — `MULTI_USER=0`: the same script launches WITHOUT the flag and
@@ -131,10 +131,10 @@ def open_tab(browser, cid, who, first_model, errors):
     return page
 
 
-def tinkpg(*args, session=None):
+def tinkerscope(*args, session=None):
     env = {**os.environ, "TINKERSCOPE_BASE_URL": BASE}
     env.pop("TINKERSCOPE_SESSION", None)
-    cmd = ["uv", "run", "tinkpg"] + (["--session", session] if session else []) + list(args)
+    cmd = ["uv", "run", "tinkerscope"] + (["--session", session] if session else []) + list(args)
     return subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=env, cwd=REPO)
 
 
@@ -204,22 +204,22 @@ def main():
             bob.wait_for_function("document.body.innerText.includes('hello from alice')", timeout=8000)
 
             # ── 5. the CLI: --session targets one sidebar; headerless is loud ─
-            out = tinkpg("params", "--temperature", "0.3", session="bob")
+            out = tinkerscope("params", "--temperature", "0.3", session="bob")
             assert out.returncode == 0, out.stderr
             assert _req("/api/state", session="bob")["temperature"] == 0.3
             if MULTI:
                 assert _req("/api/state", session="alice")["temperature"] == 1.0, "CLI params for bob reached alice"
             else:
                 assert _req("/api/state", session="alice")["temperature"] == 0.3
-            out = tinkpg("state")
+            out = tinkerscope("state")
             if MULTI:
-                assert out.returncode != 0, f"headerless `tinkpg state` should be refused with two live sessions:\n{out.stdout}"
+                assert out.returncode != 0, f"headerless `tinkerscope state` should be refused with two live sessions:\n{out.stdout}"
                 assert "--session" in out.stderr and "alice" in out.stderr and "bob" in out.stderr, out.stderr
-                out = tinkpg("state", session="alice")
+                out = tinkerscope("state", session="alice")
                 assert out.returncode == 0 and "smoke-A" in out.stdout, out.stdout + out.stderr
             else:
                 assert out.returncode == 0, out.stderr
-            out = tinkpg("sessions")
+            out = tinkerscope("sessions")
             assert out.returncode == 0, out.stderr
             if MULTI:
                 lines = {ln.split()[0]: ln for ln in out.stdout.splitlines() if ln.strip()}

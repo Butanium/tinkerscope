@@ -22,7 +22,7 @@ palette end-to-end:
      `?w=<id>&panel=<p>&node=<n>` URL cold reveals that node (flips the cycler
      to an off-path sibling).
   9. A pasted node handle (`<ws-prefix>:<panel>:<node>`, the Copy-node-id /
-     tinkpg form) resolves to that one node — no text search — and Enter jumps
+     tinkerscope form) resolves to that one node — no text search — and Enter jumps
      to it; a handle that doesn't resolve says why.
 
 No model calls.

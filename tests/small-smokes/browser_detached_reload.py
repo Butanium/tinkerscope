@@ -5,7 +5,7 @@ a reload mid-generation loses it. Pre-detached a reload killed the drained
 connection → the chat cancelled on disconnect. Post-detached the chat completes
 server-side, and the reloaded page — with no registration for it — sees the
 chat_done as EXTERNAL and folds it from the transcript echo (single representative
-sample), like a tinkpg chat. This asserts that recovery: reload during an 8-panel
+sample), like a tinkerscope chat. This asserts that recovery: reload during an 8-panel
 generation → every panel eventually folds a coherent reply, NO panel stuck on a
 'generating' placeholder, and NO double-fold (exactly one assistant per user turn).
 

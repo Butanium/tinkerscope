@@ -27,10 +27,11 @@ def test_generated_cli_reference_is_current():
 
 
 def test_reference_covers_the_merged_surface():
-    """The one app answers as both names: driver verbs under `tinkpg`, the
-    server-side surface under `tinkerscope` — and hidden aliases stay out."""
+    """Every command is documented as `tinkerscope <verb>` — and hidden aliases
+    (the deprecated `tinkpg` name, `conv`) stay out."""
     full = generate_full()
-    for needle in ("tinkpg send", "tinkpg grep", "tinkerscope serve",
+    for needle in ("tinkerscope send", "tinkerscope grep", "tinkerscope serve",
                    "tinkerscope pack export", "tinkerscope site export"):
         assert needle in full, f"missing {needle!r}"
-    assert "tinkpg conv" not in full, "hidden back-compat alias leaked into the docs"
+    assert "tinkerscope conv" not in full, "hidden back-compat alias leaked into the docs"
+    assert "tinkpg" not in full, "the deprecated tinkpg name leaked into the docs"

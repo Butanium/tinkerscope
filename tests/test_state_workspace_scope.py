@@ -83,7 +83,7 @@ def test_foreign_patch_WITH_panels_claims_the_bus():
 
 
 def test_unstamped_patch_is_treated_as_same_owner():
-    """`tinkpg open <run>` sends no workspace id — terminal-drives-browser must keep
+    """`tinkerscope open <run>` sends no workspace id — terminal-drives-browser must keep
     working, so an unstamped patch applies to whatever workspace is on the bus."""
     _apply(workspace_id="ws-a", panels=_panels(("primary", "run-a")))
     st = _apply(panels=_panels(("primary", "cli-picked")))

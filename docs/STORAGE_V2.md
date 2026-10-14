@@ -83,7 +83,7 @@ partial data. Log progress (16 workspaces, one is 115 MB — a few seconds).
 
 - `GET  /api/workspaces` → **summaries**: `{id, name, created_at, updated_at,
   panels}` — no trees. `?bodies=1` → light bodies (trees incl., blobs excl.) — for
-  the CLI's link/browse paths (`tinkpg` matches active-path content).
+  the CLI's link/browse paths (`tinkerscope` matches active-path content).
 - `GET  /api/workspaces/{id}` → one light body (NEW endpoint).
 - `POST /api/workspaces/{id}/node-blobs` body `{"nodes": ["n1", ...]}` →
   `{"n1": {"token_logprobs": [...], "raw_meta": "..."}, ...}` (NEW; POST because node

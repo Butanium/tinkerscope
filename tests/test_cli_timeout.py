@@ -1,4 +1,4 @@
-"""`tinkpg --timeout`: over real HTTP, a chat whose sample never arrives is
+"""`tinkerscope --timeout`: over real HTTP, a chat whose sample never arrives is
 cancelled server-side after the deadline, and the CLI reports the timeout (not a
 bare "cancelled"). Also pins the sample call staying UNBOUNDED server-side: the
 hang below outlives nothing on the server, only the client's deadline ends it."""

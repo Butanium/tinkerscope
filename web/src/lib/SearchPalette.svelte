@@ -88,7 +88,7 @@
     const q = query.trim();
     const handle = parseNodeHandle(q);
     if (handle) {
-      // a pasted node handle (Copy-node-id, tinkpg output) → that node, not a text search
+      // a pasted node handle (Copy-node-id, tinkerscope output) → that node, not a text search
       searching = true;
       void resolveHandle(q, handle);
       return;

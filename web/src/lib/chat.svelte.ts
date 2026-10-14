@@ -6,7 +6,7 @@
 // connection — that's what lets N panels generate at once (a held stream per
 // panel would exhaust the browser's ~6 per-host HTTP/1.1 connections; see the
 // connection-starvation diagnosis). The panel renders from the bus bucket
-// exactly like a tinkpg-driven chat. Every fire carries `parent_node`, so the
+// exactly like a tinkerscope-driven chat. Every fire carries `parent_node`, so the
 // SERVER folds all n samples + writes blobs at terminal (P2 — the fold's ops
 // event precedes chat_done and the mirror adopts it like any other batch);
 // this store's terminal job is seeding the blob cache via the `folded`
@@ -269,7 +269,7 @@ class ChatStore {
 
   /** Stop one panel if given, else EVERY panel with an in-flight chat. All chats are
    *  detached now (nothing local to abort), so Stop reaches them uniformly through
-   *  the cancel endpoint by chat_id — own OR foreign (tinkpg / another tab). The
+   *  the cancel endpoint by chat_id — own OR foreign (tinkerscope / another tab). The
    *  server fires the guaranteed terminal (chat_done with partials, or
    *  chat_error("cancelled") on 0 samples). `running` is cleared eagerly so the
    *  spinner/composer lift immediately even if the terminal round-trips slowly;

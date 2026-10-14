@@ -138,7 +138,7 @@ offers you one. This matters more than it sounds: a checkpoint with no name
 shows as `934cea31 · final · 2026-07-27`, and on a real account most of them read
 `<hex> · final · <date>` — the label exists but tells you nothing. A name you
 give is stored on the server, so it shows in every tab, survives a restart, is
-visible to the `tinkpg` CLI, and travels inside a share pack. Skipping is one
+visible to the `tinkerscope` CLI, and travels inside a share pack. Skipping is one
 click; the checkpoint is already selected either way.
 
 **Branch** — every regenerate, every edit, every one of your N samples becomes a
@@ -435,10 +435,10 @@ the search box narrows what's searched (replies / user msgs / thinking / system
 match opens its workspace, flips the ‹k/N› cyclers so the matched branch becomes
 visible, flashes the row, and opens the thinking fold when the match was in the
 CoT. After a jump the address bar reads `?w=<id>&node=<id>` — that URL is a
-shareable DEEP LINK that reopens the browser at that exact sample (`tinkpg grep
---link` prints the same URLs from the terminal). The same engine drives `tinkpg
+shareable DEEP LINK that reopens the browser at that exact sample (`tinkerscope grep
+--link` prints the same URLs from the terminal). The same engine drives `tinkerscope
 grep` on the CLI side. Paste a node handle (`<ws>:<panel>:<node>` — what the
-Copy-node-id button and every `tinkpg` printer emit) and the palette skips the
+Copy-node-id button and every `tinkerscope` printer emit) and the palette skips the
 text search: it shows that one node, and Enter jumps to it.
 
 Inside a text box `Ctrl`/`⌘`+`Z` stays the browser's normal text undo — the
@@ -463,7 +463,7 @@ answer to "which one is that"):
 | copy conversation | the same, with text lines | the whole thread as markdown |
 | send to panel | two crossing arrows | copy this branch's context into another panel |
 | view all samples | eye | spread the turn's sibling branches out as cards (later turns hide while open) |
-| copy node handle | `#` | `<ws>:<panel>:<node>` — paste into `tinkpg samples/continue --node …` in any terminal |
+| copy node handle | `#` | `<ws>:<panel>:<node>` — paste into `tinkerscope samples/continue --node …` in any terminal |
 
 Sample cards (an n>1 draw) add: **make active** (circled check — picks that
 branch and drops back to the thread), **continue this sample** (`••→`), **discard
@@ -501,14 +501,14 @@ always check what a chord will do before committing to it.
   a chevron; expand it and they appear on a second line. "Raw" is pinned leftmost
   and never folds.
 - **`live` in the top bar** means the browser is connected to the shared state
-  bus. Everything on screen can also be driven from a terminal via the `tinkpg`
+  bus. Everything on screen can also be driven from a terminal via the `tinkerscope`
   CLI, and a chat fired there streams into this view. The `#` button on a row
   copies its fully-qualified node handle, which is how you point a CLI command at one specific
   message.
 - **A `session` chip in the top bar** means the server runs `--multi-user`: your
   sidebar (models, params, open workspace) is yours alone, while workspaces are
   still shared with everyone on the instance. A terminal drives *your* screen
-  with `tinkpg --session <that id>`; open `?u=<name>` once to rename it. Links
+  with `tinkerscope --session <that id>`; open `?u=<name>` once to rename it. Links
   you copy never carry the session.
 - **Two tabs on the same workspace** is last-writer-wins for edits. Two tabs on
   *different* workspaces is safe.
@@ -586,5 +586,5 @@ and installs it. The export prints the exact `?w=…` links to hand out.
 This guide and the in-app `?` modal (`web/src/lib/HelpModal.svelte`) are twins —
 when UI behavior changes, both change, in the same commit as the code. The
 agent-facing counterpart is the CLI skill (`tinkerscope-cli`, or `tinkerscope:cli`
-via the plugin — terminal / `tinkpg`), which
+via the plugin — terminal / `tinkerscope`), which
 is the one to read when the task is *driving* the tool rather than explaining it.

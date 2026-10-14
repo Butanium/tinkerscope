@@ -4,7 +4,7 @@ There is exactly one PlaygroundState per SESSION, and in single-user mode (the
 default) exactly one session — `default`, the module's `BUS` — so it is one per
 process, as it always was. The browser treats it as the source of truth: it
 subscribes once to `/api/state/events` and re-renders on every push. Both the
-browser and the `tinkpg` CLI mutate this state through the same endpoints, so
+browser and the `tinkerscope` CLI mutate this state through the same endpoints, so
 "drive the model from the terminal" and "click in the browser" stay consistent
 — this is what makes the collaborative "let's-look-at-the-model-together" flow
 work.
@@ -137,7 +137,7 @@ class StateBus:
     One per SESSION: `id` names it; `subscribers` (attached SSE streams) is the
     "is a browser looking at this?" signal the headerless-request resolution in
     api/session.py reads; `last_seen` is bumped by anything a client does through
-    the bus, so `tinkpg sessions` can show which one moved last."""
+    the bus, so `tinkerscope sessions` can show which one moved last."""
 
     def __init__(self, id: str = DEFAULT_SESSION) -> None:
         self.id = id
@@ -173,7 +173,7 @@ class StateBus:
 
     # Everything that describes the OPEN WORKSPACE rather than the process. These are
     # persisted per-workspace by the browser and restored on open; the bus holds them
-    # only so `tinkpg` can see (and drive) what's on screen. Mirror of
+    # only so `tinkerscope` can see (and drive) what's on screen. Mirror of
     # web/src/lib/bus-scope.ts WORKSPACE_FIELDS + the panel-routing keys.
     _WORKSPACE_KEYS = (
         "panels", "workspace_id", "system_prompt", "system_enabled",
@@ -222,7 +222,7 @@ class StateBus:
            is in the module docstring). Restamping now REQUIRES a claim.
 
         A patch with NO `workspace_id` key at all is treated as same-owner:
-        that's the CLI (`tinkpg open`) and any pre-scoping client, and it's what
+        that's the CLI (`tinkerscope open`) and any pre-scoping client, and it's what
         keeps terminal-drives-browser working. (`exclude_unset` in routes/state.py
         preserves the absent-vs-null distinction this relies on.)
         See web/src/lib/bus-scope.ts for the browser half."""
@@ -276,7 +276,7 @@ class StateBus:
     async def alloc_chat_id(self) -> int:
         """chat_id allocation WITHOUT the chat lifecycle: no patch, no fanout,
         no `running` flip, no _inflight bump. For bus-SILENT chats
-        (commit=false + broadcast=false — the `tinkpg probe` shape): the id
+        (commit=false + broadcast=false — the `tinkerscope probe` shape): the id
         keeps the cancel endpoint working while subscribers never learn the
         chat existed. Pairing rule: a chat allocated here must NOT call
         chat_end — the _inflight decrement would release a CONCURRENT chat's
@@ -346,7 +346,7 @@ def last_session_key(sid: str) -> str:
 
 # Global sampling params the CLI can read before any browser connects. On startup we
 # prime the bus from prefs.json's `last_session` so a pure-CLI consumer of a pack
-# (`tinkerscope --pack …` then `tinkpg params`, never opening a browser) sees the pack's
+# (`tinkerscope --pack …` then `tinkerscope params`, never opening a browser) sees the pack's
 # defaults instead of the PlaygroundState() library defaults. ONLY these five — the
 # shared-state params — are seeded; panels/workspace are deliberately left at defaults
 # so the browser's own restore (which fires only when every panel run_id is null) still
@@ -383,7 +383,7 @@ def seed_bus_from_prefs(bus: "StateBus | None" = None, sid: str = DEFAULT_SESSIO
 def get_bus(sid: str = DEFAULT_SESSION) -> StateBus:
     """The bus for a session, created on first use. A NEW non-default session is
     seeded from prefs right here (the default one is seeded by main.lifespan,
-    once settings are final), so a session that only ever sees `tinkpg` still
+    once settings are final), so a session that only ever sees `tinkerscope` still
     starts from the instance's defaults."""
     bus = _BUSES.get(sid)
     if bus is None:
@@ -400,7 +400,7 @@ def live_sessions() -> list[StateBus]:
 
 def list_sessions() -> list[dict[str, Any]]:
     """Every session this process holds, most recently active first — the
-    `GET /api/sessions` / `tinkpg sessions` shape."""
+    `GET /api/sessions` / `tinkerscope sessions` shape."""
     return [
         {
             "id": b.id,

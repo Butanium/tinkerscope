@@ -125,7 +125,7 @@ def run_server(
     if os.environ.get("TINKERSCOPE_VLLM_URL"):
         print(f"  vLLM models from {os.environ['TINKERSCOPE_VLLM_URL']}")
     if os.environ.get("TINKERSCOPE_MULTI_USER"):
-        print("  multi-user: each browser (and `tinkpg --session <id>`) gets its own sidebar; workspaces stay shared")
+        print("  multi-user: each browser (and `tinkerscope --session <id>`) gets its own sidebar; workspaces stay shared")
     try:
         uvicorn.run(
             "tinkerscope.api.main:app",
