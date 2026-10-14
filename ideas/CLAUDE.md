@@ -65,6 +65,7 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 - [Hunt the rest of the DOM-held UI state](dom-held-ui-state-sweep.md) — the tell is state a person SET that no store knows about, inside a re-derived `{#each}`
 - [Sweep for controls that follow-scroll hides](follow-scroll-hidden-controls.md) — affordances whose useful moment is exactly when their anchor is off-screen
 - [Toolbar priority order → observed usage](toolbar-priority-order.md) — the fold order is a judgment call; bump on evidence, check in before redesigning
+- [Bring the older glyphs inside the ink rules](glyph-ink-centering-pass.md) — 10 glyphs still fail `scripts/glyph_sheet.py`'s live-area / centring check (new-blank a full unit high, dataset off the bottom); fix each, then look at it in place with guides drawn
 
 ### Verification practice
 
