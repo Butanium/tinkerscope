@@ -74,7 +74,7 @@ shape does this version mark" index.
 
 | version | what it marks |
 |---|---|
-| `v1.6.1` | docs: the CLI is documented as `tinkerscope` only; `tinkpg` is a deprecated alias. Release process: test suites are tools, not gates; the pre-commit hook checks the generated CLI reference. No code or contract change. |
+| `v1.6.1` | the CLI is documented as `tinkerscope` only (`tinkpg` = deprecated alias); the per-sample think/no-think marker is removed; release process: test suites are tools, not gates, and the pre-commit hook checks the generated CLI reference. No contract change. |
 | `v1.6.0` | search button + pasted node handles in Ctrl+K, discard-others in the row toolbar, think/no-think and prefill-scope glyphs, top-bar tidy, `tinkpg` exits 130 on a stopped fire, provenance in `tinkpg node`/`ws`. Additive: two fields on the caller's `/api/chat` stream (`n`, `cancelled`); disk untouched. |
 | `v1.5.0` | thread system prompt as the first row of each panel (and it now OVERRIDES the workspace prompt instead of being appended), per-panel prefill, focus a panel, undo reopens a closed panel. Wire and disk shapes untouched; the override is a behavior change. |
 | `v1.4.1` | hotfix: the page reconnects its live stream itself after a server restart (a browser behind `ssh -L` never retried). Browser-only; no wire or disk change. |

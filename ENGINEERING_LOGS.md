@@ -3095,3 +3095,15 @@ pre-commit hook runs plus looking: NUL bytes, the web build, ruff F on staged
 files, and — new — `python -m tinkerscope._gen_cli_ref --check` when the CLI, its
 generator or a generated target is staged (two-surface agreement, a second to
 run; the one kind of check this repo's record supports).
+
+### 2026-10-13 — The per-sample think/no-think marker is gone
+
+Clément asked twice whether the struck-brain beside ASSISTANT was new. It wasn't:
+since 2026-07-08 every sample from a thinking=Both draw carried a marker (the
+words "think" / "no think" until `eaea840` made it a glyph, which made it
+noticeable). His call: "more confusing than anything, and it's obvious whether
+there is a CoT or not" — removed from rows and sample cards. The mixed-turn
+FILTER (all / brain / struck brain, with counts) stays: it is a control, not a
+label. `browser_thinking_both` now reads CoT presence per card instead of the
+marker. (Lesson in the same exchange: I twice answered "not new" from the code's
+comment without opening the turn he showed — the data check took one query.)

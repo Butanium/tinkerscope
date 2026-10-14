@@ -82,11 +82,13 @@ def main() -> None:
         )
         card_count = page.locator(".sample-card").count()
 
-        # Every card carries a mode chip; exactly N are the thinking half. DOM order
-        # follows sample_index, so the no-think half must come FIRST. The chip is a
-        # glyph (brain / speech bubble), so read its data-mode, not its text.
-        chips = [e.get_attribute("data-mode") for e in page.locator(".sample-card .mode-tag[data-mode]").all()]
-        think_chips = page.locator(".sample-card .mode-tag.mode-think").count()
+        # Exactly N cards carry a CoT (the thinking half). DOM order follows
+        # sample_index, so the no-think half must come FIRST. (The per-card
+        # think/no-think marker was removed 2026-10-13 — whether a card has a CoT
+        # is visible, which is what this reads.)
+        chips = ["think" if c.query_selector(".sample-reasoning") else "nothink"
+                 for c in page.locator(".sample-card").all()]
+        think_chips = chips.count("think")
         order_ok = chips == ["nothink"] * N + ["think"] * N
 
         page.screenshot(path=SHOT, full_page=True)

@@ -47,7 +47,7 @@ it applies.
   |---|---|
   | brain (`think`) | the thinking half of a send |
   | speech bubble with text, pointed tail (`answer`) | the answer / non-thinking half of a prefill scope |
-  | struck-through brain, dimmed (`no-think`) | this sample was drawn WITHOUT thinking |
+  | struck-through brain, dimmed (`no-think`) | samples drawn WITHOUT thinking (the mixed-turn filter) |
   | thought bubble, trailing circles | inside the think block |
   | dots `••` | carry on from here |
   | two of a thing (`trash-all`) | all of them |

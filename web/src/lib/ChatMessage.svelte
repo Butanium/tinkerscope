@@ -445,7 +445,6 @@
     <div class="sample-header">
       <span class="sample-label">Sample {idx + 1}</span>
       {#if msg.activeSampleIndex === idx}<span class="active-sample-tag">active branch</span>{/if}
-      {#if sample.thinking !== undefined}{@render modeTag(sample.thinking)}{/if}
       {#if sample.finish_reason === 'length'}{@render truncatedTag()}{/if}
       {#if sample.prefill_ignored}{@render prefillIgnoredTag()}{/if}
     </div>
@@ -509,19 +508,6 @@
      shows the same pictogram next to each shortcut). The shift-held variants are
      distinct icons on purpose: regenerate becomes "replace in place" (square in
      the center), edit becomes "fork a full copy" (pencil on a sheet). -->
-
-<!-- think / no-think chip: which renderer mode drew this sample. Only rendered
-     when the field is set, i.e. on thinking=BOTH batches (single-mode turns
-     don't carry it — the whole batch shares one mode). -->
-{#snippet modeTag(think: boolean)}
-  <span
-    class="mode-tag mode-glyph"
-    class:mode-think={think}
-    data-mode={think ? 'think' : 'nothink'}
-    aria-label={think ? 'thinking' : 'no thinking'}
-    data-tooltip={think ? 'Drawn with the thinking renderer' : 'Drawn with the non-thinking renderer'}
-    use:tip><Icon name={think ? 'think' : 'no-think'} size={13} /></span>
-{/snippet}
 
 <!-- "no token data" pill: the Token-probs toggle is on but this turn carries no
      logprobs (OpenRouter / token-streamed paths / turns predating capture). -->
@@ -718,7 +704,6 @@
     <div class="message-head">
       <div class="message-head-left">
         <div class="message-role">{msg.role}</div>
-        {#if msg.thinking !== undefined && !isMultiSample}{@render modeTag(msg.thinking)}{/if}
         {#if msg.finish_reason === 'length' && !isMultiSample}{@render truncatedTag()}{/if}
         {#if msg.prefill_ignored && !isMultiSample}{@render prefillIgnoredTag()}{/if}
         <!-- Not while running: the pill is a verdict on a finished turn, and the
@@ -958,13 +943,7 @@
   .hidden-below-strip:hover { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
   /* Amber "truncated" pill — the turn/sample hit the max-tokens limit. */
   .truncated-tag { font-size: 0.62rem; color: #b45309; background: #f59e0b14; border: 1px solid #f59e0b66; border-radius: var(--radius-pill); padding: 0 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; cursor: default; }
-  /* think / no-think chip (thinking=BOTH batches). Both halves neutral: the glyph tells
-     them apart, and accent here means active/selected — it would rank one half above
-     the other and compete with the card's "active branch" mark. */
   .mode-tag { font-size: 0.62rem; color: var(--color-text-muted); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius-pill); padding: 0 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; cursor: default; white-space: nowrap; }
-  /* glyph instead of the word: brain = thinking renderer, struck brain = non-thinking (docs/GLYPHS.md) */
-  /* the svg box already carries ~1.4px of air around the ink, so the pill adds little */
-  .mode-tag.mode-glyph { display: inline-flex; align-items: center; padding: 0 2px; }
   /* Header rows (a row's head, a card's header) CENTRE their items, and the text in
      them trims its line box to cap height + baseline, so centring a box centres its
      caps: glyph pills, text pills, labels and the filter's counts line up by
@@ -973,7 +952,7 @@
   @supports (text-box: trim-both cap alphabetic) {
     /* the padding gives back exactly what the trim took (1lh − 1cap), so no box
        changes height — only where its caps sit inside it */
-    .message-head .message-role, .sample-label, .active-sample-tag, .seg-n, .truncated-tag, .mode-tag:not(.mode-glyph) {
+    .message-head .message-role, .sample-label, .active-sample-tag, .seg-n, .truncated-tag, .mode-tag {
       text-box: trim-both cap alphabetic; padding-block: calc((1lh - 1cap) / 2);
     }
   }

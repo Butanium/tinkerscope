@@ -150,9 +150,9 @@ the row toolbar's **eye** reopens the turn as the full card stack — every rege
 batch pooled, the active branch marked, the turns below hidden until you exit
 (**back to thread** at the top, `Esc`, the strip under the cards, or the eye again brings them back — and **make
 active** on a card exits onto that branch). When the
-siblings mix thinking and non-thinking draws, each card wears a brain (drawn with
-thinking) or a struck-through brain (without), and a filter at the turn's top
-right — `all`, brain, struck brain, each with its count — narrows the cards.
+siblings mix thinking and non-thinking draws, a filter at the turn's top right —
+`all`, brain (with thinking), struck brain (without), each with its count —
+narrows the cards.
 
 **Thread** — a workspace can hold several independent conversations. The `⑂
 branch from start` toggle next to the composer makes your next message a new

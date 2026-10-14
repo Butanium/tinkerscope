@@ -47,6 +47,12 @@ WIRE contract, not on the UI (`docs/RELEASING.md`).
   modal). `tinkpg` keeps working as a deprecated alias. A bare `tinkerscope` (or
   `tinkerscope <dir>`) still means `serve`.
 
+### Removed
+
+- The think / no-think marker beside each sample of a thinking=Both draw — whether
+  a sample has a CoT is visible. The filter on a mixed turn (all / with / without
+  thinking) stays.
+
 ## [1.6.0] — 2026-10-13
 
 A tidier screen, and `tinkpg` that says when a fire was stopped. Additive on the
