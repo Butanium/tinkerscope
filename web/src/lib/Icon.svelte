@@ -19,12 +19,12 @@
     | 'regen' | 'replace' | 'edit' | 'edit-copy' | 'trash' | 'trash-all'
     | 'tag' | 'tag-quick' | 'continue' | 'continue-think'
     | 'copy' | 'copy-all' | 'check' | 'hash' | 'send-to'
-    | 'use-sample' | 'discard-others'
+    | 'use-sample' | 'discard-others' | 'discard-path'
     // sidebar / chrome
     | 'chart' | 'pins' | 'dataset' | 'help' | 'stop' | 'undo' | 'plus' | 'minus'
     | 'focus' | 'unfocus'
     // prefill scope: the thinking half / the answer (non-thinking) half
-    | 'think' | 'answer'
+    | 'think' | 'answer' | 'no-think' | 'search'
     | 'new-blank' | 'arrow-right' | 'sidebar-fold' | 'sidebar-unfold'
     | 'theme-light' | 'theme-dark' | 'theme-auto' | 'eye' | 'upload' | 'external';
 </script>
@@ -78,6 +78,9 @@
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M5.2 8.3l1.9 1.9 3.7-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'discard-others'}
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><rect x="2.5" y="5" width="7" height="8.5" rx="1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M7 2.5h6.5V11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" opacity="0.5" /><path d="M10.8 4.8l2.4 2.4M13.2 4.8l-2.4 2.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+{:else if name === 'discard-path'}
+  <!-- Shift+discard: the path on screen stays (a chain of turns), every branch off it goes -->
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M5 3v10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><circle cx="5" cy="3" r="1.3" fill="currentColor" /><circle cx="5" cy="8" r="1.3" fill="currentColor" /><circle cx="5" cy="13" r="1.3" fill="currentColor" /><path d="M6.8 8h1.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" opacity="0.5" /><path d="M10 6.3l3.4 3.4M13.4 6.3 10 9.7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'chart'}
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><rect x="2" y="9" width="3" height="5" rx="0.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><rect x="6.5" y="5" width="3" height="9" rx="0.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><rect x="11" y="2" width="3" height="12" rx="0.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'pins'}
@@ -106,11 +109,19 @@
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M6 2.5V6H2.5M13.5 6H10V2.5M10 13.5V10h3.5M2.5 10H6v3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'think'}
   <!-- brain: the thinking half of a send -->
-  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M8 3.2a2.2 2.2 0 0 0-4.1.6A2.6 2.6 0 0 0 2.3 8.1a2.5 2.5 0 0 0 .8 3.3A2.4 2.4 0 0 0 8 12.6Z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M8 3.2a2.2 2.2 0 0 1 4.1.6A2.6 2.6 0 0 1 13.7 8.1a2.5 2.5 0 0 1-.8 3.3A2.4 2.4 0 0 1 8 12.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M3.9 3.8c.2 1 .8 1.6 1.7 1.8M12.1 3.8c-.2 1-.8 1.6-1.7 1.8M2.3 8.1c.7-.4 1.5-.5 2.3-.2M13.7 8.1c-.7-.4-1.5-.5-2.3-.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M8 3.56a1.94 1.94 0 0 0 -3.61 0.53A2.29 2.29 0 0 0 2.98 7.87a2.2 2.2 0 0 0 0.7 2.9A2.11 2.11 0 0 0 8 11.83Z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M8 3.56a1.94 1.94 0 0 1 3.61 0.53A2.29 2.29 0 0 1 13.02 7.87a2.2 2.2 0 0 1 -0.7 2.9A2.11 2.11 0 0 1 8 11.83" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M4.39 4.08c0.18 0.88 0.7 1.41 1.5 1.58M11.61 4.08c-0.18 0.88 -0.7 1.41 -1.5 1.58M2.98 7.87c0.62 -0.35 1.32 -0.44 2.02 -0.18M13.02 7.87c-0.62 -0.35 -1.32 -0.44 -2.02 -0.18" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'answer'}
   <!-- speech bubble with text: the answer (non-thinking) half. Pointed tail on
        purpose — the thought bubble (`continue-think`) trails circles -->
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M4.5 3h7A2.5 2.5 0 0 1 14 5.5v3a2.5 2.5 0 0 1-2.5 2.5H8.2L5 13.4V11h-.5A2.5 2.5 0 0 1 2 8.5v-3A2.5 2.5 0 0 1 4.5 3Z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M5.3 6h5.4M5.3 8h3.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+{:else if name === 'no-think'}
+  <!-- the think brain, dimmed and struck through: drawn WITHOUT thinking. Not the
+       speech bubble — that is the answer half of a prefill scope, a different question.
+       Opacity, not a mask: a mask id repeats per instance and dies with a hidden first copy -->
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><g opacity="0.55"><path d="M8 3.56a1.94 1.94 0 0 0 -3.61 0.53A2.29 2.29 0 0 0 2.98 7.87a2.2 2.2 0 0 0 0.7 2.9A2.11 2.11 0 0 0 8 11.83Z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M8 3.56a1.94 1.94 0 0 1 3.61 0.53A2.29 2.29 0 0 1 13.02 7.87a2.2 2.2 0 0 1 -0.7 2.9A2.11 2.11 0 0 1 8 11.83" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M4.39 4.08c0.18 0.88 0.7 1.41 1.5 1.58M11.61 4.08c-0.18 0.88 -0.7 1.41 -1.5 1.58M2.98 7.87c0.62 -0.35 1.32 -0.44 2.02 -0.18M13.02 7.87c-0.62 -0.35 -1.32 -0.44 -2.02 -0.18" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></g><path d="M2.2 13.8 13.8 2.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+{:else if name === 'search'}
+  <!-- magnifier: the Ctrl+K search palette -->
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M10.4 10.4 13.6 13.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'arrow-right'}
   <!-- "push it that way": unfold a reduced panel, send a draft into a panel -->
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
@@ -126,8 +137,9 @@
 {:else if name === 'theme-dark'}
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M14 9.2A6 6 0 0 1 6.8 2 6 6 0 1 0 14 9.2Z" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'theme-auto'}
-  <!-- monitor glyph (follows the system scheme) -->
-  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="8" rx="1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M6 14h4M8 11v3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+  <!-- half light, half dark: follows the system scheme (was a monitor, which read
+       as "screen" rather than "theme") -->
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M8 2.4a5.6 5.6 0 0 0 0 11.2Z" fill="currentColor" /></svg>
 {:else if name === 'eye'}
   <!-- "view": the read-only badge (static site) AND the row-toolbar
        view-all-samples toggle -->

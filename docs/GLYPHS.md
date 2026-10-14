@@ -6,10 +6,14 @@ it applies.
 
 ## Drawing
 
-- **Grid: `viewBox="0 0 16 16"`.** Keep strokes inside 1.5–14.5 so round caps
-  don't touch the edge. One grid means one stroke weight looks the same
+- **Grid: `viewBox="0 0 16 16"`.** One grid means one stroke weight looks the same
   everywhere. Before 2026-10-10 five glyphs used a 14 box, so the same 1.5 stroke
   drew 14% heavier.
+- **Ink (stroke included) inside 1–15, centred on y = 8 (±0.3).** A glyph whose ink
+  sits low in its box looks low next to text even when the box is centred perfectly.
+  The brain sat 0.25 low and 1.25px under the baseline beside "ASSISTANT" until it was
+  re-centred (2026-10-13). `scripts/glyph_sheet.py` prints every glyph that breaks
+  this. Several older ones still do; fixing them is open.
 - **Stroke: `stroke="currentColor" stroke-width="1.4"`, round caps and joins,
   `fill="none"` on the svg.** A mix of 1.2 to 2.0 made some buttons look bold and
   others faint in the same toolbar. 1.4 is ~1.1 px at the 13 px default.
@@ -35,16 +39,21 @@ it applies.
   `regen`→`replace` (square in the loop), `edit`→`edit-copy` (pencil on a
   sheet), `trash`→`trash-all` (two cans), `tag`→`tag-quick` (filled),
   `continue`→`continue-think` (the dots move into a thought bubble).
-- **Vocabulary, reuse it:**
+- **Vocabulary, reuse it.** Keep the two "not thinking" glyphs apart. `answer`
+  marks which half of a send a prefill goes to. `no-think` marks how a sample was
+  drawn: think vs no-think, not think vs answer (Clément, 2026-10-13).
 
   | Glyph | Means |
   |---|---|
   | brain (`think`) | the thinking half of a send |
-  | speech bubble with text, pointed tail (`answer`) | the answer / non-thinking half |
+  | speech bubble with text, pointed tail (`answer`) | the answer / non-thinking half of a prefill scope |
+  | struck-through brain, dimmed (`no-think`) | this sample was drawn WITHOUT thinking |
   | thought bubble, trailing circles | inside the think block |
   | dots `••` | carry on from here |
   | two of a thing (`trash-all`) | all of them |
   | corners out / in (`focus` / `unfocus`) | show alone / back to all |
+  | magnifier (`search`) | the Ctrl+K search palette |
+  | half-filled circle (`theme-auto`) | theme follows the system (sun = light, moon = dark) |
   | `⧉` badge (CSS, not an Icon) | Ctrl/⌘ held: this click fans out to every panel |
 
 ## Sizes it must survive

@@ -2932,29 +2932,81 @@ coming (thinking=both may be inherited, so it can't compute 2n itself).
   K`") now covers `continue` and `compare`, and a stop that kept samples, not only
   a send that lost its fire.
 
-### 2026-10-13 — think / no-think as glyphs; prefill editors fold; scope switch only when unfolded
+### 2026-10-13 — think / no-think as glyphs; prefill scope inside the pill; editors fold; search button
 
 - **After sampling** (cards in All and Cycle, a row's mode chip, the per-turn filter),
   "think" / "no think" are now glyphs: brain vs a new `no-think` (the same brain,
   dimmed and struck through). My first cut reused the `answer` speech bubble for
   "no think". Clément rejected it: here the question is think vs no-think, not think
-  vs answer. GLYPHS.md now keeps the two apart. The filter's `all` stays a word.
-  `no-think` dims with `opacity`, not a mask: a mask id repeats per Icon instance
-  and resolves to the first copy, which breaks when that copy is hidden.
-  Smokes read `data-mode` / `data-pick` now (`browser_thinking_both`,
+  vs answer. GLYPHS.md now keeps the two apart. The prefill scope keeps the bubble:
+  there the halves ARE thinking vs answer. Both chips are neutral grey. Think used
+  to be accent, but accent means active/selected, and it ranked one half above the
+  other next to the card's "active branch" mark. The filter is a 20px pill like the
+  ‹k/N› cycler beside it, `all` · brain n · struck brain n, with counts at the
+  cycler's weight. `no-think` dims with `opacity`, not a mask: a mask id repeats per
+  Icon instance and resolves to the first copy, which breaks when that copy is
+  hidden. Smokes read `data-mode` / `data-pick` (`browser_thinking_both`,
   `browser_samples_view`), since the chips have no text.
+- **Header alignment by construction.** The first fix tuned −1px / −1.5px nudges per
+  context. Clément asked for a layout where alignment is easy instead. Now the
+  card header is a flex row like the row head, and the text in both trims its box to
+  the caps (`text-box: trim-both cap alphabetic`) with `padding-block:
+  calc((1lh - 1cap) / 2)` giving the height back. Centring a box then centres its
+  caps, and no box changes height. Measured: chips, filter glyphs and counts sit
+  within 0.3px of the label's caps centre. Without `text-box` support, things centre
+  by box (~1px low).
+- **Prefill scope switch = segments INSIDE the pill** (`SplitChip`'s new `extra` slot,
+  `PrefillScopeToggle embedded`). It shows while the prefill is unfolded or enabled,
+  in the composer and in each panel. The text preview shows only while the prefill is
+  enabled, right after the pill (in the composer it used to sit after the thread
+  switcher, which read as a threads thing). Clément's call, after the switch kept
+  showing on a folded, disabled prefill.
 - **Fold animation** (`lib/motion.ts`): svelte `slide` + a real fade, 180 ms,
   instant under prefers-reduced-motion. On the panel textarea and on a wrapper
   around each composer editor (textarea + its muted hint), so the hint leaves with
   its box. A child's local transition wouldn't play when the parent `{#if}` closes.
   Measured per animation frame on a panel: `.messages` scrollTop and message
-  positions don't change while the footer grows or shrinks. Only the visible
-  height changes.
-- **The scope switch shows only while the prefill is unfolded** (Clément). Before,
-  it also showed when the prefill was armed or folded with text. Folded = pill +
-  text preview. A scope that the thinking mode never samples still greys the
-  folded line.
-
+  positions don't change while the footer grows or shrinks.
+- **Card view exits at the top**: a **back to thread** pill in the turn's head (20px,
+  same as the filter and cycler) and `Esc`. Before, the only exit was the strip under
+  the cards, a long scroll away on a 40-sample draw. Esc order is innermost first:
+  card view → focus ring → focus mode.
+- **The brain glyph was off-centre in its own box** (ink y 1.3–15.2, 0.25 low, past
+  the margins). Next to "ASSISTANT" it hung 1.25px below the baseline even with its box
+  centred. Clément had to draw the guide lines himself to show me. Re-centred and
+  scaled (0.88) to ink 1.8–14.3. Chip and filter glyphs are now cap-height (11px), the
+  chip pill is padded 0/2px, and `scripts/glyph_sheet.py` flags any glyph whose ink
+  leaves 1–15 or sits >0.3 off centre (a dozen older ones still do).
+- **Discard others in the row toolbar**, right after delete, on any row with siblings:
+  keep the branch on screen, delete its siblings. Before, it existed only on sample
+  cards. Ctrl/⌘ on it (row or card) works like Ctrl+delete: every panel keeps the
+  branch it shows at that depth, one Ctrl+Z restores all. A card's sample needn't be
+  the active child, so the depth comes from its PARENT's place on the active path.
+  **Shift = keep only the path on screen** (Clément's pick): every branch off the active
+  path through the clicked turn is deleted, above and below it, in THIS thread only.
+  Root siblings (other threads) stay. Glyph `discard-path`, a chain of turns with a
+  ✕ off it. Ctrl+Shift does it per panel on each panel's own active path; one undo
+  group.
+- **Search button** (`search` glyph), right of Stop in the sidebar icon row. It opens
+  the Ctrl+K palette and is shown on static sites too. **Help and theme moved to the
+  top bar**, next to the live dot. They're page-level viewer things and the sidebar
+  row is workspace actions. That also keeps the row at 7 buttons + fold on one line
+  with the original 8px gaps (with search added and help still in it, the row needed
+  321px of 287).
+- **`theme-auto` is a half-filled circle**, not a monitor (Clément: the monitor read as
+  "screen"; he asked for half night / half light). ◐ is the common auto-theme mark and
+  stays legible at 15px, where a sun/moon split would not.
+- **Theme toggle in the top-left corner** (Clément picked it over "top right with help"
+  and "after the title"). Its glyph's x is set to the sidebar buttons' glyph x (23px,
+  measured) so the corner reads as part of the left column.
+- **Prefill "clear" shows only while the editor is open**, right after the pill. It
+  used to sit at the far end of the composer row, after the thread switcher.
+- **Top bar is 33px, not 49**: vertical padding 12px → 4px (Clément, after trying it
+  with an in-browser assistant). Content keeps its size and stays centred.
+- **Tooltip width fix** (global): `.tooltip-instant` is `position: fixed` with a
+  `left`, so near the right edge its shrink-to-fit width was only the space left of
+  `left`, and a short tip wrapped into a narrow three-line slab. `width: max-content`
+  (still capped by max-width) lets `place()` measure the real width and shift it.
 
 ### 2026-10-13 — Provenance and `grep --scope` in the CLI
 

@@ -5,12 +5,18 @@ the app draws it, next to its neighbours, in both themes.
 
     uv run python scripts/glyph_sheet.py /tmp/glyphs.png
     uv run python scripts/glyph_sheet.py /tmp/old.png --icon /path/to/old/Icon.svelte
+
+It also prints every glyph whose ink (stroke included, measured at 160 px) leaves
+the 1–15 live area or sits more than 0.3 units off the box centre vertically. An off-centre glyph
+looks low or high next to text even when its box is centred perfectly.
 """
 
 import argparse
+import io
 import re
 from pathlib import Path
 
+from PIL import Image
 from playwright.sync_api import sync_playwright
 
 REPO = Path(__file__).resolve().parent.parent
@@ -61,7 +67,25 @@ def main() -> None:
         page = browser.new_page(viewport={"width": 110 * a.cols, "height": 300}, device_scale_factor=2)
         page.set_content(html)
         page.screenshot(path=str(a.out), full_page=True)
+        bad = []
+        probe = browser.new_page()
+        for name, svg in items:
+            probe.set_content(f"<body style='margin:0;background:#fff;color:#000'><div style='display:inline-block'>{svg.replace('SZ', '160')}</div></body>")
+            img = Image.open(io.BytesIO(probe.locator("svg").screenshot())).convert("L")
+            w, h = img.size
+            px = img.load()
+            rows = [y for y in range(h) if any(255 - px[x, y] > 60 for x in range(w))]
+            cols = [x for x in range(w) if any(255 - px[x, y] > 60 for y in range(h))]
+            if not rows:
+                continue
+            k = 16 / h
+            y0, y1, x0, x1 = rows[0] * k, (rows[-1] + 1) * k, cols[0] * k, (cols[-1] + 1) * k
+            if min(y0, x0) < 1.0 or max(y1, x1) > 15.0 or abs((y0 + y1) / 2 - 8) > 0.3:
+                bad.append(f"  {name}: ink x {x0:.1f}–{x1:.1f}, y {y0:.1f}–{y1:.1f} (centre y {(y0 + y1) / 2:.2f})")
         browser.close()
+    if bad:
+        print("outside the live area / off-centre (docs/GLYPHS.md):")
+        print("\n".join(bad))
     print(f"{len(items)} glyphs → {a.out}")
 
 

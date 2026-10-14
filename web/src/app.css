@@ -191,10 +191,13 @@ select {
 .seg-toggle.seg-icons .seg-btn { display: inline-flex; align-items: center; gap: 2px; padding: 0 6px; line-height: 1; }
 .seg-toggle.seg-icons.dim .seg-btn.active { background: var(--color-border); color: var(--color-text-secondary); }
 .seg-toggle.seg-icons .seg-btn.skipped { background: none; color: var(--color-accent); box-shadow: inset 0 0 0 1px var(--color-accent); }
+/* inside a SplitChip (its `extra` slot): the pill's border is the frame */
+.seg-toggle.seg-icons.embedded { border: none; border-radius: 0; background: none; }
+.split-chip.on .seg-toggle.seg-icons.embedded .seg-btn + .seg-btn { border-left-color: var(--color-accent); }
 /* Ctrl/⌘ held → a click on the hovered control fans out to every panel: the row
    toolbar's ⧉ badge, shown on hover only (an always-on badge on every panel's
-   footer would flash on each Ctrl+C). `.left` puts it by a SplitChip's power dot. */
+   footer would flash on each Ctrl+C). By the power dot or by the scope glyphs, whichever is hovered. */
 .all-host { display: inline-flex; position: relative; flex-shrink: 0; }
-.all-host::after { position: absolute; top: -6px; right: -4px; font-size: 0.62rem; line-height: 1; color: var(--color-accent); pointer-events: none; }
-.all-host.pwr::after { left: -4px; right: auto; }
-.all-host.all:not(.pwr):hover::after, .all-host.all.pwr:has(.zone.pwr:hover)::after { content: '⧉'; }
+.all-host::after { position: absolute; top: -6px; font-size: 0.62rem; line-height: 1; color: var(--color-accent); pointer-events: none; }
+.all-host.all:has(.zone.pwr:hover)::after { content: '⧉'; left: -4px; }
+.all-host.all:has(.seg-btn:hover)::after { content: '⧉'; right: -4px; }

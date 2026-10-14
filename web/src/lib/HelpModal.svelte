@@ -51,9 +51,9 @@
     { icon: 'chart', name: 'distribution chart', what: 'the "what does it usually say?" view over an N-sample draw' },
     { icon: 'pins', name: 'pins', what: 'browse everything you bookmarked, as a slideshow' },
     { icon: 'regen', name: 'refresh', what: 'rescan the run directory + re-check which checkpoints still serve' },
-    { icon: 'help', name: 'help', what: 'this modal' },
     { icon: 'undo', name: 'undo', what: 'put back the last thing you deleted (Ctrl+Z) — greyed out when there is nothing to undo' },
     { icon: 'stop', name: 'stop', what: 'abort generation in every panel' },
+    { icon: 'search', name: 'search', what: 'find text in every workspace — the same as Ctrl+K' },
     { icon: 'sidebar-fold', name: 'fold', what: 'collapse the sidebar to a thin rail for more panel width — » brings it back; Stop stays on the rail' }
   ];
 
@@ -83,7 +83,7 @@
       rows: [
         { keys: ['↑ / ↓'], what: 'Move the focus ring up/down that panel' },
         { keys: ['← / →'], what: "Cycle the focused row's ‹k/N› sibling branches" },
-        { keys: ['Esc'], what: 'Drop the focus ring — with none, leave a focused panel' }
+        { keys: ['Esc'], what: 'Close an open card view, else drop the focus ring, else leave a focused panel' }
       ]
     },
     {
@@ -92,11 +92,12 @@
         {
           keys: ['Ctrl / ⌘'],
           what: 'Do it in ALL panels at once (only with >1 panel) —',
-          also: ['edit', 'regen', 'trash', 'continue']
+          also: ['edit', 'regen', 'trash', 'continue', 'discard-others']
         },
         { keys: ['Shift'], icon: 'edit', btn: 'edit', what: 'Fork a full editable copy — the turns below come along, and nothing is generated' },
         { keys: ['Shift'], icon: 'regen', btn: 'regenerate', what: 'Replace this branch in place instead of adding a sibling' },
         { keys: ['Shift'], icon: 'trash', btn: 'delete', what: 'Delete every branch at this turn, not just the shown one' },
+        { keys: ['Shift'], icon: 'discard-path', btn: 'discard others', what: 'Keep only the path on screen: every branch off it, in the whole thread, goes' },
         { keys: ['Shift'], icon: 'continue', btn: 'continue', what: 'Resume INSIDE the think block (assistant turns with reasoning)' },
         { keys: ['Shift'], icon: 'copy', btn: 'copy', what: 'Include the thinking text in the copy' },
         { keys: ['Shift'], icon: 'tag', btn: 'bookmark', what: 'Pin instantly, skipping the note dialog' }
@@ -240,7 +241,8 @@ codex plugin add tinkerscope@tinkerscope</pre>
     <section class="help-sec">
       <h3>The sidebar icon row</h3>
       {@render legend(SIDEBAR_BUTTONS)}
-      <p class="help-note">The leftmost icon cycles the theme: light → dark → auto (follows your system).</p>
+      <p class="help-note">The theme toggle is the top-left corner of the page (light → dark → auto, following
+        your system); <Icon name="help" />, this help, is at the top right next to the live dot.</p>
     </section>
 
     <section class="help-sec">
@@ -334,10 +336,12 @@ codex plugin add tinkerscope@tinkerscope</pre>
       <p class="help-note">
         The card view isn't gone once you collapse it: the <b>eye</b> in the row toolbar reopens ANY turn with
         sibling branches as the full card stack — every regen batch pooled, the active branch marked. Later
-        turns hide while it's open (a strip below the cards counts them and clicks back), and picking a card
+        turns hide while it's open (a strip below the cards counts them and clicks back; <b>back to thread</b> at the top and Esc close it too), and picking a card
         with <b>make active</b> closes the view onto that branch. When the samples mix
-        thinking and non-thinking draws, an <b>all / think / no think</b> filter appears at the turn's top
-        right to narrow the cards — it's view-only and local to that turn.
+        thinking and non-thinking draws, each card is marked <Icon name="think" /> (drawn with thinking) or
+        <Icon name="no-think" /> (without), and a filter appears at the turn's top right — <b>all</b>,
+        <Icon name="think" /> or <Icon name="no-think" />, each with its count — to narrow the cards. It's
+        view-only and local to that turn.
       </p>
     </section>
 
@@ -354,9 +358,9 @@ codex plugin add tinkerscope@tinkerscope</pre>
       <p class="help-note">
         Above each column's own box is its <b>prefill</b> pill. A panel prefill replaces the composer's
         prefill for every send to that panel (composer, the column's own box, regenerate) — the way to give
-        two model families the opening each needs. Beside it, <Icon name="think" /><Icon name="answer" /> /
-        <Icon name="think" /> / <Icon name="answer" /> pick which samples get it: thinking and non-thinking,
-        thinking only, non-thinking only. When that doesn't fit the thinking mode the line greys out and the
+        two model families the opening each needs. Inside it, <Icon name="think" /><Icon name="answer" /> /
+        <Icon name="think" /> / <Icon name="answer" /> (shown while it's unfolded or enabled) pick which samples get
+        it: thinking and non-thinking, thinking only, non-thinking only. When that doesn't fit the thinking mode the line greys out and the
         panel gets no prefill at all. The line stays when you focus the panel. Hold <kbd>Ctrl/⌘</kbd> on a
         scope glyph or the pill's dot to set every panel at once (arming only the panels that have text).
       </p>

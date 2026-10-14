@@ -50,6 +50,7 @@
   import PickerDropdown from '$lib/PickerDropdown.svelte';
   import SplitChip from '$lib/SplitChip.svelte';
   import PrefillScopeToggle from '$lib/PrefillScopeToggle.svelte';
+  import { fold } from '$lib/motion';
   import ThreadSystemRow from '$lib/ThreadSystemRow.svelte';
   import TruncLabel from '$lib/TruncLabel.svelte';
   import { loadHighlightRules, highlightStore, colorRules } from '$lib/highlights.svelte';
@@ -1492,7 +1493,13 @@
     if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
     if (isEditableTarget(e.target) || anyModalOpen()) return;
     if (e.key === 'Escape') {
-      if (kbFocus) {
+      // innermost first: an open card view (closing it drops any focus ring
+      // inside it too), then the focus ring, then focus mode
+      if (Object.values(samplesOpen).some(Boolean)) {
+        samplesOpen = {};
+        kbFocus = null;
+        e.preventDefault();
+      } else if (kbFocus) {
         kbFocus = null;
         e.preventDefault();
       } else if (focusPanel) {
@@ -2142,6 +2149,28 @@
     <div class="pack-drop-hint">Drop a share pack to open it</div>
   {/if}
   <header class="topbar">
+    <!-- theme in the corner: a viewer setting, set once; its glyph lines up with the
+         sidebar buttons' glyphs below it -->
+    <button
+      class="topbar-btn topbar-theme"
+      data-testid="theme-toggle"
+      aria-label="Theme"
+      onclick={cycleTheme}
+      data-tooltip={themeMode === 'auto'
+        ? 'Theme: auto (follows system) — click for light'
+        : themeMode === 'light'
+          ? 'Theme: light — click for dark'
+          : 'Theme: dark — click for auto'}
+      use:tip
+    >
+      {#if themeMode === 'light'}
+        <Icon name="theme-light" size={15} />
+      {:else if themeMode === 'dark'}
+        <Icon name="theme-dark" size={15} />
+      {:else}
+        <Icon name="theme-auto" size={15} />
+      {/if}
+    </button>
     <div class="topbar-title">tinkerscope</div>
     {#if health?.root}
       <div class="topbar-root" title={health.root}>{health.root}</div>
@@ -2182,6 +2211,9 @@
         {/if}
       {/if}
     </div>
+    <button class="topbar-btn" onclick={() => (showHelp = true)} data-tooltip="Help and keyboard shortcuts" use:tip aria-label="Help">
+        <Icon name="help" size={15} />
+      </button>
   </header>
 
   {#if degraded}
@@ -2198,24 +2230,6 @@
     <!-- Sidebar -->
     <aside class="sidebar" class:folded={sidebarFolded}>
       <div class="sidebar-top-actions">
-        <button
-          class="theme-toggle"
-          onclick={cycleTheme}
-          data-tooltip={themeMode === 'auto'
-            ? 'Theme: auto (follows system) — click for light'
-            : themeMode === 'light'
-              ? 'Theme: light — click for dark'
-              : 'Theme: dark — click for auto'}
-          use:tip
-        >
-          {#if themeMode === 'light'}
-            <Icon name="theme-light" size={16} />
-          {:else if themeMode === 'dark'}
-            <Icon name="theme-dark" size={16} />
-          {:else}
-            <Icon name="theme-auto" size={16} />
-          {/if}
-        </button>
         <button class="theme-toggle" onclick={openChart} data-tooltip="View response distribution chart (needs samples)" use:tip>
           <Icon name="chart" size={16} />
         </button>
@@ -2227,12 +2241,8 @@
             <Icon name="regen" size={14} />
           </button>
         {/if}
-        <button class="theme-toggle" onclick={() => (showHelp = true)} data-tooltip="How to use tinkerscope — features + keyboard shortcuts" use:tip aria-label="Help">
-          <Icon name="help" size={15} />
-        </button>
         {#if !readOnly}
-          <!-- Left of stop on purpose: stop's rightmost slot is how you find the one
-               red button mid-generation. Undo stays neutral-styled, outside that family. -->
+          <!-- Undo stays neutral-styled, apart from the red stop. -->
           <button class="theme-toggle" onclick={() => undo.undo()} data-tooltip={undoTip} use:tip disabled={!undo.canUndo} aria-label="Undo last delete">
             <Icon name="undo" size={15} />
           </button>
@@ -2240,8 +2250,12 @@
             <Icon name="stop" size={14} />
           </button>
         {/if}
-        <!-- Pinned to the sidebar's right edge, so Stop stays the rightmost
-             ACTION. Folded, the row turns into the rail: this on top, Stop below. -->
+        <!-- right of Stop (Clément's placement); a static site searches too -->
+        <button class="theme-toggle" onclick={() => (showSearch = true)} data-tooltip="Search all workspaces (Ctrl+K)" use:tip aria-label="Search all workspaces" data-testid="search-open">
+          <Icon name="search" size={15} />
+        </button>
+        <!-- Pinned to the sidebar's right edge. Folded, the row turns into the rail:
+             this on top, Stop below. -->
         <button
           class="sidebar-fold-btn"
           onclick={toggleSidebarFolded}
@@ -2804,7 +2818,8 @@
                   onContinue={(allPanels, thinkingOnly) => branchOps.continueMessage(p.panel, msg, allPanels, thinkingOnly)}
                   onDelete={(allPanels, allSiblings) => (allPanels ? branchOps.deleteMessageAll(p.panel, msg, allSiblings) : branchOps.deleteMessage(p.panel, msg, allSiblings))}
                   onSelectSample={(idx) => selectSample(p.panel, msg, idx)}
-                  onDiscardOthers={(idx) => branchOps.discardOtherSamples(p.panel, msg, idx)}
+                  onDiscardOthers={(idx, all, path) => branchOps.discardOtherSamples(p.panel, msg, idx, all && isComparing && !focusPanel, path)}
+                  onDiscardSiblings={(all, path) => branchOps.discardOthers(p.panel, msg, all && isComparing && !focusPanel, path)}
                   onContinueSample={(idx) => branchOps.continueSample(p.panel, msg, idx)}
                   onDeleteSample={(idx) => branchOps.deleteSample(p.panel, msg, idx)}
                   onEdit={(content, reasoning, copyDownstream, allPanels, system) => (allPanels ? branchOps.applyEditAll(p.panel, msg, content, reasoning, copyDownstream, system) : branchOps.applyEdit(p.panel, msg, content, reasoning, copyDownstream, system))}
@@ -2853,8 +2868,19 @@
               {@const ppSkipped = panelPrefillActive(p.panel) && !scopeApplies(pp?.scope ?? 'all')}
               <!-- This panel's prefill: kept in focus mode too (it still governs
                    the composer's sends here), unlike the continue box below. -->
+              {#snippet ppScope()}
+                <PrefillScopeToggle
+                  embedded
+                  scope={pp?.scope ?? 'all'}
+                  dim={!panelPrefillActive(p.panel)}
+                  skipped={ppSkipped ? `thinking is ${s.thinking === false ? 'off' : 'on'}` : null}
+                  all={prefillFanOut}
+                  testid="panel-prefill-scope"
+                  onpick={(sc, all) => setPanelPrefillScope(p.panel, sc, all && !focusPanel)}
+                />
+              {/snippet}
               <div class="panel-prefill-line" class:skipped={ppSkipped}>
-                <span class="all-host pwr" class:all={prefillFanOut}>
+                <span class="all-host" class:all={prefillFanOut}>
                   <SplitChip
                     label="prefill"
                     active={panelPrefillActive(p.panel)}
@@ -2865,24 +2891,16 @@
                     editTip="This panel's prefill — replaces the composer prefill here"
                     onpower={(e) => togglePanelPrefillOn(p.panel, !focusPanel && (e.ctrlKey || e.metaKey))}
                     onfold={() => togglePanelPrefillOpen(p.panel)}
+                    extra={ppOpen || pp?.on ? ppScope : undefined}
                   />
                 </span>
-                {#if ppOpen || pp?.on || pp?.text.trim()}
-                  <PrefillScopeToggle
-                    scope={pp?.scope ?? 'all'}
-                    dim={!panelPrefillActive(p.panel)}
-                    skipped={ppSkipped ? `thinking is ${s.thinking === false ? 'off' : 'on'}` : null}
-                    all={prefillFanOut}
-                    testid="panel-prefill-scope"
-                    onpick={(sc, all) => setPanelPrefillScope(p.panel, sc, all && !focusPanel)}
-                  />
-                {/if}
-                {#if !ppOpen && pp?.text.trim()}
-                  <button class="prefill-peek" class:live={panelPrefillActive(p.panel) && !ppSkipped} data-tooltip="Prefill {pp.on ? 'applied' : 'muted'} — click to edit" use:tip onclick={() => togglePanelPrefillOpen(p.panel)}>{pp.text.replace(/\s+/g, ' ')}</button>
+                {#if !ppOpen && pp?.on && pp.text.trim()}
+                  <button class="prefill-peek" class:live={panelPrefillActive(p.panel) && !ppSkipped} data-tooltip="Prefill applied — click to edit" use:tip onclick={() => togglePanelPrefillOpen(p.panel)}>{pp.text.replace(/\s+/g, ' ')}</button>
                 {/if}
               </div>
               {#if ppOpen}
                 <textarea
+                  transition:fold
                   class="prefill-textarea panel-prefill-input"
                   class:muted={!pp?.on}
                   data-testid="panel-prefill-input"
@@ -2956,6 +2974,18 @@
             onpower={toggleSystemOn}
             onfold={() => (showSystem = !showSystem)}
           />
+          {#snippet composerScope()}
+            <PrefillScopeToggle
+              embedded
+              scope={prefillScope}
+              dim={!prefillActive}
+              skipped={prefillSkipped ? `thinking is ${s.thinking === false ? 'off' : 'on'}` : null}
+              testid="prefill-scope"
+              onpick={(sc) => (prefillScope = sc)}
+            />
+          {/snippet}
+          <!-- the scope switch rides INSIDE the pill and the text preview right after
+               it, so everything about the prefill reads as one thing -->
           <span class="prefill-group" class:skipped={prefillSkipped}>
             <SplitChip
               label="prefill"
@@ -2967,15 +2997,14 @@
               editTip="Edit the prefill — the model continues from your text"
               onpower={togglePrefillOn}
               onfold={() => (showPrefill = !showPrefill)}
+              extra={showPrefill || prefillOn ? composerScope : undefined}
             />
-            {#if showPrefill || prefillOn || prefillInput.trim()}
-              <PrefillScopeToggle
-                scope={prefillScope}
-                dim={!prefillActive}
-                skipped={prefillSkipped ? `thinking is ${s.thinking === false ? 'off' : 'on'}` : null}
-                testid="prefill-scope"
-                onpick={(sc) => (prefillScope = sc)}
-              />
+            {#if prefillOn && prefillInput.trim() && !showPrefill}
+              <button class="prefill-peek" class:live={prefillEffective} data-tooltip="Prefill applied — click to edit" use:tip onclick={() => (showPrefill = true)}>{prefillInput.replace(/\s+/g, ' ')}</button>
+            {/if}
+            <!-- an editing action, so it shows with the editor, next to its pill -->
+            {#if showPrefill && prefillInput.length > 0}
+              <button class="prefill-clear" onclick={() => { prefillInput = ''; prefillOn = false; showPrefill = false; }}>clear</button>
             {/if}
           </span>
           <button
@@ -2983,7 +3012,7 @@
             class:on={branchFromRoot}
             data-testid="branch-root-toggle"
             onclick={() => (branchFromRoot = !branchFromRoot)}
-            data-tooltip="While on, each composer send starts a NEW thread instead of replying"
+            data-tooltip="If enabled, each send starts a fresh conversation"
             use:tip
           >{branchFromRoot ? '⑂ branching from start' : '⑂ branch from start'}</button>
           {#if branchFromRoot}
@@ -3000,14 +3029,9 @@
             />
           {/if}
           <ThreadSwitcher />
-          {#if prefillInput.trim() && !showPrefill}
-            <button class="prefill-peek" class:live={prefillEffective} class:skipped={prefillSkipped} data-tooltip="Prefill {prefillOn ? 'applied' : 'muted'} — click to edit" use:tip onclick={() => (showPrefill = true)}>{prefillInput.replace(/\s+/g, ' ').slice(0, 80)}{prefillInput.length > 80 ? '…' : ''}</button>
-          {/if}
-          {#if prefillInput.length > 0}
-            <button class="prefill-clear" onclick={() => { prefillInput = ''; prefillOn = false; showPrefill = false; }}>clear</button>
-          {/if}
         </div>
         {#if showSystem}
+          <div transition:fold>
           <!-- disabled until the workspace is OPEN: an edit in the load window
                would race the open claim (its flush can be stamped null / get
                wiped by the claim) and ws.save() silently drops pre-open dirt —
@@ -3022,8 +3046,10 @@
             placeholder="Optional system prompt..."
           ></textarea>
           {#if !systemOn}<div class="prefill-offhint">muted — kept, not applied to sends</div>{/if}
+          </div>
         {/if}
         {#if branchFromRoot && showThreadSystem}
+          <div transition:fold>
           <textarea
             class="prefill-textarea thread-system-textarea"
             class:muted={!threadSystemOn}
@@ -3034,8 +3060,10 @@
             placeholder="Thread system prompt — recorded on the NEW thread's first message; replaces the workspace system prompt."
           ></textarea>
           {#if !threadSystemOn}<div class="prefill-offhint">muted — kept, not applied to sends</div>{/if}
+          </div>
         {/if}
         {#if showPrefill}
+          <div transition:fold>
           <textarea
             class="prefill-textarea"
             class:muted={!prefillOn}
@@ -3045,6 +3073,7 @@
             placeholder={'Assistant prefill — the model EXTENDS this. Raw format, e.g.\n  <think>\\nLet me reason…            (only some thinking — model keeps going inside)\n  <think>\\nfull reasoning\\n</think>\\n\\n   (full thinking, model writes the answer)\nDeepSeek/Kimi/Qwen3.5 auto-open <think> (a redundant one is dropped); Qwen3 opens nothing.'}
           ></textarea>
           {#if !prefillOn}<div class="prefill-offhint">muted — kept, not applied to sends</div>{/if}
+          </div>
         {/if}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div class="input-resize-handle" onmousedown={startInputResize}></div>
@@ -3176,10 +3205,15 @@
   .app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
   /* ── Top bar ───────────────────────────────────────────────────── */
-  .topbar { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-3) var(--space-5); background: var(--color-surface); border-bottom: 1px solid var(--color-border); flex-shrink: 0; }
+  .topbar { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-1) var(--space-5); background: var(--color-surface); border-bottom: 1px solid var(--color-border); flex-shrink: 0; }
   .topbar-title { font-weight: 600; font-size: 1rem; color: var(--color-accent); }
   .topbar-root { font-size: 0.72rem; color: var(--color-text-muted); font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
   .topbar-status { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+  .topbar-btn { display: flex; align-items: center; padding: 4px; margin: -4px 0; background: none; border: 1px solid transparent; border-radius: var(--radius); color: var(--color-text-muted); cursor: pointer; }
+  .topbar-btn:last-child { margin-right: -4px; }
+  /* glyph x = the sidebar buttons' glyph x (16px pad + 1px border + 6px pad = 23) */
+  .topbar-theme { margin-left: calc(23px - var(--space-5) - 5px); margin-right: calc(-1 * var(--space-2)); }
+  .topbar-btn:hover { color: var(--color-accent); border-color: var(--color-border); }
   .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-text-muted); opacity: 0.4; }
   .status-dot.ok { background: #22c55e; opacity: 1; }
   .status-dot.down { background: #ef4444; opacity: 1; }
@@ -3308,8 +3342,10 @@
   .send-chip.reduced { opacity: 0.6; font-style: italic; }
   /* ── Assistant prefill field ───────────────────────────────────── */
   .prefill-row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0 0; }
-  .prefill-group { display: inline-flex; align-items: stretch; gap: var(--space-2); flex-shrink: 0; }
-  .prefill-group.skipped, .prefill-peek.skipped { opacity: 0.55; }
+  .prefill-group { display: inline-flex; align-items: stretch; gap: var(--space-2); flex: 0 1 auto; min-width: 0; }
+  .prefill-group .prefill-peek { align-self: center; flex: 0 1 auto; max-width: 260px; }
+  .prefill-group .prefill-clear { align-self: center; }
+  .prefill-group.skipped { opacity: 0.55; }
   .prefill-toggle { font-size: 0.7rem; padding: 2px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: var(--color-bg); color: var(--color-text-muted); cursor: pointer; flex-shrink: 0; }
   .prefill-toggle.on { background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent); }
   .prefill-peek { font-size: 0.68rem; color: var(--color-text-muted); font-family: var(--font-mono, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; border: none; background: none; text-align: left; cursor: pointer; padding: 0; opacity: 0.75; }
@@ -3382,8 +3418,10 @@
 
   /* ── Instant tooltip ──────────────────────────────────────────── */
   /* max-width + wrap, not nowrap: nowrap renders a long tip as one off-screen
-     line. `use:tipHost` clamps it horizontally (see lib/tooltip.svelte.ts). */
-  .tooltip-instant { position: fixed; z-index: 9999; background: var(--color-text); color: var(--color-bg); font-size: 0.72rem; line-height: 1.45; padding: 4px 8px; border-radius: var(--radius); pointer-events: none; max-width: min(30rem, 92vw); transform: translateX(-50%); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+     line. `use:tipHost` clamps it horizontally (see lib/tooltip.svelte.ts).
+     width: max-content, or a fixed box near the right edge shrinks to the space
+     left of its `left` and wraps a short tip into a three-line slab. */
+  .tooltip-instant { position: fixed; z-index: 9999; background: var(--color-text); color: var(--color-bg); font-size: 0.72rem; line-height: 1.45; padding: 4px 8px; border-radius: var(--radius); pointer-events: none; width: max-content; max-width: min(30rem, 92vw); transform: translateX(-50%); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
 
   /* ── History mode indicator ───────────────────────────────────── */
   .input-textarea.history-mode { border-color: var(--color-accent); box-shadow: 0 0 0 1px var(--color-accent); }

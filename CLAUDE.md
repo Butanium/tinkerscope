@@ -557,6 +557,9 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     split render fabricates a phantom line break), the token views dot-underline
     it (no separate fork tick — the tint boundary is the marker, per Clément).
     **Has `loom.test.ts`**; live smoke `tests/small-smokes/browser_loom_live.py`.
+  - `lib/motion.ts` — `fold`, the open/close transition for an editor that unfolds
+    under its pill (height + fade, 180 ms, instant under prefers-reduced-motion).
+    Used by the panel-prefill textarea and the composer's three editors.
   - `lib/search-scan.ts` — the STATIC transport's search engine: pure mirror of
     `api/search.py` (same response shape, same semantics — every branch, first
     match per (node, field), the snippet triple) so Ctrl+K works on a published

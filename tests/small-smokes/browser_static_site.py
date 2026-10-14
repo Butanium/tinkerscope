@@ -276,7 +276,7 @@ def main() -> int:
             page.locator(".modal-close").first.click()
             page.wait_for_timeout(400)
             check(page.locator(".modal").count() == 0, "chart modal closes")
-            page.locator(".theme-toggle[aria-label='Help']").first.click()
+            page.locator("button[aria-label='Help']").first.click()
             page.wait_for_timeout(400)
             check(page.locator(".modal").count() > 0, "help modal opens")
 

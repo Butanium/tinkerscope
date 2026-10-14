@@ -39,6 +39,7 @@
     onDelete,
     onSelectSample,
     onDiscardOthers,
+    onDiscardSiblings,
     onContinueSample,
     onDeleteSample,
     onEdit,
@@ -73,7 +74,9 @@
     onContinue: (allPanels: boolean, thinkingOnly: boolean) => void;
     onDelete: (allPanels: boolean, allSiblings: boolean) => void;
     onSelectSample: (sampleIndex: number) => void;
-    onDiscardOthers: (sampleIndex: number) => void;
+    onDiscardOthers: (sampleIndex: number, allPanels: boolean, wholePath: boolean) => void;
+    /** row toolbar: keep this branch, delete its siblings (ctrl/cmd = every panel at this depth) */
+    onDiscardSiblings?: (allPanels: boolean, wholePath: boolean) => void;
     onContinueSample: (sampleIndex: number) => void;
     onDeleteSample: (sampleIndex: number) => void;
     onEdit: (content: string, reasoning: string | undefined, copyDownstream: boolean, allPanels: boolean, system?: string) => void;
@@ -377,10 +380,10 @@
 {#snippet thinkFilterCtl()}
   {@const filled = (msg.samples ?? []).filter((s) => s && (s.content || s.reasoning))}
   {@const nThink = filled.filter((s) => s!.reasoning).length}
-  <div class="seg-toggle seg-mini" role="group" aria-label="Filter samples by thinking" data-testid="think-filter">
-    <button class="seg-btn" class:active={effThinkPick === 'all'} data-tooltip="Show every sample" use:tip onclick={() => (thinkPick = 'all')}>all</button>
-    <button class="seg-btn" class:active={effThinkPick === 'think'} data-tooltip="Only samples with thinking" use:tip onclick={() => (thinkPick = 'think')}>think {nThink}</button>
-    <button class="seg-btn" class:active={effThinkPick === 'nothink'} data-tooltip="Only samples without thinking" use:tip onclick={() => (thinkPick = 'nothink')}>no think {filled.length - nThink}</button>
+  <div class="seg-toggle seg-icons think-filter" role="group" aria-label="Filter samples by thinking" data-testid="think-filter">
+    <button class="seg-btn" class:active={effThinkPick === 'all'} data-pick="all" data-tooltip="Show every sample" use:tip onclick={() => (thinkPick = 'all')}><span class="seg-n">all</span></button>
+    <button class="seg-btn" class:active={effThinkPick === 'think'} data-pick="think" aria-label="Only samples with thinking ({nThink})" data-tooltip="Only samples with thinking" use:tip onclick={() => (thinkPick = 'think')}><Icon name="think" size={13} /><span class="seg-n">{nThink}</span></button>
+    <button class="seg-btn" class:active={effThinkPick === 'nothink'} data-pick="nothink" aria-label="Only samples without thinking ({filled.length - nThink})" data-tooltip="Only samples without thinking" use:tip onclick={() => (thinkPick = 'nothink')}><Icon name="no-think" size={13} /><span class="seg-n">{filled.length - nThink}</span></button>
   </div>
 {/snippet}
 
@@ -440,7 +443,7 @@
   {@const cLoomCut = displayLoomCut(cTlp, sample.loom_cut)}
   <div class="sample-card" class:active-sample={msg.activeSampleIndex === idx}>
     <div class="sample-header">
-      <span>Sample {idx + 1}</span>
+      <span class="sample-label">Sample {idx + 1}</span>
       {#if msg.activeSampleIndex === idx}<span class="active-sample-tag">active branch</span>{/if}
       {#if sample.thinking !== undefined}{@render modeTag(sample.thinking)}{/if}
       {#if sample.finish_reason === 'length'}{@render truncatedTag()}{/if}
@@ -493,8 +496,8 @@
         <button class="btn-act btn-act-danger sample-del" data-tooltip="Delete this sample" use:tip aria-label="Delete this sample" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onDeleteSample(idx)}>
           <Icon name="trash" size={12} />
         </button>
-        <button class="btn-act btn-act-danger" data-tooltip="Keep only this sample — discard the others" use:tip aria-label="Discard others" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={() => onDiscardOthers(idx)}>
-          <Icon name="discard-others" />
+        <button class="btn-act btn-act-danger" class:shift-alt-danger={shiftDown} class:btn-act-all={allActive} data-tooltip={`${shiftDown ? "Keep only this sample's path — every other branch in the thread goes" : 'Keep only this sample — discard the others'}${allActive ? ' — in ALL panels' : ''}`} use:tip aria-label="Discard others" disabled={busy || !msg.sampleNodeIds?.[idx]} onclick={(e) => onDiscardOthers(idx, e.ctrlKey || e.metaKey, e.shiftKey)}>
+          {#if shiftDown}<Icon name="discard-path" />{:else}<Icon name="discard-others" />{/if}
         </button>
       {/if}
       {@render copyIdBtn(msg.sampleNodeIds?.[idx])}
@@ -505,17 +508,19 @@
 <!-- Action glyphs come from `lib/Icon.svelte` (shared with the Help modal, which
      shows the same pictogram next to each shortcut). The shift-held variants are
      distinct icons on purpose: regenerate becomes "replace in place" (square in
-     the center), edit becomes "fork a full copy" (overlapping pages). -->
+     the center), edit becomes "fork a full copy" (pencil on a sheet). -->
 
 <!-- think / no-think chip: which renderer mode drew this sample. Only rendered
      when the field is set, i.e. on thinking=BOTH batches (single-mode turns
      don't carry it — the whole batch shares one mode). -->
 {#snippet modeTag(think: boolean)}
   <span
-    class="mode-tag"
+    class="mode-tag mode-glyph"
     class:mode-think={think}
+    data-mode={think ? 'think' : 'nothink'}
+    aria-label={think ? 'thinking' : 'no thinking'}
     data-tooltip={think ? 'Drawn with the thinking renderer' : 'Drawn with the non-thinking renderer'}
-    use:tip>{think ? 'think' : 'no think'}</span>
+    use:tip><Icon name={think ? 'think' : 'no-think'} size={13} /></span>
 {/snippet}
 
 <!-- "no token data" pill: the Token-probs toggle is on but this turn carries no
@@ -723,6 +728,11 @@
       <div class="message-head-right">
         {#if isMultiSample && mixedThink}{@render thinkFilterCtl()}{/if}
         {#if showSampleCycler}{@render sampleCycler()}{:else}{@render cycler()}{/if}
+        <!-- the card view's exit at the TOP too: the strip under the cards is a long
+             scroll away on a big draw -->
+        {#if expandedView}
+          <button class="exit-view" data-testid="samples-view-exit" data-tooltip="Back to the thread (Esc)" use:tip onclick={() => onToggleSamplesView?.()}>back to thread</button>
+        {/if}
       </div>
     </div>
     {#if msg.role === 'assistant' && msg.reasoning && !isMultiSample && !tokView}
@@ -901,6 +911,11 @@
               {#if shiftDown}<Icon name="edit-copy" />{:else}<Icon name="edit" />{/if}
             </button>
             {@render deleteBtn('Delete this branch')}
+            {#if hasSiblings && onDiscardSiblings}
+              <button class="btn-act btn-act-danger" class:shift-alt-danger={shiftDown} class:btn-act-all={allActive} data-testid="discard-others" data-tooltip={`${shiftDown ? 'Keep only the path on screen — every other branch in the thread goes' : 'Keep this branch — delete its siblings'}${allActive ? ' — in ALL panels' : ''}`} use:tip aria-label="Discard other branches" onclick={(e) => onDiscardSiblings?.(e.ctrlKey || e.metaKey, e.shiftKey)}>
+                {#if shiftDown}<Icon name="discard-path" />{:else}<Icon name="discard-others" />{/if}
+              </button>
+            {/if}
           {/if}
           {#if msg.role === 'assistant' && msg.content}
             <button class="btn-tag" class:shift-alt={shiftDown} data-tooltip={shiftDown ? 'Bookmark instantly (no note)' : 'Bookmark with a note'} use:tip onclick={(e) => onTag(msg.content, null, null, msg.reasoning || '', e.shiftKey)}>
@@ -943,9 +958,31 @@
   .hidden-below-strip:hover { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
   /* Amber "truncated" pill — the turn/sample hit the max-tokens limit. */
   .truncated-tag { font-size: 0.62rem; color: #b45309; background: #f59e0b14; border: 1px solid #f59e0b66; border-radius: var(--radius-pill); padding: 0 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; cursor: default; }
-  /* think / no-think chip (thinking=BOTH batches): grey = no-think half, accent = think half. */
+  /* think / no-think chip (thinking=BOTH batches). Both halves neutral: the glyph tells
+     them apart, and accent here means active/selected — it would rank one half above
+     the other and compete with the card's "active branch" mark. */
   .mode-tag { font-size: 0.62rem; color: var(--color-text-muted); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius-pill); padding: 0 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; cursor: default; white-space: nowrap; }
-  .mode-tag.mode-think { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
+  /* glyph instead of the word: brain = thinking renderer, struck brain = non-thinking (docs/GLYPHS.md) */
+  /* the svg box already carries ~1.4px of air around the ink, so the pill adds little */
+  .mode-tag.mode-glyph { display: inline-flex; align-items: center; padding: 0 2px; }
+  /* Header rows (a row's head, a card's header) CENTRE their items, and the text in
+     them trims its line box to cap height + baseline, so centring a box centres its
+     caps: glyph pills, text pills, labels and the filter's counts line up by
+     construction. Without text-box support they fall back to box centring (~1px low). */
+  .sample-header { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+  @supports (text-box: trim-both cap alphabetic) {
+    /* the padding gives back exactly what the trim took (1lh − 1cap), so no box
+       changes height — only where its caps sit inside it */
+    .message-head .message-role, .sample-label, .active-sample-tag, .seg-n, .truncated-tag, .mode-tag:not(.mode-glyph) {
+      text-box: trim-both cap alphabetic; padding-block: calc((1lh - 1cap) / 2);
+    }
+  }
+  .exit-view { height: 20px; display: inline-flex; align-items: center; padding: 0 9px; font-size: 0.68rem; color: var(--color-text-secondary); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius-pill); cursor: pointer; flex-shrink: 0; white-space: nowrap; }
+  .exit-view:hover { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
+  /* same 20px as the ‹k/N› cycler beside it; the glyph needs air above and below */
+  .think-filter { height: 20px; }
+  .think-filter .seg-btn { padding: 0 7px; gap: 3px; font-size: 0.68rem; font-weight: 400; letter-spacing: 0; }
+  .seg-n { font-variant-numeric: tabular-nums; line-height: 1; }
   /* ── ‹k/N› cycler pill (branch siblings + sample cycle-view) ────── */
   .branch-cycle { display: flex; align-items: center; gap: 2px; padding: 1px 4px; border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: var(--color-bg); width: fit-content; user-select: none; flex-shrink: 0; }
   .branch-cycle-btn { display: flex; align-items: center; justify-content: center; padding: 2px; background: none; border: none; color: var(--color-text-muted); cursor: pointer; border-radius: var(--radius-sm); }
@@ -964,7 +1001,7 @@
     25% { box-shadow: inset 0 0 0 200vmax var(--color-accent-bg); }
     100% { box-shadow: inset 0 0 0 200vmax transparent; }
   }
-  .active-sample-tag { font-size: 0.62rem; color: var(--color-accent); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-left: var(--space-2); }
+  .active-sample-tag { font-size: 0.62rem; color: var(--color-accent); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
   .btn-use.active { background: var(--color-accent); border-color: var(--color-accent); color: white; }
   .edit-hint { font-size: 0.7rem; color: var(--color-text-muted); font-style: italic; margin-bottom: var(--space-1); line-height: 1.3; }
   /* The authored-prefill prefix of an assistant turn, colored distinctly from the

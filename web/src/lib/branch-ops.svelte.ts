@@ -301,12 +301,79 @@ class BranchOps {
     void this.#fireContinue(panel, nid);
   }
 
-  /** Keep this sample, prune all its sibling samples, then collapse to it. */
-  discardOtherSamples(panel: Panel, msg: ViewMessage, sampleIndex: number) {
-    if (this.#d.panelBusy(panel)) return;
+  /** Keep this sample, prune all its sibling samples, then collapse to it.
+   *  allPanels (ctrl/cmd): every OTHER panel keeps the branch it shows at this
+   *  row's depth, so the columns stay aligned. One Ctrl+Z restores all of them. */
+  discardOtherSamples(panel: Panel, msg: ViewMessage, sampleIndex: number, allPanels = false, wholePath = false) {
     const keep = msg.sampleNodeIds?.[sampleIndex];
     if (!keep) return;
-    undo.capture(panel, 'discard other samples');
+    if (wholePath) this.#prunePaths(panel, keep, allPanels, true);
+    else if (allPanels) this.#discardAtDepth(panel, keep, true);
+    else this.#keepOnly(panel, keep, 'discard other samples', true);
+  }
+
+  /** The row toolbar's discard-others: keep the branch on screen, delete its
+   *  siblings. allPanels as for discardOtherSamples. */
+  discardOthers(panel: Panel, msg: ViewMessage, allPanels = false, wholePath = false) {
+    if (msg.nodeId == null) return;
+    if (wholePath) this.#prunePaths(panel, msg.nodeId, allPanels, false);
+    else if (allPanels) this.#discardAtDepth(panel, msg.nodeId, false);
+    else this.#keepOnly(panel, msg.nodeId, 'discard other branches', false);
+  }
+
+  /** wholePath (shift): keep only the path through `keep` in this thread — every
+   *  branch off it, above and below, is deleted. Other THREADS (root siblings) stay:
+   *  "this thread" is the scope. allPanels: every other panel prunes its own
+   *  active path the same way, one Ctrl+Z for all. */
+  #prunePaths(panel: Panel, keep: string, allPanels: boolean, clearBucket: boolean) {
+    const one = (p: Panel, k: string | null) => {
+      if (this.#d.panelBusy(p)) return;
+      const t0 = ws.treeFor(p);
+      const t1 = k ? setSelected(t0, k) : t0;
+      const path = activePath(t1);
+      if (!path.length) return;
+      let tree = t1;
+      const ops: TreeOp[] = selectedDiffOps(t0, t1);
+      for (const n of path.slice(1)) {
+        for (const sib of siblingsOf(tree, n.id)) {
+          if (sib !== n.id) {
+            tree = deleteSubtree(tree, sib);
+            ops.push({ op: 'delete', node_id: sib });
+          }
+        }
+      }
+      if (ops.every((o) => o.op !== 'delete')) return;
+      undo.capture(p, 'keep only this path');
+      panelScroll.preserve(p);
+      ws.setTree(p, tree, { ops });
+      if (clearBucket) chat.clearPanelBucket(p);
+    };
+    if (!allPanels) return one(panel, keep);
+    undo.group('keep only the shown path (all panels)', () => {
+      for (const p of this.#d.panelSels()) one(p.panel, p.panel === panel ? keep : null);
+    });
+  }
+
+  #discardAtDepth(panel: Panel, keep: string, clearBucket: boolean) {
+    const tree = ws.treeFor(panel);
+    const parent = tree.nodes[keep]?.parent ?? null;
+    // the kept node's depth = its parent's index on the active path + 1 (a card's
+    // sample needn't be the active child, but its parent is always on the path)
+    const depth = parent == null ? 0 : activePath(tree).findIndex((n) => n.id === parent) + 1;
+    if (parent != null && depth === 0) return;
+    undo.group('discard others (all panels)', () => {
+      for (const p of this.#d.panelSels()) {
+        const own = p.panel === panel ? keep : activePath(ws.treeFor(p.panel))[depth]?.id;
+        if (own) this.#keepOnly(p.panel, own, 'discard others', clearBucket);
+      }
+    });
+  }
+
+  /** Select `keep` and delete its siblings. clearBucket: the cards came from the
+   *  live bucket (a sample-card discard), which then collapses onto the kept one. */
+  #keepOnly(panel: Panel, keep: string, label: string, clearBucket: boolean) {
+    if (this.#d.panelBusy(panel)) return;
+    undo.capture(panel, label);
     panelScroll.preserve(panel);
     const t0 = ws.treeFor(panel);
     let tree = setSelected(t0, keep);
@@ -318,7 +385,7 @@ class BranchOps {
       }
     }
     ws.setTree(panel, tree, { ops });
-    chat.clearPanelBucket(panel);
+    if (clearBucket) chat.clearPanelBucket(panel);
   }
 
   /** Delete one specific sample branch; drop it from the live cards too so the

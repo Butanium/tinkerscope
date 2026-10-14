@@ -115,15 +115,18 @@ def main():
         # -- 3. think / no-think filter (the samples mix both modes) --
         filt = panel.locator("[data-testid=think-filter]")
         assert filt.count() == 1, "mixed think/no-think samples should show the filter"
-        filt.get_by_role("button", name="think 2", exact=True).click()
+        # glyph buttons (brain / speech bubble + count): address them by data-pick
+        assert filt.locator("[data-pick=think]").inner_text().strip() == "2"
+        assert filt.locator("[data-pick=nothink]").inner_text().strip() == "1"
+        filt.locator("[data-pick=think]").click()
         texts = card_texts(panel)
         assert len(texts) == 2 and all("ANSWER-B" not in t for t in texts), \
             f"think filter should keep only the 2 CoT samples: {len(texts)}"
-        filt.get_by_role("button", name="no think 1", exact=True).click()
+        filt.locator("[data-pick=nothink]").click()
         texts = card_texts(panel)
         assert len(texts) == 1 and "ANSWER-B" in texts[0], \
             "no-think filter should keep only the CoT-less sample"
-        filt.get_by_role("button", name="all", exact=True).click()
+        filt.locator("[data-pick=all]").click()
         assert panel.locator(".sample-card").count() == 3, "'all' restores every card"
 
         # -- 4. selecting a sample makes it active AND exits the card view --

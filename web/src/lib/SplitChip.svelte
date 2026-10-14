@@ -6,6 +6,7 @@
      conflated the axes). Visual grammar: dot filled = enabled (armed even if
      empty); pill accent = ACTIVE (enabled AND non-empty text). -->
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import { tip } from './tooltip.svelte';
 
   let {
@@ -17,7 +18,8 @@
     editTip,
     testid = '',
     onpower,
-    onfold
+    onfold,
+    extra
   }: {
     label: string;
     /** enabled AND non-empty — the pill wears accent. */
@@ -30,6 +32,8 @@
     testid?: string;
     onpower: (e: MouseEvent) => void;
     onfold: () => void;
+    /** more segments drawn INSIDE the pill, after the label (the prefill scope switch) */
+    extra?: Snippet;
   } = $props();
 </script>
 
@@ -51,6 +55,7 @@
     use:tip
     onclick={onfold}
   >{label}<span class="chev"></span></button>
+  {#if extra}<span class="extra">{@render extra()}</span>{/if}
 </span>
 
 <style>
@@ -67,6 +72,8 @@
   .split-chip.on .zone.lbl { background: var(--color-accent-bg); }
   .split-chip.on .zone.pwr { background: var(--color-accent); border-right-color: var(--color-accent); }
   .split-chip.on .pdot { background: white; border-color: white; }
+  .extra { display: inline-flex; align-items: stretch; border-left: 1px solid var(--color-border); }
+  .split-chip.on .extra { border-left-color: var(--color-accent); }
   .chev { width: 0; height: 0; border-left: 3.5px solid transparent; border-right: 3.5px solid transparent; border-top: 4.5px solid currentColor; transform: rotate(-90deg); transition: transform 0.15s; opacity: 0.8; }
   .split-chip.open .chev { transform: rotate(0deg); }
   @media (prefers-reduced-motion: reduce) { .chev { transition: none; } }

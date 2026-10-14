@@ -56,11 +56,14 @@ per browser. Folding **Highlights** keeps its **Off/On** master switch and
 **+ new** in the header, and **+ new** unfolds the section on its way to the
 editor.
 
-The icon row at the top of the sidebar, left to right: **theme**, **distribution
-chart**, **pins slideshow**, **rescan runs**, **help (`?`)**, **undo last
-delete**, **stop all generation**, and at the far right edge **«, fold the
-sidebar**: it collapses to a thin rail (more width for the panels) holding just
-» to bring it back and the stop button. The fold is remembered across reloads.
+The icon row at the top of the sidebar, left to right: **distribution chart**,
+**pins slideshow**, **rescan runs**, **undo last delete**, **stop all
+generation**, **search all workspaces** (a magnifier, the same as `Ctrl+K`), and
+at the far right edge **«, fold the sidebar**: it collapses to a thin rail (more
+width for the panels) holding just » to bring it back and the stop button. The
+fold is remembered across reloads. The **theme** toggle (light → dark → auto, a
+half-filled circle when it follows the system) is the top-left corner of the page;
+**help (`?`)** is at the top right, next to the live dot.
 
 Undo (↺, greyed out when there's nothing to undo) reverses the last *destructive*
 thing done in this workspace — a delete, a discard-others, a thread reset, a closed
@@ -102,19 +105,21 @@ column's own box, regenerate), so two model families can each get the opening
 they need (e.g. `Hmm,` for one, `The user is` for the other). Next to the pill, a
 three-way switch drawn as glyphs picks which samples get it — brain + speech
 bubble = thinking and non-thinking, brain = thinking only, bubble = non-thinking
-only (the composer's own prefill has the same switch). The switch shows once the
-prefill is unfolded, armed or has text; folded, the text itself is previewed on
-the line. When the scope doesn't fit the thinking mode the line greys out and the
-panel gets no prefill (not the composer's). The line stays in focus mode, where
-the continue box is hidden. `Ctrl`/`⌘`+click on a scope glyph or the pill's dot
-sets every panel at once — arming only the panels that have text. Browser-local and per workspace,
-like the composer prefill. Beside each model's name is a **copy button** for the string
-you'd paste into your own script — the selected checkpoint's `tinker://…`
-sampler path, or a base model's id. Hold `Shift` on a discovered run and it
-copies the absolute path of the **training JSONL** that run was trained on
-instead; hold `Ctrl`+`Shift` and it *opens* that file in **samplescope** in a new
-tab, starting the viewer if none is running. (samplescope's view is shared across
-its tabs, so this moves any you already have open.)
+only (the composer's own prefill has the same switch). The switch is part of the
+pill, shown while the prefill is unfolded or enabled; enabled and folded, a preview
+of the text follows the pill.
+When the scope doesn't fit the thinking mode the line greys out and the panel
+gets no prefill (not the composer's). The line stays in focus mode, where the
+continue box is hidden. `Ctrl`/`⌘`+click on a scope glyph or the pill's dot sets
+every panel at once — arming only the panels that have text. Browser-local and
+per workspace, like the composer prefill. Beside each model's name is a **copy
+button** for the string you'd paste into your own script — the selected
+checkpoint's `tinker://…` sampler path, or a base model's id. Hold `Shift` on a
+discovered run and it copies the absolute path of the **training JSONL** that
+run was trained on instead; hold `Ctrl`+`Shift` and it *opens* that file in
+**samplescope** in a new tab, starting the viewer if none is running.
+(samplescope's view is shared across its tabs, so this moves any you already
+have open.)
 
 **Adding a checkpoint nobody here has heard of.** Under a panel's picker, *+
 Tinker model* lists every base model and sampler checkpoint on your own account.
@@ -143,10 +148,11 @@ them. Deleting prunes only that subtree. This is the core idea: you can resample
 the same turn twenty times and still read all twenty. To read them all AT ONCE,
 the row toolbar's **eye** reopens the turn as the full card stack — every regen
 batch pooled, the active branch marked, the turns below hidden until you exit
-(the strip under the cards, or the eye again, brings them back — and **make
+(**back to thread** at the top, `Esc`, the strip under the cards, or the eye again brings them back — and **make
 active** on a card exits onto that branch). When the
-siblings mix thinking and non-thinking draws, an `all / think / no think` filter
-appears at the turn's top right to narrow the cards.
+siblings mix thinking and non-thinking draws, each card wears a brain (drawn with
+thinking) or a struck-through brain (without), and a filter at the turn's top
+right — `all`, brain, struck brain, each with its count — narrows the cards.
 
 **Thread** — a workspace can hold several independent conversations. The `⑂
 branch from start` toggle next to the composer makes your next message a new
@@ -409,7 +415,7 @@ Chat rows — **click a row first** to give it the focus ring:
 |---|---|
 | `↑` / `↓` | Move the focus ring within that panel |
 | `←` / `→` | Cycle the focused row's `‹k/N›` sibling branches |
-| `Esc` | Drop the focus ring — with none, leave a focused panel |
+| `Esc` | Close an open card view, else drop the focus ring, else leave a focused panel |
 
 Anywhere:
 
@@ -467,10 +473,11 @@ Hold a modifier, then click a row-toolbar button:
 
 | Modifier | What |
 |---|---|
-| `Ctrl`/`⌘` | Do it in ALL panels at once — edit · regenerate · delete · continue, and a panel prefill's scope glyph or dot. Only live with more than one panel on screen; with one panel the modifier does nothing |
+| `Ctrl`/`⌘` | Do it in ALL panels at once — edit · regenerate · delete · continue · discard others, and a panel prefill's scope glyph or dot. Only live with more than one panel on screen; with one panel the modifier does nothing |
 | `Shift` + edit | Fork a full editable copy — the turns below come along, and nothing is generated (either role) |
 | `Shift` + regenerate | Replace this branch in place instead of adding a sibling |
 | `Shift` + delete | Delete every branch at this turn |
+| `Shift` + discard others | Keep only the path on screen: every branch off it, in the whole thread (other threads stay), is deleted |
 | `Shift` + continue | Resume *inside* the think block |
 | `Shift` + copy | Include the thinking text |
 | `Shift` + bookmark | Pin instantly, no note dialog |
