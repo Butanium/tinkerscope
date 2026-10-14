@@ -353,6 +353,10 @@
     // Hit-test the CLICK, don't reuse `hover`: while a card is pinned the hover
     // is frozen at the pinned token (onMove bails), so reading it would re-pin
     // the old token when you click a different one.
+    // A click INSIDE the card (an alternative, ↺ resample) bubbles here before
+    // Svelte's root-delegated button handler runs: hit-testing it would re-pin
+    // the token lying UNDER the card, and the pick would loom from there.
+    if ((ev.target as Element | null)?.closest?.('.tok-pop')) return;
     const hit = hitAt(ev);
     if (hit == null || !canLoomAt(hit)) return;
     const sel = window.getSelection();

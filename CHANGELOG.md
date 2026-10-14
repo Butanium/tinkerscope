@@ -27,6 +27,7 @@ WIRE contract, not on the UI (`docs/RELEASING.md`).
 
 ### Fixed
 
+- **Picking a token alternative forked at the wrong place.** In the overlay view, clicking an alternative (or ↺ resample) in a pinned card re-pinned whatever token lay under the card before the pick ran, so the loom forked there, often deep in the answer.
 - **`tinkpg ws --tree --thread K` draws thread K only.** `--tree` ignored `--thread` and printed every thread of the panel; `--tree --deepest` (meaningless together) now errors instead of ignoring `--deepest`.
 - **A stopped fire no longer exits 0.** A Stop in the browser on a CLI-fired chat
   used to leave `tinkpg` reporting a clean run with whatever samples had finished

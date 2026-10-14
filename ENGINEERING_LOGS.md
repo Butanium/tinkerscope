@@ -2982,3 +2982,23 @@ no raw_meta at all. The skill told agents to do exactly that with curl.
 - `grep --scope user` would have taken "find the conversation where I asked it
   to remember" from 275 hits to the right thread in one call. The endpoint
   already had `scopes`; only the flag was missing.
+
+### 2026-10-13 — Loom pick forked at the token UNDER the card, not the pinned one
+
+Clément picked ` smoke` on ` actually` inside a reasoning block (overlay view) and got
+a fork that replayed the whole think block plus the answer up to "Parent take-home card
+(" — stored `loom_cut` 212, where the pinned token was index 128. The pinned card had
+shown the right alternatives, so the pin was right and the PICK was wrong.
+
+Cause: the card lives inside the overlay's host, so a click on one of its buttons also
+reaches the host's native `click` listener (`onClick`). Svelte 5 delegates `onclick=`
+to the app root, so that native listener runs FIRST: it hit-tested the click point,
+found whatever token lay under the card, and re-pinned it. Then the button's handler
+ran `pick()` with the new pin. The fork point was decided by the card's position on
+screen. `onClick` now ignores clicks from inside `.tok-pop`.
+
+`tests/small-smokes/browser_loom_pick.py` reproduces it: it pins a reasoning token,
+clicks the alternative and ↺ resample at a point with text beneath, and checks
+`continue_tokens`. Without the guard it fails (cuts 115 / 165 for a pin at 4). A
+version that clicked the buttons' centres passed even without the fix, because the
+click fell between lines, so the test now picks a point over a text line on purpose.
