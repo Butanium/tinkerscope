@@ -94,8 +94,11 @@
     PanelSel,
     PrefillScope,
     ViewMessage,
-    SearchHit
+    SearchHit,
+    Effort
   } from '$lib/types';
+  import PanelParamsEditor from '$lib/PanelParamsEditor.svelte';
+  import { EFFORT_LEVELS, prunePanelParams, summarizePanelParams, type PanelParams } from '$lib/panel-params';
 
   // ── Theme ─────────────────────────────────────────────────────────
   // Three modes; 'auto' resolves to the OS scheme and live-tracks system changes.
@@ -186,7 +189,7 @@
     panels: [{ id: FIRST_PANEL_ID, run_id: null, checkpoint: null, thread_system_prompt: null }],
     workspace_id: null,
     system_prompt: null, temperature: 1.0, max_tokens: 1024, n_samples: 1,
-    thinking: false, top_p: null, chat_id: 0, running: false, last_event: null, last_event_ts: 0
+    thinking: false, top_p: null, reasoning_effort: null, chat_id: 0, running: false, last_event: null, last_event_ts: 0
   };
   let s = $derived<PlaygroundState>(live.state ?? DEFAULTS);
 
@@ -251,6 +254,15 @@
         modelCatalog.runById(p.run_id)?.supports_thinking
     )
   );
+
+  // Effort only reaches OpenRouter models: the control shows when one is on screen.
+  let anyOpenrouter = $derived(panelSels.some((p) => isOpenrouterSel(p.run_id)));
+  // Each OpenRouter panel's catalog capabilities (effort levels, ignored params,
+  // prefill) — one batched fetch for the ids not seen yet.
+  $effect(() => {
+    const ids = panelSels.map((p) => openrouterId(p.run_id)).filter((x): x is string => x != null);
+    if (ids.length) void modelCatalog.ensureOrCaps(ids);
+  });
 
   // Resolve each loose `ckpt:` panel's base model — the label + the thinking
   // control both want it, and only tinker can answer. One probe per distinct
@@ -442,6 +454,8 @@
     ws.save({ system_prompt: v || null, system_enabled: enabled });
   }
   function setTopP(v: number) { if (Number.isNaN(v)) return; patchState({ top_p: Math.max(0, Math.min(1, v)) }); }
+  /** OpenRouter reasoning effort for the thinking side; null = the model's default. */
+  function setEffort(next: Effort | null) { patchState({ reasoning_effort: next }, true); }
   function setThinking(next: boolean | 'both') {
     // Tri-state: Off / On / Both. Both fires n samples without thinking + n
     // with (2n total, no-think half first) in one chat. Deliberately touches
@@ -528,10 +542,11 @@
         // of another. ws.layout is always the layout of OUR open workspace.
         panels: ws.layout.map((p) => ({ id: p.id, run_id: p.run_id, checkpoint: p.checkpoint })),
         temperature: s.temperature, max_tokens: s.max_tokens, n_samples: s.n_samples,
-        thinking: s.thinking, top_p: s.top_p,
+        thinking: s.thinking, top_p: s.top_p, reasoning_effort: s.reasoning_effort ?? null,
         top_k: topK, presence_penalty: presencePenalty, repetition_penalty: repetitionPenalty,
         prefill: prefillInput, prefill_on: prefillOn, prefill_open: showPrefill, prefill_scope: prefillScope,
-        panel_prefills: prunePanelPrefills(panelPrefills)
+        panel_prefills: prunePanelPrefills(panelPrefills),
+        panel_params: prunePanelParams(panelParams)
       });
       if (json === lastSessionJson) return; // selection/params unchanged (e.g. mid-stream)
       lastSessionJson = json;
@@ -541,8 +556,9 @@
   $effect(() => {
     // Touch every persisted field so the effect re-runs whenever any changes.
     void ws.layout;
-    void s.temperature; void s.max_tokens; void s.n_samples; void s.thinking; void s.top_p;
+    void s.temperature; void s.max_tokens; void s.n_samples; void s.thinking; void s.top_p; void s.reasoning_effort;
     void topK; void presencePenalty; void repetitionPenalty;
+    void JSON.stringify(panelParams);
     void prefillInput; void prefillOn; void showPrefill; void prefillScope;
     void JSON.stringify(panelPrefills); // deep touch: an edit reassigns one key
     persistSession();
@@ -585,6 +601,8 @@
           prefillScope = sess.prefill_think_only ? 'think' : 'all';
         if (sess.panel_prefills && typeof sess.panel_prefills === 'object')
           panelPrefills = prunePanelPrefills(sess.panel_prefills);
+        if (sess.panel_params && typeof sess.panel_params === 'object')
+          panelParams = prunePanelParams(sess.panel_params);
       }
       if (raw && freshState) {
         const sess = JSON.parse(raw);
@@ -599,7 +617,8 @@
           ...(typeof sess.max_tokens === 'number' ? { max_tokens: sess.max_tokens } : {}),
           ...(typeof sess.n_samples === 'number' ? { n_samples: sess.n_samples } : {}),
           ...(typeof sess.thinking === 'boolean' || sess.thinking === 'both' ? { thinking: sess.thinking } : {}),
-          ...(typeof sess.top_p === 'number' ? { top_p: sess.top_p } : {})
+          ...(typeof sess.top_p === 'number' ? { top_p: sess.top_p } : {}),
+          ...(EFFORT_LEVELS.includes(sess.reasoning_effort) ? { reasoning_effort: sess.reasoning_effort } : {})
         });
       }
     } catch {
@@ -660,8 +679,8 @@
    *  'think' scope needs thinking on the table (on / both); 'non_think' needs the
    *  non-thinking side (off / both). A single-mode send that's all-thinking or
    *  all-non-thinking on the wrong side ⇒ the prefill doesn't apply at all. */
-  function scopeApplies(scope: PrefillScope): boolean {
-    return !(scope === 'think' && s.thinking === false) && !(scope === 'non_think' && s.thinking === true);
+  function scopeApplies(scope: PrefillScope, thinking: boolean | 'both' = s.thinking): boolean {
+    return !(scope === 'think' && thinking === false) && !(scope === 'non_think' && thinking === true);
   }
   let prefillEffective = $derived(prefillActive && scopeApplies(prefillScope));
   let prefillSkipped = $derived(prefillActive && !prefillEffective);
@@ -677,15 +696,17 @@
     // An active panel prefill governs that panel outright: when its scope doesn't
     // fit the thinking mode, the panel gets NO prefill, not the composer's.
     const own = panel != null && panelPrefillActive(panel) ? panelPrefillOf(panel)! : null;
+    // a panel's own thinking override decides which side its prefill lands on
+    const thinking = panel != null ? panelThinking(panel) : s.thinking;
     if (own) {
-      if (!scopeApplies(own.scope)) return { fireMsgs: msgs };
+      if (!scopeApplies(own.scope, thinking)) return { fireMsgs: msgs };
       return {
         fireMsgs: [...msgs, { role: 'assistant', content: own.text }],
         prefill: own.text,
         paramsOverride: { prefill_scope: own.scope }
       };
     }
-    if (!prefillEffective) return { fireMsgs: msgs };
+    if (!(prefillActive && scopeApplies(prefillScope, thinking))) return { fireMsgs: msgs };
     return { fireMsgs: [...msgs, { role: 'assistant', content: prefillInput }], prefill: prefillInput };
   }
   // Per-panel prefill (compare mode only — a lone panel's prefill IS the composer
@@ -731,6 +752,36 @@
   function togglePanelPrefillOpen(panel: Panel) {
     const k = panelPrefillKey(panel);
     panelPrefillOpen[k] = !panelPrefillOpen[k];
+  }
+  // Per-panel sampling overrides (compare mode only, like the panel prefill — a
+  // lone panel's params ARE the sidebar's): thinking / effort / temperature / max
+  // tokens on top of the shared params. Same key + persistence as panelPrefills.
+  // A fire carrying any of them goes params_scope 'call', so the panel's values
+  // never write back into the sidebar's shared state. See lib/panel-params.ts.
+  let panelParams = $state<Record<string, PanelParams>>({});
+  let panelParamsOpen = $state<Record<string, boolean>>({});
+  function panelParamsOf(panel: Panel): PanelParams | undefined {
+    return ws.activeId ? panelParams[panelPrefillKey(panel)] : undefined;
+  }
+  /** The overrides that apply to a fire to `panel` right now ({} outside compare). */
+  function panelOverrides(panel: Panel): Partial<ChatParams> {
+    const pp = isComparing ? panelParamsOf(panel) : undefined;
+    if (!pp) return {};
+    return Object.fromEntries(Object.entries(pp).filter(([, v]) => v != null)) as Partial<ChatParams>;
+  }
+  function panelThinking(panel: Panel): boolean | 'both' {
+    return panelOverrides(panel).thinking ?? s.thinking;
+  }
+  function setPanelParam<K extends keyof PanelParams>(panel: Panel, key: K, value: PanelParams[K] | undefined) {
+    const k = panelPrefillKey(panel);
+    const next: PanelParams = { ...(panelParams[k] ?? {}) };
+    if (value === undefined) delete next[key];
+    else next[key] = value;
+    if (Object.keys(next).length) panelParams[k] = next;
+    else delete panelParams[k];
+  }
+  function clearPanelParams(panel: Panel) {
+    delete panelParams[panelPrefillKey(panel)];
   }
   // A THREAD's own system prompt (ThreadSystemRow, top of each panel; overrides
   // the workspace one). Empty panel: what its first send will be stamped with —
@@ -851,6 +902,7 @@
       max_tokens: s.max_tokens,
       n_samples: s.n_samples,
       thinking: s.thinking,
+      reasoning_effort: s.reasoning_effort ?? 'default',
       prefill_scope: prefillScope,
       top_p: s.top_p,
       top_k: topK,
@@ -908,9 +960,11 @@
   ) {
     const model = modelOverride ?? resolveModelField(pSel);
     if (!model) return;
+    const own = panelOverrides(pSel.panel);
+    const scoped: Partial<ChatParams> = Object.keys(own).length ? { ...own, params_scope: 'call' } : {};
     chat.fireOne(
       pSel.panel, model, userParentId, messages,
-      { ...paramsBundle(), ...paramsOverride }, prefill,
+      { ...paramsBundle(), ...scoped, ...paramsOverride }, prefill,
       (m) => (backendError = m)
     );
   }
@@ -1366,7 +1420,8 @@
     panelBusy,
     withPrefill,
     fireOne,
-    resolveModelKey
+    resolveModelKey,
+    canPrefill: (pSel) => modelCatalog.orCapsBySel(pSel.run_id)?.prefill !== false
   });
 
   // ── Undo ──────────────────────────────────────────────────────────
@@ -2479,7 +2534,13 @@
               {/if}
             {:else if isOr}
               <!-- OpenRouter reference model: no checkpoint selector. -->
+              {@const orCaps = modelCatalog.orCapsBySel(p.run_id)}
               <div class="run-meta or-meta">↗ {orModel?.openrouter_model ?? openrouterId(p.run_id)}</div>
+              {#if orCaps && (orCaps.ignores.includes('temperature') || !orCaps.prefill) && !readOnly}
+                <!-- What the catalog says this model silently drops: a slider that
+                     does nothing is otherwise undiscoverable. -->
+                <div class="caps-note" data-testid="or-caps-note">{[orCaps.ignores.includes('temperature') ? 'ignores temperature' : '', orCaps.prefill ? '' : "can't be prefilled"].filter(Boolean).join(' · ')}</div>
+              {/if}
               {#if health && health.openrouter_key === false && !readOnly}
                 <div class="unsampleable-note">Set OPENROUTER_API_KEY to sample this model.</div>
               {/if}
@@ -2519,6 +2580,18 @@
               {#if pr}
                 <div class="run-meta">{pr.base_model}{pr.lora_rank ? ` · LoRA ${pr.lora_rank}` : ''}{pr.num_checkpoints ? ` · ${pr.num_checkpoints} ckpts` : ''}</div>
               {/if}
+            {/if}
+            {#if isComparing && !readOnly}
+              <PanelParamsEditor
+                params={panelParamsOf(p.panel)}
+                open={!!panelParamsOpen[panelPrefillKey(p.panel)]}
+                global={{ temperature: s.temperature, max_tokens: s.max_tokens, thinking: s.thinking, reasoning_effort: s.reasoning_effort ?? null }}
+                caps={modelCatalog.orCapsBySel(p.run_id)}
+                isOpenrouter={isOpenrouterSel(p.run_id)}
+                onToggle={() => { const k = panelPrefillKey(p.panel); panelParamsOpen[k] = !panelParamsOpen[k]; }}
+                onSet={(key, value) => setPanelParam(p.panel, key, value)}
+                onClear={() => clearPanelParams(p.panel)}
+              />
             {/if}
             {#if !readOnly}
               <div class="add-model-links">
@@ -2582,6 +2655,31 @@
                     <button class="seg-btn" class:active={s.thinking === true} onclick={() => setThinking(true)}>On</button>
                     <button class="seg-btn" class:active={s.thinking === 'both'} onclick={() => setThinking('both')}>Both</button>
                   </span>
+                </label>
+              </div>
+            {/if}
+
+            {#if anyOpenrouter}
+              <!-- OpenRouter models only (tinker models ignore it). Applies to the
+                   thinking side, so it's inert while Thinking is Off. -->
+              <div class="sidebar-section">
+                <label class="sidebar-label thinking-toggle-row">
+                  <span>Effort</span>
+                  <select
+                    class="sidebar-select effort-select"
+                    data-testid="effort-select"
+                    data-tooltip={s.thinking === false ? 'Turn Thinking on to use it' : 'Reasoning effort — OpenRouter models only'}
+                    use:tip
+                    disabled={s.thinking === false}
+                    value={s.reasoning_effort ?? ''}
+                    onchange={(e) => {
+                      const v = (e.target as HTMLSelectElement).value;
+                      setEffort(v === '' ? null : (v as Effort));
+                    }}
+                  >
+                    <option value="">model default</option>
+                    {#each EFFORT_LEVELS.filter((e) => e !== 'none') as e (e)}<option value={e}>{e}</option>{/each}
+                  </select>
                 </label>
               </div>
             {/if}
@@ -2771,6 +2869,10 @@
                 </span>
                 {/if}
                 <span class="column-title"><TruncLabel label={panelLabel(p)} /></span>
+                {#if isComparing && summarizePanelParams(panelParamsOf(p.panel))}
+                  <!-- two columns of the same model differ only here, so say it where the columns are told apart -->
+                  <span class="column-params" data-testid="column-params" data-tooltip="This panel's own params (sidebar → panel params)" use:tip>{summarizePanelParams(panelParamsOf(p.panel))}</span>
+                {/if}
                 {#if focusPanel}
                   <button class="reduce-panel" data-testid="unfocus-panel" onclick={() => setFocusUrl(null)} data-tooltip="Back to all panels (Esc)" use:tip aria-label="Back to all panels">
                     <Icon name="unfocus" size={12} />
@@ -2812,7 +2914,8 @@
                   {ctrlDown}
                   busy={panelBusy(p.panel)}
                   showRegenAll={isComparing && !focusPanel}
-                  thinking={s.thinking}
+                  thinking={panelThinking(p.panel)}
+                  noPrefill={modelCatalog.orCapsBySel(p.run_id)?.prefill === false}
                   {sampleView}
                   onRegenerate={(allPanels, replace) => (allPanels ? branchOps.regenerateAll(p.panel, msg, replace) : branchOps.regenerate(p.panel, msg, replace))}
                   onContinue={(allPanels, thinkingOnly) => branchOps.continueMessage(p.panel, msg, allPanels, thinkingOnly)}
@@ -2865,7 +2968,7 @@
             {#if isComparing && ws.activeId && panelCanChat(p) && !readOnly}
               {@const pp = panelPrefillOf(p.panel)}
               {@const ppOpen = !!panelPrefillOpen[panelPrefillKey(p.panel)]}
-              {@const ppSkipped = panelPrefillActive(p.panel) && !scopeApplies(pp?.scope ?? 'all')}
+              {@const ppSkipped = panelPrefillActive(p.panel) && !scopeApplies(pp?.scope ?? 'all', panelThinking(p.panel))}
               <!-- This panel's prefill: kept in focus mode too (it still governs
                    the composer's sends here), unlike the continue box below. -->
               {#snippet ppScope()}
@@ -3285,6 +3388,9 @@
   .add-model-links { display: flex; gap: var(--space-3); flex-wrap: wrap; padding-top: 2px; }
   .or-manage-link { align-self: flex-start; background: none; border: none; padding: 0; cursor: pointer; font-size: 0.7rem; color: var(--color-text-muted); font-weight: 500; }
   .or-manage-link:hover { color: var(--color-accent); }
+  .column-params { flex-shrink: 1; min-width: 0; font-size: 0.68rem; color: var(--color-accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .caps-note { font-size: 0.66rem; color: var(--color-text-muted); font-style: italic; }
+  .effort-select { padding: 2px var(--space-2); font-size: 0.76rem; }
   .or-meta { color: var(--color-text-secondary); }
   /* Sits in .model-slot-row beside the model name; sized to match .btn-remove-model
      so a panel with both keeps its controls on one baseline. */

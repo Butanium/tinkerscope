@@ -19,6 +19,7 @@ import { chat, type ChatParams, type ChatModelField } from './chat.svelte';
 import { panelScroll } from './scroll.svelte';
 import { undo } from './undo.svelte';
 import { assembleAssistantRaw } from './render';
+import { isSealed } from './reasoning';
 import { parseRawMetaModel, thinkResumeCut, type RawMetaModel } from './loom';
 import {
   activePath,
@@ -76,6 +77,9 @@ export type BranchOpsDeps = {
    *  checkpoint's sampler path). Lets Continue take the token path only while
    *  the panel still points at the model that produced the turn's token ids. */
   resolveModelKey: (pSel: PanelSel) => string | null;
+  /** false ⇒ the panel's model never continues a prefill (openai/* through
+   *  OpenRouter), so Continue — a prefill — skips it. Unknown ⇒ true. */
+  canPrefill?: (pSel: PanelSel) => boolean;
 };
 
 /** The same comparable key for a turn's raw_meta record (null = unparseable). */
@@ -185,7 +189,7 @@ class BranchOps {
   async #fireContinue(panel: Panel, nodeId: string, thinkingOnly = false) {
     if (this.#d.panelBusy(panel)) return;
     const pSel = this.#d.panelSels().find((x) => x.panel === panel);
-    if (!pSel) return;
+    if (!pSel || this.#d.canPrefill?.(pSel) === false) return;
     // Blob reads first (they can yield); everything tree-shaped re-reads after.
     const tokens = await this.#tokensOf(panel, nodeId);
     const fullStream = !!tokens?.length && !tokens.some((e) => e.ghost || e.tid < 0);
@@ -197,9 +201,13 @@ class BranchOps {
     if (!node || node.role !== 'assistant' || (!node.content && !node.reasoning)) return;
     const userParentId = node.parent;
     if (!userParentId || tree.nodes[userParentId]?.role !== 'user') return;
+    // A closed model's thinking (lib/reasoning.ts) is not text we can hand back
+    // inside the turn: the prefill is the answer alone, and there's nothing to
+    // resume inside — Shift degrades to a plain continue.
+    const sealed = isSealed(node.reasoning_details);
     // Resume-inside-the-think applies only when there's reasoning to resume;
     // otherwise Shift+Continue degrades to a normal continue (both paths).
-    const resumeThinking = thinkingOnly && !!node.reasoning?.trim();
+    const resumeThinking = thinkingOnly && !!node.reasoning?.trim() && !sealed;
     if (fullStream && metaKey && metaKey === this.#d.resolveModelKey(pSel)) {
       const cut = resumeThinking ? thinkResumeCut(tokens!, !!node.content) : tokens!.length;
       if (cut != null) {
@@ -220,9 +228,11 @@ class BranchOps {
     // Shift+Continue (thinkingOnly): RESUME inside the think block — prefill the
     // reasoning as an OPEN `<think>` (no `</think>`, no answer) so the model extends
     // the CoT, then naturally closes it and produces the answer.
-    const prefill = resumeThinking
-      ? assembleAssistantRaw(node.reasoning, '')
-      : assembleAssistantRaw(node.reasoning, node.content);
+    const prefill = sealed
+      ? node.content
+      : resumeThinking
+        ? assembleAssistantRaw(node.reasoning, '')
+        : assembleAssistantRaw(node.reasoning, node.content);
     const fireMessages = [
       ...ancestryMessages(tree, userParentId),
       { role: 'assistant', content: prefill }

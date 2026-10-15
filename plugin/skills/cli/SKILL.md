@@ -132,7 +132,7 @@ tinkerscope continue "<follow-up>" [opts] [--panel P] [--thread K] [--turn N] [-
 tinkerscope battery <dir> [--n N] [--pause S] [--out DIR] [--panel P ...] [--new-ws NAME | --ws W] [--no-first-token]   # fire a DIRECTORY of probe *.txt files as sequential sends (one probe = one thread)
 tinkerscope url [ws] [--live] [--json]                   # the URL of the server you're driving — what to hand the human when they want a LINK
 tinkerscope state [--full] [--width N] [--no-link] [--json] [--include-folded]   # DIGEST of on-screen panels (bindings + the open workspace's active paths)
-tinkerscope params [--temperature T] [--max-tokens M] [--n N] [--thinking/--no-thinking|--thinking-both] [--top-p P] [--system S|--system-file F|--clear-system]   # show / SET the GLOBAL sampling params (browser sidebar updates live)
+tinkerscope params [--temperature T] [--max-tokens M] [--n N] [--thinking/--no-thinking|--thinking-both] [--top-p P] [--effort E] [--system S|--system-file F|--clear-system]   # show / SET the GLOBAL sampling params (browser sidebar updates live)
 tinkerscope ws                                         # list saved WORKSPACES + branch metadata (alias: tinkerscope conv)
 tinkerscope ws <id|name> [--panel P] [--full] [--tree] [--include-folded] [--thread K] [--deepest] [--json]  # expand one: active branch + fork counts (--tree = all branches; --thread/--deepest = read a NON-active conversation; --json = export the transcript)
 tinkerscope threads [--min-turns N] [--ws W] [--model SUB] [--grep TXT] [--json]  # cross-workspace index of EVERY root thread + its deepest-branch turn count
@@ -191,7 +191,9 @@ aims at another; with none open, one named `battery <dir>` is created.
 `chat`/`compare` options: `--n N` (samples), `--temperature T`, `--max-tokens M`,
 `--thinking` (thinking renderer), `--thinking-both` (n samples WITHOUT thinking +
 n WITH in one chat — 2n total, no-think half first; overrides `--thinking`),
-`--system "…"`, `--checkpoint NAME` (overrides `@`). `tinkerscope <cmd> --help` for
+`--system "…"`, `--checkpoint NAME` (overrides `@`), `--effort E` (reasoning effort
+on the thinking side, OpenRouter models only: `default` = the model's own, `none`,
+`minimal` … `max`). `tinkerscope <cmd> --help` for
 the rest. `send` and `continue` add `--file <path>` (read the user message from a
 file — a reusable probe template, mutually exclusive with the positional prompt)
 and `--prefill-file <path>` (read the assistant prefill from a file).
@@ -209,6 +211,17 @@ The human can MUTE the global system prompt in the browser (the split-chip
 power dot: text kept, not applied) — `params`/`state` then show it as
 `(muted)` and per-call inherits skip it. `params --system "…"` always
 re-enables; an explicit per-call `--system` applies regardless of the mute.
+The browser's **panel params** (a compare panel's own thinking / effort /
+temperature / max tokens) are browser-local and do NOT apply to CLI fires — pass
+the per-call flags instead.
+
+**Closed models (OpenAI / Anthropic via OpenRouter).** Their visible thinking is a
+provider summary (or signed text); the real reasoning comes back encrypted and is
+stored on the node as `reasoning_details`. `continue` (and every browser send)
+hands it back on the next turn, so the model sees its earlier reasoning. GPT
+models through OpenRouter ignore temperature/top_p silently and are never
+prefilled: a `--prefill` on such a panel is dropped and the sample is tagged
+`prefill_unsupported`.
 
 **Thread system prompts (`send --system`).** A thread's first message can carry
 its OWN system prompt, which REPLACES the global one for that thread at fire
@@ -559,6 +572,7 @@ tinkerscope chat <run> <prompt> [options]
   --max-tokens INTEGER              this call only; omit = inherit the global param
   --thinking/--no-thinking          force the thinking renderer on/off for this call; omit = inherit the global param
   --thinking-both                   draw n samples WITHOUT thinking + n WITH (2n total; overrides --thinking)
+  --effort TEXT                     reasoning effort on the thinking side, OpenRouter models only: default (the model's own) | none | minimal | low | medium | high | xhigh | max; omit = inherit the global param
   --system TEXT                     system prompt for this call; omit = inherit the global one
   --no-system                       fire with NO system prompt even if the global state carries one
   --checkpoint TEXT                 checkpoint name (overrides @ in the run arg)
@@ -574,6 +588,7 @@ tinkerscope compare <run_a> <run_b> <prompt> [options]
   --max-tokens INTEGER              this call only; omit = inherit the global param
   --thinking/--no-thinking          force thinking on/off for this call; omit = inherit
   --thinking-both                   n samples WITHOUT thinking + n WITH, per run (overrides --thinking)
+  --effort TEXT                     reasoning effort on the thinking side, OpenRouter models only: default (the model's own) | none | minimal | low | medium | high | xhigh | max; omit = inherit the global param
   --system TEXT                     system prompt for this call; omit = inherit the global one
   --no-system                       fire with NO system prompt even if the global state carries one
   --prefill TEXT                    assistant prefill the models extend; raw `<think>` ok
@@ -587,6 +602,7 @@ tinkerscope send [prompt] [options]
   --max-tokens INTEGER              this call only; omit = inherit the global param
   --thinking/--no-thinking          force thinking on/off for this call; omit = inherit the global param
   --thinking-both                   n samples WITHOUT thinking + n WITH, per panel (overrides --thinking)
+  --effort TEXT                     reasoning effort on the thinking side, OpenRouter models only: default (the model's own) | none | minimal | low | medium | high | xhigh | max; omit = inherit the global param
   --system TEXT                     system prompt for this call; omit = inherit the global one
   --no-system                       fire with NO system prompt even if the global state carries one
   --prefill TEXT                    assistant prefill the models extend; raw `<think>` ok
@@ -608,6 +624,7 @@ tinkerscope continue [prompt] [options]
   --max-tokens INTEGER              this call only; omit = inherit the global param
   --thinking/--no-thinking          force thinking on/off for this call; omit = inherit the global param
   --thinking-both                   n samples WITHOUT thinking + n WITH, per panel (overrides --thinking)
+  --effort TEXT                     reasoning effort on the thinking side, OpenRouter models only: default (the model's own) | none | minimal | low | medium | high | xhigh | max; omit = inherit the global param
   --system TEXT                     system prompt for this call; omit = inherit the global one
   --no-system                       fire with NO system prompt even if the global state carries one
   --file TEXT                       read the user message from a file (mutually exclusive with the positional prompt)
@@ -649,6 +666,7 @@ tinkerscope probe <run> [prompt] [options]
   --temperature FLOAT
   --max-tokens INTEGER
   --thinking/--no-thinking          thinking renderer (default: inherit the global)
+  --effort TEXT                     reasoning effort on the thinking side, OpenRouter models only: default (the model's own) | none | minimal | low | medium | high | xhigh | max; omit = inherit the global param
   --system TEXT                     system prompt for this call
   --no-system                       fire with NO system prompt at all
   --file TEXT                       read the user message from a file
@@ -664,6 +682,7 @@ tinkerscope params [options]
   --n INTEGER                       default sample count
   --thinking/--no-thinking
   --thinking-both                   set the global thinking mode to 'both'
+  --effort TEXT                     reasoning effort on the thinking side, OpenRouter models only: default (the model's own) | none | minimal | low | medium | high | xhigh | max; omit = inherit the global param
   --top-p FLOAT
   --system TEXT                     global system prompt
   --system-file TEXT                read the global system prompt from a file (mutually exclusive with --system)

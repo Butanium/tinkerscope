@@ -24,7 +24,7 @@ import {
   isCkptSel, samplerPathOf,
   isVllmSel, vllmModelId
 } from './model-sel';
-import type { Run, OpenRouterModel, TinkerModel, VllmModel } from './types';
+import type { Run, OpenRouterModel, OpenRouterCaps, TinkerModel, VllmModel } from './types';
 
 /** Recently-used raw base models + loose checkpoints (localStorage) so a picked
  *  tinker model stays visible in the panel dropdown across reloads even though
@@ -68,6 +68,12 @@ class ModelCatalog {
   orCatalogLoaded = $state(false);
   orCatalogLoading = $state(false);
   orCatalogError = $state<string | null>(null);
+
+  /** Per-model capabilities of the OpenRouter models on screen (efforts, ignored
+   *  params, prefill), keyed by OpenRouter id. Fetched on demand by `ensureOrCaps`;
+   *  an id the catalog doesn't know stays absent (= unknown, never "no"). */
+  orCaps = $state<Record<string, OpenRouterCaps>>({});
+  #orCapsAsked = new Set<string>();
 
   recentBaseModels = $state<RecentBase[]>([]);
   recentCheckpoints = $state<RecentCkpt[]>([]);
@@ -191,6 +197,25 @@ class ModelCatalog {
     const orId = openrouterId(id);
     if (orId == null) return undefined;
     return this.openrouterModels.find((m) => m.openrouter_model === orId);
+  }
+  /** Capabilities of a panel's OpenRouter pick, once fetched (undefined = not an
+   *  OpenRouter pick, not fetched yet, or not in the catalog). */
+  orCapsBySel(id: string | null | undefined): OpenRouterCaps | undefined {
+    const orId = openrouterId(id);
+    return orId == null ? undefined : this.orCaps[orId];
+  }
+  /** Fetch caps for any of these OpenRouter ids not asked about yet (one call). */
+  async ensureOrCaps(ids: string[]) {
+    const want = [...new Set(ids)].filter((id) => !this.#orCapsAsked.has(id));
+    if (!want.length) return;
+    want.forEach((id) => this.#orCapsAsked.add(id));
+    try {
+      const res = await api.openrouterCaps(want);
+      if (Object.keys(res.caps).length) this.orCaps = { ...this.orCaps, ...res.caps };
+      if (res.error) want.forEach((id) => this.#orCapsAsked.delete(id)); // retry next time
+    } catch {
+      want.forEach((id) => this.#orCapsAsked.delete(id));
+    }
   }
   openrouterLabel(id: string | null | undefined): string {
     const orId = openrouterId(id);

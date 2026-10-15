@@ -41,6 +41,38 @@ export type Run = {
 
 export type OpenRouterModel = { label: string; openrouter_model: string };
 
+/** OpenRouter's reasoning effort levels; `null` (in state) = the model's own default. */
+export type Effort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+/** One OpenRouter model's capabilities, from its catalog entry
+ *  (GET /api/openrouter-models/caps). */
+export type OpenRouterCaps = {
+  reasoning: boolean;
+  /** Reasoning can't be turned off (Thinking: Off sends its lowest effort). */
+  reasoning_mandatory: boolean;
+  efforts: string[];
+  default_effort: string | null;
+  /** Sampling params the model drops (OpenRouter filters them silently). */
+  ignores: string[];
+  /** false ⇒ a prefill is never continued; the server sends without it. */
+  prefill: boolean;
+};
+
+/** One item of a closed model's reasoning payload, verbatim from OpenRouter.
+ *  `reasoning.summary` = the provider's summary (display only); `reasoning.encrypted`
+ *  = the reasoning itself, opaque; `reasoning.text` = plain reasoning, bound to the
+ *  provider when it carries a `signature`. Replayed on later turns, never edited. */
+export type ReasoningDetail = {
+  type: string;
+  format?: string;
+  index?: number;
+  id?: string | null;
+  summary?: string;
+  text?: string;
+  data?: string;
+  signature?: string | null;
+};
+
 /**
  * One entry in the combined /api/tinker-models list. `id` + `label` are unified
  * across both kinds; `kind` selects the extra fields:
@@ -122,7 +154,13 @@ export type Health = {
 
 // `reasoning` (assistant turns only) travels with the message so the sampler can hand the
 // renderer the full turn and let it apply its own history policy; `content` stays answer-only.
-export type ChatMessage = { role: 'user' | 'assistant' | 'system'; content: string; reasoning?: string };
+export type ChatMessage = {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  reasoning?: string;
+  /** An OpenRouter turn's reasoning payload — replayed to that provider's models. */
+  reasoning_details?: ReasoningDetail[];
+};
 
 /** A render-time text-coloring rule (see lib/highlight-match.ts + the backend
  *  api/routes/highlights.py). Mirrors samplescope's HighlightRule, minus the
@@ -192,6 +230,8 @@ export type PlaygroundState = {
    *  with (2n per chat; see /api/chat in docs/API_CONTRACT.md). */
   thinking: boolean | 'both';
   top_p: number | null;
+  /** Reasoning effort for OpenRouter models' thinking side; null = model default. */
+  reasoning_effort?: Effort | null;
   chat_id: number;
   running: boolean;
   /** One entry per chat in flight (servers before 2026-09-26 omit it). */
@@ -222,6 +262,8 @@ export type StatePatch = {
   n_samples?: number;
   thinking?: boolean | 'both';
   top_p?: number | null;
+  /** null = the model's own default effort. */
+  reasoning_effort?: Effort | null;
 };
 
 /** Scope of the assistant prefill across a send's thinking/non-thinking halves. */
@@ -254,6 +296,8 @@ export type ChatRequest = {
    *  accepted server-side as an alias for any stale client. */
   prefill_thinking_only?: boolean;
   top_p?: number | null;
+  /** OpenRouter reasoning effort for the thinking side; 'default' = the model's own. */
+  reasoning_effort?: Effort | 'default' | null;
   top_k?: number | null;
   presence_penalty?: number | null;
   repetition_penalty?: number | null;
@@ -455,6 +499,13 @@ export type SampleData = {
   /** The provider ignored the prefill and started a fresh turn (the completion
    *  repeats the prefill's opening): content is the fresh turn, NOT merged. */
   prefill_ignored?: boolean;
+  /** With prefill_ignored: the model can't be prefilled at all, so the server
+   *  sampled without the prefill (openai/* through OpenRouter). */
+  prefill_unsupported?: boolean;
+  /** Closed-model reasoning payload (OpenRouter) — see ReasoningDetail. */
+  reasoning_details?: ReasoningDetail[];
+  /** Hidden reasoning tokens the provider billed (the summary is much shorter). */
+  reasoning_tokens?: number;
   /** LOOM provenance (continue_tokens fires only): how many leading stream
    *  entries were FORCED (replayed prefix + picked alternative), and that prefix
    *  as frame-normalized display text — tinted like a prefill so n samples don't
@@ -487,6 +538,12 @@ export type ViewMessage = {
   loom_text?: string;
   /** The provider started a fresh turn instead of continuing the prefill. */
   prefill_ignored?: boolean;
+  /** …because the model can't be prefilled (sampled without it). */
+  prefill_unsupported?: boolean;
+  /** Closed-model reasoning payload: decides the Thinking label and that an
+   *  edit can only keep or drop the thinking. See ReasoningDetail. */
+  reasoning_details?: ReasoningDetail[];
+  reasoning_tokens?: number;
   /** How generation ended — 'length' ⇒ cut off by max tokens (truncation badge). */
   finish_reason?: string;
   /** Renderer mode of this turn's sample — set only for thinking='both' batches

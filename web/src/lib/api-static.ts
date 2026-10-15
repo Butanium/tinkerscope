@@ -246,6 +246,8 @@ const impl: ApiClient = {
     const seen = new Set(base.models.map((m) => m.id));
     return { ...base, models: [...base.models, ...extra.filter((m) => !seen.has(m.id))] };
   },
+  // Capabilities only steer controls a read-only site doesn't render.
+  openrouterCaps: async () => ({ caps: {}, error: null }),
   openrouterAvailable: async (): Promise<OpenRouterAvailableResponse> => ({
     available: false,
     error: 'static site — no OpenRouter catalog',

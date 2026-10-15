@@ -7,6 +7,7 @@
   // sibling branch instead of "use this".
   import { renderContent, renderPrefilled, splitPrefill } from '$lib/render';
   import { withPrefillGhost } from '$lib/token-prefill';
+  import { thinkingKind, thinkingLabel, thinkingKindTip } from '$lib/reasoning';
   // Read-only (static export): the row keeps everything that INSPECTS or COPIES
   // (Raw, token probs, copy message/workspace/node id, bookmark, sample select)
   // and drops everything that would generate or rewrite the tree.
@@ -54,7 +55,8 @@
     panelId,
     rowIndex = -1,
     focused = false,
-    onFocusRow
+    onFocusRow,
+    noPrefill = false
   }: {
     msg: ViewMessage;
     isLastAssistant: boolean;
@@ -109,6 +111,9 @@
     rowIndex?: number;
     focused?: boolean;
     onFocusRow?: () => void;
+    /** The panel's model can't be prefilled (openai/* through OpenRouter), so
+     *  Continue — a prefill — has nothing to offer on this panel. */
+    noPrefill?: boolean;
   } = $props();
 
   // The FORCED leading text of a turn — the authored prefill plus a loom fire's
@@ -201,8 +206,14 @@
     (effThinkPick === 'all' || (effThinkPick === 'think') === !!s.reasoning);
   // ctrl/cmd "apply to every panel" only means something with >1 panel on screen.
   let allActive = $derived(ctrlDown && showRegenAll);
-  // Shift+Continue resumes inside the think block — only meaningful with reasoning.
-  let canResumeThinking = $derived(msg.role === 'assistant' && !!msg.reasoning?.trim());
+  // A closed model's thinking (summary / signed / encrypted — lib/reasoning.ts):
+  // labelled for what it is, and an edit can only keep or drop it.
+  let tKind = $derived(msg.role === 'assistant' ? thinkingKind(msg.reasoning_details) : null);
+  // Shift+Continue resumes inside the think block — only meaningful with reasoning
+  // the model can be handed back as text (not a closed model's summary).
+  let canResumeThinking = $derived(msg.role === 'assistant' && !!msg.reasoning?.trim() && !tKind);
+  // Continue is a prefill: dead on a model that ignores them — unless the
+  // ctrl/cmd all-panels variant reaches other panels.
 
   function roleColor(role: string): string {
     if (role === 'user') return 'var(--color-user-bg)';
@@ -281,6 +292,8 @@
   // it drops the CoT; on a non-thinking turn there's no box (stays single-field).
   let editReasoning = $state('');
   let editHasReasoning = $state(false);
+  // Closed-model thinking (tKind set): no textarea — keep it as is, or drop it.
+  let editDropThinking = $state(false);
   let editShift = $state(false);
   let editAll = $state(false);
   // Thread-system field (ROOT user rows only): editing it — like editing the
@@ -293,14 +306,18 @@
     editShift = shift;
     editAll = all;
     editDraft = msg.content;
-    editHasReasoning = msg.role === 'assistant' && !!msg.reasoning;
+    editHasReasoning = msg.role === 'assistant' && (!!msg.reasoning || !!tKind);
     editReasoning = msg.reasoning ?? '';
+    editDropThinking = false;
     editSystem = msg.system_prompt ?? '';
   }
   function commitEdit() {
+    // Sealed thinking: the ORIGINAL text means "kept" (the tree carries the payload
+    // along), '' means dropped — tree.ts editAssistant keys on exactly that.
+    const reasoning = tKind ? (editDropThinking ? '' : msg.reasoning) : editHasReasoning ? editReasoning : undefined;
     onEdit(
       editDraft,
-      editHasReasoning ? editReasoning : undefined,
+      reasoning,
       editShift,
       editAll,
       editHasSystem ? editSystem : undefined
@@ -346,6 +363,7 @@
     editDraft = '';
     editReasoning = '';
     editHasReasoning = false;
+    editDropThinking = false;
     editShift = false;
     editAll = false;
     editSystem = '';
@@ -446,7 +464,7 @@
       <span class="sample-label">Sample {idx + 1}</span>
       {#if msg.activeSampleIndex === idx}<span class="active-sample-tag">active branch</span>{/if}
       {#if sample.finish_reason === 'length'}{@render truncatedTag()}{/if}
-      {#if sample.prefill_ignored}{@render prefillIgnoredTag()}{/if}
+      {#if sample.prefill_ignored}{@render prefillIgnoredTag(sample.prefill_unsupported)}{/if}
     </div>
     {#if sample.reasoning && !sampleTok(sample)}
       <details
@@ -455,7 +473,7 @@
         ontoggle={(e) => (reasoningOpen = (e.currentTarget as HTMLDetailsElement).open)}
       >
         <summary class="sample-reasoning-toggle">
-          <span>Reasoning</span>
+          <span>{thinkingLabel(sample.reasoning_details, sample.reasoning_tokens)}</span>
           <svg class="thinking-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
         </summary>
         <div class="sample-reasoning">{@html cSplit ? renderPrefilled(sample.reasoning, cSplit.think, 'assistant') : renderContent(sample.reasoning, 'assistant')}</div>
@@ -530,11 +548,13 @@
 <!-- "prefill ignored": the provider started a fresh turn instead of continuing
      the prefill (its reply repeats the prefill's opening), so the turn is shown as
      written, not merged onto the prefill. -->
-{#snippet prefillIgnoredTag()}
+{#snippet prefillIgnoredTag(unsupported = false)}
   <span
     class="truncated-tag"
-    data-tooltip="The provider restarted the turn instead of continuing your prefill"
-    use:tip>prefill ignored</span>
+    data-tooltip={unsupported
+      ? "This model can't be prefilled — sampled without your prefill"
+      : 'The provider restarted the turn instead of continuing your prefill'}
+    use:tip>{unsupported ? 'no prefill' : 'prefill ignored'}</span>
 {/snippet}
 
 <!-- Stop THIS panel's draw. Partials already streamed are kept (the server fires
@@ -561,7 +581,10 @@
     class="btn-act"
     class:btn-act-all={allActive}
     class:shift-alt={shiftDown && canResumeThinking}
-    data-tooltip={(shiftDown && canResumeThinking
+    disabled={noPrefill && !allActive}
+    data-tooltip={noPrefill && !allActive
+      ? "This model can't continue a message (no prefill)"
+      : (shiftDown && canResumeThinking
       ? 'Continue the thinking'
       : 'Continue writing this message') + (allActive ? ' — in ALL panels' : '')}
     use:tip
@@ -705,7 +728,7 @@
       <div class="message-head-left">
         <div class="message-role">{msg.role}</div>
         {#if msg.finish_reason === 'length' && !isMultiSample}{@render truncatedTag()}{/if}
-        {#if msg.prefill_ignored && !isMultiSample}{@render prefillIgnoredTag()}{/if}
+        {#if msg.prefill_ignored && !isMultiSample}{@render prefillIgnoredTag(msg.prefill_unsupported)}{/if}
         <!-- Not while running: the pill is a verdict on a finished turn, and the
              live bucket has no token data yet by definition. -->
         {#if logprobView.enabled && msg.role === 'assistant' && !msg.running && (msg.content || msg.reasoning || isMultiSample) && !hasTok && !(msg.samples ?? []).some((s) => s?.token_logprobs?.length)}{@render noTokTag()}{/if}
@@ -723,11 +746,19 @@
     {#if msg.role === 'assistant' && msg.reasoning && !isMultiSample && !tokView}
       <details class="sample-reasoning-block reasoning-primary" open={thinkingView.open || isLastAssistant || revealOpen}>
         <summary class="sample-reasoning-toggle">
-          <span>Thinking</span>
+          {#if thinkingKindTip(tKind)}
+            <span data-testid="thinking-label" data-tooltip={thinkingKindTip(tKind)} use:tip>{thinkingLabel(msg.reasoning_details, msg.reasoning_tokens)}</span>
+          {:else}
+            <span data-testid="thinking-label">{thinkingLabel(msg.reasoning_details, msg.reasoning_tokens)}</span>
+          {/if}
           <svg class="thinking-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
         </summary>
         <div class="sample-reasoning">{@html prefillSplit ? renderPrefilled(msg.reasoning, prefillSplit.think, 'assistant') : renderContent(msg.reasoning, 'assistant')}</div>
       </details>
+    {:else if msg.role === 'assistant' && tKind && !isMultiSample && !tokView && !editing}
+      <!-- Reasoning that came back with no readable text at all (encrypted only):
+           it still exists, and the next turn still replays it. -->
+      <div class="reasoning-sealed-empty" data-testid="thinking-label" data-tooltip={thinkingKindTip(tKind)} use:tip>{thinkingLabel(msg.reasoning_details, msg.reasoning_tokens)} — no visible text</div>
     {/if}
     {#if isMultiSample}
       {@const completedCount = msg.samples ? msg.samples.filter((x) => x && x.content).length : 0}
@@ -817,7 +848,27 @@
         ></textarea>
         <div class="edit-field-label">Message</div>
       {/if}
-      {#if editHasReasoning}
+      {#if editHasReasoning && tKind}
+        <!-- Closed-model thinking: what the next turn replays is the provider's
+             payload, not this text — so it can be kept or dropped, not edited. -->
+        <div class="edit-field-label edit-sealed-head">
+          <span>{thinkingLabel(msg.reasoning_details, msg.reasoning_tokens)}</span>
+          <button
+            class="edit-drop-thinking"
+            class:dropped={editDropThinking}
+            data-testid="edit-drop-thinking"
+            data-tooltip={editDropThinking ? 'Keep the thinking' : 'Fork without this thinking — the next turn won’t see it'}
+            use:tip
+            onclick={() => (editDropThinking = !editDropThinking)}
+          >{editDropThinking ? 'undo drop' : 'drop thinking'}</button>
+        </div>
+        {#if editDropThinking}
+          <div class="edit-sealed-text dropped" data-testid="edit-thinking-dropped">dropped</div>
+        {:else}
+          <div class="edit-sealed-text" data-testid="edit-thinking-locked">{msg.reasoning || '(encrypted — no visible text)'}</div>
+        {/if}
+        <div class="edit-field-label">Response</div>
+      {:else if editHasReasoning}
         <!-- Assistant CoT editor: edits land in this turn's reasoning block.
              Clear it to drop the CoT entirely. -->
         <div class="edit-field-label">Thinking</div>

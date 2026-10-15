@@ -20,7 +20,7 @@ import type {
   SearchResponse
 } from './types';
 import type { ConvTree } from './tree';
-import type { ConvFields, WorkspaceOp, OpsResponse } from './types';
+import type { ConvFields, WorkspaceOp, OpsResponse, OpenRouterCaps } from './types';
 import { isStatic } from './static-mode';
 import { staticApi, staticSse } from './api-static';
 import { sessionId, SESSION_HEADER, SESSION_QUERY } from './session';
@@ -66,6 +66,10 @@ const httpApi = {
       method: 'POST',
       body: JSON.stringify({ kind, ref, label })
     }),
+  openrouterCaps: (ids: string[]) =>
+    j<{ caps: Record<string, OpenRouterCaps>; error: string | null }>(
+      `/api/openrouter-models/caps?ids=${encodeURIComponent(ids.join(','))}`
+    ),
   openrouterAvailable: (refresh = false) =>
     j<OpenRouterAvailableResponse>(
       `/api/openrouter-models/available${refresh ? '?refresh' : ''}`

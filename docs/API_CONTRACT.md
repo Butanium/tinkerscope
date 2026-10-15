@@ -108,6 +108,7 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
 | POST | `/api/openrouter-models` | `{openrouter_model, label?}` | the updated saved list (upsert) |
 | DELETE | `/api/openrouter-models?model=<id>` | — | the updated saved list (model id in query; ids have slashes) |
 | GET | `/api/openrouter-models/available` | `?refresh` | `{available, error, models:[{openrouter_model, label}]}` — full OpenRouter catalog (their `/v1/models`) for typeahead |
+| GET | `/api/openrouter-models/caps` | `?ids=<csv of OpenRouter ids>` | `{caps: {<id>: {reasoning, reasoning_mandatory, efforts[], default_effort, ignores[], prefill}}, error}` — per-model capabilities from the same cached catalog: the model's reasoning-effort levels, the sampling params it silently drops (`ignores` ⊂ temperature/top_p/top_k/presence_penalty/repetition_penalty), and whether it can be prefilled (`false` for `openai/*`). An id the catalog doesn't know is absent (= unknown). Drives the sidebar's Effort options, the per-panel params editor and the "ignores temperature · can't be prefilled" note |
 | GET | `/api/vllm-models` | `?refresh` | `{available, error, url, models:[{kind:"vllm", id, label, vllm_model, root, parent, max_model_len, supports_thinking?}]}` — what the configured vLLM server serves (its `/v1/models`), as panel-picker entries (`vllm:<id>` sentinel; `id === vllm_model`, the served name). `available:false` + `error:null` = no server configured; with an error = configured but unreachable. `root` = what vLLM loaded (HF id or a path on the GPU box); `supports_thinking` is read off the chat template (`enable_thinking`) when the tinkerscope box can load the tokenizer for `root`, absent otherwise (⇒ assume true). Cached ~30 s server-side; `?refresh=1` re-fetches now. Read-only — the list IS the `vllm serve` invocation. Sampling: `/api/chat` with `vllm_model` (`api/vllm_sampler.py`). |
 | POST | `/api/chat` | ChatRequest (below) | **SSE** (below) |
 | POST | `/api/chat/{chat_id}/cancel` | — | `{status, chat_id}` — cancel an in-flight chat by id (`status`: `"cancelling"` or `"not_found"`). How the browser's "Stop all" reaches a chat it doesn't own (fired by tinkerscope / another tab, so no local AbortController): drives the SAME guaranteed terminal a client disconnect would — `chat_end` fires (`running` clears for every subscriber), any already-completed samples are still committed, and a cancel with 0 completed samples fires the **error**-flavored terminal so nothing folds an empty branch. Idempotent (already-ended chats are `not_found`). Best-effort remote-side: the tinker SDK runs sample calls on its own loop, so cancel stops us listening, never the remote compute in flight. |
@@ -171,9 +172,16 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
 The **tree** is a per-panel branch structure owned by the frontend
 (`web/src/lib/tree.ts`): `nodes[id] = {id, role, content, reasoning?, raw_text?,
 prefill?, loom_cut?, loom_text?, finish_reason?, parent, children[],
-has_token_logprobs?, has_raw_meta?}`
+has_token_logprobs?, has_raw_meta?, reasoning_details?, reasoning_tokens?,
+prefill_unsupported?}`
 + a `selected` map (parentId|`"__root__"` → selected child id). `finish_reason:
 "length"` marks a turn cut off by the max-tokens limit (the UI badges it).
+`reasoning_details` is a closed model's reasoning payload, verbatim from OpenRouter
+(`reasoning.summary` / `reasoning.encrypted` / `reasoning.text`+`signature` items);
+`reasoning` is then only its display text (the provider's summary), and
+`reasoning_tokens` the hidden reasoning's billed length. Kept LIGHT (the browser
+builds the next fire's messages from the tree), carried by an assistant edit that
+keeps the thinking unchanged and dropped by one that changes or drops it.
 `loom_cut`/`loom_text` mark a loom branch's forced prefix (see the `message`
 event below). The
 linear ACTIVE PATH (root→leaf via `selected`) is what the sampler and the CLI
@@ -311,6 +319,12 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
                           //   "call" (the CLI): explicit values apply to THIS chat only,
                           //     absent ones inherit the CURRENT global state, nothing is
                           //     written back (a CLI probe can't clobber the sidebar).
+  "reasoning_effort": null, // OpenRouter models only: effort on the THINKING side —
+                          // "default" (the model's own) | "none" (= thinking off) |
+                          // "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+                          // null = unset → resolved by params_scope like the others.
+                          // A model whose reasoning can't be disabled gets its lowest
+                          // supported level when thinking is off (catalog-driven).
   "thinking": null,       // false | true | "both" | null (unset → resolved by params_scope).
                           // "both" draws n_samples WITHOUT thinking
                           // (sample_index 0..n-1) PLUS n_samples WITH (n..2n-1) concurrently
@@ -416,7 +430,15 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
   model" below), and n>1 sends whole samples for every producer. A consumer that
   saw deltas for a sample uses the later `message` event to *finalize* (clean
   content), not to reprint.
-- `event: message` → `data:` one sample: `{sample_index, content, raw_text, finish_reason, reasoning?, thinking?, token_logprobs?, loom_cut?, loom_text?}` or `{sample_index, error}`.
+- `event: message` → `data:` one sample: `{sample_index, content, raw_text, finish_reason, reasoning?, thinking?, token_logprobs?, loom_cut?, loom_text?, reasoning_details?, reasoning_tokens?, prefill_ignored?, prefill_unsupported?}` or `{sample_index, error}`.
+  `reasoning_details` / `reasoning_tokens`: OpenRouter only — the provider's reasoning
+  payload (see the tree node above) and its billed length. A request's assistant
+  `messages[]` entries may carry `reasoning_details` back; the server forwards them to
+  an OpenRouter model of the same vendor (`format` decides: openai / anthropic /
+  google / x-ai; vendor-neutral items go anywhere) and nowhere else.
+  `prefill_unsupported` (with `prefill_ignored`): the model can't be prefilled
+  (`openai/*`), so the server sent the request WITHOUT the trailing assistant
+  message and the content is the model's fresh turn.
   `thinking` (bool) is present **only on `thinking:"both"` chats** and says which
   half produced the sample (false = non-thinking, true = thinking); single-mode
   chats omit it.
@@ -536,6 +558,7 @@ zero browsers attached:
                                     // a NON-EMPTY system_prompt WITHOUT this flag auto-enables
                                     // (old-client shim: CLI `params --system` keeps applying)
   "temperature","max_tokens","n_samples","thinking","top_p",
+  "reasoning_effort": null,         // OpenRouter effort, thinking side; null = model default
   "chat_id": 0,        // increments each chat run; scopes sample events
   "running": false,
   "running_chats": [],  // one {chat_id, panel, client_token, workspace_id} per chat in
@@ -562,7 +585,7 @@ load-bearing:
 | scope | fields | why |
 |---|---|---|
 | **workspace** | `panels` (incl. per-panel `run_id`/`checkpoint`/`thread_system_prompt`), `workspace_id`, `system_prompt`, `system_enabled` | persisted **with the workspace** and restored on open — a workspace IS its panel layout |
-| **global** | `temperature`, `max_tokens`, `n_samples`, `thinking`, `top_p`, `chat_id`, `running`, `running_chats`, `last_event*` | one knob for every panel and every client — the point of a shared bus |
+| **global** | `temperature`, `max_tokens`, `n_samples`, `thinking`, `top_p`, `reasoning_effort`, `chat_id`, `running`, `running_chats`, `last_event*` | one knob for every panel and every client — the point of a shared bus |
 
 The bus holds exactly **one workspace's** worth of the first group at a time,
 identified by `workspace_id`. Three rules keep that honest:

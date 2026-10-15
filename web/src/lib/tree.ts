@@ -11,6 +11,7 @@
 //  - every op is immutable: clone → mutate → return.
 
 import { logprobsAfterEdit } from './token-edit.ts';
+import type { ReasoningDetail } from './types.ts';
 
 export const ROOT = '__root__';
 
@@ -72,6 +73,16 @@ export type TreeNode = {
   /** The provider started a fresh turn instead of continuing the prefill, so
    *  `content` is that fresh turn and there is no `prefill`. Persisted. */
   prefill_ignored?: boolean;
+  /** …because the model can't be prefilled: it was sampled without the prefill. */
+  prefill_unsupported?: boolean;
+  /** A closed model's reasoning payload (OpenRouter), verbatim: what the model's
+   *  next turn sees of this turn's thinking (`reasoning` is only its summary).
+   *  Kept LIGHT — the browser builds the next fire's messages from the tree.
+   *  Carried by an edit that leaves the thinking alone, dropped by one that
+   *  drops it; never edited (a modified payload is a provider 400). */
+  reasoning_details?: ReasoningDetail[];
+  /** Hidden reasoning tokens the provider billed for this turn. */
+  reasoning_tokens?: number;
   /** How generation ended ('stop' | 'length' | …) — 'length' ⇒ cut off by the
    *  max-tokens limit; persisted so the truncation badge survives reload. */
   finish_reason?: string;
@@ -131,6 +142,9 @@ export type SampleLike = {
    *  prefill+completion, so the client must not re-prepend the prefill. */
   prefill_incorporated?: boolean;
   prefill_ignored?: boolean;
+  prefill_unsupported?: boolean;
+  reasoning_details?: ReasoningDetail[];
+  reasoning_tokens?: number;
   /** The authored prefill this sample was generated from (raw text) — folded onto
    *  the node so the rendered turn can color the prefilled prefix. */
   prefill?: string;
@@ -146,7 +160,7 @@ export type SampleLike = {
   sample_index?: number;
 };
 
-export type Msg = { role: NodeRole; content: string; reasoning?: string };
+export type Msg = { role: NodeRole; content: string; reasoning?: string; reasoning_details?: ReasoningDetail[] };
 
 /** Tree node → wire Msg. Carries `reasoning` ONLY when present, so the sampler can hand
  *  the renderer the full turn ([thinking, text] structured content) and let the model's
@@ -156,9 +170,12 @@ export type Msg = { role: NodeRole; content: string; reasoning?: string };
  *  thinking lives in the separate field, never inlined as a `<think>` string (the renderers
  *  pass string content through verbatim, so an inlined tag would force-keep the CoT). */
 function nodeToMsg(n: TreeNode): Msg {
-  return n.reasoning
-    ? { role: n.role, content: n.content, reasoning: n.reasoning }
-    : { role: n.role, content: n.content };
+  return {
+    role: n.role,
+    content: n.content,
+    ...(n.reasoning ? { reasoning: n.reasoning } : {}),
+    ...(n.reasoning_details?.length ? { reasoning_details: n.reasoning_details } : {})
+  };
 }
 
 // ── IDs ──────────────────────────────────────────────────────────────
@@ -342,6 +359,9 @@ export function foldAssistant(
       loom_cut: s.loom_cut,
       loom_text: s.loom_text,
       prefill_ignored: s.prefill_ignored,
+      prefill_unsupported: s.prefill_unsupported,
+      reasoning_details: s.reasoning_details,
+      reasoning_tokens: s.reasoning_tokens,
       finish_reason: s.finish_reason,
       thinking: s.thinking,
       token_logprobs: cloneTokenLogprobs(s.token_logprobs),
@@ -435,6 +455,10 @@ function graftDownstream(t: ConvTree, rootId: string, chain: TreeNode[]): void {
       role: node.role,
       content: node.content,
       reasoning: node.reasoning,
+      // the reasoning payload goes with its text: OpenAI accepts a blob replayed
+      // under a different user turn (probed 2026-10-15), so a copy still carries it
+      reasoning_details: node.reasoning_details,
+      reasoning_tokens: node.reasoning_tokens,
       raw_text: node.raw_text,
       raw_meta: node.raw_meta,
       parent: curParent,
@@ -470,6 +494,10 @@ export function editAssistant(
     { reasoning: orig.reasoning, content: orig.content },
     { reasoning, content }
   );
+  // A closed model's reasoning payload rides along only while the thinking is
+  // left exactly as it was: an edited summary isn't what the model saw, and a
+  // dropped one ('' — the edit dialog's "drop thinking") takes the payload with it.
+  const keepPayload = reasoning === orig.reasoning;
   // Manual branch: store the edited reasoning (empty ⇒ drop the CoT). raw_text /
   // raw_meta / prefill are the model's originals — stale after a hand-edit, so omit.
   t.nodes[id] = {
@@ -477,6 +505,9 @@ export function editAssistant(
     role: 'assistant',
     content,
     reasoning: reasoning && reasoning.trim() ? reasoning : undefined,
+    ...(keepPayload && orig.reasoning_details?.length
+      ? { reasoning_details: orig.reasoning_details, reasoning_tokens: orig.reasoning_tokens }
+      : {}),
     token_logprobs: cloneTokenLogprobs(kept),
     parent: orig.parent,
     children: []

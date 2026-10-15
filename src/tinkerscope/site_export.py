@@ -225,6 +225,7 @@ def _state_json(pack: packmod.Pack, workspace_id: str | None) -> dict:
         "n_samples": session.get("n_samples", 1),
         "thinking": session.get("thinking", False),
         "top_p": session.get("top_p"),
+        "reasoning_effort": session.get("reasoning_effort"),
         "chat_id": 0,
         "running": False,
         "last_event": None,
@@ -303,6 +304,20 @@ def _strip_logprob_flags(body: dict, keep: set[str] | None) -> None:
         for nid, node in (tree.get("nodes") or {}).items():
             if isinstance(node, dict) and nid not in keep:
                 node.pop("has_token_logprobs", None)
+
+
+def _elide_encrypted_reasoning(body: dict) -> None:
+    """Empty the payload of every closed-model `reasoning.encrypted` item in place.
+    A read-only site never replays it to a model (its only use) and it is the
+    bulk of a closed-model turn; the item itself stays, so the turn still reads
+    "Thinking · encrypted/summary" rather than passing a summary off as the CoT."""
+    for tree in (body.get("trees") or {}).values():
+        if not isinstance(tree, dict):
+            continue
+        for node in (tree.get("nodes") or {}).values():
+            for d in (node.get("reasoning_details") or []) if isinstance(node, dict) else []:
+                if isinstance(d, dict) and d.get("type") == "reasoning.encrypted" and d.get("data"):
+                    d["data"] = ""
 
 
 # ── which turns keep their logprobs (--logprobs chart | last:N) ───────────────
@@ -533,6 +548,7 @@ def export_site(
         nids = _blob_node_ids(body, keep)
         blobs = workspace_store.get_blobs(cid, nids) if nids else {}
         _strip_logprob_flags(body, keep)
+        _elide_encrypted_reasoning(body)
         for nid, blob in blobs.items():
             payload = {
                 k: v

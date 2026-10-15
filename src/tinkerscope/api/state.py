@@ -116,6 +116,9 @@ class PlaygroundState:
     # 2n per chat — see routes/chat.py)
     thinking: bool | str = False
     top_p: float | None = None
+    # Reasoning effort for OpenRouter models' thinking side (None = the model's
+    # own default). Tinker / vLLM sampling ignores it.
+    reasoning_effort: str | None = None
     # chat lifecycle
     chat_id: int = 0                      # increments each chat run; scopes sample events
     running: bool = False
@@ -347,11 +350,11 @@ def last_session_key(sid: str) -> str:
 # Global sampling params the CLI can read before any browser connects. On startup we
 # prime the bus from prefs.json's `last_session` so a pure-CLI consumer of a pack
 # (`tinkerscope --pack …` then `tinkerscope params`, never opening a browser) sees the pack's
-# defaults instead of the PlaygroundState() library defaults. ONLY these five — the
+# defaults instead of the PlaygroundState() library defaults. ONLY these — the
 # shared-state params — are seeded; panels/workspace are deliberately left at defaults
 # so the browser's own restore (which fires only when every panel run_id is null) still
 # runs and restores the layout + the frontend-only params (top_k/presence/repetition).
-_SEEDABLE_PARAMS = ("temperature", "max_tokens", "n_samples", "thinking", "top_p")
+_SEEDABLE_PARAMS = ("temperature", "max_tokens", "n_samples", "thinking", "top_p", "reasoning_effort")
 
 
 def seed_bus_from_prefs(bus: "StateBus | None" = None, sid: str = DEFAULT_SESSION) -> None:

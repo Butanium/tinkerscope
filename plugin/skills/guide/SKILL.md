@@ -44,7 +44,10 @@ someone through the screen, or to answer a specific "what does this do".
 The sidebar splits in two. **Sampling params** is what the next send draws:
 temperature, max tokens, samples, the thinking Off/On/Both toggle, and an
 **Advanced…** popup for top_p and the OpenRouter / vLLM knobs (top_k, presence /
-repetition penalty — Tinker models take temperature and top_p only). **View** is how replies that already exist are shown:
+repetition penalty — Tinker models take temperature and top_p only). With an
+OpenRouter model on screen there is also **Effort** — how hard the model reasons
+on the thinking side (model default, minimal, low, medium, high, xhigh, max);
+Tinker models ignore it, and it greys out while Thinking is Off. **View** is how replies that already exist are shown:
 *Layout* (all samples stacked vs one at a time), whether thinking blocks start
 folded, and token probabilities. Changing anything under View re-renders what's
 on screen; it never re-samples.
@@ -120,6 +123,18 @@ run was trained on instead; hold `Ctrl`+`Shift` and it *opens* that file in
 **samplescope** in a new tab, starting the viewer if none is running.
 (samplescope's view is shared across its tabs, so this moves any you already
 have open.)
+
+**Giving one model its own settings.** With two or more panels, each model block
+in the sidebar has a **panel params** fold: that panel's thinking mode, effort,
+temperature and max tokens, each defaulting to the sidebar's ("sidebar (on)").
+It's how you put a GPT model at high effort next to a fine-tune at temperature
+0.7 in one send. The set values show on the folded line and in the column header
+(two columns of the same model differ only there), and they never move the
+shared sidebar params. Stored like the panel prefill: per browser, per workspace
+panel. Under an OpenRouter model a grey line names what the model silently drops
+— *ignores temperature* (GPT models through OpenRouter take no sampling knobs at
+all; OpenRouter drops them without an error), *can't be prefilled* (OpenAI
+models).
 
 **Adding a checkpoint nobody here has heard of.** Under a panel's picker, *+
 Tinker model* lists every base model and sampler checkpoint on your own account.
@@ -223,6 +238,17 @@ them open, on every turn and every sample card, so scrolling a long comparison d
 mean re-clicking each fold. Folds you clicked keep their own state until you flip it
 back. Browser preference (like Token probs): remembered locally, not part of the
 workspace, and a reader of a published site sets their own.
+
+**"Is that its real chain of thought?"** Not on closed models. The fold's header
+says what it is: **Thinking · summary** — a summary the provider wrote (OpenAI);
+**signed** — text the provider signed (Anthropic); **encrypted** — no readable
+text came back at all. The token count next to it is the hidden reasoning's real
+length (a 1,000-token reasoning can have a three-line summary). The real
+reasoning comes back encrypted, and tinkerscope hands it to the model on the next
+turn, so a follow-up question sees the model's earlier thinking. That's why
+editing such a turn can't change its thinking — the model would still get the
+original — and the edit box offers **drop thinking** instead: the fork has no
+reasoning, and the next turn sees none.
 
 **"What do I paste into my script to get this model?"** The ⧉ button beside a model's
 name in the sidebar. A checkpoint copies its `tinker://…/sampler_weights/…` path — the
@@ -332,7 +358,9 @@ samples greys the prefill out. Some OpenRouter providers ignore a prefill and
 start the reply over (it repeats the prefill's opening); tinkerscope keeps such a
 turn as written and tags it **prefill ignored** instead of gluing it onto the
 prefill — pick a model that continues (DeepSeek or Llama did in a Sept 2026 check;
-gpt-4o-mini and Qwen3-8B didn't). Alternatively, **edit an assistant message**
+gpt-4o-mini and Qwen3-8B didn't). OpenAI models never continue one (their API has
+no prefill), so their panels sample without it, tagged **no prefill**, and their
+continue button is greyed out. Alternatively, **edit an assistant message**
 — that writes a manual branch you can then continue from. `Shift`+edit brings the
 turns below along onto the new branch instead of dead-ending at the edit, which
 is what you want when you're rewriting one reply in the middle of a thread.

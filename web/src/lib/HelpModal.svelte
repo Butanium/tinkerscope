@@ -258,6 +258,16 @@ codex plugin add tinkerscope@tinkerscope</pre>
         <b>Sampling params</b> is what the next send draws: temperature, max tokens, samples and the
         thinking Off/On/Both toggle, plus an <b>Advanced…</b> popup for top_p and the OpenRouter / vLLM knobs
         (top_k, presence and repetition penalty — Tinker models take temperature and top_p only).
+        With an OpenRouter model on screen, <b>Effort</b> sets how hard it reasons on the thinking side
+        (model default, minimal … max); Tinker models ignore it.
+      </p>
+      <p class="help-note">
+        With two or more panels, each model block in the sidebar has a <b>panel params</b> fold: that
+        panel's own thinking mode, effort, temperature and max tokens, each defaulting to the sidebar's.
+        Set ones show folded in the sidebar and in the column header, and never move the shared params.
+        Under an OpenRouter model, a grey line says what the model silently drops — e.g.
+        <i>ignores temperature</i> (GPT models through OpenRouter take none of the sampling knobs) or
+        <i>can't be prefilled</i>.
       </p>
       <p class="help-note">
         <b>View</b> is how replies that already exist are shown: <b>Layout</b> (every sample stacked vs one
@@ -458,6 +468,15 @@ codex plugin add tinkerscope@tinkerscope</pre>
         It's a browser preference, like Token probs: remembered here, never written into the workspace, and
         set independently by whoever reads a published site.
       </p>
+      <p class="help-note">
+        Closed models don't show the reasoning they ran on. The fold's header says what you're reading:
+        <b>Thinking · summary</b> is the provider's summary of it (OpenAI), <b>signed</b> is text the
+        provider signed (Anthropic), <b>encrypted</b> means there's no readable text at all; the token
+        count is the hidden reasoning's real length. The reasoning itself comes back encrypted and is
+        handed to the model on the next turn, so it remembers its earlier thinking. That's also why
+        <Icon name="edit" /> on such a turn can't rewrite the thinking — only <b>drop thinking</b>, which
+        forks the turn without it.
+      </p>
     </section>
 
     <section class="help-sec">
@@ -551,7 +570,8 @@ codex plugin add tinkerscope@tinkerscope</pre>
       <p class="help-note">
         Some OpenRouter providers don't continue a prefill: they start the reply over (it repeats your
         prefill's opening). Such a turn is kept as the model wrote it, tagged <b>prefill ignored</b>, rather
-        than glued onto your prefill.
+        than glued onto your prefill. OpenAI models never continue one: their panels sample without it,
+        tagged <b>no prefill</b>, and their <Icon name="continue" /> is greyed out.
       </p>
     </section>
 

@@ -22,6 +22,7 @@ def _st(**kw) -> PlaygroundState:
     st.n_samples = 4
     st.thinking = True
     st.top_p = 0.9
+    st.reasoning_effort = "high"
     for k, v in kw.items():
         setattr(st, k, v)
     return st
@@ -34,21 +35,31 @@ def _req(**kw) -> ChatRequest:
 def test_global_scope_absent_params_use_server_defaults():
     p = resolve_params(_req(), _st())
     assert p == {"system_prompt": None, "thread_system_prompt": "", "temperature": 1.0,
-                 "max_tokens": 1024, "n_samples": 1, "thinking": False, "top_p": None}
+                 "max_tokens": 1024, "n_samples": 1, "thinking": False, "top_p": None,
+                 "reasoning_effort": None}
 
 
 def test_global_scope_explicit_params_win():
     p = resolve_params(_req(temperature=0.2, max_tokens=99, n_samples=3,
-                            thinking="both", system_prompt="s", top_p=0.5), _st())
+                            thinking="both", system_prompt="s", top_p=0.5,
+                            reasoning_effort="low"), _st())
     assert p == {"system_prompt": "s", "thread_system_prompt": "", "temperature": 0.2,
-                 "max_tokens": 99, "n_samples": 3, "thinking": "both", "top_p": 0.5}
+                 "max_tokens": 99, "n_samples": 3, "thinking": "both", "top_p": 0.5,
+                 "reasoning_effort": "low"}
 
 
 def test_call_scope_absent_params_inherit_state():
     p = resolve_params(_req(params_scope="call"), _st())
     assert p == {"system_prompt": "global sys", "thread_system_prompt": "",
                  "temperature": 0.7, "max_tokens": 555,
-                 "n_samples": 4, "thinking": True, "top_p": 0.9}
+                 "n_samples": 4, "thinking": True, "top_p": 0.9,
+                 "reasoning_effort": "high"}
+
+
+def test_effort_default_is_explicit_model_default():
+    # "default" never inherits: a CLI call can ask for the model's own effort
+    # while the sidebar holds another (None = model default downstream).
+    assert resolve_params(_req(params_scope="call", reasoning_effort="default"), _st())["reasoning_effort"] is None
 
 
 def test_call_scope_explicit_params_override_without_full_inherit():

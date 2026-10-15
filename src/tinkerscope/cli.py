@@ -1208,6 +1208,30 @@ def _call_params(
     return body
 
 
+_EFFORTS = ("default", "none", "minimal", "low", "medium", "high", "xhigh", "max")
+
+
+def _effort_option():
+    return typer.Option(
+        None, "--effort",
+        help="reasoning effort on the thinking side, OpenRouter models only: "
+             "default (the model's own) | none | minimal | low | medium | high | xhigh | max; "
+             "omit = inherit the global param",
+    )
+
+
+def _check_effort(effort: Optional[str]) -> Optional[str]:
+    if effort is not None and effort not in _EFFORTS:
+        _die(f"--effort must be one of {', '.join(_EFFORTS)} (got {effort!r})")
+    return effort
+
+
+def _with_effort(body: dict, effort: Optional[str]) -> None:
+    """Per-call reasoning effort (params_scope="call": omitted = inherit)."""
+    if _check_effort(effort) is not None:
+        body["reasoning_effort"] = effort
+
+
 def _chat_body(
     run: dict,
     checkpoint: Optional[str],
@@ -1264,6 +1288,7 @@ def cmd_chat(
     max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="this call only; omit = inherit the global param"),
     thinking: Optional[bool] = typer.Option(None, "--thinking/--no-thinking", help="force the thinking renderer on/off for this call; omit = inherit the global param"),
     thinking_both: bool = typer.Option(False, "--thinking-both", help="draw n samples WITHOUT thinking + n WITH (2n total; overrides --thinking)"),
+    effort: Optional[str] = _effort_option(),
     system: Optional[str] = typer.Option(None, "--system", help="system prompt for this call; omit = inherit the global one"),
     no_system: bool = typer.Option(False, "--no-system", help="fire with NO system prompt even if the global state carries one"),
     checkpoint: Optional[str] = typer.Option(None, "--checkpoint", help="checkpoint name (overrides @ in the run arg)"),
@@ -1288,6 +1313,7 @@ def cmd_chat(
     # thread identity, not a call-scoped global override.
     system, thread_system = _new_thread_system(_resolve_sys(system, no_system))
     body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, think, system, pid, prefill)
+    _with_effort(body, effort)
     if thread_system is not None:
         body["thread_system_prompt"] = thread_system
     # Placement writer (P3, task #15's answered design): with a workspace open,
@@ -1320,6 +1346,7 @@ def cmd_compare(
     max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="this call only; omit = inherit the global param"),
     thinking: Optional[bool] = typer.Option(None, "--thinking/--no-thinking", help="force thinking on/off for this call; omit = inherit"),
     thinking_both: bool = typer.Option(False, "--thinking-both", help="n samples WITHOUT thinking + n WITH, per run (overrides --thinking)"),
+    effort: Optional[str] = _effort_option(),
     system: Optional[str] = typer.Option(None, "--system", help="system prompt for this call; omit = inherit the global one"),
     no_system: bool = typer.Option(False, "--no-system", help="fire with NO system prompt even if the global state carries one"),
     prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the models extend; raw `<think>` ok"),
@@ -1372,6 +1399,7 @@ def cmd_compare(
     think: "bool | str | None" = "both" if thinking_both else thinking
     for (r, ckpt, pid) in specs:
         body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, think, system, pid, prefill)
+        _with_effort(body, effort)
         if thread_system is not None:
             body["thread_system_prompt"] = thread_system
         res = _StreamResult()
@@ -1637,6 +1665,7 @@ def _fire_send(
     sink: Optional[Any] = None,
     thread_system: Optional[str] = None,
     conv_id: Optional[str] = None,
+    effort: Optional[str] = None,
 ) -> list[tuple[str, dict, _StreamResult]]:
     """Fire one fresh-history chat per target panel, concurrently; join and return
     [(panel_id, panel, result)] with each result's collected samples.
@@ -1663,6 +1692,7 @@ def _fire_send(
     for p in targets:
         body = _panel_chat_body(p, prompt, n, temperature, max_tokens, think, system, prefill,
                                 thread_system=thread_system)
+        _with_effort(body, effort)
         res = _StreamResult()
         if conv_id and p["id"] in parents:
             body["workspace_id"] = conv_id
@@ -1704,6 +1734,7 @@ def cmd_send(
     max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="this call only; omit = inherit the global param"),
     thinking: Optional[bool] = typer.Option(None, "--thinking/--no-thinking", help="force thinking on/off for this call; omit = inherit the global param"),
     thinking_both: bool = typer.Option(False, "--thinking-both", help="n samples WITHOUT thinking + n WITH, per panel (overrides --thinking)"),
+    effort: Optional[str] = _effort_option(),
     system: Optional[str] = typer.Option(None, "--system", help="system prompt for this call; omit = inherit the global one"),
     no_system: bool = typer.Option(False, "--no-system", help="fire with NO system prompt even if the global state carries one"),
     prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the models extend; raw `<think>` ok"),
@@ -1758,7 +1789,7 @@ def cmd_send(
 
     results = _fire_send(targets, prompt, prefill, n, temperature, max_tokens,
                          think, system, show_logprobs, json_out,
-                         thread_system=thread_system, conv_id=conv_id)
+                         thread_system=thread_system, conv_id=conv_id, effort=effort)
     if first_token:
         _print_first_token_tables(results, json_out)
     failures, code = _fire_failures(results, lambda pid, p: f"{pid} ({_short_run(p.get('run_id'))})")
@@ -1853,7 +1884,11 @@ def _continue_messages(ancestry: list[dict], prompt: Optional[str], prefill: Opt
         CoT continuation).
     Content is answer-only (CoT excluded): the native renderer rebuilds each turn and
     applies its own history policy. Placement is `parent_node`, never content match."""
-    pairs = [{"role": m["role"], "content": m.get("content", "")} for m in ancestry if m.get("role") != "system"]
+    # A closed model's reasoning payload (OpenRouter) rides along: the server
+    # replays it to that provider's models so they see their own earlier thinking.
+    pairs = [{"role": m["role"], "content": m.get("content", ""),
+              **({"reasoning_details": m["reasoning_details"]} if m.get("reasoning_details") else {})}
+             for m in ancestry if m.get("role") != "system"]
     if not pairs:
         _die("empty ancestry — nothing to continue from")
     last = pairs[-1]["role"]
@@ -1881,6 +1916,7 @@ def cmd_continue(
     max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="this call only; omit = inherit the global param"),
     thinking: Optional[bool] = typer.Option(None, "--thinking/--no-thinking", help="force thinking on/off for this call; omit = inherit the global param"),
     thinking_both: bool = typer.Option(False, "--thinking-both", help="n samples WITHOUT thinking + n WITH, per panel (overrides --thinking)"),
+    effort: Optional[str] = _effort_option(),
     system: Optional[str] = typer.Option(None, "--system", help="system prompt for this call; omit = inherit the global one"),
     no_system: bool = typer.Option(False, "--no-system", help="fire with NO system prompt even if the global state carries one"),
     file: Optional[str] = typer.Option(None, "--file", help="read the user message from a file (mutually exclusive with the positional prompt)"),
@@ -2126,6 +2162,7 @@ def cmd_continue(
     for (p, msgs, ts, _anchor) in plans:
         body = _panel_body(p, msgs, n, temperature, max_tokens, think, system, prefill_scope,
                            thread_system=ts)
+        _with_effort(body, effort)
         res = _StreamResult()
         if c is not None and p["id"] in fire_parent:
             body["workspace_id"] = c["id"]
@@ -2337,6 +2374,7 @@ def cmd_probe(
     temperature: Optional[float] = typer.Option(None, "--temperature"),
     max_tokens: Optional[int] = typer.Option(None, "--max-tokens"),
     thinking: Optional[bool] = typer.Option(None, "--thinking/--no-thinking", help="thinking renderer (default: inherit the global)"),
+    effort: Optional[str] = _effort_option(),
     system: Optional[str] = typer.Option(None, "--system", help="system prompt for this call"),
     no_system: bool = typer.Option(False, "--no-system", help="fire with NO system prompt at all"),
     file: Optional[str] = typer.Option(None, "--file", help="read the user message from a file"),
@@ -2406,6 +2444,7 @@ def cmd_probe(
         "thread_system_prompt": "",
         **_call_params(n, temperature, max_tokens, thinking, _resolve_sys(system, no_system)),
     }
+    _with_effort(body, effort)
     if run_arg.startswith("openrouter:"):
         body["openrouter_model"] = run_arg[len("openrouter:"):]
     elif run_arg.startswith("base:"):
@@ -2436,6 +2475,7 @@ def cmd_params(
     n: Optional[int] = typer.Option(None, "--n", help="default sample count"),
     thinking: Optional[bool] = typer.Option(None, "--thinking/--no-thinking"),
     thinking_both: bool = typer.Option(False, "--thinking-both", help="set the global thinking mode to 'both'"),
+    effort: Optional[str] = _effort_option(),
     top_p: Optional[float] = typer.Option(None, "--top-p"),
     system: Optional[str] = typer.Option(None, "--system", help="global system prompt"),
     system_file: Optional[str] = typer.Option(None, "--system-file", help="read the global system prompt from a file (mutually exclusive with --system)"),
@@ -2443,7 +2483,7 @@ def cmd_params(
     json_out: bool = typer.Option(False, "--json", help="print the resulting global params as JSON"),
 ) -> None:
     """Show or SET the GLOBAL sampling params (system prompt, temperature, max
-    tokens, n, thinking, top-p) — the shared state the browser sidebar shows, and
+    tokens, n, thinking, top-p, reasoning effort) — the shared state the browser sidebar shows, and
     what a send/chat/continue inherits for any param it doesn't pass. This is the
     DELIBERATE route for changing them; per-call args on send/chat/continue/compare
     apply to that call only and never touch this state. With no options: just show."""
@@ -2463,6 +2503,8 @@ def cmd_params(
         patch["thinking"] = thinking
     if top_p is not None:
         patch["top_p"] = top_p
+    if _check_effort(effort) is not None:
+        patch["reasoning_effort"] = None if effort == "default" else effort
     if system is not None:
         patch["system_prompt"] = system
     elif clear_system:
@@ -2470,14 +2512,16 @@ def cmd_params(
     st = _post("/api/state", patch) if patch else _get("/api/state")
     verb = "set" if patch else "current"
     if json_out:
-        keys = ("temperature", "max_tokens", "n_samples", "thinking", "top_p", "system_prompt", "system_enabled")
+        keys = ("temperature", "max_tokens", "n_samples", "thinking", "top_p", "reasoning_effort",
+                "system_prompt", "system_enabled")
         _print_json({k: st.get(k) for k in keys})
         return
     think = st.get("thinking")
     think_s = "both" if think == "both" else ("yes" if think else "no")
     print(f"{verb} global params   temp={st.get('temperature')} max_tokens={st.get('max_tokens')} "
           f"n={st.get('n_samples')} thinking={think_s}"
-          + (f" top_p={st.get('top_p')}" if st.get("top_p") is not None else ""))
+          + (f" top_p={st.get('top_p')}" if st.get("top_p") is not None else "")
+          + (f" effort={st.get('reasoning_effort')}" if st.get("reasoning_effort") else ""))
     sp = st.get("system_prompt")
     muted = " (muted — browser power toggle off; kept but not applied)" if sp and st.get("system_enabled") is False else ""
     print(f"system: {sp}{muted}" if sp else "system: (none)")

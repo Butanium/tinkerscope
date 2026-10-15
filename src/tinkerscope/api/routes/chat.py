@@ -114,6 +114,14 @@ class ChatMessage(BaseModel):
     # the native renderer paths can rebuild the full turn and apply the model's own history
     # policy (strip_thinking_from_history / preserve). None for non-thinking turns.
     reasoning: str | None = None
+    # An OpenRouter turn's reasoning payload, verbatim as the provider returned it
+    # (summary + encrypted / signed items). Forwarded on later OpenRouter calls so
+    # the model sees its own earlier reasoning (openrouter.prepare_messages);
+    # ignored by every other backend. The display text is `reasoning`.
+    reasoning_details: list[dict] | None = None
+
+
+Effort = Literal["default", "none", "minimal", "low", "medium", "high", "xhigh", "max"]
 
 
 class ChatRequest(BaseModel):
@@ -151,6 +159,10 @@ class ChatRequest(BaseModel):
     # (sample_index 0..n-1) plus n_samples WITH (n..2n-1) in one chat — 2n total.
     # None = unset (resolved by params_scope — see resolve_params).
     thinking: bool | Literal["both"] | None = None
+    # Reasoning effort for the thinking side of an OpenRouter call (the off side
+    # is always "none"). "default" = the model's own default; None = unset
+    # (resolved by params_scope like the other params). Other backends ignore it.
+    reasoning_effort: Effort | None = None
     # Param routing — the "two routes" contract (see resolve_params):
     #   "global" (default; the browser) — this chat's params ARE the shared
     #     sidebar state: explicit values are written back to the state bus,
@@ -317,6 +329,7 @@ def _committed_turn(
 _FOLD_SAMPLE_FIELDS = (
     "reasoning", "raw_text", "raw_meta", "finish_reason", "thinking",
     "token_logprobs", "loom_cut", "loom_text", "prefill_ignored",
+    "prefill_unsupported", "reasoning_details", "reasoning_tokens",
 )
 
 
@@ -470,7 +483,15 @@ def resolve_params(req: ChatRequest, st: Any) -> dict:
         "thinking": req.thinking if req.thinking is not None
         else (st.thinking if inherit else False),
         "top_p": req.top_p if req.top_p is not None else (st.top_p if inherit else None),
+        "reasoning_effort": _effort(req.reasoning_effort if req.reasoning_effort is not None
+                                    else (getattr(st, "reasoning_effort", None) if inherit else None)),
     }
+
+
+def _effort(v: str | None) -> str | None:
+    """Wire effort → the stored/used value: "default" and None both mean the
+    model's own default (None)."""
+    return None if v in (None, "default") else v
 
 
 def compose_system(global_part: str | None, thread_part: str | None) -> str:
@@ -508,8 +529,9 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
                 "on the bus first (HANDOFF_SERVER_AUTHORITY §4.4)",
             )
     # `msgs` is the request's message list (answer-only, no system prompt). From it:
-    #  - sampling_msgs: {role, content} ONLY (+ system) — fed to the OpenAI-style endpoints
-    #    (OpenRouter, loose checkpoint), which would choke on an extra `reasoning` key.
+    #  - sampling_msgs: {role, content} ONLY (+ system) — fed to the vLLM server's
+    #    chat template, which would choke on an extra `reasoning` key.
+    #  - or_msgs: {role, content} + an assistant turn's `reasoning_details` — OpenRouter.
     #  - native_msgs: also carries `reasoning` (+ system), fed to the native renderer paths
     #    (base_model / run_id) so the renderer rebuilds the full turn and applies its OWN
     #    history policy (strip_thinking_from_history / preserve) instead of us pre-stripping.
@@ -517,6 +539,13 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
     sampling_msgs = list(msgs)
     native_msgs = [
         {"role": m.role, "content": m.content, **({"reasoning": m.reasoning} if m.reasoning else {})}
+        for m in req.messages
+    ]
+    # OpenRouter's own lists: like sampling_msgs, plus each assistant turn's stored
+    # reasoning_details (openrouter.prepare_messages decides what is replayable).
+    or_msgs = [
+        {"role": m.role, "content": m.content,
+         **({"reasoning_details": m.reasoning_details} if m.reasoning_details else {})}
         for m in req.messages
     ]
     params = resolve_params(req, bus.state)
@@ -531,6 +560,7 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
         sys_msg = {"role": "system", "content": effective_system}
         sampling_msgs = [sys_msg, *sampling_msgs]
         native_msgs = [sys_msg, *native_msgs]
+        or_msgs = [sys_msg, *or_msgs]
 
     # prefill_scope decides which side keeps the trailing-assistant prefill.
     # sampling_msgs/native_msgs become the ON (think=True) lists; the *_off variants
@@ -541,8 +571,20 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
     sampling_msgs, native_msgs, sampling_off, native_off = _prep_prefill_lists(
         sampling_msgs, native_msgs, scope
     )
+    or_on, _, or_off, _ = _prep_prefill_lists(or_msgs, or_msgs, scope)
+    # A model that can't be prefilled (openrouter.prefill_unsupported) gets NO
+    # trailing assistant at all, and every sample is tagged — sending it would make
+    # it an earlier turn the model answers afresh, which the fold would then merge
+    # with the prefill as if it were a continuation.
+    or_no_prefill = bool(
+        req.openrouter_model and openrouter.prefill_unsupported(req.openrouter_model)
+        and msgs and msgs[-1]["role"] == "assistant"
+    )
+    if or_no_prefill:
+        or_on, or_off = _drop_trailing_assistant(or_on), _drop_trailing_assistant(or_off)
     if thinking is False:
         sampling_msgs, native_msgs = sampling_off, native_off
+        or_on = or_off
 
     temperature, max_tokens, n = params["temperature"], params["max_tokens"], params["n_samples"]
     # thinking="both" = a non-thinking batch of n + a thinking batch of n in one
@@ -597,8 +639,9 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
                 def or_kwargs(think: bool) -> dict:
                     return dict(
                         model=req.openrouter_model,
-                        messages=sampling_msgs if think else sampling_off,
+                        messages=or_on if think else or_off,
                         temperature=temperature, max_tokens=max_tokens, thinking=think,
+                        effort=params["reasoning_effort"],
                         top_p=top_p, top_k=req.top_k, presence_penalty=req.presence_penalty,
                         repetition_penalty=req.repetition_penalty,
                     )
@@ -805,6 +848,7 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
                     "n_samples": n,
                     "thinking": thinking,
                     "top_p": top_p,
+                    "reasoning_effort": params["reasoning_effort"],
                 })
         chat_id = await (bus.alloc_chat_id() if bus_silent else bus.chat_begin(
             _running={"panel": req.panel, "client_token": req.client_token,
@@ -1027,7 +1071,10 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
                     continue
                 if "content" in item and "error" not in item:
                     item.setdefault("sample_index", 0)
-                    if (not item.get("prefill_incorporated") and msgs and msgs[-1]["role"] == "assistant"
+                    if or_no_prefill and _prefill_reaches_sample(scope, thinking, n, item["sample_index"]):
+                        item["prefill_ignored"] = True
+                        item["prefill_unsupported"] = True
+                    elif (not item.get("prefill_incorporated") and msgs and msgs[-1]["role"] == "assistant"
                             and _prefill_reaches_sample(scope, thinking, n, item["sample_index"])
                             and _echoes_prefill(msgs[-1]["content"], item["content"])):
                         item["prefill_ignored"] = True

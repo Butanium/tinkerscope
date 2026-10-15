@@ -55,25 +55,26 @@ _KIND_TO_SENTINEL = {"ckpt": "ckpt:", "base": "base:", "openrouter": "openrouter
 _SENTINEL_TO_KIND = {v: k for k, v in _KIND_TO_SENTINEL.items()}
 _MODEL_KINDS = tuple(_KIND_TO_SENTINEL)
 
-# `last_session` params. The first five have a backend source of truth
+# `last_session` params. The first six have a backend source of truth
 # (PlaygroundState); the last three live ONLY in the frontend (+page.svelte's
 # topK/presencePenalty/repetitionPenalty, "not in shared state") so we mirror them here.
 _PARAM_KEYS = (
-    "temperature", "max_tokens", "n_samples", "thinking", "top_p",
+    "temperature", "max_tokens", "n_samples", "thinking", "top_p", "reasoning_effort",
     "top_k", "presence_penalty", "repetition_penalty",
 )
 _FRONTEND_ONLY_DEFAULTS = {"top_k": 20, "presence_penalty": 1.5, "repetition_penalty": 1.0}
 
 
 def _param_defaults() -> dict[str, Any]:
-    """A seeded session's param defaults: the shared-state five derived from
+    """A seeded session's param defaults: the shared-state six derived from
     PlaygroundState (so they never drift from the live defaults) + the frontend-only three."""
     import dataclasses
 
     from .api.state import PlaygroundState
 
     s = dataclasses.asdict(PlaygroundState())
-    return {k: s[k] for k in ("temperature", "max_tokens", "n_samples", "thinking", "top_p")} | _FRONTEND_ONLY_DEFAULTS
+    return {k: s[k] for k in ("temperature", "max_tokens", "n_samples", "thinking", "top_p",
+                              "reasoning_effort")} | _FRONTEND_ONLY_DEFAULTS
 
 
 # ── panel-id scheme (mirror +page.svelte nextPanelId) ────────────────────────────

@@ -3146,3 +3146,57 @@ and hid the undo regression. `scripts/icon_halfpx_check.py` is the cheap DOM-onl
 check for the rounding class; it found the tag, the card buttons and the continue
 arrow after I'd called the pass done.
 
+
+### 2026-10-15 — Closed reasoning models (GPT-6 Luna) through OpenRouter
+
+Clément is about to use tinkerscope with closed models. Probed `openai/gpt-6-luna`
+first (BYOK on his OpenAI key; scripts in that session's scratchpad, the findings
+also logged in `~/docs/openrouter.md`):
+
+- **The visible thinking is not the reasoning.** `reasoning` is a provider-written
+  summary; `reasoning_details` carries it as a `reasoning.summary` item next to a
+  `reasoning.encrypted` blob (~1.9 KB at 20 reasoning tokens). Passing the details
+  back on the next turn raises prompt tokens by about the reasoning length (58 → 78);
+  passing the summary alone, an edited summary, or a plain `reasoning` string changes
+  nothing (58); a tampered blob is a 400 `invalid_encrypted_content`. A blob replayed
+  under a different user turn, a different system prompt, twice, or to `gpt-6-sol`
+  was accepted. Short reasoning often comes back with NO summary item at all.
+- Until now tinkerscope dropped all of it on the next turn (`sampling_msgs` was
+  `{role, content}` only), so a Luna follow-up never saw its own earlier reasoning.
+  Now the details are stored LIGHT on the node (the browser builds fire messages
+  from the tree; `raw_text`, also light, is already O(conversation) per OpenRouter
+  turn), ride `ChatMessage.reasoning_details`, and `openrouter.prepare_messages`
+  forwards them — vendor-filtered by `format`, so one provider's blob never reaches
+  another's model. Streaming merges `delta.reasoning_details` by `index`.
+- **Edit = keep or drop, never rewrite.** `editAssistant` carries the payload only
+  when the reasoning string is passed back unchanged; the edit box replaces the
+  thinking textarea with read-only text + "drop thinking" when `reasoning_details`
+  has a summary / encrypted / signed item (`lib/reasoning.ts`). Plain unsigned text
+  (an open model's CoT through OpenRouter) stays editable; an edit drops its payload.
+- **Prefill does not exist for OpenAI models.** A trailing assistant message is read
+  as an earlier turn: "Name one color." + prefill "Instead of a color, here is my
+  favorite fruit:" → "Blue."; "Count to 10" + "1, 2, 3, 4," → "5, 6, …" at effort
+  none (passes `_echoes_prefill`, so it would have been MERGED into a fake
+  continuation) and "1, 2, 3, 4, 5, …" at effort low. `openai/*` now gets no trailing
+  assistant at all and every sample is tagged `prefill_unsupported`; Continue is
+  disabled on those panels (and skipped by the Ctrl all-panels variant).
+- **Sampling knobs are dropped silently.** Luna's catalog `supported_parameters`
+  has no temperature/top_p; temperature 0.2 returns 200. The catalog (now cached in
+  `openrouter.fetch_catalog`, served per model on `/api/openrouter-models/caps`)
+  drives an "ignores temperature · can't be prefilled" line under the model.
+- **Effort.** OpenRouter's vocabulary is none|minimal|low|medium|high|xhigh|max (a
+  bogus value 400s and lists them); a level outside the model's `supported_efforts`
+  is coerced ("minimal" on Luna → 200). New shared param `reasoning_effort` (state,
+  StatePatch, packs, `--effort` on chat/compare/send/continue/probe/params). Thinking
+  off on a model whose reasoning is mandatory and has no "none" level sends its
+  lowest level instead of the 400 (`reasoning_param`, catalog-driven, cache-only
+  on the chat path so a send never waits on a catalog fetch).
+- **Per-panel params** (`lib/panel-params.ts`, `PanelParamsEditor.svelte`): thinking /
+  effort / temperature / max tokens per compare panel, stored like the panel prefill.
+  A fire carrying any goes `params_scope: "call"` — the "global" scope writes a
+  chat's params back into shared state, which would have moved the sidebar to the
+  panel's values.
+- Static site export empties `reasoning.encrypted` payloads (never replayed there;
+  the item stays so the label still says "summary"). Not done: whether a blob
+  replays across OpenRouter accounts / BYOK on-off (packs carry it verbatim), and no
+  Anthropic / Gemini probe (only Luna was sanctioned for testing).

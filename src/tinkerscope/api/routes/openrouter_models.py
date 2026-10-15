@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import os
 
-import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from .. import openrouter
 from ..store import read_json, write_json
 
 
@@ -26,26 +26,37 @@ def _path():
 
 router = APIRouter(prefix="/api/openrouter-models", tags=["openrouter"])
 
-# Full OpenRouter catalog (their OpenAI-compatible /v1/models), cached after the
-# first fetch. Powers the type-to-filter "add model" UI. Public, no key needed.
-_catalog: list[dict] | None = None
-
 
 @router.get("/available")
 def available_openrouter_models(refresh: bool = False) -> dict:
     """The OpenRouter model catalog for typeahead. Cached; ?refresh=1 re-fetches."""
-    global _catalog
-    if _catalog is None or refresh:
-        try:
-            r = httpx.get("https://openrouter.ai/api/v1/models", timeout=15.0)
-            r.raise_for_status()
-            _catalog = [
-                {"openrouter_model": m["id"], "label": m.get("name") or m["id"]}
-                for m in r.json().get("data", [])
-            ]
-        except Exception as e:
-            return {"available": False, "error": f"{type(e).__name__}: {e}", "models": []}
-    return {"available": True, "error": None, "models": _catalog}
+    try:
+        cat = openrouter.fetch_catalog(refresh)
+    except Exception as e:
+        return {"available": False, "error": f"{type(e).__name__}: {e}", "models": []}
+    return {
+        "available": True,
+        "error": None,
+        "models": [{"openrouter_model": m["id"], "label": m.get("name") or m["id"]} for m in cat],
+    }
+
+
+@router.get("/caps")
+def openrouter_caps(ids: str = "") -> dict:
+    """Per-model capabilities from the catalog for the comma-separated `ids`:
+    reasoning efforts (+ the model's default, whether reasoning can be turned
+    off), the sampling params it ignores, whether it can be prefilled. An id the
+    catalog doesn't know is absent from `caps`; a failed catalog fetch → error."""
+    try:
+        openrouter.fetch_catalog()
+    except Exception as e:
+        return {"caps": {}, "error": f"{type(e).__name__}: {e}"}
+    out = {}
+    for mid in (i.strip() for i in ids.split(",")):
+        c = openrouter.model_caps(mid) if mid else None
+        if c is not None:
+            out[mid] = c
+    return {"caps": out, "error": None}
 
 
 class OpenRouterModel(BaseModel):

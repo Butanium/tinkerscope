@@ -373,7 +373,10 @@ export function parseSample(data: any): SampleData {
     // carried so the bus-bucket fold (chat.svelte.ts) knows whether to prepend
     // the prefill (false/absent = continuation-only path → prepend).
     prefill_incorporated: data?.prefill_incorporated === true ? true : undefined,
-    prefill_ignored: data?.prefill_ignored === true ? true : undefined
+    prefill_ignored: data?.prefill_ignored === true ? true : undefined,
+    prefill_unsupported: data?.prefill_unsupported === true ? true : undefined,
+    reasoning_details: Array.isArray(data?.reasoning_details) ? data.reasoning_details : undefined,
+    reasoning_tokens: typeof data?.reasoning_tokens === 'number' ? data.reasoning_tokens : undefined
   };
 }
 

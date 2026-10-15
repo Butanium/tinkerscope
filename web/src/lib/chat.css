@@ -156,6 +156,7 @@ mark.hl-mark.hl-join-r { padding-right: 0; border-top-right-radius: 0; border-bo
 
 /* Icon action buttons: regenerate / edit / delete. */
 .btn-act { background: none; border: 1px solid transparent; border-radius: var(--radius); padding: 3px 6px; color: var(--color-text-muted); display: inline-flex; align-items: center; transition: all 0.15s; }
+.btn-act:disabled, .btn-act:disabled:hover { opacity: 0.35; cursor: default; color: var(--color-text-muted); border-color: transparent; background: none; }
 .btn-act:hover { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
 .btn-act-danger:hover { color: #ef4444; border-color: #ef4444; background: #fef2f240; }
 /* Shift held → this button's action changes (regen→replace, edit→copy): tint it
@@ -192,6 +193,15 @@ mark.hl-mark.hl-join-r { padding-right: 0; border-top-right-radius: 0; border-bo
 .edit-field-label { font-size: 0.64rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); margin: var(--space-1) 0 2px; }
 .edit-reasoning { border-color: var(--color-border); color: var(--color-text-secondary); font-size: 0.82rem; }
 .edit-reasoning:focus { border-color: var(--color-accent); }
+/* Closed-model thinking in the editor: read-only text + a keep/drop switch. */
+.edit-sealed-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.edit-drop-thinking { background: none; border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 1px 6px; font-size: 0.66rem; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--color-text-muted); cursor: pointer; }
+.edit-drop-thinking:hover { color: #ef4444; border-color: #ef4444; }
+.edit-drop-thinking.dropped { color: var(--color-accent); border-color: var(--color-accent); }
+.edit-sealed-text { max-height: 8em; overflow-y: auto; padding: var(--space-2) var(--space-3); border: 1px dashed var(--color-border); border-radius: var(--radius); color: var(--color-text-secondary); font-size: 0.8rem; line-height: 1.5; white-space: pre-wrap; }
+.edit-sealed-text.dropped { color: var(--color-text-muted); font-style: italic; text-decoration: none; }
+/* Reasoning that exists but has no visible text (encrypted only). */
+.reasoning-sealed-empty { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); padding: var(--space-1) 0; margin-bottom: var(--space-2); }
 /* Thread-system editor (root user rows): dimmer than the message box, like the CoT one. */
 .edit-system { border-color: var(--color-border); background: var(--color-system-bg); color: var(--color-text-secondary); font-size: 0.8rem; font-family: var(--font-mono); }
 .edit-system:focus { border-color: var(--color-accent); }

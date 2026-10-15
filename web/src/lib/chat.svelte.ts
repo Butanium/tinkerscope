@@ -34,6 +34,7 @@ export type ChatParams = Pick<
   | 'max_tokens'
   | 'n_samples'
   | 'thinking'
+  | 'reasoning_effort'
   | 'prefill_scope'
   | 'top_p'
   | 'top_k'

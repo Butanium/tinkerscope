@@ -64,6 +64,8 @@ class StatePatch(BaseModel):
     n_samples: int | None = None
     thinking: bool | Literal["both"] | None = None
     top_p: float | None = None
+    # None (sent explicitly) = the model's own default effort
+    reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"] | None = None
 
 
 @router.get("")
