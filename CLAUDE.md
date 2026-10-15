@@ -117,6 +117,14 @@ and in this file's reference section; HANDOFF.md itself is retired.
   polling mode so tinker's ~30 s answers are a heartbeat; silence (not a long
   wait) triggers reconnect + resend. It touches private SDK surface — re-run
   `tests/small-smokes/tinker_liveness_live.py` after any tinker SDK upgrade.
+- **Closed reasoning models through OpenRouter** (`src/tinkerscope/api/openrouter.py` —
+  module docstring; probes in `ENGINEERING_LOGS.md` 2026-10-15): the visible thinking
+  is a provider SUMMARY (or signed text); the reasoning itself is the opaque
+  `reasoning_details` payload, stored LIGHT on the node and replayed on later turns
+  (vendor-filtered). So an edit keeps or drops it, never rewrites it
+  (`web/src/lib/reasoning.ts`, `tree.ts editAssistant`). `openai/*` never continues a
+  prefill — the server drops it and tags `prefill_unsupported`. Per-model caps (efforts,
+  silently ignored params) come from the cached catalog: `/api/openrouter-models/caps`.
 - **vLLM backend** (`src/tinkerscope/api/vllm_sampler.py` — module docstring): a
   self-hosted OpenAI-compatible server (`$TINKERSCOPE_VLLM_URL` / `--vllm-url`)
   whose models join the picker as `vllm:<name>` (⚙) and sample NATIVE-shaped —
@@ -559,6 +567,14 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     split render fabricates a phantom line break), the token views dot-underline
     it (no separate fork tick — the tint boundary is the marker, per Clément).
     **Has `loom.test.ts`**; live smoke `tests/small-smokes/browser_loom_live.py`.
+  - `lib/panel-params.ts` (+ `PanelParamsEditor.svelte`) — a compare panel's own
+    thinking / effort / temperature / max tokens (session pref keyed
+    `<workspace>:<panel>`, like the panel prefill). +page's `fireOne` sends them at
+    `params_scope: 'call'` — the default "global" scope writes a chat's params back
+    into shared state, which would move the sidebar. **Has `panel-params.test.ts`.**
+  - `lib/reasoning.ts` — what a turn's thinking IS (`summary` / `signed` /
+    `encrypted`, off `reasoning_details`) + the fold label. **Has `reasoning.test.ts`**
+    (also pins tree.ts's keep/drop of the payload on edit).
   - `lib/motion.ts` — `fold`, the open/close transition for an editor that unfolds
     under its pill (height + fade, 180 ms, instant under prefers-reduced-motion).
     Used by the panel-prefill textarea and the composer's three editors.
