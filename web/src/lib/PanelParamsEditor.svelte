@@ -28,6 +28,8 @@
     onSet: <K extends keyof PanelParams>(key: K, value: PanelParams[K] | undefined) => void;
     onClear: () => void;
   } = $props();
+  // one editor per panel is open at once: label↔control ids must be per instance
+  const uid = $props.id();
 
   let summary = $derived(summarizePanelParams(params));
   const thinkWord = (t: boolean | 'both') => (t === 'both' ? 'both' : t ? 'on' : 'off');
@@ -59,8 +61,8 @@
   </button>
   {#if open}
     <div class="pp-grid">
-      <label for="pp-think">Thinking</label>
-      <select id="pp-think" class="pp-select" data-testid="pp-thinking"
+      <label for="{uid}-think">Thinking</label>
+      <select id="{uid}-think" class="pp-select" data-testid="pp-thinking"
         value={params?.thinking == null ? '' : String(params.thinking)}
         onchange={(e) => {
           const v = (e.target as HTMLSelectElement).value;
@@ -73,8 +75,8 @@
       </select>
 
       {#if isOpenrouter}
-        <label for="pp-effort">Effort</label>
-        <select id="pp-effort" class="pp-select" data-testid="pp-effort"
+        <label for="{uid}-effort">Effort</label>
+        <select id="{uid}-effort" class="pp-select" data-testid="pp-effort"
           value={params?.reasoning_effort ?? ''}
           onchange={(e) => {
             const v = (e.target as HTMLSelectElement).value;
@@ -86,16 +88,16 @@
         </select>
       {/if}
 
-      <label for="pp-temp">Temp</label>
-      <input id="pp-temp" class="pp-input" type="number" min="0" max="2" step="0.05" data-testid="pp-temperature"
+      <label for="{uid}-temp">Temp</label>
+      <input id="{uid}-temp" class="pp-input" type="number" min="0" max="2" step="0.05" data-testid="pp-temperature"
         placeholder={`sidebar (${global.temperature.toFixed(2)})`}
         disabled={ignoresTemp}
         value={params?.temperature ?? ''}
         onchange={(e) => onSet('temperature', numOrUndef((e.target as HTMLInputElement).value, 0, 2))} />
       {#if ignoresTemp}<span class="pp-note" data-tooltip="OpenRouter drops it for this model without an error" use:tip>ignored by this model</span>{/if}
 
-      <label for="pp-max">Max tokens</label>
-      <input id="pp-max" class="pp-input" type="number" min="1" max="128000" data-testid="pp-max-tokens"
+      <label for="{uid}-max">Max tokens</label>
+      <input id="{uid}-max" class="pp-input" type="number" min="1" max="128000" data-testid="pp-max-tokens"
         placeholder={`sidebar (${global.max_tokens})`}
         value={params?.max_tokens ?? ''}
         onchange={(e) => onSet('max_tokens', numOrUndef((e.target as HTMLInputElement).value, 1, 128000, true))} />
