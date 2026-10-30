@@ -589,7 +589,7 @@ codex plugin add tinkerscope@tinkerscope</pre>
         A result is a normal turn: edit it to fork the thread from a different tool output (Shift-edit:
         fork without a reply), regenerate to resample the model's reaction to it. A thinking fold marked
         <b>other account</b> holds reasoning encrypted under another OpenRouter key; the model won't see it
-        on later turns.
+        on later turns. A turn where the model produced nothing shows as a muted <b>empty turn</b> row.
       </p>
     </section>
 

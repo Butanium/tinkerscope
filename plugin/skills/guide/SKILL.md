@@ -206,6 +206,9 @@ turns: edit one to fork the thread from a different tool output, regenerate to
 resample the reply to it. A thinking fold tagged **other account** holds
 reasoning encrypted under a different OpenRouter key — the model won't see it on
 later turns (the provider ignores another account's reasoning without an error).
+A turn where the model produced nothing (no text, no call) shows as a muted
+**empty turn** row — for an agent, silence is often the behavior being studied,
+so it stays visible and can be regenerated like any turn.
 
 **"Do these two checkpoints differ?"** Add a panel per checkpoint, send the same
 prompt with a large *Samples*, and compare the charts (the chart shows every

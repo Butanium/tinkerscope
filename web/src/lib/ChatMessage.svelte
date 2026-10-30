@@ -726,7 +726,7 @@
   <!-- Status strip (e.g. 'stopped' after a deliberate 0-sample cancel) — not a
        message: no role header, no toolbar, muted. -->
   <div class="message-notice" data-row={rowIndex}>⏹ {msg.notice}</div>
-{:else if msg.role !== 'assistant' || msg.content || msg.reasoning || msg.tool_calls?.length || isMultiSample || (msg.samples && msg.samples.some((x) => x && (x.content || x.tool_calls?.length)))}
+{:else if msg.role !== 'assistant' || msg.content || msg.reasoning || msg.tool_calls?.length || isMultiSample || (msg.nodeId != null && !msg.running) || (msg.samples && msg.samples.some((x) => x && (x.content || x.tool_calls?.length)))}
   <!-- Row click (anywhere, buttons included) moves the keyboard focus here.
        svelte-ignore: this is a mouse-only convenience — the keyboard already
        has its own path to focus (↑/↓), so no key handler belongs on the div. -->
@@ -934,7 +934,12 @@
           <pre class="tool-result" data-testid="tool-result">{msg.content || '(empty result)'}</pre>
         {/if}
       {:else}
-        {#if msg.content || !msg.tool_calls?.length}
+        {#if msg.role === 'assistant' && !msg.content && !msg.tool_calls?.length && !msg.reasoning && !tKind}
+          <!-- A committed turn with nothing in it is still a turn the model took
+               (an agent's silence is often the behavior under study) — mark it
+               instead of dropping the row and showing two user turns back to back. -->
+          <div class="empty-turn" data-testid="empty-turn">empty turn</div>
+        {:else if msg.content || !msg.tool_calls?.length}
           <div class="message-content">{@html prefillSplit ? renderPrefilled(msg.content, prefillSplit.answer, msg.role) : renderContent(msg.content, msg.role)}</div>
         {/if}
         {#if msg.tool_calls?.length}<ToolCalls calls={msg.tool_calls} />{/if}
@@ -953,7 +958,7 @@
       {#if msg.running && !isMultiSample && onStop && !readOnly}
         <div class="stop-turn-row">{@render stopBtn()}</div>
       {/if}
-      {#if msg.role !== 'system' && (msg.content || msg.raw_text || msg.reasoning || msg.role === 'tool' || msg.tool_calls?.length)}
+      {#if msg.role !== 'system' && (msg.content || msg.raw_text || msg.reasoning || msg.role === 'tool' || msg.tool_calls?.length || (msg.nodeId != null && !msg.running))}
         <OverflowRow klass="hover-actions" resetKey={msg.nodeId ?? msg.content}>
           {#if msg.raw_text}
             <!-- Raw leads the row (Clément: very left, always visible — first
@@ -1009,6 +1014,7 @@
   .tool-result { font-family: 'Courier New', Courier, monospace; font-size: 0.8rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; margin: var(--space-1) 0 0; color: var(--color-text-secondary); max-height: 480px; overflow-y: auto; }
   .tool-result-fold > summary { cursor: pointer; font-family: 'Courier New', Courier, monospace; font-size: 0.8rem; color: var(--color-text-secondary); overflow-wrap: anywhere; }
   .tool-result-size { color: var(--color-text-muted); }
+  .empty-turn { font-size: 0.8rem; font-style: italic; color: var(--color-text-muted); }
   /* transient strip while a light node's raw_meta blob is being fetched */
   .blob-loading {
     font-size: 0.72rem;

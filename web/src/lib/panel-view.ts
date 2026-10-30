@@ -109,11 +109,10 @@ export function buildPanelView(tree: ConvTree, run: PanelRun, prefill?: string):
       const userParent = replacedId ? tree.nodes[replacedId]?.parent : null;
       if (userParent && tree.nodes[userParent]) {
         const kids = tree.nodes[userParent].children;
-        // A sample is "folded" iff it has content AND no error — matching
-        // foldAssistant's skip rule (error samples carry an "Error: …" content
-        // string, so gating on content alone would miscount). Error slots map to ''.
-        const isFold = (x: (typeof run.samples)[number]) =>
-          !!(x && !x.error && (x.content || x.tool_calls?.length));
+        // A sample is "folded" iff it completed without error — the server's fold
+        // (`_build_fold_nodes`) keeps EMPTY samples too: a model that chose to say
+        // nothing is a result. Error slots map to ''.
+        const isFold = (x: (typeof run.samples)[number]) => !!(x && !x.error);
         const filledCount = run.samples.filter(isFold).length;
         const batch = kids.slice(Math.max(0, kids.length - filledCount)); // this turn's folds
         sampleNodeIds = [];
