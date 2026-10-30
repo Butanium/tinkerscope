@@ -3,7 +3,7 @@
   // what the parser accepts.
   import { untrack } from 'svelte';
   import Modal from '$lib/Modal.svelte';
-  import { parseToolDefs, formatToolDefs } from '$lib/tools-def';
+  import { parseToolDefs, formatToolDefs, toolName } from '$lib/tools-def';
   import type { ToolDef } from '$lib/types';
 
   let {
@@ -40,7 +40,7 @@
     }}
   ></textarea>
   <div class="tools-status" class:err={parsed.error !== undefined} data-testid="tools-status">
-    {#if parsed.error !== undefined}{parsed.error}{:else if parsed.tools}{parsed.tools.length} tool{parsed.tools.length === 1 ? '' : 's'}: {parsed.tools.map((t) => t.function.name).join(', ')}{:else}No tools{/if}
+    {#if parsed.error !== undefined}{parsed.error}{:else if parsed.tools}{parsed.tools.length} tool{parsed.tools.length === 1 ? '' : 's'}: {parsed.tools.map(toolName).join(', ')}{:else}No tools{/if}
   </div>
   <div class="tag-form-actions">
     <button class="btn-new" onclick={save} disabled={parsed.error !== undefined} data-testid="tools-save">Save</button>

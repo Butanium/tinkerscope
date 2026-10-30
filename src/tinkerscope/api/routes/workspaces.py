@@ -52,6 +52,9 @@ class WorkspaceCreate(BaseModel):
     # Tool definitions sent with every fire (OpenAI function schemas; see
     # tree_ops.check_tools). None = no tools.
     tools: list[dict[str, Any]] | None = None
+    # Wire setting: {"api": "responses", "reasoning": {…}, …} sends this workspace's
+    # threads through OpenRouter's Responses API (api/openrouter_responses.py).
+    wire: dict[str, Any] | None = None
     # N-panel shape: {panel_id: opaque tree}.
     trees: dict[str, Any] | None = None
     # legacy 2-panel shape (transitional CLI callers) — synthesized into `trees`.
@@ -79,6 +82,7 @@ class WorkspacePatch(BaseModel):
     system_prompt: str | None = None
     system_enabled: bool | None = None
     tools: list[dict[str, Any]] | None = None
+    wire: dict[str, Any] | None = None
     panels: list[dict[str, Any]] | None = None
     reduced_panels: list[str] | None = None
     send_targets: list[str] | None = None
@@ -201,6 +205,7 @@ def create_workspace(req: WorkspaceCreate) -> dict:
         system_prompt=req.system_prompt,
         system_enabled=req.system_enabled,
         tools=tools,
+        wire=req.wire,
         trees=trees,
         panels=req.panels or [],
         reduced_panels=req.reduced_panels,

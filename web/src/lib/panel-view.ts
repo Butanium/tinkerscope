@@ -51,6 +51,7 @@ export function bucketTurn(run: PanelRun, prefill?: string): ViewMessage {
     reasoning_tokens: one?.reasoning_tokens,
     reasoning_account: one?.reasoning_account,
     tool_calls: one?.tool_calls,
+    items: one?.items,
     finish_reason: one?.finish_reason,
     token_logprobs: one?.token_logprobs,
     running: run.running
@@ -79,6 +80,8 @@ export function buildPanelView(tree: ConvTree, run: PanelRun, prefill?: string):
     tool_calls: n.tool_calls,
     tool_call_id: n.tool_call_id,
     name: n.name,
+    items: n.items,
+    has_items: n.has_items,
     finish_reason: n.finish_reason,
     thinking: n.thinking,
     token_logprobs: n.token_logprobs,

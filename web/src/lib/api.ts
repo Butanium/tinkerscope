@@ -20,7 +20,7 @@ import type {
   SearchResponse
 } from './types';
 import type { ConvTree } from './tree';
-import type { ConvFields, WorkspaceOp, OpsResponse, OpenRouterCaps, ToolDef } from './types';
+import type { ConvFields, WorkspaceOp, OpsResponse, OpenRouterCaps, ToolDef, WireSetting } from './types';
 import { isStatic } from './static-mode';
 import { staticApi, staticSse } from './api-static';
 import { sessionId, SESSION_HEADER, SESSION_QUERY } from './session';
@@ -148,6 +148,7 @@ const httpApi = {
     send_targets?: string[];
     seen_panels?: string[];
     tools?: ToolDef[] | null;
+    wire?: WireSetting | null;
   }) => j<Workspace>('/api/workspaces', { method: 'POST', body: JSON.stringify(entry) }),
   patchWorkspace: (id: string, patch: Partial<ConvFields> & { name?: string }) =>
     j<WorkspaceSummary>(`/api/workspaces/${encodeURIComponent(id)}`, {

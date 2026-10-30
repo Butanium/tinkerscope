@@ -852,6 +852,9 @@ tinkerscope import <file> [options]
   --panel TEXT                      transcript: the panel the thread goes in  [default: p-1]
   --thread-system                   transcript: record `system` on the thread's first message instead of as the workspace's system prompt
   --tools-file TEXT                 tool definitions for the workspace (replaces the file's)
+  --responses-call                  FILE is one recorded Responses-API call ({input: {input, model, tools, reasoning}, output}) — imported VERBATIM for exact replay
+  --include-output                  --responses-call: append the call's own output as the last assistant turn
+  --calls-dir TEXT                  --responses-call: where to look for the calls that PRODUCED id-only reasoning items, to recover their encrypted blobs (default: the file's directory)
 tinkerscope export <ws> [options]
   # Print a workspace as JSON: its body (what `import` takes back, `--blobs` for a complete...
   --blobs                           inline each node's heavy data (raw_meta, token_logprobs) so `import` restores it
@@ -859,6 +862,7 @@ tinkerscope export <ws> [options]
   --panel TEXT                      --openai: the panel (default: the first one with a thread)
   --thread INTEGER                  --openai: 1-indexed root thread (default: the active one)
   --out TEXT                        write here instead of stdout
+  --responses                       export ONE thread as a Responses-API request {input: {model, input, tools, reasoning}} — each node's recorded items verbatim (what `import --responses-call` takes back)
 tinkerscope trash [action] [handle] [options]
   # Recover deleted branches.
   --workspace TEXT                  workspace id-prefix or name substring (default: every workspace, for list)

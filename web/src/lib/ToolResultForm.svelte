@@ -1,11 +1,13 @@
 <script lang="ts">
   // Answer the tool calls the panel's last turn is waiting on: one field per
-  // pending call. Send → the results land as tool turns and the model continues
-  // from them; "result only" stores them without generating, so a user turn can
-  // follow (tool → user → assistant is a valid thread too).
-  import type { ToolCall } from '$lib/types';
+  // pending call — text for a function call, a screenshot for a computer call
+  // (Responses wire: it goes back as a `computer_call_output` item). Send → the
+  // results land as tool turns and the model continues from them; "result only"
+  // stores them without generating, so a user turn can follow.
+  import type { ResponsesItem, ToolCall } from '$lib/types';
   import { tip } from '$lib/tooltip.svelte';
 
+  type Result = { tool_call_id: string; name?: string; content: string; items?: ResponsesItem[] };
   let {
     pending,
     busy,
@@ -13,18 +15,40 @@
   }: {
     pending: ToolCall[];
     busy: boolean;
-    onSubmit: (results: { tool_call_id: string; name?: string; content: string }[], fire: boolean) => void;
+    onSubmit: (results: Result[], fire: boolean) => void;
   } = $props();
 
   let drafts = $state<Record<string, string>>({});
+  let shots = $state<Record<string, { url: string; name: string }>>({});
+  let missingShot = $derived(pending.some((c) => c.type === 'computer_call' && !shots[c.id]));
+
+  function pick(callId: string, e: Event) {
+    const f = (e.currentTarget as HTMLInputElement).files?.[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => (shots[callId] = { url: String(r.result), name: f.name });
+    r.readAsDataURL(f);
+  }
 
   function submit(fire: boolean) {
-    if (busy) return;
+    if (busy || missingShot) return;
     onSubmit(
-      pending.map((c) => ({ tool_call_id: c.id, name: c.function.name, content: drafts[c.id] ?? '' })),
+      pending.map((c): Result => {
+        if (c.type === 'computer_call') {
+          const s = shots[c.id];
+          return {
+            tool_call_id: c.id,
+            name: 'computer',
+            content: `[screenshot ${s.name}]`,
+            items: [{ type: 'computer_call_output', call_id: c.id, output: { type: 'computer_screenshot', image_url: s.url } }]
+          };
+        }
+        return { tool_call_id: c.id, name: c.function.name, content: drafts[c.id] ?? '' };
+      }),
       fire
     );
     drafts = {};
+    shots = {};
   }
   function oneline(s: string): string {
     return s.replace(/\s+/g, ' ').trim();
@@ -36,20 +60,27 @@
   {#each pending as c (c.id)}
     <label class="tool-form-call">
       <code class="tool-form-sig"><b>{c.function.name}</b>({oneline(c.function.arguments || '')})</code>
-      <textarea
-        rows="2"
-        placeholder="What the tool returned"
-        data-testid="tool-result-input"
-        bind:value={drafts[c.id]}
-        onkeydown={(e) => {
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit(!e.shiftKey); }
-        }}
-      ></textarea>
+      {#if c.type === 'computer_call'}
+        <span class="tool-form-shot">
+          <input type="file" accept="image/*" data-testid="tool-result-image" onchange={(e) => pick(c.id, e)} />
+          {#if shots[c.id]}<img src={shots[c.id].url} alt="screenshot to send" />{/if}
+        </span>
+      {:else}
+        <textarea
+          rows="2"
+          placeholder="What the tool returned"
+          data-testid="tool-result-input"
+          bind:value={drafts[c.id]}
+          onkeydown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit(!e.shiftKey); }
+          }}
+        ></textarea>
+      {/if}
     </label>
   {/each}
   <div class="tool-form-actions">
-    <button class="btn-edit-cancel" disabled={busy} onclick={() => submit(false)} data-tooltip="Store the result(s) without a reply — then type a user turn" use:tip data-testid="tool-result-only">Result only</button>
-    <button class="btn-edit-save" disabled={busy} onclick={() => submit(true)} data-tooltip="Send the result(s); the model continues (Ctrl/⌘+Enter)" use:tip data-testid="tool-result-send">Send</button>
+    <button class="btn-edit-cancel" disabled={busy || missingShot} onclick={() => submit(false)} data-tooltip="Store the result(s) without a reply — then type a user turn" use:tip data-testid="tool-result-only">Result only</button>
+    <button class="btn-edit-save" disabled={busy || missingShot} onclick={() => submit(true)} data-tooltip={missingShot ? 'A computer call needs a screenshot' : 'Send the result(s); the model continues (Ctrl/⌘+Enter)'} use:tip data-testid="tool-result-send">Send</button>
   </div>
 </div>
 
@@ -59,5 +90,7 @@
   .tool-form-call { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
   .tool-form-sig { font-family: 'Courier New', Courier, monospace; font-size: 0.78rem; color: var(--color-text-secondary); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .tool-form textarea { width: 100%; box-sizing: border-box; font-family: 'Courier New', Courier, monospace; font-size: 0.85rem; resize: vertical; background: var(--color-surface); color: var(--color-text); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 6px 8px; }
+  .tool-form-shot { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; font-size: 0.8rem; }
+  .tool-form-shot img { max-height: 80px; max-width: 160px; border: 1px solid var(--color-border); border-radius: var(--radius); }
   .tool-form-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
 </style>

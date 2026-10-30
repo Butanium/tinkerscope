@@ -15,12 +15,14 @@
 import type { ConvTree } from './tree';
 import type { NodeBlobs } from './types';
 
-export const BLOB_FIELDS = ['token_logprobs', 'raw_meta'] as const;
+export const BLOB_FIELDS = ['token_logprobs', 'raw_meta', 'items', 'items_recorded'] as const;
 type BlobField = (typeof BLOB_FIELDS)[number];
 
 const FLAG: Record<BlobField, string> = {
   token_logprobs: 'has_token_logprobs',
-  raw_meta: 'has_raw_meta'
+  raw_meta: 'has_raw_meta',
+  items: 'has_items',
+  items_recorded: 'has_items_recorded'
 };
 
 type AnyNode = Record<string, unknown>;

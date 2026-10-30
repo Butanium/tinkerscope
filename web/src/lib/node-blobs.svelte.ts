@@ -58,7 +58,7 @@ class NodeBlobStore {
 
   /** Locally install a fresh node's blobs (fold time — no fetch ever needed). */
   seed(nodeId: string, blobs: NodeBlobs): void {
-    if (blobs.token_logprobs == null && blobs.raw_meta == null) return;
+    if (blobs.token_logprobs == null && blobs.raw_meta == null && blobs.items == null) return;
     this.#cache[nodeId] = blobs;
   }
 

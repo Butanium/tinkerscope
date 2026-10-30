@@ -378,7 +378,8 @@ export function parseSample(data: any): SampleData {
     reasoning_details: Array.isArray(data?.reasoning_details) ? data.reasoning_details : undefined,
     reasoning_tokens: typeof data?.reasoning_tokens === 'number' ? data.reasoning_tokens : undefined,
     reasoning_account: typeof data?.reasoning_account === 'string' ? data.reasoning_account : undefined,
-    tool_calls: Array.isArray(data?.tool_calls) && data.tool_calls.length ? data.tool_calls : undefined
+    tool_calls: Array.isArray(data?.tool_calls) && data.tool_calls.length ? data.tool_calls : undefined,
+    items: Array.isArray(data?.items) && data.items.length ? data.items : undefined
   };
 }
 

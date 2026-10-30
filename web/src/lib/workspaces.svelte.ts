@@ -52,7 +52,8 @@ import type {
   OpsEvent,
   ConvFields,
   SetMetaFields,
-  ToolDef
+  ToolDef,
+  WireSetting
 } from './types';
 
 function asTree(x: unknown): ConvTree {
@@ -104,6 +105,9 @@ class ConversationsStore {
    *  null = none. Written through setTools (an immediate set_meta), mirrored from
    *  other tabs by #applyMetaEvent. $state.raw: replaced wholesale. */
   tools = $state.raw<ToolDef[] | null>(null);
+  /** The open workspace's wire setting (Responses API opt-in), sent with every
+   *  fire. Set by `import --responses-call` / PATCH; mirrored like `tools`. */
+  wire = $state.raw<WireSetting | null>(null);
 
   /** Hook (assigned by +page, which owns patchState): flush the pending debounced
    *  /api/state patch — assigning its response into live.state — BEFORE any
@@ -652,7 +656,8 @@ class ConversationsStore {
       const name = this.list.find((c) => c.id === id)?.name ?? 'Untitled';
       const body = await api.createWorkspace({
         id, name, ...this.#fields(), trees: { ...this.trees },
-        ...(this.tools ? { tools: this.tools } : {})
+        ...(this.tools ? { tools: this.tools } : {}),
+        ...(this.wire ? { wire: this.wire } : {})
       });
       // The create is this mirror's rev BASELINE (same role as a body GET) —
       // ops events for the follow-up batches arrive contiguously above it.
@@ -864,6 +869,7 @@ class ConversationsStore {
     this.sendTargets = new Set(ids);
     this.#seenPanels = new Set(ids);
     this.tools = null;
+    this.wire = null;
     // A fresh workspace gets its OWN counter, seeded from the ids it starts with —
     // not whatever the previously-open one had reached. Carrying that over is safe
     // (mintPanelId also refuses anything in `taken`) but it persists a number with
@@ -1040,6 +1046,7 @@ class ConversationsStore {
     }
     this.#applyPanelUi(conv);
     this.tools = conv.tools?.length ? conv.tools : null;
+    this.wire = conv.wire ?? null;
     // The STORE-OWNED layout: the workspace's stored panels, or — for a
     // layout-less legacy body — whatever layout was already shown (kept, as
     // before; its first save then bakes it in).
@@ -1262,6 +1269,7 @@ class ConversationsStore {
 
   #applyMetaEvent(fields: SetMetaFields): void {
     if ('tools' in fields) this.tools = fields.tools?.length ? fields.tools : null;
+    if ('wire' in fields) this.wire = fields.wire ?? null;
     if (fields.name != null && this.activeId) {
       const id = this.activeId;
       this.list = this.list.map((c) => (c.id === id ? { ...c, name: fields.name! } : c));

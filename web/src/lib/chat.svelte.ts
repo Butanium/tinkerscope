@@ -119,8 +119,9 @@ class ChatStore {
       .then(() => api
         .chat({
         ...model, messages, ...params, thread_system_prompt, panel,
-        // The workspace's tools ride on every fire, like the system prompt.
+        // The workspace's tools + wire setting ride on every fire, like the system prompt.
         ...(ws.tools ? { tools: ws.tools } : {}),
+        ...(ws.wire ? { wire: ws.wire } : {}),
         broadcast: true, detached: true, client_token: token,
         // SERVER-AUTHORED FOLD (P2): the samples fold under this user node at
         // terminal, server-side — all n, blobs included, zero browsers needed.
@@ -194,7 +195,7 @@ class ChatStore {
         // light nodes from birth (has_* flags) — no post-save lightening pass.
         for (const id of ids) {
           const n = tree.nodes[id];
-          nodeBlobs.seed(id, { token_logprobs: n.token_logprobs, raw_meta: n.raw_meta });
+          nodeBlobs.seed(id, { token_logprobs: n.token_logprobs, raw_meta: n.raw_meta, items: n.items });
         }
         const opNodes = ids.map((id) => opNode(tree, id));
         const light = lightenTree(tree, heavyNodeIds(tree));
@@ -236,7 +237,7 @@ class ChatStore {
       for (const { sample_index, node_id } of data.folded ?? []) {
         const sm = bucket.samples[sample_index];
         if (sm && (sm.token_logprobs?.length || sm.raw_meta))
-          nodeBlobs.seed(node_id, { token_logprobs: sm.token_logprobs, raw_meta: sm.raw_meta });
+          nodeBlobs.seed(node_id, { token_logprobs: sm.token_logprobs, raw_meta: sm.raw_meta, items: sm.items });
       }
     }
     if (typeof data.fold_rev === 'number') ws.ensureRev(data.fold_rev);

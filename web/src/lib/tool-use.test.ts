@@ -131,6 +131,10 @@ test('parseToolDefs: full shape, bare functions, blank, errors', () => {
   eq(full.tools, [{ type: 'function', function: { name: 'a', parameters: { type: 'object' } } }]);
   const bare = parseToolDefs('{"name":"b","description":"d","strict":true}');
   eq(bare.tools, [{ type: 'function', function: { name: 'b', description: 'd', strict: true } }]);
+  // native + flat Responses tools stay verbatim
+  const resp = parseToolDefs('[{"type":"computer"},{"type":"function","name":"c","strict":true,"parameters":{}}]');
+  eq(resp.tools, [{ type: 'computer' }, { type: 'function', name: 'c', strict: true, parameters: {} }]);
+  eq(parseToolDefs('[{"type":"function","name":"c"},{"type":"function","function":{"name":"c"}}]').error, 'Two tools are named "c"');
   eq(typeof parseToolDefs('[{').error, 'string');
   eq(parseToolDefs('[{"description":"x"}]').error, 'Tool 1 has no "name"');
   eq(parseToolDefs('[{"name":"a"},{"name":"a"}]').error, 'Two tools are named "a"');

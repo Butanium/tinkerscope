@@ -159,15 +159,37 @@ export type Health = {
  *  because it is replayed to the model as its own earlier call. */
 export type ToolCall = {
   id: string;
-  type: 'function';
+  /** 'computer_call': a native computer-use call on the Responses wire (its
+   *  `function.arguments` is the action JSON, for display) — answered with a
+   *  screenshot, not text. */
+  type: 'function' | 'computer_call';
   function: { name: string; arguments: string };
 };
 
-/** A tool offered to the model: an OpenAI function definition. A workspace's
- *  `tools` list is sent with every fire (OpenRouter only). */
+/** A tool offered to the model, stored VERBATIM: a chat-shaped function
+ *  `{type:'function', function:{name,…}}`, a flat Responses-API function
+ *  `{type:'function', name, parameters, strict}`, or a native tool such as
+ *  `{type:'computer'}` (Responses wire only). See lib/tools-def.ts toolName. */
 export type ToolDef = {
-  type: 'function';
-  function: { name: string; description?: string; parameters?: Record<string, unknown> };
+  type: string;
+  name?: string;
+  function?: { name: string; description?: string; parameters?: Record<string, unknown> };
+  [k: string]: unknown;
+};
+
+/** A verbatim OpenAI Responses-API item (message / reasoning / function_call /
+ *  function_call_output / computer_call / computer_call_output / …). */
+export type ResponsesItem = Record<string, any>;
+
+/** A workspace's wire setting: `api: 'responses'` sends its threads through
+ *  OpenRouter's Responses API, `reasoning` is the recorded reasoning object
+ *  (e.g. {effort:'medium', summary:'detailed'}), `extra` request-level fields a
+ *  recorded call carried, `model` the recorded model id. */
+export type WireSetting = {
+  api?: 'responses';
+  model?: string;
+  reasoning?: Record<string, unknown>;
+  extra?: Record<string, unknown>;
 };
 
 // `reasoning` (assistant turns only) travels with the message so the sampler can hand the
@@ -182,6 +204,10 @@ export type ChatMessage = {
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   name?: string;
+  /** Verbatim Responses items, inline — or the node whose stored items the
+   *  server loads. Either puts the chat on the Responses wire. */
+  items?: ResponsesItem[];
+  items_node?: string;
 };
 
 /** A render-time text-coloring rule (see lib/highlight-match.ts + the backend
@@ -301,6 +327,8 @@ export type ChatRequest = {
   system_prompt?: string | null;
   /** The workspace's tool definitions (OpenRouter only). Absent/null/[] = none. */
   tools?: ToolDef[] | null;
+  /** The workspace's wire setting (Responses API opt-in + its recorded reasoning). */
+  wire?: WireSetting | null;
   /** The THREAD's system prompt, which overrides the global part server-side
    *  (thread if non-empty, else global). Tri-state: absent/null =
    *  inherit the panel's mirrored thread system; '' = explicitly none; the
@@ -377,7 +405,7 @@ export type ConvFields = {
 
 /** set_meta's payload: any subset of the meta fields (+ name). Field-wise LWW
  *  server-side, except panel_seq (monotone max) and seen_panels (union). */
-export type SetMetaFields = Partial<ConvFields> & { name?: string; tools?: ToolDef[] | null };
+export type SetMetaFields = Partial<ConvFields> & { name?: string; tools?: ToolDef[] | null; wire?: WireSetting | null };
 
 /** One workspace mutation on the wire — POST /api/workspaces/{id}/ops and the
  *  bus `ops` echo alike (docs/HANDOFF_SERVER_AUTHORITY.md §4.1). Panel-level ops
@@ -459,6 +487,9 @@ export type SearchResponse = {
 export type NodeBlobs = {
   token_logprobs?: TokenLogprob[];
   raw_meta?: string;
+  /** Verbatim Responses items (the wire form) + what was originally sent when it differs. */
+  items?: ResponsesItem[];
+  items_recorded?: ResponsesItem[];
 };
 
 /** One saved, branchable workspace. The trees are OPAQUE to the backend; the
@@ -473,6 +504,8 @@ export type Workspace = {
   system_enabled?: boolean | null;
   /** Tool definitions sent with every fire (null/absent = none). */
   tools?: ToolDef[] | null;
+  /** Wire setting (Responses API) — see WireSetting. */
+  wire?: WireSetting | null;
   /** Per-panel branch trees, keyed by panel id ('primary','compare','p-2',…). */
   trees: Record<string, ConvTree>;
   /** Legacy 2-panel shape — present only on un-migrated saved workspaces; the
@@ -536,6 +569,8 @@ export type SampleData = {
   reasoning_account?: string;
   /** The tool calls this sample made (finish_reason 'tool_calls'). */
   tool_calls?: ToolCall[];
+  /** Responses wire: the response's output items, verbatim. */
+  items?: ResponsesItem[];
   /** LOOM provenance (continue_tokens fires only): how many leading stream
    *  entries were FORCED (replayed prefix + picked alternative), and that prefix
    *  as frame-normalized display text — tinted like a prefill so n samples don't
@@ -559,6 +594,9 @@ export type ViewMessage = {
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   name?: string;
+  /** Verbatim Responses items (inline on a fresh fold) / their blob flag. */
+  items?: ResponsesItem[];
+  has_items?: boolean;
   reasoning?: string;
   raw_text?: string;
   raw_meta?: string;

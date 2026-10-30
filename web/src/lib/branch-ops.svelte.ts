@@ -49,7 +49,7 @@ import {
   type TokenLogprob,
   type TreeOp
 } from './tree';
-import type { Panel, PanelSel, ChatMessage, ViewMessage } from './types';
+import type { Panel, PanelSel, ChatMessage, ViewMessage, ResponsesItem } from './types';
 
 /** The +page-owned seams these handlers need. Injected once via configure() so
  *  the module never reaches into the sidebar/composer state itself. */
@@ -599,7 +599,7 @@ class BranchOps {
    *  are still unanswered. */
   answerToolCalls(
     panel: Panel,
-    results: { tool_call_id: string; name?: string; content: string }[],
+    results: { tool_call_id: string; name?: string; content: string; items?: ResponsesItem[] }[],
     fire = true
   ) {
     if (this.#d.panelBusy(panel) || !results.length) return;
@@ -624,7 +624,7 @@ class BranchOps {
     for (const id of chain) {
       const n = tree.nodes[id];
       if (n.token_logprobs?.length || n.raw_meta)
-        nodeBlobs.seed(id, { token_logprobs: n.token_logprobs, raw_meta: n.raw_meta });
+        nodeBlobs.seed(id, { token_logprobs: n.token_logprobs, raw_meta: n.raw_meta, items: n.items });
     }
     const ops: TreeOp[] = [
       { op: 'add_nodes', nodes: chain.map((id) => opNode(tree, id)), select: true }

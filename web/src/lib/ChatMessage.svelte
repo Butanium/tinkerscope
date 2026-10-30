@@ -26,6 +26,7 @@
   import TokenLogprobs from '$lib/TokenLogprobs.svelte';
   import TokenHeatOverlay from '$lib/TokenHeatOverlay.svelte';
   import ToolCalls from '$lib/ToolCalls.svelte';
+  import ResponsesItems from '$lib/ResponsesItems.svelte';
   import type { ViewMessage, SampleData, TokenLogprob } from '$lib/types';
 
   let {
@@ -216,8 +217,15 @@
   let canResumeThinking = $derived(msg.role === 'assistant' && !!msg.reasoning?.trim() && !tKind);
   // Encrypted reasoning made under ANOTHER OpenRouter account: OpenRouter drops it
   // on replay without an error, so the next turn won't see it (openrouter.py).
+  // Verbatim Responses items (lib/ResponsesItems): inline on a fresh fold, else the
+  // node's blob — fetched when the row mounts, since the items ARE the row.
+  let hasItems = $derived(!!msg.items?.length || !!msg.has_items);
+  let itemsResolved = $derived(msg.items ?? blob?.items);
+  $effect(() => {
+    if (hasItems && !itemsResolved && msg.nodeId) void nodeBlobs.ensure([msg.nodeId]);
+  });
   let foreignReasoning = $derived(
-    !!tKind && !!msg.reasoning_account && !!modelCatalog.orAccount && msg.reasoning_account !== modelCatalog.orAccount
+    (!!tKind || hasItems) && !!msg.reasoning_account && !!modelCatalog.orAccount && msg.reasoning_account !== modelCatalog.orAccount
   );
   // Continue is a prefill: dead on a model that ignores them — unless the
   // ctrl/cmd all-panels variant reaches other panels.
@@ -761,7 +769,7 @@
         {/if}
       </div>
     </div>
-    {#if msg.role === 'assistant' && msg.reasoning && !isMultiSample && !tokView}
+    {#if msg.role === 'assistant' && msg.reasoning && !isMultiSample && !tokView && !hasItems}
       <details class="sample-reasoning-block reasoning-primary" open={thinkingView.open || isLastAssistant || revealOpen}>
         <summary class="sample-reasoning-toggle">
           {#if thinkingKindTip(tKind)}
@@ -774,7 +782,7 @@
         </summary>
         <div class="sample-reasoning">{@html prefillSplit ? renderPrefilled(msg.reasoning, prefillSplit.think, 'assistant') : renderContent(msg.reasoning, 'assistant')}</div>
       </details>
-    {:else if msg.role === 'assistant' && tKind && !isMultiSample && !tokView && !editing}
+    {:else if msg.role === 'assistant' && tKind && !isMultiSample && !tokView && !editing && !hasItems}
       <!-- Reasoning that came back with no readable text at all (encrypted only):
            it still exists, and the next turn still replays it. -->
       <div class="reasoning-sealed-empty" data-testid="thinking-label" data-tooltip={thinkingKindTip(tKind)} use:tip>{thinkingLabel(msg.reasoning_details, msg.reasoning_tokens)} — no visible text{#if foreignReasoning}{@render foreignTag()}{/if}</div>
@@ -923,6 +931,13 @@
           {#if rawMeta}{@render rawMetaDisclosure(rawMeta)}{:else if hasMeta}<div class="blob-loading">loading request &amp; response…</div>{/if}
       {:else if tokView}
         <TokenLogprobs tlp={tlp!} onLoom={loomHandler} loomCut={loomCutDisplay} />
+      {:else if hasItems}
+        {#if itemsResolved}
+          <ResponsesItems items={itemsResolved} foreign={foreignReasoning} />
+        {:else}
+          {#if msg.content}<div class="message-content">{@html renderContent(msg.content, msg.role)}</div>{/if}
+          <div class="blob-loading">loading items…</div>
+        {/if}
       {:else if msg.role === 'tool'}
         {@const lines = msg.content.split('\n').length}
         {#if lines > 12 || msg.content.length > 1500}

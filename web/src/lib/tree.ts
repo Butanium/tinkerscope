@@ -11,7 +11,7 @@
 //  - every op is immutable: clone → mutate → return.
 
 import { logprobsAfterEdit } from './token-edit.ts';
-import type { ReasoningDetail, ToolCall } from './types.ts';
+import type { ReasoningDetail, ResponsesItem, ToolCall } from './types.ts';
 
 export const ROOT = '__root__';
 
@@ -94,6 +94,15 @@ export type TreeNode = {
   /** Tool nodes: which call this result answers, and that function's name. */
   tool_call_id?: string;
   name?: string;
+  /** The VERBATIM Responses-API items this turn stands for (a recorded agent call,
+   *  or a Responses-wire sample's output). HEAVY — a write-once blob server-side
+   *  (screenshots), so loaded nodes carry `has_items`; on the wire they go out as
+   *  they are. `items_recorded`: what was originally sent, kept when the wire form
+   *  differs (a recovered reasoning blob). The light fields above are derived. */
+  items?: ResponsesItem[];
+  items_recorded?: ResponsesItem[];
+  has_items?: boolean;
+  has_items_recorded?: boolean;
   /** How generation ended ('stop' | 'length' | …) — 'length' ⇒ cut off by the
    *  max-tokens limit; persisted so the truncation badge survives reload. */
   finish_reason?: string;
@@ -158,6 +167,7 @@ export type SampleLike = {
   reasoning_tokens?: number;
   reasoning_account?: string;
   tool_calls?: ToolCall[];
+  items?: ResponsesItem[];
   /** The authored prefill this sample was generated from (raw text) — folded onto
    *  the node so the rendered turn can color the prefilled prefix. */
   prefill?: string;
@@ -181,6 +191,8 @@ export type Msg = {
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   name?: string;
+  items?: ResponsesItem[];
+  items_node?: string;
 };
 
 /** Tree node → wire Msg. Carries `reasoning` ONLY when present, so the sampler can hand
@@ -197,7 +209,9 @@ function nodeToMsg(n: TreeNode): Msg {
     ...(n.reasoning ? { reasoning: n.reasoning } : {}),
     ...(n.reasoning_details?.length ? { reasoning_details: n.reasoning_details } : {}),
     ...(n.tool_calls?.length ? { tool_calls: n.tool_calls } : {}),
-    ...(n.role === 'tool' ? { tool_call_id: n.tool_call_id ?? '', ...(n.name ? { name: n.name } : {}) } : {})
+    ...(n.role === 'tool' ? { tool_call_id: n.tool_call_id ?? '', ...(n.name ? { name: n.name } : {}) } : {}),
+    // verbatim Responses items: inline when held, else by node (the server loads the blob)
+    ...(n.items?.length ? { items: n.items } : n.has_items ? { items_node: n.id } : {})
   };
 }
 
@@ -387,6 +401,7 @@ export function foldAssistant(
       reasoning_tokens: s.reasoning_tokens,
       reasoning_account: s.reasoning_account,
       tool_calls: s.tool_calls,
+      items: s.items,
       finish_reason: s.finish_reason,
       thinking: s.thinking,
       token_logprobs: cloneTokenLogprobs(s.token_logprobs),
@@ -442,7 +457,7 @@ export function pendingToolCalls(
  *  next turn folds. */
 export function appendToolResults(
   t0: ConvTree,
-  results: { tool_call_id: string; name?: string; content: string }[]
+  results: { tool_call_id: string; name?: string; content: string; items?: ResponsesItem[] }[]
 ): { tree: ConvTree; ids: string[] } {
   const t = cloneTree(t0);
   const path = activePath(t);
@@ -456,6 +471,7 @@ export function appendToolResults(
       content: r.content,
       tool_call_id: r.tool_call_id,
       ...(r.name ? { name: r.name } : {}),
+      ...(r.items?.length ? { items: r.items } : {}),
       parent,
       children: []
     };
@@ -1052,7 +1068,7 @@ export function applyPanelOp(
 export function heavyNodeIds(tree: ConvTree): Set<string> {
   const ids = new Set<string>();
   for (const [id, n] of Object.entries(tree.nodes)) {
-    if ((n.token_logprobs?.length ?? 0) > 0 || (n.raw_meta ?? '') !== '') ids.add(id);
+    if ((n.token_logprobs?.length ?? 0) > 0 || (n.raw_meta ?? '') !== '' || (n.items?.length ?? 0) > 0) ids.add(id);
   }
   return ids;
 }
@@ -1065,7 +1081,8 @@ export function lightenTree(current: ConvTree, shipped: Set<string>): ConvTree |
   for (const [id, n] of Object.entries(current.nodes)) {
     const lp = shipped.has(id) && (n.token_logprobs?.length ?? 0) > 0;
     const rm = shipped.has(id) && (n.raw_meta ?? '') !== '';
-    if (!lp && !rm) {
+    const it = shipped.has(id) && (n.items?.length ?? 0) > 0;
+    if (!lp && !rm && !it) {
       nodes[id] = n;
       continue;
     }
@@ -1078,6 +1095,10 @@ export function lightenTree(current: ConvTree, shipped: Set<string>): ConvTree |
     if (rm) {
       delete light.raw_meta;
       light.has_raw_meta = true;
+    }
+    if (it) {
+      delete light.items;
+      light.has_items = true;
     }
     nodes[id] = light;
   }

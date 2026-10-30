@@ -96,6 +96,7 @@ META_FIELDS = (
     "seen_panels",
     "panel_seq",
     "tools",
+    "wire",
 )
 
 # Reserved panel ids the pre-multipanel {tree, compare_tree} shape maps onto.
@@ -398,19 +399,25 @@ def normalize_panels(panels: Any, trees: Any) -> Any:
 
 
 def check_tools(v: Any) -> Optional[list]:
-    """Validate a workspace's `tools` meta: OpenAI function definitions
-    `[{type: "function", function: {name, description?, parameters?}}]`. None and
-    [] both mean "no tools" and store as None. Raises ValueError on anything else —
-    a malformed definition would otherwise surface as a provider 400 on every send."""
+    """Validate a workspace's `tools` meta, stored VERBATIM: chat-shaped functions
+    `{type: "function", function: {name, …}}`, flat Responses-API functions
+    `{type: "function", name, parameters, strict?}`, and native tool types such as
+    `{type: "computer"}` (Responses wire only). None and [] both mean "no tools"
+    and store as None. Raises ValueError on anything else — a malformed definition
+    would otherwise surface as a provider 400 on every send."""
     if v is None or v == []:
         return None
     if not isinstance(v, list):
-        raise ValueError("tools must be a list of function definitions")
+        raise ValueError("tools must be a list of tool definitions")
     names = set()
     for i, t in enumerate(v):
-        fn = t.get("function") if isinstance(t, dict) else None
-        if not isinstance(fn, dict) or not isinstance(fn.get("name"), str) or not fn["name"]:
-            raise ValueError(f"tools[{i}]: expected {{type: 'function', function: {{name, …}}}}")
+        if not isinstance(t, dict) or not isinstance(t.get("type"), str) or not t["type"]:
+            raise ValueError(f"tools[{i}]: expected an object with a `type`")
+        if t["type"] != "function":
+            continue  # a native tool (computer, web_search, …): passed through as-is
+        fn = t["function"] if isinstance(t.get("function"), dict) else t
+        if not isinstance(fn.get("name"), str) or not fn["name"]:
+            raise ValueError(f"tools[{i}]: a function needs a `name`")
         if fn["name"] in names:
             raise ValueError(f"tools[{i}]: duplicate tool name {fn['name']!r}")
         names.add(fn["name"])

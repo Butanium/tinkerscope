@@ -52,6 +52,7 @@ from httpx_sse import connect_sse
 # stdlib only (its store imports are deferred), so `tinkerscope --help` stays cheap.
 from .api.tree_ops import ROOT  # noqa: F401  (re-exported: _aim_at_node & friends read it)
 from .api.tree_ops import active_path as _active_path
+from .api import openrouter_responses as _oresp
 from .api.tree_ops import check_tools as _check_tools
 from .api.tree_ops import ancestry as _ancestry
 from .api.tree_ops import mint_node_id as _mint_node_id
@@ -292,7 +293,7 @@ def _ws_system(c: Optional[dict]) -> Optional[str]:
     return text if enabled else ""
 
 
-_MSG_KEYS = ("role", "content", "reasoning", "reasoning_details", "tool_calls", "tool_call_id", "name")
+_MSG_KEYS = ("role", "content", "reasoning", "reasoning_details", "tool_calls", "tool_call_id", "name", "items")
 
 
 def _norm_msgs(entries: Any, what: str) -> list[dict]:
@@ -1784,6 +1785,7 @@ def _fire_send(
     conv_id: Optional[str] = None,
     effort: Optional[str] = None,
     tools: Optional[list] = None,
+    wire: Optional[dict] = None,
 ) -> list[tuple[str, dict, _StreamResult]]:
     """Fire one fresh-history chat per target panel, concurrently; join and return
     [(panel_id, panel, result)] with each result's collected samples. The
@@ -1816,6 +1818,8 @@ def _fire_send(
         _with_effort(body, effort)
         if tools is not None:
             body["tools"] = tools
+        if wire:
+            body["wire"] = wire
         res = _StreamResult()
         if conv_id and p["id"] in parents:
             body["workspace_id"] = conv_id
@@ -1910,6 +1914,7 @@ def cmd_send(
     tools = _load_tools_file(tools_file)
     if tools is None:
         tools = ws_body.get("tools") or None
+    wire = ws_body.get("wire") or None
     plan_out = sys.stderr if json_out else sys.stdout  # JSON mode: keep stdout pure JSONL
 
     print(f"send (new thread)  n={n} temp={_fmt_param(temperature)}  →  {len(targets)} panel(s)", file=plan_out)
@@ -1923,7 +1928,7 @@ def cmd_send(
 
     results = _fire_send(targets, prompt, prefill, n, temperature, max_tokens,
                          think, system, show_logprobs, json_out,
-                         thread_system=thread_system, conv_id=conv_id, effort=effort, tools=tools)
+                         thread_system=thread_system, conv_id=conv_id, effort=effort, tools=tools, wire=wire)
     if first_token:
         _print_first_token_tables(results, json_out)
     failures, code = _fire_failures(results, lambda pid, p: f"{pid} ({_short_run(p.get('run_id'))})")
@@ -2020,6 +2025,12 @@ def _wire_msg(m: dict) -> dict:
         out["tool_call_id"] = m.get("tool_call_id") or ""
         if m.get("name"):
             out["name"] = m["name"]
+    # Verbatim Responses items: inline when we hold them, else by node — the server
+    # loads the blob (it puts the chat on the Responses wire either way).
+    if m.get("items"):
+        out["items"] = m["items"]
+    elif m.get("has_items") and m.get("id"):
+        out["items_node"] = m["id"]
     return out
 
 
@@ -2029,9 +2040,36 @@ def _tool_result_msgs(calls: list[dict], results: list[str]) -> list[dict]:
     if len(results) != len(calls):
         _die(f"the target turn made {len(calls)} tool call(s) — pass exactly that many "
              f"--tool-result values, in call order (got {len(results)})")
-    return [{"role": "tool", "content": r, "tool_call_id": c.get("id") or "",
-             **({"name": (c.get("function") or {}).get("name")} if (c.get("function") or {}).get("name") else {})}
-            for c, r in zip(calls, results)]
+    return [_tool_result_msg(c, r) for c, r in zip(calls, results)]
+
+
+_IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif"}
+
+
+def _tool_result_msg(call: dict, result: str) -> dict:
+    """One tool turn answering `call`. `@image:PATH` answers a computer call with
+    that screenshot (a `computer_call_output` item, Responses wire); anything
+    else is the tool's text output."""
+    import base64
+
+    cid = call.get("id") or ""
+    name = (call.get("function") or {}).get("name")
+    if result.startswith("@image:"):
+        if call.get("type") != "computer_call":
+            _die(f"@image: answers a computer call; call {cid} is a function call — pass its text output")
+        f = Path(result[len("@image:"):])
+        if not f.is_file():
+            _die(f"screenshot not found: {f}")
+        mime = _IMAGE_TYPES.get(f.suffix.lower())
+        if not mime:
+            _die(f"unsupported image type {f.suffix!r} (png, jpg, webp, gif)")
+        url = f"data:{mime};base64," + base64.b64encode(f.read_bytes()).decode()
+        return {"role": "tool", "content": f"[screenshot {f.name}]", "tool_call_id": cid, "name": "computer",
+                "items": [{"type": "computer_call_output", "call_id": cid,
+                           "output": {"type": "computer_screenshot", "image_url": url}}]}
+    if call.get("type") == "computer_call":
+        _die(f"call {cid} is a computer call — answer it with a screenshot: --tool-result @image:PATH")
+    return {"role": "tool", "content": result, "tool_call_id": cid, **({"name": name} if name else {})}
 
 
 def _continue_messages(ancestry: list[dict], prompt: Optional[str], prefill: Optional[str],
@@ -2361,6 +2399,12 @@ def cmd_continue(
             body["tools"] = call_tools
         elif c is not None and c.get("tools"):
             body["tools"] = c["tools"]
+        if c is not None and fixed_ancestry is None:
+            # where items_node blobs live (an external transcript carries its items
+            # inline and belongs to no workspace — stamping one would claim it does)
+            body["workspace_id"] = c["id"]
+            if c.get("wire"):
+                body["wire"] = c["wire"]
         if no_persist:
             # a pure read, like `probe`: no panel routing, no bus events, no fold
             body["broadcast"] = False
@@ -4098,6 +4142,9 @@ def cmd_replay(
         _with_effort(body, effort)
         if tools is not None:
             body["tools"] = tools
+        body["workspace_id"] = c["id"]
+        if c.get("wire"):
+            body["wire"] = c["wire"]
         _bind_panel_model(body, binding)
         res = _StreamResult()
         _stream_chat(body, None, threading.Lock(), res, False, False, True, io.StringIO())
@@ -4143,11 +4190,172 @@ def cmd_replay(
         print(f"  real {rk:30s} → {cnt}", file=plan_out)
 
 
+# ---------- Responses-API calls: verbatim import / export ----------
+
+_FOREIGN_ACCOUNT = "recorded"  # reasoning_account tag for blobs made under ANOTHER org (never this key's)
+
+
+def _recovered_reasoning(call_dir: Path) -> dict[str, dict]:
+    """reasoning id → the OUTPUT item that produced it (with its encrypted_content),
+    from every call file in `call_dir`. A recorded call's INPUT replays earlier
+    reasoning by id only — the blob is in the output of the call that made it."""
+    found: dict[str, dict] = {}
+    for f in sorted(call_dir.glob("*.json")):
+        try:
+            d = json.loads(f.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        for o in (d.get("output") or []) if isinstance(d, dict) else []:
+            if isinstance(o, dict) and o.get("type") == "reasoning" and o.get("id") and o.get("encrypted_content"):
+                found[o["id"]] = o
+    return found
+
+
+def _item_side(it: dict) -> str:
+    t = it.get("type") or "message"
+    if t == "message":
+        return {"system": "system", "developer": "system", "assistant": "assistant"}.get(it.get("role"), "user")
+    if t.endswith("_call_output"):
+        return "tool"
+    return "assistant"  # reasoning, function_call, computer_call, …
+
+
+def _items_nodes(items: list[dict], recovered: dict[str, dict]) -> tuple[list[dict], int]:
+    """Recorded Responses items → tree nodes (chained in order): consecutive
+    system / user / assistant-side items group into one node, each tool output is
+    its own node. A node's `items` are the WIRE form — an id-only reasoning item
+    gains the blob recovered from the call that produced it (a blob is bound to its
+    item id, so it goes back under that id); `items_recorded` keeps exactly what was
+    sent when that differs. Returns (nodes, blobs recovered)."""
+    groups: list[tuple[str, list[dict], list[dict]]] = []
+    n_rec = 0
+    for it in items:
+        side = _item_side(it)
+        wire = it
+        if it.get("type") == "reasoning" and not it.get("encrypted_content") and it.get("id") in recovered:
+            wire = {**it, "encrypted_content": recovered[it["id"]]["encrypted_content"]}
+            n_rec += 1
+        if side == "tool" or not groups or groups[-1][0] != side:
+            groups.append((side, [], []))
+        groups[-1][1].append(wire)
+        groups[-1][2].append(it)
+    names = {it.get("call_id"): it.get("name") or ("computer" if it.get("type") == "computer_call" else None)
+             for it in items if (it.get("type") or "").endswith("_call")}
+    nodes = []
+    for side, wire_items, recorded in groups:
+        nd: dict = {"role": side, "items": wire_items}
+        if recorded != wire_items:
+            nd["items_recorded"] = recorded
+        if side == "assistant":
+            d = _oresp.derive(wire_items)
+            nd["content"] = d["content"]
+            if d.get("reasoning"):
+                nd["reasoning"] = d["reasoning"]
+            if d.get("tool_calls"):
+                nd["tool_calls"] = d["tool_calls"]
+            if d["encrypted"]:
+                nd["reasoning_account"] = _FOREIGN_ACCOUNT
+        else:
+            nd["content"] = _oresp.input_text(wire_items)
+            if side == "tool":
+                nd["tool_call_id"] = wire_items[0].get("call_id") or ""
+                if names.get(nd["tool_call_id"]):
+                    nd["name"] = names[nd["tool_call_id"]]
+        nodes.append(nd)
+    return nodes, n_rec
+
+
+def _responses_call_body(data: Any, f: Path, model: Optional[str], panel: str, include_output: bool,
+                         calls_dir: Path) -> tuple[dict, str]:
+    """A recorded Responses call → a workspace body (see `import --responses-call`)."""
+    req = data.get("input") if isinstance(data, dict) and isinstance(data.get("input"), dict) else data
+    if not isinstance(req, dict) or not isinstance(req.get("input"), list):
+        _die("--responses-call: expected {input: {input: [items], model, tools, reasoning}} (a call file) or the request itself")
+    items = list(req["input"])
+    recovered = _recovered_reasoning(calls_dir) if any(
+        it.get("type") == "reasoning" and not it.get("encrypted_content") for it in items) else {}
+    nodes, n_rec = _items_nodes(items, recovered)
+    if include_output:
+        out_items = data.get("output") if isinstance(data, dict) else None
+        if not out_items:
+            _die("--include-output: the file has no `output`")
+        d = _oresp.derive(out_items)
+        nd = {"role": "assistant", "items": out_items, "content": d["content"],
+              **({"reasoning": d["reasoning"]} if d.get("reasoning") else {}),
+              **({"tool_calls": d["tool_calls"]} if d.get("tool_calls") else {}),
+              **({"reasoning_account": _FOREIGN_ACCOUNT} if d["encrypted"] else {})}
+        nodes.append(nd)
+    tree_nodes: dict = {}
+    selected: dict = {}
+    parent = None
+    for nd in nodes:
+        nid = _mint_node_id()
+        tree_nodes[nid] = {"id": nid, **nd, "parent": parent, "children": []}
+        if parent is not None:
+            tree_nodes[parent]["children"].append(nid)
+        selected[parent or ROOT] = nid
+        parent = nid
+    root = next(iter(tree_nodes))
+    rec_model = req.get("model")
+    ref = _resolve_model_arg(model)[0] if model else (
+        f"openrouter:{_oresp.openai_model(rec_model)}" if rec_model else None)
+    system = "\n\n".join(nd["content"] for nd in nodes if nd["role"] == "system")
+    extra = {k: v for k, v in req.items() if k not in ("input", "model", "tools", "reasoning")}
+    body = {
+        "trees": {panel: {"nodes": tree_nodes, "rootChildren": [root], "selected": selected}},
+        "panels": [{"id": panel, "run_id": ref, "checkpoint": None}],
+        "seen_panels": [panel],
+        # the thread's own system node goes out verbatim (it wins over this); the
+        # workspace prompt is what a NEW thread in this workspace starts under
+        "system_prompt": system or None,
+        "system_enabled": bool(system),
+        "tools": req.get("tools") or None,
+        "wire": {"api": "responses",
+                 **({"model": rec_model} if rec_model else {}),
+                 **({"reasoning": req["reasoning"]} if req.get("reasoning") else {}),
+                 **({"extra": extra} if extra else {})},
+    }
+    kind = (f"Responses call, {len(items)} item(s) → {len(nodes)} turn(s) in {panel}"
+            + (f", {n_rec} reasoning blob(s) recovered" if n_rec else "")
+            + (" + its output" if include_output else "") + (f" ({ref})" if ref else ""))
+    return body, kind
+
+
+def _responses_export(c: dict, panel: Optional[str], thread: Optional[int]) -> dict:
+    """One thread as the Responses request it would replay: each node's RECORDED
+    items (verbatim), converted chat-shaped fields for nodes without any."""
+    trees = c.get("trees") or {}
+    pid = panel or next((k for k, t in trees.items() if (t or {}).get("nodes")), None)
+    if pid is None:
+        _die("the workspace has no thread")
+    path = _thread_nodes(c, pid, thread)
+    heavy = [nd["id"] for nd in path if nd.get("has_items") or nd.get("has_items_recorded")]
+    blobs = _post(f"/api/workspaces/{c['id']}/node-blobs", {"nodes": heavy, "fields": ["items", "items_recorded"]}) if heavy else {}
+    items: list[dict] = []
+    for nd in path:
+        b = (blobs or {}).get(nd["id"]) or {}
+        rec = nd.get("items_recorded") or b.get("items_recorded") or nd.get("items") or b.get("items")
+        items.extend(rec if rec else _oresp.message_items(_wire_msg(nd)))
+    if not any((it.get("role") in ("system", "developer")) for it in items):
+        sys_text = _ws_system(c)
+        if sys_text:
+            items.insert(0, {"role": "system", "content": sys_text})
+    wire = c.get("wire") or {}
+    lay = next((r for r in (c.get("panels") or []) if isinstance(r, dict) and r.get("id") == pid), {})
+    model = wire.get("model") or (lay.get("run_id") or "").removeprefix("openrouter:") or None
+    req: dict = {"input": items, "model": model, "tools": c.get("tools") or []}
+    if wire.get("reasoning"):
+        req["reasoning"] = wire["reasoning"]
+    req.update(wire.get("extra") or {})
+    return {"input": req}
+
+
 # ---------- import / export: a workspace as a file ----------
 
 _IMPORT_KEYS = ("name", "system_prompt", "system_enabled", "tools", "trees", "panels",
                 "reduced_panels", "send_targets", "seen_panels", "panel_seq")
-_HEAVY_FLAGS = {"has_token_logprobs": "token_logprobs", "has_raw_meta": "raw_meta"}
+_HEAVY_FLAGS = {"has_token_logprobs": "token_logprobs", "has_raw_meta": "raw_meta", "has_items": "items",
+                "has_items_recorded": "items_recorded"}
 
 
 def _model_ref(m: str) -> str:
@@ -4164,6 +4372,9 @@ def cmd_import(
     panel: str = typer.Option("p-1", "--panel", help="transcript: the panel the thread goes in"),
     thread_system: bool = typer.Option(False, "--thread-system", help="transcript: record `system` on the thread's first message instead of as the workspace's system prompt"),
     tools_file: Optional[str] = typer.Option(None, "--tools-file", help="tool definitions for the workspace (replaces the file's)"),
+    responses_call: bool = typer.Option(False, "--responses-call", help="FILE is one recorded Responses-API call ({input: {input, model, tools, reasoning}, output}) — imported VERBATIM for exact replay"),
+    include_output: bool = typer.Option(False, "--include-output", help="--responses-call: append the call's own output as the last assistant turn"),
+    calls_dir: Optional[str] = typer.Option(None, "--calls-dir", help="--responses-call: where to look for the calls that PRODUCED id-only reasoning items, to recover their encrypted blobs (default: the file's directory)"),
 ) -> None:
     """Create a workspace from a file. A workspace body is created as-is (heavy
     node data restores only if it was exported with --blobs); a chat transcript
@@ -4179,7 +4390,10 @@ def cmd_import(
     if ws_id is not None and any(w.get("id") == ws_id for w in (_get("/api/workspaces") or [])):
         print(f"replacing workspace {ws_id}", file=sys.stderr)
 
-    if isinstance(data, dict) and "trees" in data:
+    if responses_call:
+        body, kind = _responses_call_body(data, f, model, panel, include_output,
+                                          Path(calls_dir) if calls_dir else f.parent)
+    elif isinstance(data, dict) and "trees" in data:
         body = {k: data[k] for k in _IMPORT_KEYS if k in data}
         nodes_n = 0
         for t in (body.get("trees") or {}).values():
@@ -4246,6 +4460,7 @@ def cmd_export(
     panel: Optional[str] = typer.Option(None, "--panel", help="--openai: the panel (default: the first one with a thread)"),
     thread: Optional[int] = typer.Option(None, "--thread", help="--openai: 1-indexed root thread (default: the active one)"),
     out: Optional[str] = typer.Option(None, "--out", help="write here instead of stdout"),
+    responses: bool = typer.Option(False, "--responses", help="export ONE thread as a Responses-API request {input: {model, input, tools, reasoning}} — each node's recorded items verbatim (what `import --responses-call` takes back)"),
 ) -> None:
     """Print a workspace as JSON: its body (what `import` takes back, `--blobs` for
     a complete copy), or with --openai one thread as an OpenAI-style transcript —
@@ -4253,7 +4468,9 @@ def cmd_export(
     tool results and reasoning payloads included), its effective system prompt and
     the workspace's tools."""
     c = _resolve_workspace(ws)
-    if openai:
+    if responses:
+        doc = _responses_export(c, panel, thread)
+    elif openai:
         trees = c.get("trees") or {}
         pid = panel or next((k for k, t in trees.items() if (t or {}).get("nodes")), None)
         if pid is None:

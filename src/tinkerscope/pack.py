@@ -393,6 +393,7 @@ def apply_pack(pack: Pack, *, force: bool = False, reseed: bool = False, on_conf
             system_prompt=body.get("system_prompt"),
             system_enabled=body.get("system_enabled"),
             tools=body.get("tools") or None,
+            wire=body.get("wire") or None,
             trees=body.get("trees") or {},
             panels=body.get("panels") or [],
             reduced_panels=body.get("reduced_panels") or [],
@@ -454,7 +455,7 @@ def build_last_session(pack: Pack) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════════════
 # EXPORT
 # ═══════════════════════════════════════════════════════════════════════════════════
-_BLOB_FLAGS = ("has_token_logprobs", "has_raw_meta")
+_BLOB_FLAGS = ("has_token_logprobs", "has_raw_meta", "has_items", "has_items_recorded")
 
 
 def _pick_checkpoint(run: Any, name: str | None) -> Any:
@@ -818,7 +819,7 @@ class StateReader:
         one. `names` filters HERE rather than in the caller's loop for the same reason —
         a `--workspace X` export used to fetch every OTHER workspace's blobs and throw
         them away. `blobs=False` skips the fetch entirely (models-only callers)."""
-        want = ("has_raw_meta", "has_token_logprobs") if logprobs else ("has_raw_meta",)
+        want = ("has_raw_meta", "has_items", "has_items_recorded") + (("has_token_logprobs",) if logprobs else ())
         for body in self._store.list_bodies():
             if names is not None and (body.get("name") or "workspace") not in names:
                 continue
@@ -834,6 +835,15 @@ class StateReader:
             ]
             blobs = self._store.get_blobs(cid, nids) if (cid and nids) else {}
             raw_meta = {nid: b["raw_meta"] for nid, b in blobs.items() if b.get("raw_meta")}
+            # Verbatim Responses items ARE the turn (its exact replay), not a debug record,
+            # so they always travel — inlined on the node; the apply's split re-blobs them.
+            if any(b.get("items") or b.get("items_recorded") for b in blobs.values()):
+                body = json.loads(json.dumps(body))
+                for tree in (body.get("trees") or {}).values():
+                    for nid, n in ((tree or {}).get("nodes") or {}).items():
+                        for f in ("items", "items_recorded"):
+                            if (blobs.get(nid) or {}).get(f):
+                                n[f] = blobs[nid][f]
             lps = (
                 {nid: b["token_logprobs"] for nid, b in blobs.items() if b.get("token_logprobs")}
                 if logprobs

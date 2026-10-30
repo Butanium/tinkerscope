@@ -68,7 +68,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from .. import discovery, inflight, openrouter, tinker_oai, tree_ops, vllm_sampler, workspace_store
+from .. import discovery, inflight, openrouter, openrouter_responses, tinker_oai, tree_ops, vllm_sampler, workspace_store
 from ..session import resolve_session
 from ..state import DEFAULT_PANEL_ID, BUS, get_bus  # noqa: F401  (BUS: the default bus, patched by tests)
 from ..tinker_sampler import get_sampler, select_renderer_name
@@ -126,6 +126,12 @@ class ChatMessage(BaseModel):
     tool_calls: list[dict] | None = None
     tool_call_id: str | None = None
     name: str | None = None
+    # The VERBATIM Responses-API items this turn stands for (api/openrouter_responses.py),
+    # inline — or `items_node`: the id of the node whose stored `items` blob to load
+    # (the browser's light tree doesn't carry it; screenshots are ~0.7 MB each).
+    # Either one puts the chat on the Responses wire.
+    items: list[dict] | None = None
+    items_node: str | None = None
 
 
 Effort = Literal["default", "none", "minimal", "low", "medium", "high", "xhigh", "max"]
@@ -155,6 +161,11 @@ class ChatRequest(BaseModel):
     # workspace's `tools` meta, sent by the client like the system prompt (the
     # server never looks it up). None / [] = no tools. OpenRouter only.
     tools: list[dict] | None = None
+    # The workspace's wire setting, sent by the client like `tools`:
+    # {"api": "responses", "reasoning": {effort?, summary?}} opts a thread into
+    # OpenRouter's Responses API (with that recorded reasoning object as the base).
+    # Messages carrying items use that wire regardless. None = chat completions.
+    wire: dict | None = None
     # Thread-level system prompt: REPLACES the global/call system part at sample
     # time when non-empty (compose_system) and is recorded on the thread's ROOT
     # node. None ≡ "" = no thread part. (Until the P3
@@ -349,6 +360,7 @@ _FOLD_SAMPLE_FIELDS = (
     "reasoning", "raw_text", "raw_meta", "finish_reason", "thinking",
     "token_logprobs", "loom_cut", "loom_text", "prefill_ignored",
     "prefill_unsupported", "reasoning_details", "reasoning_tokens", "reasoning_account", "tool_calls",
+    "items",
 )
 
 
@@ -547,6 +559,28 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
                 "parent_node needs a home workspace: send workspace_id, or open a workspace "
                 "on the bus first (HANDOFF_SERVER_AUTHORITY §4.4)",
             )
+    # Verbatim Responses items referenced by node: load them from the workspace's
+    # blobs (the request names the node instead of shipping megabytes of screenshots).
+    need = [m for m in req.messages if m.items_node and not m.items]
+    if need:
+        items_ws = req.workspace_id or fold_ws or bus.state.workspace_id
+        if not items_ws:
+            raise HTTPException(400, "items_node needs the workspace: send workspace_id")
+        blobs = await asyncio.to_thread(
+            workspace_store.get_blobs, items_ws, [m.items_node for m in need], ["items"]
+        )
+        for m in need:
+            got = (blobs.get(m.items_node) or {}).get("items")
+            if not got:
+                raise HTTPException(400, f"no stored items for node {m.items_node!r} in workspace {items_ws!r}")
+            m.items = got
+    use_responses = bool(
+        (req.wire or {}).get("api") == "responses" or any(m.items for m in req.messages)
+    )
+    if use_responses and not (req.openrouter_model and req.openrouter_model.lstrip("~").startswith("openai/")):
+        raise HTTPException(
+            400, "the Responses wire (verbatim items / wire: responses) needs an OpenRouter openai/* model"
+        )
     # `msgs` is the request's message list (answer-only, no system prompt). From it:
     #  - sampling_msgs: {role, content} ONLY (+ system) — fed to the vLLM server's
     #    chat template, which would choke on an extra `reasoning` key.
@@ -567,7 +601,8 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
          **({"reasoning_details": m.reasoning_details} if m.reasoning_details else {}),
          **({"tool_calls": m.tool_calls} if m.tool_calls else {}),
          **({"tool_call_id": m.tool_call_id} if m.role == "tool" else {}),
-         **({"name": m.name} if m.role == "tool" and m.name else {})}
+         **({"name": m.name} if m.role == "tool" and m.name else {}),
+         **({"items": m.items} if m.items else {})}
         for m in req.messages
     ]
     params = resolve_params(req, bus.state)
@@ -660,15 +695,41 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
                     raise ValueError("continue_tokens requires a native tinker model")
                 if both:
                     raise ValueError('continue_tokens is incompatible with thinking="both"')
-            if req.openrouter_model:
+            if req.openrouter_model and use_responses:
                 label = req.openrouter_model
+                base_reasoning = (req.wire or {}).get("reasoning")
+
+                def resp_kwargs(think: bool) -> dict:
+                    return dict(
+                        model=req.openrouter_model,
+                        messages=or_on if think else or_off,
+                        tools=req.tools, max_tokens=max_tokens, temperature=temperature,
+                        thinking=think, effort=params["reasoning_effort"], base_reasoning=base_reasoning,
+                        extra=(req.wire or {}).get("extra"),
+                    )
+
+                if both:
+                    total = 2 * n
+                    produce_iter = _dual(
+                        _fanout(lambda i: openrouter_responses.sample_one(**resp_kwargs(False)), n),
+                        _fanout(lambda i: openrouter_responses.sample_one(**resp_kwargs(True)), n),
+                        n,
+                    )
+                else:
+                    produce_iter = _fanout(
+                        lambda i: openrouter_responses.sample_one(**resp_kwargs(bool(thinking))), n
+                    )
+                sel_patch = {}
+            elif req.openrouter_model:
+                label = req.openrouter_model
+                chat_tools = openrouter_responses.chat_tools(req.tools) or None
 
                 def or_kwargs(think: bool) -> dict:
                     return dict(
                         model=req.openrouter_model,
                         messages=or_on if think else or_off,
                         temperature=temperature, max_tokens=max_tokens, thinking=think,
-                        effort=params["reasoning_effort"], tools=req.tools or None,
+                        effort=params["reasoning_effort"], tools=chat_tools,
                         top_p=top_p, top_k=req.top_k, presence_penalty=req.presence_penalty,
                         repetition_penalty=req.repetition_penalty,
                     )

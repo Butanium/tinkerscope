@@ -64,9 +64,10 @@ from .store import locked, write_json
 log = logging.getLogger("tinkerscope.workspace_store")
 
 # Heavy per-node fields that live in blobs, not the light tree.
-BLOB_FIELDS = ("token_logprobs", "raw_meta")
+BLOB_FIELDS = ("token_logprobs", "raw_meta", "items", "items_recorded")
 # light-node presence flag for each heavy field.
-_FLAG = {"token_logprobs": "has_token_logprobs", "raw_meta": "has_raw_meta"}
+_FLAG = {"token_logprobs": "has_token_logprobs", "raw_meta": "has_raw_meta", "items": "has_items",
+         "items_recorded": "has_items_recorded"}
 _FLAGS = tuple(_FLAG.values())
 
 # Workspace / node ids become path components — confine them to safe chars so a
@@ -869,6 +870,7 @@ def upsert(
     trees: dict[str, Any],
     panels: list[dict],
     tools: list[dict] | None = None,
+    wire: dict | None = None,
     reduced_panels: list[str],
     send_targets: list[str],
     seen_panels: list[str],
@@ -886,6 +888,7 @@ def upsert(
             "system_prompt": system_prompt,
             "system_enabled": system_enabled,
             "tools": tools,
+            "wire": wire,
             "trees": trees,
             # Phantom-panel heal on every layout SET (see tree_ops.normalize_panels):
             # the browser used to do this on load, and with the layout
