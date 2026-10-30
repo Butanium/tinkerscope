@@ -153,7 +153,8 @@
   .ri-fold > summary { cursor: pointer; overflow-wrap: anywhere; font-size: 0.86rem; }
   .ri-fold[open] > summary { margin-bottom: var(--space-1); }
   .ri-thinking-head { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; }
-  .ri .sample-reasoning-block { margin-bottom: 0; }
+  .ri .sample-reasoning-block, .ri .reasoning-sealed-empty { margin-bottom: 0; }
+  .ri .reasoning-sealed-empty { padding: 0; }
   .ri-thinking-head :global(.foreign-reasoning) { text-transform: none; letter-spacing: 0; font-weight: 500; }
   .foreign-reasoning { font-size: 0.68rem; font-weight: 600; color: var(--color-no); border: 1px solid currentColor; border-radius: 999px; padding: 0 6px; }
   .ri-call, .ri-out { border: 1px solid var(--color-tool-border); border-radius: var(--radius); background: var(--color-tool-bg); padding: 4px 8px; }
