@@ -36,6 +36,11 @@ export type PanelRun = {
    *  answering this chat's calls (a handler failed, python is off, the step cap).
    *  Shown on the result form those calls then open. */
   toolNote?: string | null;
+  /** chat_done carried a fold manifest: these samples are now tree nodes. Such a
+   *  bucket only ever overlays its own (trailing assistant) row — when the path
+   *  has moved past it (an auto-answered tool call, a CLI tool result), it isn't
+   *  drawn again as a new turn. */
+  folded?: boolean;
 };
 
 export function emptyPanel(): PanelRun {
@@ -323,7 +328,12 @@ class LiveStore {
         this.onChatDone?.(panel, data);
         const cur = this.panels[panel] ?? emptyPanel();
         if (cur.chat_id != null && data.chat_id != null && data.chat_id !== cur.chat_id) break;
-        this.panels[panel] = { ...cur, running: false, toolNote: data?.tool_note ?? null };
+        this.panels[panel] = {
+          ...cur,
+          running: false,
+          toolNote: data?.tool_note ?? null,
+          folded: Array.isArray(data?.folded) && data.folded.length > 0
+        };
         break;
       }
       case 'chat_error': {

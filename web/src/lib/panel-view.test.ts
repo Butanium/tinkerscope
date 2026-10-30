@@ -94,6 +94,19 @@ test('a folded node’s thinking mode lands on its ViewMessage', () => {
 });
 
 // ── run.error appends a trailing error row ──
+test('a folded bucket is not redrawn once the path moved past its turn (auto-answered tool)', () => {
+  const u = appendUserTurn(emptyTree(), 'q');
+  const f = foldAssistant(u.tree, u.nodeId, [{ content: '', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'send', arguments: '{}' } }] }]);
+  const asst = f.ids[0];
+  const t = structuredClone(f.tree);
+  t.nodes['t1'] = { id: 't1', role: 'tool', content: 'ok', tool_call_id: 'c1', parent: asst, children: [] };
+  t.nodes[asst].children.push('t1');
+  const done = run({ chat_id: 7, n: 1, samples: [{ content: '', tool_calls: [] }], running: false, folded: true });
+  eq(buildPanelView(t, done).map((m) => m.role), ['user', 'assistant', 'tool']);
+  // still running after a tool leaf (the next step streaming) → drawn
+  eq(buildPanelView(t, { ...done, running: true, folded: false }).map((m) => m.role), ['user', 'assistant', 'tool', 'assistant']);
+});
+
 test('run.error appends an error ViewMessage', () => {
   const { tree } = folded(1);
   const out = buildPanelView(tree, run({ error: 'backend exploded' }));

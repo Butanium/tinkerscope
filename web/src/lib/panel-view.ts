@@ -97,7 +97,12 @@ export function buildPanelView(tree: ConvTree, run: PanelRun, prefill?: string):
     sib: siblingInfo(tree, n.id),
     isBucket: false
   }));
-  const hasBucket = run.chat_id != null || run.samples.length > 0 || run.running;
+  const trailingAsst = out.length > 0 && out[out.length - 1].role === 'assistant';
+  // A finished bucket whose samples are folded belongs to ITS row; if the path has
+  // moved past that row (tool results added under it), drawing it would duplicate
+  // the turn as a phantom new one.
+  const stale = !run.running && !!run.folded && !trailingAsst;
+  const hasBucket = !stale && (run.chat_id != null || run.samples.length > 0 || run.running);
 
   if (hasBucket) {
     let replacedId: string | null = null;
