@@ -3,10 +3,11 @@
 Both sampling backends render a two-section (request / response) JSON blob, but
 the *contents* differ on purpose — the backends fail in different ways and are
 debugged differently. Tinker fills it with tokenizer-level detail (prompt /
-completion as ``convert_ids_to_tokens`` splits them) and shows it in a *dropdown
-beneath* the decoded-token raw view; OpenRouter fills it with the API request
-body + trimmed response and, having no real tokens, makes this blob its *whole*
-raw view. This helper only owns the shared section layout, not what goes in it.
+completion as ``convert_ids_to_tokens`` splits them); OpenRouter fills it with
+the API request body + trimmed response. Both store it as the heavy `raw_meta`
+blob, shown in a *dropdown beneath* the light raw view (tinker: the decoded
+tokens; OpenRouter: the response section alone). This helper only owns the
+shared section layout, not what goes in it.
 
 ``default=str`` guards against non-JSON-serializable values that can sneak into a
 request (e.g. a renderer's stop sequences as bytes) — we want a faithful dump,
@@ -49,10 +50,19 @@ def _pretty(obj: object, level: int = 0) -> str:
     return json.dumps(obj, ensure_ascii=False, default=str)
 
 
+_RESPONSE_HEAD = "── response (output + thinking) ──────────────────\n"
+
+
 def format_request_response(request: dict, response: dict) -> str:
     return (
         "── request ──────────────────────────────────────\n"
         + _pretty(request)
-        + "\n\n── response (output + thinking) ──────────────────\n"
+        + "\n\n" + _RESPONSE_HEAD
         + _pretty(response)
     )
+
+
+def format_response(response: dict) -> str:
+    """The response section alone — OpenRouter's light `raw_text`, whose full
+    request + response record is the heavy `raw_meta`."""
+    return _RESPONSE_HEAD + _pretty(response)

@@ -581,7 +581,7 @@ tinkerscope checkpoints <run>
 tinkerscope open <run>
   # Select a run or model in single mode; the browser switches live.
 tinkerscope chat <run> <prompt> [options]
-  # Sample from a run's checkpoint; stream completions to stdout and the browser.
+  # Sample from a run's checkpoint or any model; stream completions to stdout and the browser.
   --n INTEGER                       number of samples to draw  [default: 1]
   --temperature FLOAT               this call only; omit = inherit the global param (see `tinkerscope params`)
   --max-tokens INTEGER              this call only; omit = inherit the global param
@@ -589,6 +589,7 @@ tinkerscope chat <run> <prompt> [options]
   --thinking-both                   draw n samples WITHOUT thinking + n WITH (2n total; overrides --thinking)
   --effort TEXT                     reasoning effort on the thinking side, OpenRouter models only: default (the model's own) | none | minimal | low | medium | high | xhigh | max; omit = inherit the global param
   --system TEXT                     system prompt for this call; omit = inherit the global one
+  --system-file TEXT                read the system prompt from a file
   --no-system                       fire with NO system prompt even if the global state carries one
   --checkpoint TEXT                 checkpoint name (overrides @ in the run arg)
   --prefill TEXT                    assistant prefill the model extends; raw `<think>` ok
@@ -618,8 +619,10 @@ tinkerscope send [prompt] [options]
   --thinking/--no-thinking          force thinking on/off for this call; omit = inherit the global param
   --thinking-both                   n samples WITHOUT thinking + n WITH, per panel (overrides --thinking)
   --effort TEXT                     reasoning effort on the thinking side, OpenRouter models only: default (the model's own) | none | minimal | low | medium | high | xhigh | max; omit = inherit the global param
-  --system TEXT                     system prompt for this call; omit = inherit the global one
-  --no-system                       fire with NO system prompt even if the global state carries one
+  --system TEXT                     the new THREAD's system prompt (overrides the workspace's); omit = the workspace's own
+  --system-file TEXT                read the thread system prompt from a file
+  --no-system                       fire with NO system prompt at all
+  --tools-file TEXT                 tool definitions for this call instead of the workspace's (JSON; [] = none)
   --prefill TEXT                    assistant prefill the models extend; raw `<think>` ok
   --file TEXT                       read the user message from a file (a probe template — mutually exclusive with the positional prompt)
   --prefill-file TEXT               read the assistant prefill from a file (mutually exclusive with --prefill)
@@ -640,8 +643,11 @@ tinkerscope continue [prompt] [options]
   --thinking/--no-thinking          force thinking on/off for this call; omit = inherit the global param
   --thinking-both                   n samples WITHOUT thinking + n WITH, per panel (overrides --thinking)
   --effort TEXT                     reasoning effort on the thinking side, OpenRouter models only: default (the model's own) | none | minimal | low | medium | high | xhigh | max; omit = inherit the global param
-  --system TEXT                     system prompt for this call; omit = inherit the global one
-  --no-system                       fire with NO system prompt even if the global state carries one
+  --system TEXT                     the workspace-level system prompt for this call; omit = the target workspace's own (a thread's own prompt still overrides it)
+  --system-file TEXT                read that system prompt from a file
+  --no-system                       fire with NO system prompt at all (thread part included)
+  --tools-file TEXT                 tool definitions for this call instead of the workspace's (JSON; [] = none)
+  --no-persist                      sample WITHOUT writing anything: no turns added, no fold, nothing on the bus — samples go to stdout only (fidelity checks, ablations)
   --file TEXT                       read the user message from a file (mutually exclusive with the positional prompt)
   --prefill TEXT                    assistant prefill the model extends — a thinking opener ('Hmm,') or its own truncated CoT; raw `<think>` ok
   --prefill-file TEXT               read the prefill from a file (mutually exclusive with --prefill) — e.g. the model's own truncated CoT
@@ -684,9 +690,11 @@ tinkerscope probe <run> [prompt] [options]
   --thinking/--no-thinking          thinking renderer (default: inherit the global)
   --effort TEXT                     reasoning effort on the thinking side, OpenRouter models only: default (the model's own) | none | minimal | low | medium | high | xhigh | max; omit = inherit the global param
   --system TEXT                     system prompt for this call
+  --system-file TEXT                read the system prompt from a file
   --no-system                       fire with NO system prompt at all
+  --tools-file TEXT                 tool definitions offered to the model (JSON list; OpenRouter models)
   --file TEXT                       read the user message from a file
-  --ancestry-file TEXT              JSON list of {role, content} dicts to sample a continuation of — the multi-turn form (a trailing assistant entry acts as a prefill)
+  --ancestry-file TEXT              JSON list of chat messages (OpenAI shape: tool_calls / role "tool" turns allowed) to sample a continuation of — the multi-turn form (a trailing assistant entry acts as a prefill)
   --prefill TEXT                    assistant prefill the model extends
   --full                            print each sample's complete answer + CoT
   --json                            JSONL to stdout, one object per sample (carries raw_meta)
@@ -775,6 +783,41 @@ tinkerscope node <node_id> [options]
   --full                            full content / thinking / prefill instead of one-line previews
   --json                            the matches as one JSON object (blobs included when --logprobs/--meta; content never truncated) — for scripts
   --link                            append a clickable deep link (?w=…&node=… opens the browser AT this node)
+tinkerscope replay [options]
+  # Resample every assistant turn of a thread from its exact prefix: at each turn the model...
+  --ws TEXT                         workspace (id-prefix or name substring)
+  --panel TEXT                      the panel whose thread to replay
+  --thread INTEGER                  1-indexed root thread; default = the panel's active one
+  --turn INTEGER (repeatable)       only these assistant turns, 1-indexed along the path (repeatable)
+  --n INTEGER                       samples per turn  [default: 1]
+  --model TEXT                      sample this model instead of the panel's (run[@ckpt] or a selector like openrouter:<id>)
+  --temperature FLOAT               omit = inherit the global param
+  --max-tokens INTEGER              omit = inherit the global param
+  --thinking/--no-thinking          omit = inherit the global param
+  --effort TEXT                     reasoning effort on the thinking side, OpenRouter models only: default (the model's own) | none | minimal | low | medium | high | xhigh | max; omit = inherit the global param
+  --system TEXT                     workspace-level system prompt for this replay; omit = the workspace's own (a thread's own prompt still overrides it)
+  --system-file TEXT                read that system prompt from a file
+  --no-system                       no system prompt at all (thread part included)
+  --tools-file TEXT                 tool definitions instead of the workspace's (JSON; [] = none)
+  --concurrency INTEGER             turns sampled at once  [default: 4]
+  --json                            JSONL: one row per sample, the real turn alongside
+  --width INTEGER                   human output: per-turn truncation width  [default: 140]
+  --timeout FLOAT                   cancel each chat after this many seconds (default: none — a cold tinker model can take minutes before its first sample); samples already finished are kept
+tinkerscope import <file> [options]
+  # Create a workspace from a file.
+  --name TEXT                       workspace name (default: the file's, else the file name)
+  --id TEXT                         workspace id to create; an EXISTING id is replaced (its old nodes go to that workspace's trash)
+  --model TEXT                      transcript: the panel's model (selector or run[@ckpt]); default = the file's `model`, a bare id read as OpenRouter
+  --panel TEXT                      transcript: the panel the thread goes in  [default: p-1]
+  --thread-system                   transcript: record `system` on the thread's first message instead of as the workspace's system prompt
+  --tools-file TEXT                 tool definitions for the workspace (replaces the file's)
+tinkerscope export <ws> [options]
+  # Print a workspace as JSON: its body (what `import` takes back, `--blobs` for a complete...
+  --blobs                           inline each node's heavy data (raw_meta, token_logprobs) so `import` restores it
+  --openai                          export ONE thread as a chat transcript {model, system, tools, messages} instead of the workspace body
+  --panel TEXT                      --openai: the panel (default: the first one with a thread)
+  --thread INTEGER                  --openai: 1-indexed root thread (default: the active one)
+  --out TEXT                        write here instead of stdout
 tinkerscope trash [action] [handle] [options]
   # Recover deleted branches.
   --workspace TEXT                  workspace id-prefix or name substring (default: every workspace, for list)

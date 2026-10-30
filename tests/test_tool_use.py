@@ -48,6 +48,14 @@ def test_finish_reports_tool_calls():
     assert "tool_calls" in res["raw_text"]
 
 
+def test_wire_request_is_heavy_raw_meta_and_raw_text_is_the_response():
+    kw = {"model": "openai/x", "messages": [{"role": "system", "content": "S" * 5000}, {"role": "user", "content": "q"}]}
+    res = openrouter._finish("ans", None, [], None, kw, "stop")
+    assert "S" * 5000 in res["raw_meta"] and '"model": "openai/x"' in res["raw_meta"]
+    assert "S" * 5000 not in res["raw_text"] and "ans" in res["raw_text"]
+    assert res["raw_text"].startswith("── response")
+
+
 def test_build_kwargs_sends_tools_only_when_given():
     tools = [{"type": "function", "function": {"name": "send"}}]
     kw = openrouter._build_kwargs(model="m", messages=[], temperature=1, max_tokens=10, thinking=False,

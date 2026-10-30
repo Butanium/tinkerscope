@@ -52,6 +52,7 @@ from httpx_sse import connect_sse
 # stdlib only (its store imports are deferred), so `tinkerscope --help` stays cheap.
 from .api.tree_ops import ROOT  # noqa: F401  (re-exported: _aim_at_node & friends read it)
 from .api.tree_ops import active_path as _active_path
+from .api.tree_ops import check_tools as _check_tools
 from .api.tree_ops import ancestry as _ancestry
 from .api.tree_ops import mint_node_id as _mint_node_id
 from .api.tree_ops import root_of as _root_of
@@ -238,6 +239,83 @@ def _arg_or_file(inline: Optional[str], file: Optional[str], what: str, flag: st
             _die(f"{what} file not found: {file}")
         return p.read_text()
     return inline
+
+
+def _system_arg(system: Optional[str], system_file: Optional[str], no_system: bool) -> Optional[str]:
+    """--system / --system-file / --no-system → the call's system prompt: the text,
+    "" (explicitly none), or None (not given — the caller decides what to inherit).
+    A long prompt goes in a file: passing a 34k-char memory as "$(cat …)" is fragile."""
+    text = _arg_or_file(system, system_file, "system prompt", "--system-file")
+    if no_system:
+        if text is not None:
+            _die("--no-system can't be combined with --system / --system-file")
+        return ""
+    return text
+
+
+def _load_tools_file(path: Optional[str]) -> Optional[list]:
+    """--tools-file → tool definitions for THIS call (None = not given; [] = no
+    tools). A JSON list or `{"tools": [...]}`; bare `{name, description,
+    parameters}` functions are wrapped, like the browser's tools editor."""
+    if path is None:
+        return None
+    f = Path(path)
+    if not f.is_file():
+        _die(f"tools file not found: {path}")
+    try:
+        raw = json.loads(f.read_text())
+    except json.JSONDecodeError as e:
+        _die(f"--tools-file must be JSON: {e}")
+    if isinstance(raw, dict):
+        raw = raw.get("tools", [raw]) if "tools" in raw or "function" in raw or "name" in raw else [raw]
+    if not isinstance(raw, list):
+        _die("--tools-file must hold a list of tool definitions")
+    tools = [t if isinstance(t, dict) and isinstance(t.get("function"), dict) else {"type": "function", "function": t}
+             for t in raw]
+    try:
+        return _check_tools(tools) or []
+    except ValueError as e:
+        _die(f"--tools-file: {e}")
+    raise AssertionError  # unreachable
+
+
+def _ws_system(c: Optional[dict]) -> Optional[str]:
+    """A workspace's own system prompt as the browser sends it for that workspace:
+    the text when enabled, "" when muted or empty. None without a workspace (the
+    server then inherits the bus global — whatever the browser has open)."""
+    if c is None:
+        return None
+    text = c.get("system_prompt") or ""
+    enabled = c.get("system_enabled")
+    if enabled is None:  # legacy body: enabled iff there is text
+        enabled = bool(text.strip())
+    return text if enabled else ""
+
+
+_MSG_KEYS = ("role", "content", "reasoning", "reasoning_details", "tool_calls", "tool_call_id", "name")
+
+
+def _norm_msgs(entries: Any, what: str) -> list[dict]:
+    """A transcript from a file (OpenAI chat-completions shape) → /api/chat
+    messages: role user|assistant|system|tool, `content` null → "" (a calls-only
+    assistant turn), tool_calls / tool_call_id / name / reasoning_details kept,
+    anything else dropped."""
+    if not isinstance(entries, list) or not entries:
+        _die(f"{what} must be a non-empty JSON list of messages")
+    out = []
+    for m in entries:
+        if not isinstance(m, dict) or m.get("role") not in ("user", "assistant", "system", "tool"):
+            _die(f"bad {what} entry (role must be user/assistant/system/tool): {str(m)[:200]}")
+        c = m.get("content")
+        if c is None and not (m["role"] == "assistant" and m.get("tool_calls")):
+            _die(f"bad {what} entry — each needs {{role, content}} (content may be null only on an "
+                 f"assistant turn with tool_calls): {str(m)[:200]}")
+        if c is None:
+            c = ""
+        if not isinstance(c, str):
+            _die(f"{what}: content must be a string or null (image/content-part arrays aren't supported): {str(m)[:200]}")
+        out.append({k: v for k, v in {**m, "content": c}.items() if k in _MSG_KEYS and v is not None})
+    return out
 
 
 def _stringify(v: Any) -> str:
@@ -1156,6 +1234,8 @@ def _stream_chat(
                         # This sample already streamed inline — finalize it (end the
                         # line, append finish_reason) without reprinting the content.
                         emit_inline("\n")
+                        for ln in _fmt_tool_calls(payload.get("tool_calls"), "asst", "", 10**9, True):
+                            emit_inline(ln.strip() + "\n")
                         fr = payload.get("finish_reason")
                         if fr:
                             emit_inline(f"[finish_reason={fr}]\n")
@@ -1165,6 +1245,7 @@ def _stream_chat(
                     if reasoning:
                         parts.append(f"[thinking] {reasoning}")
                     parts.append(payload.get("content", ""))
+                    parts.extend(ln.strip() for ln in _fmt_tool_calls(payload.get("tool_calls"), "asst", "", 10**9, True))
                     fr = payload.get("finish_reason")
                     if fr:
                         parts.append(f"[finish_reason={fr}]")
@@ -1252,7 +1333,7 @@ def _with_effort(body: dict, effort: Optional[str]) -> None:
 
 
 def _chat_body(
-    run: dict,
+    model_ref: str,
     checkpoint: Optional[str],
     prompt: str,
     n: int,
@@ -1274,15 +1355,26 @@ def _chat_body(
     if prefill:
         messages.append({"role": "assistant", "content": prefill})
     body: dict = {
-        "run_id": run["id"],
         "messages": messages,
         "panel": panel,
         "broadcast": True,
         **_call_params(n, temperature, max_tokens, thinking, system),
     }
-    if checkpoint is not None:
-        body["checkpoint"] = checkpoint
+    _bind_panel_model(body, {"run_id": model_ref, "checkpoint": checkpoint})
     return body
+
+
+def _resolve_model_arg(arg: str, catalog: Optional[list[dict]] = None) -> tuple[str, Optional[str]]:
+    """A run argument (`run[@ckpt]`) or a model selector (`openrouter:` / `base:` /
+    `ckpt:` / `vllm:` — bound as-is, like `open` and `probe`) → (panel model ref,
+    checkpoint). A bad selector name surfaces on the fire."""
+    if arg.startswith(_MODEL_SELECTORS):
+        return arg, None
+    run_arg, ckpt_arg = _split_run_arg(arg)
+    r = _resolve_run(run_arg, catalog)
+    ckpt = _resolve_checkpoint(r, ckpt_arg)
+    _guard_sampleable(r)
+    return r["id"], ckpt
 
 
 def _resolve_sys(system: Optional[str], no_system: bool) -> Optional[str]:
@@ -1300,7 +1392,7 @@ def _fmt_param(v: Any) -> str:
 
 @app.command("chat")
 def cmd_chat(
-    run: str = typer.Argument(..., help="run id or unique substring; optional @checkpoint"),
+    run: str = typer.Argument(..., help="run id or unique substring (optional @checkpoint), or a model: `openrouter:<id>`, `base:<model>`, `ckpt:<sampler_path>`, `vllm:<name>`"),
     prompt: str = typer.Argument(..., help="user message"),
     n: int = typer.Option(1, "--n", help="number of samples to draw"),
     temperature: Optional[float] = typer.Option(None, "--temperature", help="this call only; omit = inherit the global param (see `tinkerscope params`)"),
@@ -1309,6 +1401,7 @@ def cmd_chat(
     thinking_both: bool = typer.Option(False, "--thinking-both", help="draw n samples WITHOUT thinking + n WITH (2n total; overrides --thinking)"),
     effort: Optional[str] = _effort_option(),
     system: Optional[str] = typer.Option(None, "--system", help="system prompt for this call; omit = inherit the global one"),
+    system_file: Optional[str] = typer.Option(None, "--system-file", help="read the system prompt from a file"),
     no_system: bool = typer.Option(False, "--no-system", help="fire with NO system prompt even if the global state carries one"),
     checkpoint: Optional[str] = typer.Option(None, "--checkpoint", help="checkpoint name (overrides @ in the run arg)"),
     prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the model extends; raw `<think>` ok"),
@@ -1316,22 +1409,21 @@ def cmd_chat(
     json_out: bool = typer.Option(False, "--json", help="one JSON object per line instead of human text (includes token_logprobs when present)"),
     timeout: Optional[float] = _timeout_option(),
 ) -> None:
-    """Sample from a run's checkpoint; stream completions to stdout and the browser."""
+    """Sample from a run's checkpoint or any model; stream completions to stdout and the browser."""
     _set_timeout(timeout)
-    run_arg, ckpt_arg = _split_run_arg(run)
-    r = _resolve_run(run_arg)
-    ckpt = _resolve_checkpoint(r, checkpoint or ckpt_arg)
-    _guard_sampleable(r)
+    if checkpoint and not run.startswith(_MODEL_SELECTORS):
+        run = f"{_split_run_arg(run)[0]}@{checkpoint}"  # --checkpoint wins over an @ in the arg
+    ref, ckpt = _resolve_model_arg(run)
     # Mirror selection to the bus so the browser shows what's being sampled (single
     # mode = one panel).
     pid = _layout_panel_ids(1)[0]
-    _post("/api/state", {"panels": [_panel_obj(pid, r["id"], ckpt)]})
+    _post("/api/state", {"panels": [_panel_obj(pid, ref, ckpt)]})
     think: "bool | str | None" = "both" if thinking_both else thinking
     # Like `send`, --system authors the THREAD prompt (recorded on the root node,
     # overriding the global) — a `chat` is a new thread now, so its prompt is
     # thread identity, not a call-scoped global override.
-    system, thread_system = _new_thread_system(_resolve_sys(system, no_system))
-    body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, think, system, pid, prefill)
+    system, thread_system = _new_thread_system(_system_arg(system, system_file, no_system))
+    body = _chat_body(ref, ckpt, prompt, n, temperature, max_tokens, think, system, pid, prefill)
     _with_effort(body, effort)
     if thread_system is not None:
         body["thread_system_prompt"] = thread_system
@@ -1348,7 +1440,7 @@ def cmd_chat(
         body["parent_node"] = parents[pid]
     if prefill:
         print(f"prefill: {prefill!r}")
-    print(f"chat {r['id']}" + (f"@{ckpt}" if ckpt else "") + f"  n={n} temp={_fmt_param(temperature)}"
+    print(f"chat {ref}" + (f"@{ckpt}" if ckpt else "") + f"  n={n} temp={_fmt_param(temperature)}"
           + (f"  → persists in workspace {conv_id[:8]}" if conv_id else "  (no workspace open — not persisted)"))
     # Single chat: n==1 streams tokens inline; n>1 prints whole samples (no deltas).
     _stream_chat(body, stream_inline=not json_out, logprobs=show_logprobs, json_out=json_out)
@@ -1356,8 +1448,8 @@ def cmd_chat(
 
 @app.command("compare")
 def cmd_compare(
-    run_a: str = typer.Argument(..., help="run A → primary pane: id/substring; optional @checkpoint"),
-    run_b: str = typer.Argument(..., help="run B → compare pane: id/substring; optional @checkpoint"),
+    run_a: str = typer.Argument(..., help="run A → primary pane: id/substring (optional @checkpoint) or a model selector (`openrouter:…` / `base:…` / `ckpt:…` / `vllm:…`)"),
+    run_b: str = typer.Argument(..., help="run B → compare pane: same forms as run A"),
     prompt: str = typer.Argument(..., help="user message"),
     run: list[str] = typer.Option([], "--run", help="additional run(s) → 3rd, 4th, … panes (repeatable)"),
     n: int = typer.Option(1, "--n", help="number of samples per side"),
@@ -1381,19 +1473,13 @@ def cmd_compare(
     catalog = _models()
     # Resolve every run (A, B, then each --run) to (run, checkpoint, panel_id). Runs
     # are resolved BEFORE minting so an unresolvable arg doesn't burn panel numbers.
-    resolved: list[tuple[dict, Optional[str]]] = []
-    for run_arg in [run_a, run_b, *run]:
-        arg, ckpt_arg = _split_run_arg(run_arg)
-        r = _resolve_run(arg, catalog)
-        ckpt = _resolve_checkpoint(r, ckpt_arg)
-        _guard_sampleable(r)
-        resolved.append((r, ckpt))
-    specs: list[tuple[dict, Optional[str], str]] = [
-        (r, ckpt, pid) for (r, ckpt), pid in zip(resolved, _layout_panel_ids(len(resolved)))
+    resolved: list[tuple[str, Optional[str]]] = [_resolve_model_arg(a, catalog) for a in [run_a, run_b, *run]]
+    specs: list[tuple[str, Optional[str], str]] = [
+        (ref, ckpt, pid) for (ref, ckpt), pid in zip(resolved, _layout_panel_ids(len(resolved)))
     ]
 
     # One /api/state replace sets the whole panel layout at once.
-    _post("/api/state", {"panels": [_panel_obj(pid, r["id"], ckpt) for (r, ckpt, pid) in specs]})
+    _post("/api/state", {"panels": [_panel_obj(pid, ref, ckpt) for (ref, ckpt, pid) in specs]})
 
     # Placement writer with a workspace open (see cmd_chat) — one ops batch
     # persists every panel's user turn before any fire.
@@ -1408,16 +1494,16 @@ def cmd_compare(
 
     print(f"compare  n={n} temp={_fmt_param(temperature)}"
           + (f"  → persists in workspace {conv_id[:8]}" if conv_id else "  (no workspace open — not persisted)"))
-    for (r, ckpt, pid) in specs:
-        print(f"  {pid}: {r['id']}" + (f"@{ckpt}" if ckpt else ""))
+    for (ref, ckpt, pid) in specs:
+        print(f"  {pid}: {ref}" + (f"@{ckpt}" if ckpt else ""))
     print()
 
     lock = threading.Lock()
     threads: list[threading.Thread] = []
     results: list[tuple[str, dict, _StreamResult]] = []
     think: "bool | str | None" = "both" if thinking_both else thinking
-    for (r, ckpt, pid) in specs:
-        body = _chat_body(r, ckpt, prompt, n, temperature, max_tokens, think, system, pid, prefill)
+    for (ref, ckpt, pid) in specs:
+        body = _chat_body(ref, ckpt, prompt, n, temperature, max_tokens, think, system, pid, prefill)
         _with_effort(body, effort)
         if thread_system is not None:
             body["thread_system_prompt"] = thread_system
@@ -1426,15 +1512,15 @@ def cmd_compare(
             body["workspace_id"] = conv_id
             body["parent_node"] = parents[pid]
             res.user_turn = _qualified_handle(conv_id, pid, parents[pid])
-        label = f"{pid} {r['id']}" + (f"@{ckpt}" if ckpt else "")
+        label = f"{pid} {ref}" + (f"@{ckpt}" if ckpt else "")
         t = threading.Thread(target=_stream_chat,
                              args=(body, label, lock, res, False, show_logprobs, json_out))
-        results.append((pid, r, res))
+        results.append((pid, ref, res))
         threads.append(t)
         t.start()
     _join_fires(threads, results)
 
-    failures, code = _fire_failures(results, lambda pid, r: f"{pid} ({r['id']})")
+    failures, code = _fire_failures(results, lambda pid, ref: f"{pid} ({ref})")
     if failures:
         _die(f"compare {'stopped' if code == _EXIT_STOPPED else 'failed'}:\n  " + "\n  ".join(failures), code)
 
@@ -1697,6 +1783,7 @@ def _fire_send(
     thread_system: Optional[str] = None,
     conv_id: Optional[str] = None,
     effort: Optional[str] = None,
+    tools: Optional[list] = None,
 ) -> list[tuple[str, dict, _StreamResult]]:
     """Fire one fresh-history chat per target panel, concurrently; join and return
     [(panel_id, panel, result)] with each result's collected samples. The
@@ -1707,7 +1794,6 @@ def _fire_send(
     folds all n replies — durable with no browser attached. Without one, NOTHING
     persists: the fire is ephemeral (bucket render + stdout only)."""
     parents: dict[str, str] = {}
-    tools = None
     if conv_id:
         parents, turn_err = _emit_user_turns(conv_id, targets, prompt, thread_system)
         if turn_err is not None:
@@ -1719,7 +1805,8 @@ def _fire_send(
                 res.error = turn_err
                 failed.append((p["id"], p, res))
             return failed
-        tools = _workspace_tools(conv_id)
+        if tools is None:
+            tools = _workspace_tools(conv_id)
     lock = threading.Lock()
     threads: list[threading.Thread] = []
     results: list[tuple[str, dict, _StreamResult]] = []
@@ -1727,7 +1814,7 @@ def _fire_send(
         body = _panel_chat_body(p, prompt, n, temperature, max_tokens, think, system, prefill,
                                 thread_system=thread_system)
         _with_effort(body, effort)
-        if tools:
+        if tools is not None:
             body["tools"] = tools
         res = _StreamResult()
         if conv_id and p["id"] in parents:
@@ -1771,8 +1858,10 @@ def cmd_send(
     thinking: Optional[bool] = typer.Option(None, "--thinking/--no-thinking", help="force thinking on/off for this call; omit = inherit the global param"),
     thinking_both: bool = typer.Option(False, "--thinking-both", help="n samples WITHOUT thinking + n WITH, per panel (overrides --thinking)"),
     effort: Optional[str] = _effort_option(),
-    system: Optional[str] = typer.Option(None, "--system", help="system prompt for this call; omit = inherit the global one"),
-    no_system: bool = typer.Option(False, "--no-system", help="fire with NO system prompt even if the global state carries one"),
+    system: Optional[str] = typer.Option(None, "--system", help="the new THREAD's system prompt (overrides the workspace's); omit = the workspace's own"),
+    system_file: Optional[str] = typer.Option(None, "--system-file", help="read the thread system prompt from a file"),
+    no_system: bool = typer.Option(False, "--no-system", help="fire with NO system prompt at all"),
+    tools_file: Optional[str] = typer.Option(None, "--tools-file", help="tool definitions for this call instead of the workspace's (JSON; [] = none)"),
     prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the models extend; raw `<think>` ok"),
     file: Optional[str] = typer.Option(None, "--file", help="read the user message from a file (a probe template — mutually exclusive with the positional prompt)"),
     prefill_file: Optional[str] = typer.Option(None, "--prefill-file", help="read the assistant prefill from a file (mutually exclusive with --prefill)"),
@@ -1811,7 +1900,16 @@ def cmd_send(
         # fan-out evaporated with the process).
         conv_id = _create_send_workspace(_derived_ws_name(prompt), targets)
     think: "bool | str | None" = "both" if thinking_both else thinking
-    system, thread_system = _new_thread_system(_resolve_sys(system, no_system))
+    system, thread_system = _new_thread_system(_system_arg(system, system_file, no_system))
+    # The global part is the TARGET workspace's own prompt, as the browser would send
+    # it — not the bus global, which is whatever workspace a browser has open (or
+    # nothing, headless).
+    ws_body = _get(f"/api/workspaces/{conv_id}") or {}
+    if system is None:
+        system = _ws_system(ws_body)
+    tools = _load_tools_file(tools_file)
+    if tools is None:
+        tools = ws_body.get("tools") or None
     plan_out = sys.stderr if json_out else sys.stdout  # JSON mode: keep stdout pure JSONL
 
     print(f"send (new thread)  n={n} temp={_fmt_param(temperature)}  →  {len(targets)} panel(s)", file=plan_out)
@@ -1825,7 +1923,7 @@ def cmd_send(
 
     results = _fire_send(targets, prompt, prefill, n, temperature, max_tokens,
                          think, system, show_logprobs, json_out,
-                         thread_system=thread_system, conv_id=conv_id, effort=effort)
+                         thread_system=thread_system, conv_id=conv_id, effort=effort, tools=tools)
     if first_token:
         _print_first_token_tables(results, json_out)
     failures, code = _fire_failures(results, lambda pid, p: f"{pid} ({_short_run(p.get('run_id'))})")
@@ -1989,8 +2087,11 @@ def cmd_continue(
     thinking: Optional[bool] = typer.Option(None, "--thinking/--no-thinking", help="force thinking on/off for this call; omit = inherit the global param"),
     thinking_both: bool = typer.Option(False, "--thinking-both", help="n samples WITHOUT thinking + n WITH, per panel (overrides --thinking)"),
     effort: Optional[str] = _effort_option(),
-    system: Optional[str] = typer.Option(None, "--system", help="system prompt for this call; omit = inherit the global one"),
-    no_system: bool = typer.Option(False, "--no-system", help="fire with NO system prompt even if the global state carries one"),
+    system: Optional[str] = typer.Option(None, "--system", help="the workspace-level system prompt for this call; omit = the target workspace's own (a thread's own prompt still overrides it)"),
+    system_file: Optional[str] = typer.Option(None, "--system-file", help="read that system prompt from a file"),
+    no_system: bool = typer.Option(False, "--no-system", help="fire with NO system prompt at all (thread part included)"),
+    tools_file: Optional[str] = typer.Option(None, "--tools-file", help="tool definitions for this call instead of the workspace's (JSON; [] = none)"),
+    no_persist: bool = typer.Option(False, "--no-persist", help="sample WITHOUT writing anything: no turns added, no fold, nothing on the bus — samples go to stdout only (fidelity checks, ablations)"),
     file: Optional[str] = typer.Option(None, "--file", help="read the user message from a file (mutually exclusive with the positional prompt)"),
     prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the model extends — a thinking opener ('Hmm,') or its own truncated CoT; raw `<think>` ok"),
     prefill_file: Optional[str] = typer.Option(None, "--prefill-file", help="read the prefill from a file (mutually exclusive with --prefill) — e.g. the model's own truncated CoT"),
@@ -2049,11 +2150,7 @@ def cmd_continue(
             fixed_ancestry = json.loads(raw.read_text())
         except json.JSONDecodeError as e:
             _die(f"--ancestry-file must be a JSON list of {{role, content}} dicts: {e}")
-        if not isinstance(fixed_ancestry, list) or not fixed_ancestry:
-            _die("--ancestry-file must be a non-empty JSON list of {role, content} dicts")
-        for m in fixed_ancestry:
-            if not isinstance(m, dict) or m.get("role") not in ("user", "assistant", "system", "tool") or not isinstance(m.get("content"), str):
-                _die(f"bad ancestry entry (need role in user/assistant/system/tool + string content): {m!r}")
+        fixed_ancestry = _norm_msgs(fixed_ancestry, "--ancestry-file")
     # A qualified handle (`<ws>:<panel>:<node>` from the browser's Copy-node-id
     # button, or `<panel>:<node>`) carries the panel —
     # and optionally the workspace — that a loom target needs to be unambiguous.
@@ -2136,9 +2233,16 @@ def cmd_continue(
                 "or open that workspace in the browser and bind a model"
             )
         _die("no target panel has a model bound")
-    _refuse_if_busy(st, [p["id"] for p in targets], (c or {}).get("id") or conv_id, force)
+    if not no_persist:
+        _refuse_if_busy(st, [p["id"] for p in targets], (c or {}).get("id") or conv_id, force)
     think: "bool | str | None" = "both" if thinking_both else thinking
-    system = _resolve_sys(system, no_system)
+    system = _system_arg(system, system_file, no_system)
+    if system is None and fixed_ancestry is None:
+        # The TARGET workspace's own prompt, as the browser would send it for that
+        # workspace. Inheriting the bus global instead used whatever workspace a
+        # browser had open — or nothing at all, headless.
+        system = _ws_system(c)
+    call_tools = _load_tools_file(tools_file)
 
     # Build (panel, messages, thread-system) per target — refusing bad sequences
     # BEFORE firing any. The thread part rides per-plan: a loomed thread keeps the
@@ -2192,7 +2296,7 @@ def cmd_continue(
     # ops BEFORE any fire (§4.3 — a pre-start failure must not lose them), and
     # record each fire's parent_node. A re-sample plan's anchor IS the user turn.
     fire_parent: dict[str, str] = {}
-    if c is not None:
+    if c is not None and not no_persist:
         turn_ops: list[dict] = []
         for (p, _msgs, _ts, anchor) in plans:
             if anchor is None:
@@ -2226,7 +2330,8 @@ def cmd_continue(
             _post(f"/api/workspaces/{c['id']}/ops", {"ops": turn_ops})
 
     plan_out = sys.stderr if json_out else sys.stdout  # JSON mode: keep stdout pure JSONL
-    print(f"continue (loom)  n={n} temp={_fmt_param(temperature)}  →  {len(targets)} panel(s)", file=plan_out)
+    print(f"continue (loom)  n={n} temp={_fmt_param(temperature)}  →  {len(targets)} panel(s)"
+          + ("  [no-persist: nothing written]" if no_persist else ""), file=plan_out)
     for (p, msgs, _ts, _anchor) in plans:
         base = len(msgs) - (1 if prompt is not None else 0) - (1 if prefill is not None else 0) - len(tool_result)
         add = []
@@ -2252,8 +2357,14 @@ def cmd_continue(
         body = _panel_body(p, msgs, n, temperature, max_tokens, think, system, prefill_scope,
                            thread_system=ts)
         _with_effort(body, effort)
-        if c is not None and c.get("tools"):
+        if call_tools is not None:
+            body["tools"] = call_tools
+        elif c is not None and c.get("tools"):
             body["tools"] = c["tools"]
+        if no_persist:
+            # a pure read, like `probe`: no panel routing, no bus events, no fold
+            body["broadcast"] = False
+            body["commit"] = False
         res = _StreamResult()
         if c is not None and p["id"] in fire_parent:
             body["workspace_id"] = c["id"]
@@ -2459,7 +2570,7 @@ def cmd_battery(
 
 @app.command("probe")
 def cmd_probe(
-    run: str = typer.Argument(..., help="run id / unique substring, `run@checkpoint`, `base:<model>`, `ckpt:<sampler_path>`, or `vllm:<model>` (a model the configured vLLM server lists)"),
+    run: str = typer.Argument(..., help="run id / unique substring, `run@checkpoint`, `openrouter:<id>`, `base:<model>`, `ckpt:<sampler_path>`, or `vllm:<model>` (a model the configured vLLM server lists)"),
     prompt: Optional[str] = typer.Argument(None, help="the user message; omit when using --ancestry-file"),
     n: int = typer.Option(1, "--n", help="samples to draw"),
     temperature: Optional[float] = typer.Option(None, "--temperature"),
@@ -2467,11 +2578,13 @@ def cmd_probe(
     thinking: Optional[bool] = typer.Option(None, "--thinking/--no-thinking", help="thinking renderer (default: inherit the global)"),
     effort: Optional[str] = _effort_option(),
     system: Optional[str] = typer.Option(None, "--system", help="system prompt for this call"),
+    system_file: Optional[str] = typer.Option(None, "--system-file", help="read the system prompt from a file"),
     no_system: bool = typer.Option(False, "--no-system", help="fire with NO system prompt at all"),
+    tools_file: Optional[str] = typer.Option(None, "--tools-file", help="tool definitions offered to the model (JSON list; OpenRouter models)"),
     file: Optional[str] = typer.Option(None, "--file", help="read the user message from a file"),
     ancestry_file: Optional[str] = typer.Option(
         None, "--ancestry-file",
-        help="JSON list of {role, content} dicts to sample a continuation of — the multi-turn form (a trailing assistant entry acts as a prefill)",
+        help="JSON list of chat messages (OpenAI shape: tool_calls / role \"tool\" turns allowed) to sample a continuation of — the multi-turn form (a trailing assistant entry acts as a prefill)",
     ),
     prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the model extends"),
     full: bool = typer.Option(False, "--full", help="print each sample's complete answer + CoT"),
@@ -2505,14 +2618,9 @@ def cmd_probe(
         if not raw.is_file():
             _die(f"ancestry file not found: {ancestry_file}")
         try:
-            ancestry = json.loads(raw.read_text())
+            ancestry = _norm_msgs(json.loads(raw.read_text()), "--ancestry-file")
         except json.JSONDecodeError as e:
-            _die(f"--ancestry-file must be a JSON list of {{role, content}} dicts: {e}")
-        if not isinstance(ancestry, list) or not ancestry:
-            _die("--ancestry-file must be a non-empty JSON list of {role, content} dicts")
-        for m in ancestry:
-            if not isinstance(m, dict) or "role" not in m or "content" not in m:
-                _die("--ancestry-file entries must each be a {role, content} dict")
+            _die(f"--ancestry-file must be a JSON list of messages: {e}")
     elif msg is None:
         _die("pass a prompt, --file, or --ancestry-file")
     else:
@@ -2522,7 +2630,6 @@ def cmd_probe(
             _die("--prefill needs the ancestry to end on a user turn (it already ends on an assistant one)")
         ancestry = ancestry + [{"role": "assistant", "content": prefill}]
 
-    run_arg, at_ckpt = _split_run_arg(run)
     body: dict = {
         "messages": ancestry,
         "panel": "p-1",  # required by the schema; commit=false makes the server
@@ -2533,24 +2640,14 @@ def cmd_probe(
         # explicit: a probe must never sample under the OPEN thread's prompt
         # (belt-and-braces — new servers don't inherit the mirror at all)
         "thread_system_prompt": "",
-        **_call_params(n, temperature, max_tokens, thinking, _resolve_sys(system, no_system)),
+        **_call_params(n, temperature, max_tokens, thinking, _system_arg(system, system_file, no_system)),
     }
     _with_effort(body, effort)
-    if run_arg.startswith("openrouter:"):
-        body["openrouter_model"] = run_arg[len("openrouter:"):]
-    elif run_arg.startswith("base:"):
-        body["base_model"] = run_arg[len("base:"):]
-    elif run_arg.startswith("ckpt:"):
-        body["sampler_path"] = run_arg[len("ckpt:"):]
-    elif run_arg.startswith("vllm:"):
-        body["vllm_model"] = run_arg[len("vllm:"):]
-    else:
-        r = _resolve_run(run_arg)
-        _guard_sampleable(r)
-        body["run_id"] = r["id"]
-        ck = _resolve_checkpoint(r, at_ckpt)
-        if ck is not None:
-            body["checkpoint"] = ck
+    tools = _load_tools_file(tools_file)
+    if tools:
+        body["tools"] = tools
+    ref, ck = _resolve_model_arg(run)
+    _bind_panel_model(body, {"run_id": ref, "checkpoint": ck})
     if not json_out:
         label = body.get("run_id") or body.get("base_model") or body.get("sampler_path") or body.get("openrouter_model")
         ckpt = body.get("checkpoint")
@@ -3881,6 +3978,310 @@ def cmd_node(
     if json_out:
         print(json.dumps({"matches": json_matches, "total": len(json_matches)},
                          default=str, ensure_ascii=False))
+
+
+# ---------- replay: resample every turn of a thread (fidelity) ----------
+
+def _turn_kind(content: Optional[str], calls: Optional[list]) -> str:
+    """A coarse label to compare a resampled turn with the real one: the tools it
+    called, else text / empty."""
+    if calls:
+        return "call:" + ",".join(((c or {}).get("function") or {}).get("name") or "?" for c in calls)
+    return "text" if (content or "").strip() else "empty"
+
+
+def _turn_record(m: dict) -> dict:
+    return {k: m.get(k) for k in ("content", "reasoning", "tool_calls", "finish_reason", "reasoning_tokens")
+            if m.get(k) is not None}
+
+
+def _panel_model(c: dict, panel: str, model: Optional[str]) -> dict:
+    """The model a replay/export samples: --model, else the panel's saved binding."""
+    if model is not None:
+        ref, ck = _resolve_model_arg(model)
+        return {"run_id": ref, "checkpoint": ck}
+    lay = next((r for r in (c.get("panels") or []) if isinstance(r, dict) and r.get("id") == panel), None)
+    if not lay or not lay.get("run_id"):
+        _die(f"panel {panel} has no model bound in workspace {c.get('name')!r} — pass --model")
+    return {"run_id": lay["run_id"], "checkpoint": lay.get("checkpoint")}
+
+
+def _thread_nodes(c: dict, panel: str, thread: Optional[int]) -> list[dict]:
+    """A panel's thread as its SELECTED path, root → leaf (light nodes)."""
+    tree = (c.get("trees") or {}).get(panel)
+    if not (tree or {}).get("nodes"):
+        _die(f"panel {panel} of workspace {c.get('name')!r} has no thread")
+    roots = tree.get("rootChildren") or []
+    if thread is not None:
+        if not 1 <= thread <= len(roots):
+            _die(f"--thread {thread} out of range (panel has {len(roots)} thread(s))")
+        root = roots[thread - 1]
+    else:
+        root = _selected_child(tree, ROOT)
+    return _thread_path(tree, root)
+
+
+@app.command("replay")
+def cmd_replay(
+    ws: str = typer.Option(..., "--ws", "--conv", help="workspace (id-prefix or name substring)"),
+    panel: str = typer.Option(..., "--panel", help="the panel whose thread to replay"),
+    thread: Optional[int] = typer.Option(None, "--thread", help="1-indexed root thread; default = the panel's active one"),
+    turn: list[int] = typer.Option([], "--turn", help="only these assistant turns, 1-indexed along the path (repeatable)"),
+    n: int = typer.Option(1, "--n", help="samples per turn"),
+    model: Optional[str] = typer.Option(None, "--model", help="sample this model instead of the panel's (run[@ckpt] or a selector like openrouter:<id>)"),
+    temperature: Optional[float] = typer.Option(None, "--temperature", help="omit = inherit the global param"),
+    max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="omit = inherit the global param"),
+    thinking: Optional[bool] = typer.Option(None, "--thinking/--no-thinking", help="omit = inherit the global param"),
+    effort: Optional[str] = _effort_option(),
+    system: Optional[str] = typer.Option(None, "--system", help="workspace-level system prompt for this replay; omit = the workspace's own (a thread's own prompt still overrides it)"),
+    system_file: Optional[str] = typer.Option(None, "--system-file", help="read that system prompt from a file"),
+    no_system: bool = typer.Option(False, "--no-system", help="no system prompt at all (thread part included)"),
+    tools_file: Optional[str] = typer.Option(None, "--tools-file", help="tool definitions instead of the workspace's (JSON; [] = none)"),
+    concurrency: int = typer.Option(4, "--concurrency", help="turns sampled at once"),
+    json_out: bool = typer.Option(False, "--json", help="JSONL: one row per sample, the real turn alongside"),
+    width: int = typer.Option(140, "--width", help="human output: per-turn truncation width"),
+    timeout: Optional[float] = _timeout_option(),
+) -> None:
+    """Resample every assistant turn of a thread from its exact prefix: at each
+    turn the model actually took, draw N samples from the same context (the path
+    up to that turn — tool calls and tool results included — under the thread's
+    system prompt and the workspace's tools) and show them next to the real turn.
+    Nothing is written: no turns, no folds, no bus events. The fidelity check for
+    a reconstructed or forked conversation."""
+    _set_timeout(timeout)
+    import io
+    from concurrent.futures import ThreadPoolExecutor
+
+    c = _resolve_workspace(ws)
+    path = _thread_nodes(c, panel, thread)
+    binding = _panel_model(c, panel, model)
+    sysarg = _system_arg(system, system_file, no_system)
+    global_sys = sysarg if sysarg is not None else _ws_system(c)
+    thread_sys = "" if no_system else (path[0].get("system_prompt") or "")
+    tools = _load_tools_file(tools_file)
+    if tools is None:
+        tools = c.get("tools") or None
+
+    jobs: list[tuple[int, dict, list[dict]]] = []  # (turn number, real node, prefix)
+    skipped: list[str] = []
+    t = 0
+    for i, nd in enumerate(path):
+        if nd.get("role") != "assistant":
+            continue
+        t += 1
+        if turn and t not in turn:
+            continue
+        prefix = [m for m in path[:i] if m.get("role") != "system"]
+        if not prefix or prefix[-1].get("role") not in ("user", "tool"):
+            skipped.append(f"turn {t} ({nd['id']}): follows a {prefix[-1]['role'] if prefix else 'nothing'} turn")
+            continue
+        jobs.append((t, nd, prefix))
+    if not jobs:
+        _die("no assistant turn to replay" + (f" ({'; '.join(skipped)})" if skipped else ""))
+
+    plan_out = sys.stderr if json_out else sys.stdout
+    print(f"replay {c.get('name')!r} {panel}: {len(jobs)} turn(s) × n={n} → {binding['run_id']}"
+          f"  (concurrency {concurrency}; nothing written)", file=plan_out)
+    for sk in skipped:
+        print(f"  skipped {sk}", file=plan_out)
+
+    def fire(job: tuple[int, dict, list[dict]]) -> _StreamResult:
+        _t, _real, prefix = job
+        body = {
+            "messages": [_wire_msg(m) for m in prefix],
+            "panel": panel,
+            "broadcast": False,
+            "commit": False,
+            "thread_system_prompt": thread_sys,
+            **_call_params(n, temperature, max_tokens, thinking, global_sys),
+        }
+        _with_effort(body, effort)
+        if tools is not None:
+            body["tools"] = tools
+        _bind_panel_model(body, binding)
+        res = _StreamResult()
+        _stream_chat(body, None, threading.Lock(), res, False, False, True, io.StringIO())
+        return res
+
+    agree = total = 0
+    by_real: dict[str, dict[str, int]] = {}
+    with ThreadPoolExecutor(max(1, concurrency)) as ex:
+        futures = [(job, ex.submit(fire, job)) for job in jobs]
+        for (t, real, _prefix), fut in futures:  # submission order: rows come out turn by turn
+            res = fut.result()
+            real_kind = _turn_kind(real.get("content"), real.get("tool_calls"))
+            if res.error and not res.samples:
+                if json_out:
+                    print(json.dumps({"turn": t, "node": real["id"], "error": res.error}, ensure_ascii=False), flush=True)
+                else:
+                    print(f"turn {t} ({real['id']}): ERROR {res.error}", flush=True)
+                continue
+            if not json_out:
+                print(f"\nturn {t} ({real['id']})  real [{real_kind}] "
+                      f"{_oneline(real.get('content') or '', width)}", flush=True)
+                for ln in _fmt_tool_calls(real.get("tool_calls"), "real", "", width, False):
+                    print(ln, flush=True)
+            for smp in sorted(res.samples, key=lambda x: x.get("sample_index") or 0):
+                kind = _turn_kind(smp.get("content"), smp.get("tool_calls"))
+                total += 1
+                agree += kind == real_kind
+                by_real.setdefault(real_kind, {}).setdefault(kind, 0)
+                by_real[real_kind][kind] += 1
+                if json_out:
+                    print(json.dumps({"turn": t, "node": real["id"], "sample_index": smp.get("sample_index"),
+                                      "real_kind": real_kind, "sample_kind": kind,
+                                      "real": _turn_record(real), "sample": _turn_record(smp)},
+                                     ensure_ascii=False, default=str), flush=True)
+                else:
+                    print(f"  sample {smp.get('sample_index')} [{kind}] {_oneline(smp.get('content') or '', width)}", flush=True)
+                    for ln in _fmt_tool_calls(smp.get("tool_calls"), "  smp", "", width, False):
+                        print(ln, flush=True)
+            if res.error:
+                print(f"  (turn {t}: {res.error})", file=plan_out, flush=True)
+    print(f"\nkind agreement: {agree}/{total}", file=plan_out)
+    for rk, cnt in sorted(by_real.items(), key=lambda kv: -sum(kv[1].values())):
+        print(f"  real {rk:30s} → {cnt}", file=plan_out)
+
+
+# ---------- import / export: a workspace as a file ----------
+
+_IMPORT_KEYS = ("name", "system_prompt", "system_enabled", "tools", "trees", "panels",
+                "reduced_panels", "send_targets", "seen_panels", "panel_seq")
+_HEAVY_FLAGS = {"has_token_logprobs": "token_logprobs", "has_raw_meta": "raw_meta"}
+
+
+def _model_ref(m: str) -> str:
+    """A transcript's `model` as a panel ref: selectors as-is, a bare id as OpenRouter."""
+    return m if m.startswith(_MODEL_SELECTORS) else f"openrouter:{m}"
+
+
+@app.command("import")
+def cmd_import(
+    file: str = typer.Argument(..., help="a workspace body (`tinkerscope export` output) OR a chat transcript: {model?, system?, tools?, messages} or a bare messages list (OpenAI shape)"),
+    name: Optional[str] = typer.Option(None, "--name", help="workspace name (default: the file's, else the file name)"),
+    ws_id: Optional[str] = typer.Option(None, "--id", help="workspace id to create; an EXISTING id is replaced (its old nodes go to that workspace's trash)"),
+    model: Optional[str] = typer.Option(None, "--model", help="transcript: the panel's model (selector or run[@ckpt]); default = the file's `model`, a bare id read as OpenRouter"),
+    panel: str = typer.Option("p-1", "--panel", help="transcript: the panel the thread goes in"),
+    thread_system: bool = typer.Option(False, "--thread-system", help="transcript: record `system` on the thread's first message instead of as the workspace's system prompt"),
+    tools_file: Optional[str] = typer.Option(None, "--tools-file", help="tool definitions for the workspace (replaces the file's)"),
+) -> None:
+    """Create a workspace from a file. A workspace body is created as-is (heavy
+    node data restores only if it was exported with --blobs); a chat transcript
+    becomes ONE thread, its messages chained verbatim — tool calls, tool results
+    and closed-model reasoning payloads included."""
+    f = Path(file)
+    if not f.is_file():
+        _die(f"file not found: {file}")
+    try:
+        data = json.loads(f.read_text())
+    except json.JSONDecodeError as e:
+        _die(f"not JSON: {e}")
+    if ws_id is not None and any(w.get("id") == ws_id for w in (_get("/api/workspaces") or [])):
+        print(f"replacing workspace {ws_id}", file=sys.stderr)
+
+    if isinstance(data, dict) and "trees" in data:
+        body = {k: data[k] for k in _IMPORT_KEYS if k in data}
+        nodes_n = 0
+        for t in (body.get("trees") or {}).values():
+            for nd in ((t or {}).get("nodes") or {}).values():
+                nodes_n += 1
+                for flag, field in _HEAVY_FLAGS.items():
+                    if nd.get(flag) and field not in nd:  # no blob would back the flag
+                        nd.pop(flag)
+        kind = f"workspace body, {nodes_n} node(s)"
+    else:
+        tr = {"messages": data} if isinstance(data, list) else data
+        if not isinstance(tr, dict) or not isinstance(tr.get("messages"), list):
+            _die("expected a workspace body (with `trees`) or a transcript (with `messages`)")
+        msgs = _norm_msgs(tr["messages"], "messages")
+        sys_parts = [m["content"] for m in msgs if m["role"] == "system"]
+        if tr.get("system"):
+            sys_parts.insert(0, tr["system"])
+        msgs = [m for m in msgs if m["role"] != "system"]
+        if not msgs:
+            _die("the transcript has no non-system message")
+        sys_text = "\n\n".join(sys_parts)
+        nodes: dict = {}
+        selected: dict = {}
+        parent = None
+        for m in msgs:
+            nid = _mint_node_id()
+            nodes[nid] = {"id": nid, **m, "parent": parent, "children": []}
+            if parent is None:
+                if thread_system and sys_text:
+                    nodes[nid]["system_prompt"] = sys_text
+            else:
+                nodes[parent]["children"].append(nid)
+            selected[parent or ROOT] = nid
+            parent = nid
+        root = next(iter(nodes))
+        m_ref = model or tr.get("model")
+        ref, ck = (_resolve_model_arg(m_ref) if model else (_model_ref(m_ref), None)) if m_ref else (None, None)
+        body = {
+            "trees": {panel: {"nodes": nodes, "rootChildren": [root], "selected": selected}},
+            "panels": [{"id": panel, "run_id": ref, "checkpoint": ck}],
+            "seen_panels": [panel],
+        }
+        if sys_text and not thread_system:
+            body["system_prompt"] = sys_text
+            body["system_enabled"] = True
+        if tr.get("tools"):
+            body["tools"] = tr["tools"]
+        kind = f"transcript, {len(nodes)} turn(s) → {panel}" + (f" ({ref})" if ref else " (no model bound)")
+    tools = _load_tools_file(tools_file)
+    if tools is not None:
+        body["tools"] = tools or None
+    body["name"] = name or body.get("name") or f.stem
+    if ws_id is not None:
+        body["id"] = ws_id
+    w = _post("/api/workspaces", body)
+    print(f"imported {kind} as {body['name']!r} ({w['id']}) — open: {_base_url()}/?w={w['id']}")
+
+
+@app.command("export")
+def cmd_export(
+    ws: str = typer.Argument(..., help="workspace id-prefix or name substring"),
+    blobs: bool = typer.Option(False, "--blobs", help="inline each node's heavy data (raw_meta, token_logprobs) so `import` restores it"),
+    openai: bool = typer.Option(False, "--openai", help="export ONE thread as a chat transcript {model, system, tools, messages} instead of the workspace body"),
+    panel: Optional[str] = typer.Option(None, "--panel", help="--openai: the panel (default: the first one with a thread)"),
+    thread: Optional[int] = typer.Option(None, "--thread", help="--openai: 1-indexed root thread (default: the active one)"),
+    out: Optional[str] = typer.Option(None, "--out", help="write here instead of stdout"),
+) -> None:
+    """Print a workspace as JSON: its body (what `import` takes back, `--blobs` for
+    a complete copy), or with --openai one thread as an OpenAI-style transcript —
+    the exact messages the thread's next turn would be sampled from (tool calls,
+    tool results and reasoning payloads included), its effective system prompt and
+    the workspace's tools."""
+    c = _resolve_workspace(ws)
+    if openai:
+        trees = c.get("trees") or {}
+        pid = panel or next((k for k, t in trees.items() if (t or {}).get("nodes")), None)
+        if pid is None:
+            _die("the workspace has no thread")
+        path = _thread_nodes(c, pid, thread)
+        system = (path[0].get("system_prompt") or "") or (_ws_system(c) or "")
+        lay = next((r for r in (c.get("panels") or []) if isinstance(r, dict) and r.get("id") == pid), {})
+        doc: dict = {"model": lay.get("run_id"), "system": system, "tools": c.get("tools") or [],
+                     "messages": [_wire_msg(m) for m in path if m.get("role") != "system"]}
+    else:
+        doc = {k: v for k, v in c.items() if k not in ("rev",)}
+        if blobs:
+            for t in (doc.get("trees") or {}).values():
+                ids = [i for i, nd in ((t or {}).get("nodes") or {}).items()
+                       if any(nd.get(fl) for fl in _HEAVY_FLAGS)]
+                got = _post(f"/api/workspaces/{c['id']}/node-blobs", {"nodes": ids}) if ids else {}
+                for i, blob in (got or {}).items():
+                    nd = t["nodes"][i]
+                    for fl, field in _HEAVY_FLAGS.items():
+                        if field in blob:
+                            nd[field] = blob[field]
+                            nd.pop(fl, None)
+    text = json.dumps(doc, ensure_ascii=False, indent=1)
+    if out:
+        Path(out).write_text(text)
+        print(f"wrote {out} ({len(text)} chars)", file=sys.stderr)
+    else:
+        print(text)
 
 
 @app.command("trash")

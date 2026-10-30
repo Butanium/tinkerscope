@@ -49,7 +49,7 @@ from typing import Any
 import httpx
 from openai import AsyncOpenAI
 
-from .raw_view import format_request_response
+from .raw_view import format_request_response, format_response
 
 _client: AsyncOpenAI | None = None
 
@@ -342,11 +342,29 @@ def merge_tool_call_chunks(acc: list[dict], chunk) -> None:
             cur["function"]["arguments"] += fn["arguments"]
 
 
-def _raw_text(request_kwargs: dict, content: str, reasoning: str | None,
-              details: list[dict] | None = None, usage: dict | None = None,
-              tool_calls: list[dict] | None = None) -> str:
-    """Raw view for the OpenRouter backend: the actual request body sent over
-    the wire, plus the response trimmed to just its output + thinking fields.
+def _response_view(content: str, reasoning: str | None, details: list[dict] | None,
+                   usage: dict | None, tool_calls: list[dict] | None) -> dict:
+    response: dict = {}
+    if reasoning:
+        response["reasoning"] = reasoning
+    if details:
+        response["reasoning_details"] = _elide(details)
+    response["content"] = content
+    if tool_calls:
+        response["tool_calls"] = tool_calls
+    if usage:
+        response["usage"] = usage
+    return response
+
+
+def _wire_record(request_kwargs: dict, content: str, reasoning: str | None,
+                 details: list[dict] | None = None, usage: dict | None = None,
+                 tool_calls: list[dict] | None = None) -> str:
+    """The sample's `raw_meta`: the actual request body sent over the wire, plus
+    the response trimmed to just its output + thinking fields. Heavy on purpose —
+    the request repeats the whole conversation (system prompt included) on every
+    turn, so it lives in the write-once blob, not the light tree; the light
+    `raw_text` is the response section alone.
 
     Unlike the tinker path (which decodes the real prompt+completion tokens),
     an OpenRouter model has no single chat template *we* control — it's a JSON
@@ -362,17 +380,7 @@ def _raw_text(request_kwargs: dict, content: str, reasoning: str | None,
         for m in body.get("messages", [])
     ]
     body.update(request_kwargs.get("extra_body") or {})
-    response: dict = {}
-    if reasoning:
-        response["reasoning"] = reasoning
-    if details:
-        response["reasoning_details"] = _elide(details)
-    response["content"] = content
-    if tool_calls:
-        response["tool_calls"] = tool_calls
-    if usage:
-        response["usage"] = usage
-    return format_request_response(body, response)
+    return format_request_response(body, _response_view(content, reasoning, details, usage, tool_calls))
 
 
 def _usage_view(usage) -> dict | None:
@@ -415,7 +423,9 @@ def _finish(content: str, reasoning: str | None, details: list[dict], usage, kwa
     calls = clean_tool_calls(tool_calls)
     if calls:
         result["tool_calls"] = calls
-    result["raw_text"] = _raw_text(kwargs, content, reasoning, details, _usage_view(usage), calls)
+    usage_v = _usage_view(usage)
+    result["raw_text"] = format_response(_response_view(content, reasoning, details, usage_v, calls))
+    result["raw_meta"] = _wire_record(kwargs, content, reasoning, details, usage_v, calls)
     if finish:
         result["finish_reason"] = finish  # "length" ⇒ cut by max_tokens
     return result

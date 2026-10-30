@@ -65,7 +65,7 @@ def test_raw_view_elides_payloads():
                   {"role": "assistant", "content": "a", "reasoning_details": [SUMMARY, ENCRYPTED]},
                   {"role": "user", "content": "q2"}],
     )
-    raw = openrouter._raw_text(kw, "ans", "sum", [SUMMARY, ENCRYPTED], {"reasoning_tokens": 18})
+    raw = openrouter._wire_record(kw, "ans", "sum", [SUMMARY, ENCRYPTED], {"reasoning_tokens": 18})
     assert "x" * 100 not in raw
     assert "<encrypted, 1805 chars>" in raw and '"effort": "low"' in raw
 
