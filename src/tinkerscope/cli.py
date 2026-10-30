@@ -4366,7 +4366,7 @@ def _responses_export(c: dict, panel: Optional[str], thread: Optional[int]) -> d
 
 # ---------- import / export: a workspace as a file ----------
 
-_IMPORT_KEYS = ("name", "system_prompt", "system_enabled", "tools", "trees", "panels",
+_IMPORT_KEYS = ("name", "system_prompt", "system_enabled", "tools", "wire", "trees", "panels",
                 "reduced_panels", "send_targets", "seen_panels", "panel_seq")
 _HEAVY_FLAGS = {"has_token_logprobs": "token_logprobs", "has_raw_meta": "raw_meta", "has_items": "items",
                 "has_items_recorded": "items_recorded"}
