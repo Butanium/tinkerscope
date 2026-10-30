@@ -223,6 +223,21 @@ models through OpenRouter ignore temperature/top_p silently and are never
 prefilled: a `--prefill` on such a panel is dropped and the sample is tagged
 `prefill_unsupported`.
 
+**Tool use (OpenRouter models).** A workspace's `tools` (OpenAI function
+definitions — set in the browser's **tools** pill, or `PATCH /api/workspaces/<id>`
+`{"tools": [...]}`) ride on every `send`/`continue` into it. A turn that calls tools
+stores them as `tool_calls`; `ws` / `node` print each as
+`[asst →call <id>] name(<raw JSON args>)` and results as
+`[tool ←name <id>] <result>`. Answer the leaf's pending calls with
+`tinkerscope continue --tool-result '<output>'` — one per call, in call order;
+they persist as tool turns and the model continues from the last one (add a
+positional message to put a user turn after the results instead). `continue`
+refuses a target whose calls are unanswered, and continuing from a tool turn
+needs no message. Other backends refuse a thread with tools or tool turns.
+Encrypted reasoning is stamped `reasoning_account` (a hash of the OpenRouter key):
+a workspace made under another account replays WITHOUT that reasoning — OpenRouter
+drops a foreign blob silently.
+
 **Thread system prompts (`send --system`).** A thread's first message can carry
 its OWN system prompt, which REPLACES the global one for that thread at fire
 time (the global stays the default for threads without one, never clobbered). On `send` (always a

@@ -2150,7 +2150,7 @@
         url.searchParams.delete(SESSION_URL_PARAM);
         await goto(url, { replaceState: true, keepFocus: true, noScroll: true });
       }
-      try { health = await api.health(); } catch (e: any) { backendError = `Backend not reachable: ${e?.message ?? e}`; }
+      try { health = await api.health(); modelCatalog.orAccount = health?.openrouter_account ?? null; } catch (e: any) { backendError = `Backend not reachable: ${e?.message ?? e}`; }
       await modelCatalog.loadRuns(setBackendError);
       await modelCatalog.loadOpenrouterModels(setBackendError);
       await modelCatalog.loadVllmModels(setBackendError);

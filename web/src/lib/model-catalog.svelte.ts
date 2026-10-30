@@ -58,6 +58,9 @@ class ModelCatalog {
   vllmModels = $state<VllmModel[]>([]);
   vllmUrl = $state<string | null>(null);
   vllmError = $state<string | null>(null);
+  /** The server's OpenRouter account tag (health `openrouter_account`): a turn
+   *  whose encrypted reasoning carries a different tag can't be replayed. */
+  orAccount = $state<string | null>(null);
 
   // Typeahead catalogs (lazy-loaded when their picker opens).
   tinkerModels = $state<TinkerModel[]>([]);

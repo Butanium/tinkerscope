@@ -33,6 +33,7 @@ import {
   editAssistant,
   editToolResult,
   appendToolResults,
+  isFireParent,
   pendingToolCalls,
   deleteSubtree,
   deleteSiblings,
@@ -203,7 +204,7 @@ class BranchOps {
     const node = tree.nodes[nodeId];
     if (!node || node.role !== 'assistant' || (!node.content && !node.reasoning)) return;
     const userParentId = node.parent;
-    if (!userParentId || tree.nodes[userParentId]?.role !== 'user') return;
+    if (!userParentId || !isFireParent(tree.nodes[userParentId])) return;
     // A closed model's thinking (lib/reasoning.ts) is not text we can hand back
     // inside the turn: the prefill is the answer alone, and there's nothing to
     // resume inside — Shift degrades to a plain continue.
@@ -500,7 +501,7 @@ class BranchOps {
     const node = tree.nodes[nodeId];
     if (!node || node.role !== 'assistant') return;
     const userParentId = node.parent;
-    if (!userParentId || tree.nodes[userParentId]?.role !== 'user') return;
+    if (!userParentId || !isFireParent(tree.nodes[userParentId])) return;
     panelScroll.preserve(panel);
     chat.clearPanelBucket(panel);
     // Reproduce the original fire's message list — including its prefill, whose

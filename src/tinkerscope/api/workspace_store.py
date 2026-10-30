@@ -1002,8 +1002,9 @@ def register_chat_placement(cid: str, panel: str, parent_node: str) -> str | Non
     registered, or None on success (the caller MUST `inflight.release` at the
     chat's terminal).
 
-    The parent must be a USER node: folds hang assistant siblings under the user
-    turn they answer (same contract as `foldAssistant`), and under §4.3 that node
+    The parent must be a USER node or a TOOL result: folds hang assistant siblings
+    under the turn they answer (same contract as `foldAssistant`; a tool result is
+    what the model answers after its own tool call), and under §4.3 that node
     was persisted by the writer's own op BEFORE the fire — "not found" here means
     the op was never emitted, or a delete won the tiny op-to-fire race."""
     with locked("workspaces"):
@@ -1018,10 +1019,10 @@ def register_chat_placement(cid: str, panel: str, parent_node: str) -> str | Non
                 f"parent node {parent_node!r} not found in panel {panel!r} of workspace "
                 f"{cid!r} — the user turn must be persisted (add_nodes op) before the fire"
             )
-        if node.get("role") != "user":
+        if node.get("role") not in ("user", "tool"):
             return (
                 f"parent node {parent_node!r} is a {node.get('role')!r} turn — "
-                "samples fold under USER nodes"
+                "samples fold under USER or TOOL nodes"
             )
         inflight.register(cid, panel, parent_node)
         return None

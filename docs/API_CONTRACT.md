@@ -98,7 +98,7 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
 
 | Method | Path | Body / params | Returns |
 |---|---|---|---|
-| GET | `/api/health` | — | `{ok, root, scan_roots[], tinker_key, openrouter_key, vllm_url, multi_user, session, available, supported_models[], error}` — `vllm_url` = the configured vLLM server (normalized, `$TINKERSCOPE_VLLM_URL` / `--vllm-url`) or null; `multi_user` = started with `--multi-user`; `session` = the session id THIS request resolved to (see "Sessions" below; always `"default"` on a single-user server; `null` when the request would be refused as ambiguous); `available`/`supported_models`/`error` = the tinker capabilities probe, cached server-side 10 min after a success and 60 s after a failure — past that the stale answer is served while one background re-probe runs |
+| GET | `/api/health` | — | `{ok, root, scan_roots[], tinker_key, openrouter_key, openrouter_account, vllm_url, multi_user, session, available, supported_models[], error}` — `openrouter_account` = this key's 10-hex tag (`openrouter.account_tag`), what encrypted reasoning is stamped with (see `reasoning_account` below); `vllm_url` = the configured vLLM server (normalized, `$TINKERSCOPE_VLLM_URL` / `--vllm-url`) or null; `multi_user` = started with `--multi-user`; `session` = the session id THIS request resolved to (see "Sessions" below; always `"default"` on a single-user server; `null` when the request would be refused as ambiguous); `available`/`supported_models`/`error` = the tinker capabilities probe, cached server-side 10 min after a success and 60 s after a failure — past that the stale answer is served while one background re-probe runs |
 | GET | `/api/models` | — | `Run[]` (with `supports_thinking`) |
 | POST | `/api/models/refresh` | — | `{status, count}` (rescans fs + capabilities) |
 | GET | `/api/tinker-models` | `?refresh` | `{available, error, models:[…]}` — everything sampleable through tinker, one filterable list. Each entry has `kind` + unified `id` + `label`. `kind:"base"` (+`base_model`, +`supports_thinking`) = raw base models from `get_server_capabilities` (no LoRA); `supports_thinking` = the family exposes a binary thinking toggle (so the composer can hide its thinking control for base picks with none). `kind:"checkpoint"` (+`sampler_path`,`created`) = every sampler checkpoint the account still has (the REST `list_user_checkpoints` sweep — not the 20-capped oai /v1/models), newest first, UUID-only (no `supports_thinking` — base/renderer unknown ⇒ the UI assumes thinking-capable). Base models first, then checkpoints. `?refresh=1` re-probes both the capabilities and the checkpoint sweep now (otherwise the same TTL cache as `/api/health`). Entries a **share pack** injected (see `docs/PACK.md`) are appended with `pack:true` and deduped by `id` against the sweep — these carry explicit sampler paths / base models the account sweep won't list (public checkpoints trained elsewhere), so they appear even offline / cross-account. A registry label **OVERRIDES** a sweep entry's derived one (same `id` ⇒ one row, not two) and sets `named:true`; an entry with no registry label has no `named` flag, which is how the UI knows its label is derived and offers to name it. |
@@ -132,9 +132,9 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
 | GET | `/api/workspaces/{id}` | — | one light `Workspace` body (trees incl., blobs excl.); 404 if unknown |
 | POST | `/api/workspaces/{id}/node-blobs` | `{nodes: string[], fields?: string[]}` | `{nodeId: {token_logprobs?, raw_meta?}}` — heavy blobs for a batch of node ids (POST, not GET, because the list is long). `fields` narrows each blob (`["raw_meta"]` = provenance only — a fan-out's `token_logprobs` run to MBs); omitted = all. Unknown / blob-less ids are OMITTED, not an error |
 | GET | `/api/workspaces/{id}/layout-history` | — | `[{ts, panels}]` oldest-first — one entry per panel-LAYOUT change (not per save). `[]` for an unknown workspace or one whose layout never changed (never 404 — same "absence is not an error" convention as node-blobs). Restoring is a normal PATCH of `panels`; `scripts/layout_history.py` is the front end |
-| POST | `/api/workspaces` | `{id?, name?, system_prompt?, system_enabled?, trees?, panels?, tree?, compare_tree?, reduced_panels?, send_targets?, seen_panels?, panel_seq?}` | the saved light Workspace (`id`,`created_at`,`updated_at` added; inline heavy node fields stripped into blobs). 400 on a crafted (non-filename-safe) `id` |
+| POST | `/api/workspaces` | `{id?, name?, system_prompt?, system_enabled?, tools?, trees?, panels?, tree?, compare_tree?, reduced_panels?, send_targets?, seen_panels?, panel_seq?}` | the saved light Workspace (`id`,`created_at`,`updated_at` added; inline heavy node fields stripped into blobs). 400 on a crafted (non-filename-safe) `id` |
 | POST | `/api/workspaces/{id}/ops` | `{ops: Op[]}` | `{rev, results}` — **the tree mutation path** (op table under "Workspace" below). Applied atomically under the workspaces flock; ANY rejection discards the whole batch → 409 `{detail:{index, error}}` with nothing written. On success, one bus `ops` event carries the batch as applied. 404 if unknown |
-| PATCH | `/api/workspaces/{id}` | any subset of `{name, system_prompt, system_enabled, panels, reduced_panels, send_targets, seen_panels, panel_seq}` | the updated **WorkspaceSummary** (layout-only — NO tree bytes shipped either way); 404 if unknown. Sugar over the `set_meta` op: same locked apply, same `rev` bump, same `ops` broadcast, so other tabs converge on metadata live |
+| PATCH | `/api/workspaces/{id}` | any subset of `{name, system_prompt, system_enabled, tools, panels, reduced_panels, send_targets, seen_panels, panel_seq}` | the updated **WorkspaceSummary** (layout-only — NO tree bytes shipped either way); 404 if unknown. Sugar over the `set_meta` op: same locked apply, same `rev` bump, same `ops` broadcast, so other tabs converge on metadata live |
 | DELETE | `/api/workspaces/{id}` | — | `{status}`. **Soft**: the light file, blobs dir, layout history and trash journal are MOVED to `workspaces/.deleted/<id>-<ts>/`, not unlinked (aged out after 90 days). The one deletion the trash journal can't cover is the workspace's own, since the journal lives inside it |
 | GET | `/api/workspaces/{id}/trash` | — | `[{id, ts, panel, kind, count, roots, selected, layout?, layout_index?}]` NEWEST-first — one entry per save that made nodes disappear. Node BODIES excluded (a listing is for choosing; bodies can be MBs). `roots` = the deleted subtree anchors `{id, parent, index, role, preview}`. `kind` is `"nodes"` (branches vanished) or `"panel"` (the whole column did) — a `"panel"` entry also carries `layout`, that panel's layout row, and `layout_index`, its position in `panels`, so the column can come back bound to its model and in its old slot. Both absent on entries journaled before they were recorded. `[]` for unknown / never-deleted (never 404, same convention as node-blobs) |
 | POST | `/api/workspaces/{id}/trash/restore` | `{handle}` | `{ok, restored, panel, recreated_panel, unbound_panel, entry}` — splices a journaled subtree back at its recorded sibling `index`. `handle` = an entry id, a subtree-root node id, or any node id inside an entry. Blobs need no work (write-once, never removed), so logprobs come back too. `recreated_panel` = this restore re-added a whole column; its tree and its layout row are checked SEPARATELY because they drift (a stale tab's save wipes the row while the partial tree upsert keeps the tree), which is also what keeps restore re-runnable. `unbound_panel` = the re-added row binds no model, so the browser's phantom filter will drop it on load — the caller should say so rather than promise a re-bind. `{ok: false, error}` with **200** when nothing matches — that's an answer, not a transport failure |
@@ -149,6 +149,11 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
   "system_prompt": null,                    // travels with the workspace (each conv = one experiment)
   "system_enabled": null,                   // its power state (false = kept but muted); absent/null on
                                             // legacy bodies → readers derive from text presence
+  "tools": null,                            // tool definitions sent with every fire, OpenAI function
+                                            // schemas [{type:"function", function:{name, description?,
+                                            // parameters?}}]; null = none. Validated on write
+                                            // (tree_ops.check_tools: names present + unique → else 400/409).
+                                            // A set_meta / PATCH field like system_prompt.
   "trees": {                                // per-panel LIGHT branch trees, keyed by stable panel id
     "primary": { "nodes": {…}, "rootChildren": [], "selected": {} },
     "p-2": { … }                            // one per open panel; ids are minted p-<n> and NEVER
@@ -173,6 +178,7 @@ The **tree** is a per-panel branch structure owned by the frontend
 (`web/src/lib/tree.ts`): `nodes[id] = {id, role, content, reasoning?, raw_text?,
 prefill?, loom_cut?, loom_text?, finish_reason?, parent, children[],
 has_token_logprobs?, has_raw_meta?, reasoning_details?, reasoning_tokens?,
+reasoning_account?, tool_calls?, tool_call_id?, name?,
 prefill_unsupported?}`
 + a `selected` map (parentId|`"__root__"` → selected child id). `finish_reason:
 "length"` marks a turn cut off by the max-tokens limit (the UI badges it).
@@ -182,6 +188,21 @@ prefill_unsupported?}`
 `reasoning_tokens` the hidden reasoning's billed length. Kept LIGHT (the browser
 builds the next fire's messages from the tree), carried by an assistant edit that
 keeps the thinking unchanged and dropped by one that changes or drops it.
+`reasoning_account` is the 10-hex tag of the OpenRouter key an encrypted/signed
+payload came from: another account's blob is accepted by OpenRouter and silently
+ignored on replay, so the UI flags a tag that differs from `/api/health`'s
+`openrouter_account` (absent = unknown, never flagged).
+
+**Tool use** (OpenRouter only; OpenAI chat-completions shape). `role` may be
+`"tool"`. An assistant node's `tool_calls` = `[{id, type:"function", function:{name,
+arguments}}]` — `arguments` is the model's raw JSON string, stored and replayed
+verbatim; such a turn's `content` may be `""`. Each call is answered by a
+`role:"tool"` node carrying `tool_call_id` (+ the function `name`); a turn's results
+form a CHAIN under it in call order (asst → tool(c1) → tool(c2) → …), and the
+model's next turn folds under the last result (`parent_node` may be a tool node).
+A user node may also follow a result. The browser shows a result form while the
+active path has unanswered calls, and refuses a plain user turn there (the
+provider would 400 the thread).
 `loom_cut`/`loom_text` mark a loom branch's forced prefix (see the `message`
 event below). The
 linear ACTIVE PATH (root→leaf via `selected`) is what the sampler and the CLI
@@ -291,7 +312,13 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
                           // sampling call, raw_meta (request block keyed `vllm_model`),
                           // continue_tokens (loom) honored; top_k / presence_penalty /
                           // repetition_penalty forwarded. Token-streams at n==1.
-  "messages": [{"role":"user","content":"…"}],   // required
+  "messages": [{"role":"user","content":"…"}],   // required. An entry may also carry
+                          // reasoning_details (assistant), tool_calls (assistant) or
+                          // tool_call_id + name (role "tool") — forwarded to OpenRouter.
+  "tools": null,          // optional; OpenAI function definitions offered to the model
+                          // (the workspace's `tools`, sent by the client like the system
+                          // prompt — the server never looks it up). OpenRouter only: any
+                          // other backend errors on a thread with tools / tool turns.
   "system_prompt": null,  // optional; the GLOBAL system-prompt part.
                           // "" = EXPLICITLY none (never inherits — see params_scope).
                           // The "call"-scope inherit SKIPS a muted global prompt
@@ -430,7 +457,7 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
   model" below), and n>1 sends whole samples for every producer. A consumer that
   saw deltas for a sample uses the later `message` event to *finalize* (clean
   content), not to reprint.
-- `event: message` → `data:` one sample: `{sample_index, content, raw_text, finish_reason, reasoning?, thinking?, token_logprobs?, loom_cut?, loom_text?, reasoning_details?, reasoning_tokens?, prefill_ignored?, prefill_unsupported?}` or `{sample_index, error}`.
+- `event: message` → `data:` one sample: `{sample_index, content, raw_text, finish_reason, reasoning?, thinking?, token_logprobs?, loom_cut?, loom_text?, reasoning_details?, reasoning_tokens?, reasoning_account?, tool_calls?, prefill_ignored?, prefill_unsupported?}` or `{sample_index, error}`. `tool_calls` (with `finish_reason:"tool_calls"`): the calls the turn made, folded onto the node.
   `reasoning_details` / `reasoning_tokens`: OpenRouter only — the provider's reasoning
   payload (see the tree node above) and its billed length. A request's assistant
   `messages[]` entries may carry `reasoning_details` back; the server forwards them to

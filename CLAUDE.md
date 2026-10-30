@@ -125,6 +125,18 @@ and in this file's reference section; HANDOFF.md itself is retired.
   (`web/src/lib/reasoning.ts`, `tree.ts editAssistant`). `openai/*` never continues a
   prefill — the server drops it and tags `prefill_unsupported`. Per-model caps (efforts,
   silently ignored params) come from the cached catalog: `/api/openrouter-models/caps`.
+  ⚠️ An encrypted blob is bound to the KEY's account and OpenRouter drops a foreign one
+  SILENTLY (200, ignored) — hence the `reasoning_account` stamp + "other account" pill.
+- **Tool use** (OpenRouter only; `openrouter.py` docstring + `ENGINEERING_LOGS.md`
+  2026-10-29): OpenAI chat-completions shape 1:1 — assistant `tool_calls` (arguments =
+  raw JSON string, never re-serialized), `role:"tool"` nodes (`tool_call_id`, `name`)
+  CHAINED under the calling turn in call order, the next model turn folds under the last
+  result (fold parent = user OR tool: `tree.ts isFireParent`). Workspace meta `tools`,
+  sent by the client on every fire. Pure half: `tree.ts`'s `pendingToolCalls` /
+  `appendToolResults` / `editToolResult` + `lib/tools-def.ts` (**`tool-use.test.ts`**);
+  UI: `ToolCalls.svelte` (a turn's calls), `ToolResultForm.svelte` (per-panel answer form,
+  Send vs Result only), `ToolsModal.svelte` (the composer's **tools** pill). The composer
+  refuses a user turn after unanswered calls (provider 400). CLI: `continue --tool-result`.
 - **vLLM backend** (`src/tinkerscope/api/vllm_sampler.py` — module docstring): a
   self-hosted OpenAI-compatible server (`$TINKERSCOPE_VLLM_URL` / `--vllm-url`)
   whose models join the picker as `vllm:<name>` (⚙) and sample NATIVE-shaped —

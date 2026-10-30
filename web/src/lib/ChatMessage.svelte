@@ -18,6 +18,7 @@
   import { reveal } from '$lib/reveal.svelte';
   import { nodeBlobs } from '$lib/node-blobs.svelte';
   import { workspaces as ws } from '$lib/workspaces.svelte';
+  import { modelCatalog } from '$lib/model-catalog.svelte';
   import ActionMenu from '$lib/ActionMenu.svelte';
   import Icon from '$lib/Icon.svelte';
   import WaitTimer from '$lib/WaitTimer.svelte';
@@ -213,6 +214,11 @@
   // Shift+Continue resumes inside the think block — only meaningful with reasoning
   // the model can be handed back as text (not a closed model's summary).
   let canResumeThinking = $derived(msg.role === 'assistant' && !!msg.reasoning?.trim() && !tKind);
+  // Encrypted reasoning made under ANOTHER OpenRouter account: OpenRouter drops it
+  // on replay without an error, so the next turn won't see it (openrouter.py).
+  let foreignReasoning = $derived(
+    !!tKind && !!msg.reasoning_account && !!modelCatalog.orAccount && msg.reasoning_account !== modelCatalog.orAccount
+  );
   // Continue is a prefill: dead on a model that ignores them — unless the
   // ctrl/cmd all-panels variant reaches other panels.
 
@@ -454,6 +460,10 @@
     </summary>
     <pre class="raw-text-view">{meta}</pre>
   </details>
+{/snippet}
+
+{#snippet foreignTag()}
+  <span class="foreign-reasoning" data-testid="foreign-reasoning" data-tooltip="Made under another OpenRouter account — the next turn won't see it" use:tip>other account</span>
 {/snippet}
 
 {#snippet sampleCard(sample: SampleData, idx: number)}
@@ -759,6 +769,7 @@
           {:else}
             <span data-testid="thinking-label">{thinkingLabel(msg.reasoning_details, msg.reasoning_tokens)}</span>
           {/if}
+          {#if foreignReasoning}{@render foreignTag()}{/if}
           <svg class="thinking-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
         </summary>
         <div class="sample-reasoning">{@html prefillSplit ? renderPrefilled(msg.reasoning, prefillSplit.think, 'assistant') : renderContent(msg.reasoning, 'assistant')}</div>
@@ -766,7 +777,7 @@
     {:else if msg.role === 'assistant' && tKind && !isMultiSample && !tokView && !editing}
       <!-- Reasoning that came back with no readable text at all (encrypted only):
            it still exists, and the next turn still replays it. -->
-      <div class="reasoning-sealed-empty" data-testid="thinking-label" data-tooltip={thinkingKindTip(tKind)} use:tip>{thinkingLabel(msg.reasoning_details, msg.reasoning_tokens)} — no visible text</div>
+      <div class="reasoning-sealed-empty" data-testid="thinking-label" data-tooltip={thinkingKindTip(tKind)} use:tip>{thinkingLabel(msg.reasoning_details, msg.reasoning_tokens)} — no visible text{#if foreignReasoning}{@render foreignTag()}{/if}</div>
     {/if}
     {#if isMultiSample}
       {@const completedCount = msg.samples ? msg.samples.filter((x) => x && x.content).length : 0}
@@ -993,6 +1004,7 @@
 {/if}
 
 <style>
+  .foreign-reasoning { margin-left: 6px; font-size: 0.68rem; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--color-no); border: 1px solid currentColor; border-radius: 999px; padding: 0 6px; }
   .tool-result-name { font-family: 'Courier New', Courier, monospace; font-size: 0.78rem; font-weight: 700; color: var(--color-text-secondary); overflow-wrap: anywhere; }
   .tool-result { font-family: 'Courier New', Courier, monospace; font-size: 0.8rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; margin: var(--space-1) 0 0; color: var(--color-text-secondary); max-height: 480px; overflow-y: auto; }
   .tool-result-fold > summary { cursor: pointer; font-family: 'Courier New', Courier, monospace; font-size: 0.8rem; color: var(--color-text-secondary); overflow-wrap: anywhere; }

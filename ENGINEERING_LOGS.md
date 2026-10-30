@@ -3200,3 +3200,44 @@ also logged in `~/docs/openrouter.md`):
   the item stays so the label still says "summary"). Not done: whether a blob
   replays across OpenRouter accounts / BYOK on-off (packs carry it verbatim), and no
   Anthropic / Gemini probe (only Luna was sanctioned for testing).
+
+### 2026-10-29 — Tool use (OpenRouter), and the silent cross-account reasoning drop
+
+Built to run a fork of an AI Village agent (GPT-5.6 Terra) whose context is mostly
+tool calls; verified live against `openai/gpt-5.6-terra` (browser + CLI, a
+two-call chain and a parallel two-call turn).
+
+- **Shape = OpenAI chat completions, 1:1.** An assistant node's `tool_calls`
+  (`arguments` kept as the model's raw JSON string — re-serializing would change
+  what the model sees of its own call on replay), `role:"tool"` nodes with
+  `tool_call_id` + `name`. A turn's results are a CHAIN under it in call order, not
+  siblings: siblings already mean "alternative branches" here, and a chain keeps
+  `activePath` a valid message sequence with no special case.
+- **The model's next turn folds under the last tool node.** `register_chat_placement`
+  and every client-side "parent must be a user turn" check now take user OR tool
+  (`tree.ts isFireParent`).
+- **`tools` is workspace meta** (set_meta / PATCH / create), validated server-side
+  (`tree_ops.check_tools`), SENT by the client on each fire like the system prompt
+  — the server never looks it up, same as everything else on ChatRequest. No
+  thread-level override: nothing needed one yet.
+- **OpenRouter only.** Native renderers and the vLLM path would drop or mangle tool
+  turns silently, so `/api/chat` refuses a tool-use thread on them instead.
+- **Pending calls.** A user turn after unanswered calls is a provider 400, so the
+  composer refuses it and points at the per-panel result form. The form has *Send*
+  (fire from the results) and *Result only* (persist; a user turn follows) — the
+  Village's own loop is tool result → user message carrying new events → model.
+- **No reasoning on tool-call turns (observed, not explained).** gpt-5.6-terra at
+  effort high returned no reasoning payload / reasoning_tokens on a turn that made
+  tool calls, while the same model on a plain question at effort high returned
+  summary + encrypted (78 reasoning tokens). Unknown whether that's OpenRouter or
+  the model's routing.
+- **Cross-account reasoning is dropped silently** (measured by the Terra session,
+  `~/projects2/village-terra/ENGINEERING_LOGS.md` "whose drop is it?"): OpenAI
+  direct answers another org's encrypted blob with 400 `invalid_encrypted_content`;
+  OpenRouter answers 200 and ignores it (prompt tokens at baseline). A shared
+  workspace therefore replays with the closed model's past reasoning missing and
+  nothing says so. Samples with encrypted/signed reasoning are now stamped
+  `reasoning_account` (10 hex of sha256 of the OpenRouter key; `/api/health`
+  exposes the current one) and the thinking fold shows *other account* on a
+  mismatch. Unstamped (older) turns are unknown, not flagged. Two keys on one
+  OpenRouter account would false-flag — accepted, rare.

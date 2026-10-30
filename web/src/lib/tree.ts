@@ -83,6 +83,10 @@ export type TreeNode = {
   reasoning_details?: ReasoningDetail[];
   /** Hidden reasoning tokens the provider billed for this turn. */
   reasoning_tokens?: number;
+  /** Which OpenRouter account the encrypted reasoning is bound to (a short key
+   *  hash). Another account's blob is silently ignored on replay, so the UI flags
+   *  a tag that differs from the server's. Absent = unknown (older turns). */
+  reasoning_account?: string;
   /** Assistant nodes: the tool calls this turn made (OpenAI shape, `arguments`
    *  verbatim). Answered by a CHAIN of role='tool' children, one per call in
    *  order; until every call is answered the composer offers the result inputs. */
@@ -152,6 +156,7 @@ export type SampleLike = {
   prefill_unsupported?: boolean;
   reasoning_details?: ReasoningDetail[];
   reasoning_tokens?: number;
+  reasoning_account?: string;
   tool_calls?: ToolCall[];
   /** The authored prefill this sample was generated from (raw text) — folded onto
    *  the node so the rendered turn can color the prefilled prefix. */
@@ -380,6 +385,7 @@ export function foldAssistant(
       prefill_unsupported: s.prefill_unsupported,
       reasoning_details: s.reasoning_details,
       reasoning_tokens: s.reasoning_tokens,
+      reasoning_account: s.reasoning_account,
       tool_calls: s.tool_calls,
       finish_reason: s.finish_reason,
       thinking: s.thinking,
@@ -562,6 +568,7 @@ function graftDownstream(t: ConvTree, rootId: string, chain: TreeNode[]): void {
       // under a different user turn (probed 2026-10-15), so a copy still carries it
       reasoning_details: node.reasoning_details,
       reasoning_tokens: node.reasoning_tokens,
+      reasoning_account: node.reasoning_account,
       tool_calls: node.tool_calls,
       ...(node.role === 'tool' ? { tool_call_id: node.tool_call_id, name: node.name } : {}),
       raw_text: node.raw_text,
@@ -611,7 +618,11 @@ export function editAssistant(
     content,
     reasoning: reasoning && reasoning.trim() ? reasoning : undefined,
     ...(keepPayload && orig.reasoning_details?.length
-      ? { reasoning_details: orig.reasoning_details, reasoning_tokens: orig.reasoning_tokens }
+      ? {
+          reasoning_details: orig.reasoning_details,
+          reasoning_tokens: orig.reasoning_tokens,
+          reasoning_account: orig.reasoning_account
+        }
       : {}),
     // The calls are part of what the turn DID; editing its text keeps them.
     ...(orig.tool_calls?.length ? { tool_calls: orig.tool_calls } : {}),

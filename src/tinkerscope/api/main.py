@@ -20,7 +20,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from .. import __version__
-from . import vllm_sampler, workspace_store
+from . import openrouter, vllm_sampler, workspace_store
 from .discovery import get_capabilities
 from .session import resolve_session_soft
 from .routes import (
@@ -103,6 +103,9 @@ def health(request: Request) -> dict:
         "scan_roots": [str(r) for r in SETTINGS.scan_roots],
         "tinker_key": bool(SETTINGS.tinker_api_key),
         "openrouter_key": bool(SETTINGS.openrouter_api_key),
+        # What this key's encrypted reasoning is stamped with (openrouter.account_tag):
+        # a turn stamped differently came from another account and won't be replayed.
+        "openrouter_account": openrouter.account_tag(),
         # The configured vLLM server (normalized), or null — its models are on
         # /api/vllm-models and sample via /api/chat's `vllm_model`.
         "vllm_url": vllm_sampler.base_url(),

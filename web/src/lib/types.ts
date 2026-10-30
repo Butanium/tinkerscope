@@ -138,6 +138,8 @@ export type Health = {
   scan_roots?: string[];
   tinker_key?: boolean;
   openrouter_key?: boolean;
+  /** This server's OpenRouter account tag — see TreeNode.reasoning_account. */
+  openrouter_account?: string | null;
   /** The configured vLLM server (normalized URL), or null. */
   vllm_url?: string | null;
   /** `tinkerscope serve --multi-user`: the state bus is per session (lib/session.ts). */
@@ -530,6 +532,8 @@ export type SampleData = {
   reasoning_details?: ReasoningDetail[];
   /** Hidden reasoning tokens the provider billed (the summary is much shorter). */
   reasoning_tokens?: number;
+  /** Account tag the encrypted reasoning is bound to (see TreeNode). */
+  reasoning_account?: string;
   /** The tool calls this sample made (finish_reason 'tool_calls'). */
   tool_calls?: ToolCall[];
   /** LOOM provenance (continue_tokens fires only): how many leading stream
@@ -574,6 +578,7 @@ export type ViewMessage = {
    *  edit can only keep or drop the thinking. See ReasoningDetail. */
   reasoning_details?: ReasoningDetail[];
   reasoning_tokens?: number;
+  reasoning_account?: string;
   /** How generation ended — 'length' ⇒ cut off by max tokens (truncation badge). */
   finish_reason?: string;
   /** Renderer mode of this turn's sample — set only for thinking='both' batches

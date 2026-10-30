@@ -22,10 +22,24 @@ on later turns (`prepare_messages`), filtered by vendor so one provider's blob i
 never sent to another's model. A plain `reasoning` string is NOT forwarded (it
 never was: OpenAI ignores it, and a tinker turn's thinking isn't the OpenRouter
 model's own).
+
+An encrypted blob is bound to the ACCOUNT that produced it, and OpenRouter hides a
+mismatch: another account's blob comes back 200 and is silently ignored (OpenAI
+direct says 400 `invalid_encrypted_content`; measured 2026-10-29, see
+ENGINEERING_LOGS). So a shared workspace replays with that reasoning missing and
+no error. Each sample carrying reasoning_details is stamped `reasoning_account`
+(`account_tag()`, a short hash of the key) so the UI can flag the turns this key
+can't replay.
+
+Tool calling: `tools` goes on the request as-is, a turn's `tool_calls` come back
+in the OpenAI shape (streamed pieces merged by index) and are replayed on the
+assistant turn, tool results go back as role="tool" turns with their
+`tool_call_id`. Arguments are the model's raw JSON string, never re-serialized.
 """
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import re
@@ -64,6 +78,13 @@ def _split_think(content: str) -> tuple[str, str | None]:
     think = "\n\n".join(m.group(1).strip() for m in _THINK_RE.finditer(content))
     text = _THINK_RE.sub("", content).strip()
     return text, (think or None)
+
+
+def account_tag() -> str | None:
+    """A short, non-reversible tag for the configured key — what an encrypted
+    reasoning blob is bound to (see the module docstring). None without a key."""
+    key = os.environ.get("OPENROUTER_API_KEY", "")
+    return hashlib.sha256(key.encode()).hexdigest()[:10] if key else None
 
 
 def _get_client() -> AsyncOpenAI:
@@ -386,6 +407,8 @@ def _finish(content: str, reasoning: str | None, details: list[dict], usage, kwa
         result["reasoning"] = reasoning
     if details:
         result["reasoning_details"] = details
+        if any(d.get("type") == "reasoning.encrypted" or d.get("signature") for d in details):
+            result["reasoning_account"] = account_tag()
     rt = _reasoning_tokens(usage)
     if rt:
         result["reasoning_tokens"] = rt

@@ -348,7 +348,7 @@ def _committed_turn(
 _FOLD_SAMPLE_FIELDS = (
     "reasoning", "raw_text", "raw_meta", "finish_reason", "thinking",
     "token_logprobs", "loom_cut", "loom_text", "prefill_ignored",
-    "prefill_unsupported", "reasoning_details", "reasoning_tokens", "tool_calls",
+    "prefill_unsupported", "reasoning_details", "reasoning_tokens", "reasoning_account", "tool_calls",
 )
 
 

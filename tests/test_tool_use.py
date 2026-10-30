@@ -116,3 +116,12 @@ def test_cli_continue_from_a_tool_turn():
     ancestry = [{"role": "user", "content": "go"}, {"role": "assistant", "content": "", "tool_calls": [CALL]},
                 {"role": "tool", "content": "sent", "tool_call_id": "c1"}]
     assert cli._continue_messages(ancestry, None, None)[-1]["role"] == "tool"
+
+
+def test_encrypted_reasoning_is_stamped_with_the_account(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    enc = [{"type": "reasoning.encrypted", "data": "gAAA", "format": "openai-responses-v1"}]
+    res = openrouter._finish("x", None, enc, None, {"model": "m", "messages": []}, "stop")
+    assert res["reasoning_account"] == openrouter.account_tag() and len(res["reasoning_account"]) == 10
+    plain = [{"type": "reasoning.text", "text": "t"}]  # an open model's readable reasoning: not bound
+    assert "reasoning_account" not in openrouter._finish("x", None, plain, None, {"model": "m", "messages": []}, "stop")

@@ -49,6 +49,7 @@ export function bucketTurn(run: PanelRun, prefill?: string): ViewMessage {
     prefill_unsupported: one?.prefill_unsupported,
     reasoning_details: one?.reasoning_details,
     reasoning_tokens: one?.reasoning_tokens,
+    reasoning_account: one?.reasoning_account,
     tool_calls: one?.tool_calls,
     finish_reason: one?.finish_reason,
     token_logprobs: one?.token_logprobs,
@@ -74,6 +75,7 @@ export function buildPanelView(tree: ConvTree, run: PanelRun, prefill?: string):
     prefill_unsupported: n.prefill_unsupported,
     reasoning_details: n.reasoning_details,
     reasoning_tokens: n.reasoning_tokens,
+    reasoning_account: n.reasoning_account,
     tool_calls: n.tool_calls,
     tool_call_id: n.tool_call_id,
     name: n.name,
@@ -197,6 +199,7 @@ export function expandTurnSamples(
       prefill_unsupported: n.prefill_unsupported,
       reasoning_details: n.reasoning_details,
       reasoning_tokens: n.reasoning_tokens,
+      reasoning_account: n.reasoning_account,
       tool_calls: n.tool_calls,
       token_logprobs: n.token_logprobs ?? getBlob?.(n.id)?.token_logprobs
     })),

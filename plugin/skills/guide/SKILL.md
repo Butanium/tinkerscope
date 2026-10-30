@@ -194,6 +194,19 @@ it means the same thing under any match scope, and when you click into a bucket
 the inspector greys out everything past the cut so a sample sitting in *no match*
 with a visible later hit explains itself.
 
+**"Can I give it tools?"** Yes, for OpenRouter models. The **tools** pill under
+the composer opens a JSON editor for the workspace's tool definitions (OpenAI
+function schemas, or bare `{name, description, parameters}` objects). When the
+model calls one, the call appears under its turn as `→ name(arguments)` and a
+**Tool result** form opens below it — the person plays the tool: **Send** stores
+the result and the model continues, **Result only** stores it so a user message
+can follow. A plain message can't follow an unanswered call (the provider rejects
+that), so the composer refuses and points at the form. Results are ordinary
+turns: edit one to fork the thread from a different tool output, regenerate to
+resample the reply to it. A thinking fold tagged **other account** holds
+reasoning encrypted under a different OpenRouter key — the model won't see it on
+later turns (OpenRouter drops it silently).
+
 **"Do these two checkpoints differ?"** Add a panel per checkpoint, send the same
 prompt with a large *Samples*, and compare the charts (the chart shows every
 panel). For a single-turn difference, the row toolbar's regenerate with Ctrl held

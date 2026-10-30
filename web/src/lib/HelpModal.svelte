@@ -576,6 +576,24 @@ codex plugin add tinkerscope@tinkerscope</pre>
     </section>
 
     <section class="help-sec">
+      <h3>Tool use</h3>
+      <p>
+        The <b>tools</b> pill under the composer holds the workspace's tool definitions (OpenAI function JSON;
+        bare <code>{'{'}name, description, parameters{'}'}</code> objects work too). OpenRouter models get them
+        on every send. When the model calls a tool, the call shows under its turn as
+        <code>→ name(arguments)</code> and a <b>Tool result</b> form opens below: you play the tool. <b>Send</b>
+        stores your result and lets the model continue; <b>Result only</b> stores it so you can type a user
+        message next. A call has to be answered before a plain message can follow it.
+      </p>
+      <p class="help-note">
+        A result is a normal turn: edit it to fork the thread from a different tool output (Shift-edit:
+        fork without a reply), regenerate to resample the model's reaction to it. A thinking fold marked
+        <b>other account</b> holds reasoning encrypted under another OpenRouter key; the model won't see it
+        on later turns.
+      </p>
+    </section>
+
+    <section class="help-sec">
       <h3>Keeping things</h3>
       <p>
         {@render chip('tag', 'bookmark')} on a row saves a sample with a note; {@render chip('pins')} in the
