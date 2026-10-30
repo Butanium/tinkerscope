@@ -172,6 +172,14 @@ test('expand: no-ops — unknown parent, off-path turn, <2 siblings', () => {
   ok(expandTurnSamples(base, tree, u2) === base, 'single-sibling turn → same ref');
 });
 
+test('expand: call-only and empty siblings are samples too', () => {
+  let { tree, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+  const call = { id: 'c1', type: 'function' as const, function: { name: 'send', arguments: '{}' } };
+  ({ tree } = foldAssistant(tree, u, [{ content: '', tool_calls: [call] }, { content: '' }, { content: 'hi' }]));
+  const out = expandTurnSamples(buildPanelView(tree, run({})), tree, u);
+  eq(out[out.length - 1].samples?.length, 3);
+});
+
 test('expand: the live bucket row stays a bucket (expansion dormant)', () => {
   const { tree, kids, userId } = folded(2);
   const view = buildPanelView(tree, run({ chat_id: 7, n: 2, samples: [{ content: 's0' }, { content: 's1' }], running: true }));

@@ -196,7 +196,7 @@
   // classification, so the two surfaces never disagree.
   let thinkPick = $state<'all' | 'think' | 'nothink'>('all');
   let mixedThink = $derived.by(() => {
-    const filled = (msg.samples ?? []).filter((s) => s && (s.content || s.reasoning));
+    const filled = (msg.samples ?? []).filter(isResult);
     return filled.some((s) => s.reasoning) && filled.some((s) => !s.reasoning);
   });
   let effThinkPick = $derived(mixedThink ? thinkPick : 'all');
@@ -204,9 +204,14 @@
   // not-yet-arrived), but a FOLDED sample whose whole budget went to CoT
   // (content '' with reasoning) is real data and renders — the chart already
   // counts it, and a card view that drops it undercounts the distribution.
+  // A finished sample is a result whatever it holds: text, only thinking, only
+  // tool calls (an agent's reply often IS a call), or nothing at all — the
+  // server folds every one of those. A streaming slot shows once it has text or calls.
+  function isResult(s: SampleData | undefined | null): s is SampleData {
+    return !!s && !s.error && !!(s.content || s.tool_calls?.length || !msg.running);
+  }
   const showSample = (s: SampleData | undefined | null): s is SampleData =>
-    !!s && !!(s.content || (!msg.running && s.reasoning)) &&
-    (effThinkPick === 'all' || (effThinkPick === 'think') === !!s.reasoning);
+    isResult(s) && (effThinkPick === 'all' || (effThinkPick === 'think') === !!s.reasoning);
   // ctrl/cmd "apply to every panel" only means something with >1 panel on screen.
   let allActive = $derived(ctrlDown && showRegenAll);
   // A closed model's thinking (summary / signed / encrypted — lib/reasoning.ts):
@@ -419,7 +424,7 @@
      the samples mix both modes. Local view state (like the raw toggles): filters
      which cards render, touches nothing stored. Counts = the two populations. -->
 {#snippet thinkFilterCtl()}
-  {@const filled = (msg.samples ?? []).filter((s) => s && (s.content || s.reasoning))}
+  {@const filled = (msg.samples ?? []).filter(isResult)}
   {@const nThink = filled.filter((s) => s!.reasoning).length}
   <div class="seg-toggle seg-icons think-filter" role="group" aria-label="Filter samples by thinking" data-testid="think-filter">
     <button class="seg-btn" class:active={effThinkPick === 'all'} data-pick="all" data-tooltip="Show every sample" use:tip onclick={() => (thinkPick = 'all')}><span class="seg-n">all</span></button>
@@ -493,6 +498,9 @@
       {#if sample.finish_reason === 'length'}{@render truncatedTag()}{/if}
       {#if sample.prefill_ignored}{@render prefillIgnoredTag(sample.prefill_unsupported)}{/if}
     </div>
+    {#if !sample.reasoning && sample.reasoning_tokens && !sampleTok(sample)}
+      <div class="reasoning-sealed-empty">{encryptedNote(sample.reasoning_tokens)}</div>
+    {/if}
     {#if sample.reasoning && !sampleTok(sample)}
       <details
         class="sample-reasoning-block"

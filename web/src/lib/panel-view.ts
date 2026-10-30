@@ -182,11 +182,11 @@ export function expandTurnSamples(
     (m) => m.role === 'assistant' && !m.isBucket && m.nodeId != null && tree.nodes[m.nodeId]?.parent === parentId
   );
   if (idx < 0) return view;
-  // Same keep-rule as the chart (buildChartSources): a sample whose whole budget
-  // went to CoT (content '' but reasoning present) still counts.
+  // Every folded sibling is a sample: text, CoT only, calls only, or empty (the
+  // server folds a model that said nothing — for an agent that is the result).
   const sibs = tree.nodes[parentId].children
     .map((id) => tree.nodes[id])
-    .filter((n) => n && n.role === 'assistant' && (n.content || n.reasoning || n.tool_calls?.length));
+    .filter((n) => n && n.role === 'assistant');
   if (sibs.length < 2) return view;
   const row = view[idx];
   // The card view colors ONE msg-level prefill across all cards; siblings from
