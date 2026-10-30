@@ -23,13 +23,13 @@ never sent to another's model. A plain `reasoning` string is NOT forwarded (it
 never was: OpenAI ignores it, and a tinker turn's thinking isn't the OpenRouter
 model's own).
 
-An encrypted blob is bound to the ACCOUNT that produced it, and OpenRouter hides a
-mismatch: another account's blob comes back 200 and is silently ignored (OpenAI
-direct says 400 `invalid_encrypted_content`; measured 2026-10-29, see
-ENGINEERING_LOGS). So a shared workspace replays with that reasoning missing and
-no error. Each sample carrying reasoning_details is stamped `reasoning_account`
-(`account_tag()`, a short hash of the key) so the UI can flag the turns this key
-can't replay.
+An encrypted blob is bound to the ORG that produced it, and a mismatch is silent:
+OpenAI itself answers another org's blob with 200 and ignores it (no reasoning
+tokens), directly or through OpenRouter (measured 2026-10-29 on gpt-5.6-terra
+across two orgs — ENGINEERING_LOGS). So a shared workspace replays with that
+reasoning missing and no error. Each sample carrying reasoning_details is stamped
+`reasoning_account` (`account_tag()`, a short hash of the key) so the UI can flag
+the turns this key can't replay.
 
 Tool calling: `tools` goes on the request as-is, a turn's `tool_calls` come back
 in the OpenAI shape (streamed pieces merged by index) and are replayed on the

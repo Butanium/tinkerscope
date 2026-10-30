@@ -3241,3 +3241,15 @@ two-call chain and a parallel two-call turn).
   exposes the current one) and the thinking fold shows *other account* on a
   mismatch. Unstamped (older) turns are unknown, not flagged. Two keys on one
   OpenRouter account would false-flag — accepted, rare.
+
+### 2026-10-29 — Correction: the silent cross-account drop is OpenAI's
+
+The entry above blames OpenRouter. Retested by the Terra session on gpt-5.6-terra
+with two direct OpenAI orgs (`~/projects2/village-terra/ENGINEERING_LOGS.md`,
+"CORRECTION"): OpenAI ITSELF answers another org's blob with 200 and ignores it.
+The 400 seen earlier came from sending an OpenRouter-issued blob straight to
+OpenAI — OpenRouter re-wraps the blobs it returns, so OpenAI can't parse them —
+while raw OpenAI blobs pass through OpenRouter and work when the org matches. The
+`reasoning_account` flag stands: a cross-account replay loses the reasoning
+silently on every path. (The tag hashes the OpenRouter key, so it approximates the
+org behind it: a BYOK key change within one org would false-flag.)

@@ -153,6 +153,8 @@ mark.hl-mark.hl-join-r { padding-right: 0; border-top-right-radius: 0; border-bo
 /* Toolbar revealed on message hover (kept faintly visible for discoverability). */
 .hover-actions { opacity: 0.25; transition: opacity 0.12s ease; }
 .message:hover .hover-actions, .hover-actions:focus-within { opacity: 1; }
+/* no hover on a touch screen: a faded toolbar would just look disabled */
+@media (hover: none) { .hover-actions { opacity: 1; } }
 
 /* Icon action buttons: regenerate / edit / delete. */
 .btn-act { background: none; border: 1px solid transparent; border-radius: var(--radius); padding: 3px 6px; color: var(--color-text-muted); display: inline-flex; align-items: center; transition: all 0.15s; }

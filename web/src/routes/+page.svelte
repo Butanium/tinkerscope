@@ -169,6 +169,12 @@
   // The whole sidebar folds to a rail (the « beside Stop) to give the panels
   // the width. Persisted like the section folds.
   let sidebarFolded = $state(false);
+  // Phone-width layout (≤700px, matchMedia in onMount): the sidebar becomes an
+  // overlay drawer opened from the topbar, closed by default and not persisted —
+  // a 320px sidebar beside a 390px screen leaves no room for the chat.
+  let narrow = $state(false);
+  let drawerOpen = $state(false);
+  let sidebarHidden = $derived(narrow ? !drawerOpen : sidebarFolded);
   function toggleSidebarFolded() {
     sidebarFolded = !sidebarFolded;
     localStorage.setItem('playground-sidebar-folded', sidebarFolded ? '1' : '0');
@@ -1708,6 +1714,9 @@
   }
 
   function handleKeydown(e: KeyboardEvent) {
+    // On a phone Enter is the only way to break a line, so it does that and the
+    // Send button sends (Ctrl/⌘+Enter still sends from a hardware keyboard).
+    if (e.key === 'Enter' && narrow && !(e.ctrlKey || e.metaKey)) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
@@ -2083,6 +2092,12 @@
 
   // ── Lifecycle ─────────────────────────────────────────────────────
   onMount(() => {
+    const mq = window.matchMedia('(max-width: 700px)');
+    narrow = mq.matches;
+    mq.addEventListener('change', (e) => {
+      narrow = e.matches;
+      if (!e.matches) drawerOpen = false;
+    });
     const saved = localStorage.getItem('playground-theme');
     // No saved preference → keep the 'auto' default. The $effect reacts to this
     // assignment and applies the resolved class (no imperative apply needed here).
@@ -2223,6 +2238,11 @@
     <div class="pack-drop-hint">Drop a share pack to open it</div>
   {/if}
   <header class="topbar">
+    {#if narrow}
+      <button class="topbar-btn topbar-menu" data-testid="drawer-open" aria-label="Open the sidebar" onclick={() => (drawerOpen = true)}>
+        <Icon name="sidebar-unfold" size={18} />
+      </button>
+    {/if}
     <!-- theme in the corner: a viewer setting, set once; its glyph lines up with the
          sidebar buttons' glyphs below it -->
     <button
@@ -2302,7 +2322,11 @@
 
   <div class="main-layout">
     <!-- Sidebar -->
-    <aside class="sidebar" class:folded={sidebarFolded}>
+    {#if narrow && drawerOpen}
+      <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+      <div class="drawer-backdrop" onclick={() => (drawerOpen = false)}></div>
+    {/if}
+    <aside class="sidebar" class:folded={sidebarHidden} class:drawer={narrow}>
       <div class="sidebar-top-actions">
         <button class="theme-toggle" onclick={openChart} data-tooltip="View response distribution chart (needs samples)" use:tip>
           <Icon name="chart" size={16} />
@@ -2332,14 +2356,14 @@
              this on top, Stop below. -->
         <button
           class="sidebar-fold-btn"
-          onclick={toggleSidebarFolded}
-          data-tooltip={sidebarFolded ? 'Unfold the sidebar' : 'Fold the sidebar'}
+          onclick={() => (narrow ? (drawerOpen = !drawerOpen) : toggleSidebarFolded())}
+          data-tooltip={sidebarHidden ? 'Unfold the sidebar' : 'Fold the sidebar'}
           use:tip
-          aria-label={sidebarFolded ? 'Unfold the sidebar' : 'Fold the sidebar'}
-          aria-expanded={!sidebarFolded}
+          aria-label={sidebarHidden ? 'Unfold the sidebar' : 'Fold the sidebar'}
+          aria-expanded={!sidebarHidden}
           data-testid="sidebar-fold"
         >
-          <Icon name={sidebarFolded ? 'sidebar-unfold' : 'sidebar-fold'} size={16} />
+          <Icon name={sidebarHidden ? 'sidebar-unfold' : 'sidebar-fold'} size={16} />
         </button>
       </div>
 
@@ -3231,9 +3255,16 @@
               ? 'Select a model to chat'
               : historyBrowsing
                 ? 'History mode -- up/down browse, Esc exit'
-                : 'Type a message... (Enter to send, Esc for history)'}
+                : narrow
+                  ? 'Message'
+                  : 'Type a message... (Enter to send, Esc for history)'}
           disabled={!canChat || !ws.activeId}
         ></textarea>
+        {#if narrow}
+          <button class="composer-send" data-testid="composer-send" aria-label="Send" disabled={!userInput.trim() || allBusy || !canChat || !ws.activeId} onclick={sendMessage}>
+            <Icon name="arrow-right" size={16} />
+          </button>
+        {/if}
       </div>
       {/if}
     </div>
@@ -3347,7 +3378,9 @@
 {/if}
 
 <style>
-  .app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+  /* dvh: on a phone, 100vh counts the area behind the browser's own bars, which
+     hides the composer under them */
+  .app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden; }
 
   /* ── Top bar ───────────────────────────────────────────────────── */
   .topbar { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-1) var(--space-5); background: var(--color-surface); border-bottom: 1px solid var(--color-border); flex-shrink: 0; }
@@ -3371,7 +3404,10 @@
   :global(.dark) .degraded-banner { color: #fbbf24; background: #78350f40; border-color: #f59e0b30; }
 
   /* ── Main layout ───────────────────────────────────────────────── */
-  .main-layout { display: flex; flex: 1; overflow: hidden; }
+  .main-layout { display: flex; flex: 1; overflow: hidden; position: relative; }
+  .drawer-backdrop { position: absolute; inset: 0; z-index: 59; background: rgba(0, 0, 0, 0.35); }
+  .topbar-menu { margin-right: calc(-1 * var(--space-2)); }
+
 
   /* ── Sidebar ───────────────────────────────────────────────────── */
   .sidebar { width: var(--sidebar-width); flex-shrink: 0; background: var(--color-surface); border-right: 1px solid var(--color-border); padding: var(--space-4); overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-4); }
@@ -3519,6 +3555,8 @@
   .input-resize-handle { height: 8px; cursor: row-resize; position: relative; }
   .input-resize-handle::after { content: ''; position: absolute; left: 30%; right: 30%; top: 3px; height: 2px; background: transparent; transition: background 0.15s; border-radius: 1px; }
   .input-resize-handle:hover::after { background: var(--color-accent); }
+  .composer-send { position: absolute; right: calc(var(--space-4) + 8px); bottom: calc(var(--space-3) + 8px); width: 36px; height: 36px; border-radius: 50%; border: none; background: var(--color-accent); color: white; display: flex; align-items: center; justify-content: center; }
+  .composer-send:disabled { opacity: 0.35; }
   .input-textarea { width: 100%; padding: var(--space-3) var(--space-4); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius-md); color: var(--color-text); font-family: var(--font-sans); font-size: 0.9rem; resize: none; line-height: 1.5; }
   .input-textarea:focus { outline: none; border-color: var(--color-accent); }
   .input-textarea:disabled { opacity: 0.6; }
@@ -3573,4 +3611,20 @@
 
   /* ── History mode indicator ───────────────────────────────────── */
   .input-textarea.history-mode { border-color: var(--color-accent); box-shadow: 0 0 0 1px var(--color-accent); }
+
+  /* ── Phone width ───────────────────────────────────────────────── */
+  @media (max-width: 700px) {
+    .topbar { padding: var(--space-1) var(--space-3); gap: var(--space-2); }
+    .topbar-root { display: none; }
+    .topbar-theme { margin-left: 0; }
+    .sidebar.drawer { position: absolute; top: 0; bottom: 0; left: 0; z-index: 60; width: min(340px, 88vw); box-shadow: 4px 0 24px rgba(0, 0, 0, 0.25); }
+    .sidebar.drawer.folded { display: none; }
+    .messages { padding: var(--space-2); }
+    .input-bar { padding: 0 var(--space-2) var(--space-2); position: relative; }
+    .input-textarea { padding-right: 52px; }
+    .composer-send { right: calc(var(--space-2) + 6px); bottom: calc(var(--space-2) + 8px); }
+    .prefill-row { flex-wrap: wrap; row-gap: var(--space-1); }
+    /* iOS zooms the page on focusing a field under 16px */
+    .app :global(textarea), .app :global(input), .app :global(select) { font-size: 16px; }
+  }
 </style>
