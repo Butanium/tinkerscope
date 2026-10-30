@@ -125,8 +125,9 @@ and in this file's reference section; HANDOFF.md itself is retired.
   (`web/src/lib/reasoning.ts`, `tree.ts editAssistant`). `openai/*` never continues a
   prefill — the server drops it and tags `prefill_unsupported`. Per-model caps (efforts,
   silently ignored params) come from the cached catalog: `/api/openrouter-models/caps`.
-  ⚠️ An encrypted blob is bound to the KEY's account and OpenRouter drops a foreign one
-  SILENTLY (200, ignored) — hence the `reasoning_account` stamp + "other account" pill.
+  ⚠️ An encrypted blob is bound to the org behind the key, and OpenAI ignores a foreign
+  one SILENTLY (200, no reasoning used) — hence the `reasoning_account` stamp + "other
+  account" pill.
 - **Tool use** (OpenRouter only; `openrouter.py` docstring + `ENGINEERING_LOGS.md`
   2026-10-29): OpenAI chat-completions shape 1:1 — assistant `tool_calls` (arguments =
   raw JSON string, never re-serialized), `role:"tool"` nodes (`tool_call_id`, `name`)

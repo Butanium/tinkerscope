@@ -235,8 +235,8 @@ positional message to put a user turn after the results instead). `continue`
 refuses a target whose calls are unanswered, and continuing from a tool turn
 needs no message. Other backends refuse a thread with tools or tool turns.
 Encrypted reasoning is stamped `reasoning_account` (a hash of the OpenRouter key):
-a workspace made under another account replays WITHOUT that reasoning — OpenRouter
-drops a foreign blob silently.
+a workspace made under another account replays WITHOUT that reasoning — the
+provider ignores another org's blob without an error.
 
 **Thread system prompts (`send --system`).** A thread's first message can carry
 its OWN system prompt, which REPLACES the global one for that thread at fire
