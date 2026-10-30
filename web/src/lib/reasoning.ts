@@ -9,7 +9,7 @@
 //
 // Pure (no Svelte/DOM) — `reasoning.test.ts`.
 
-import type { ReasoningDetail } from './types.ts';
+import type { ReasoningDetail, ResponsesItem } from './types.ts';
 
 export type ThinkingKind = 'summary' | 'signed' | 'encrypted';
 
@@ -30,11 +30,7 @@ export function isSealed(details: ReasoningDetail[] | undefined): boolean {
 
 /** "Thinking · summary · 1,234 tokens" — the block's header text. */
 export function thinkingLabel(details: ReasoningDetail[] | undefined, tokens?: number): string {
-  const kind = thinkingKind(details);
-  const parts = ['Thinking'];
-  if (kind) parts.push(kind);
-  if (tokens) parts.push(`${tokens.toLocaleString('en-US')} token${tokens === 1 ? '' : 's'}`);
-  return parts.join(' · ');
+  return kindLabel(thinkingKind(details), tokens);
 }
 
 /** One-line hover text for the kind (null kind ⇒ no tooltip). */
@@ -43,4 +39,23 @@ export function thinkingKindTip(kind: ThinkingKind | null): string | null {
   if (kind === 'signed') return 'Signed by the provider: the next turn gets it back unchanged';
   if (kind === 'encrypted') return 'Encrypted by the provider — the next turn gets it back unchanged';
   return null;
+}
+
+/** The same question for a node's verbatim Responses items (lib/ResponsesItems):
+ *  a reasoning item with summary text is a 'summary', one with only an encrypted
+ *  payload (or only an id) is 'encrypted'. null = no reasoning item. Like
+ *  `thinkingKind`, any of these can be kept or dropped by an edit, never rewritten. */
+export function itemsThinkingKind(items: ResponsesItem[] | undefined): ThinkingKind | null {
+  const rs = (items ?? []).filter((it) => it?.type === 'reasoning');
+  if (!rs.length) return null;
+  if (rs.some((it) => (it.summary ?? []).some((x: { text?: string }) => x?.text))) return 'summary';
+  return 'encrypted';
+}
+
+/** "Thinking · summary · 1,234 tokens" for a known kind (the items twin of thinkingLabel). */
+export function kindLabel(kind: ThinkingKind | null, tokens?: number): string {
+  const parts = ['Thinking'];
+  if (kind) parts.push(kind);
+  if (tokens) parts.push(`${tokens.toLocaleString('en-US')} token${tokens === 1 ? '' : 's'}`);
+  return parts.join(' · ');
 }

@@ -440,6 +440,17 @@ class BranchOps {
     return nodeBlobs.get(nodeId)?.token_logprobs;
   }
 
+  /** The node's verbatim Responses items (same inline-first / fetch-on-demand
+   *  resolution as #tokensOf). undefined = not a Responses turn. */
+  async #itemsOf(panel: Panel, nodeId: string): Promise<ResponsesItem[] | undefined> {
+    const node = ws.treeFor(panel).nodes[nodeId];
+    if (!node) return undefined;
+    if (node.items?.length) return node.items;
+    if (!node.has_items) return undefined;
+    if (!nodeBlobs.get(nodeId)?.items) await nodeBlobs.ensure([nodeId]);
+    return nodeBlobs.get(nodeId)?.items;
+  }
+
   /** The node's raw_meta blob (same inline-first / fetch-on-demand resolution as
    *  #tokensOf — the two blobs travel together, so a #tokensOf call usually
    *  already warmed it). undefined = the turn has none / fetch came back empty. */
@@ -572,9 +583,10 @@ class BranchOps {
       }
     } else if (msg.role === 'assistant') {
       const tlp = await this.#tokensOf(panel, msg.nodeId);
+      const items = await this.#itemsOf(panel, msg.nodeId);
       // Re-read the tree AFTER the await: the fetch yields, and the node could
       // have been pruned/cycled away meanwhile (editAssistant returns null then).
-      const r = editAssistant(ws.treeFor(panel), msg.nodeId, text, reasoning, tlp, copyDownstream);
+      const r = editAssistant(ws.treeFor(panel), msg.nodeId, text, reasoning, tlp, copyDownstream, items);
       if (r) this.#commitChain(panel, r.tree, r.newId);
     }
   }
@@ -623,7 +635,7 @@ class BranchOps {
     const chain = chainFrom(tree, startId);
     for (const id of chain) {
       const n = tree.nodes[id];
-      if (n.token_logprobs?.length || n.raw_meta)
+      if (n.token_logprobs?.length || n.raw_meta || n.items?.length)
         nodeBlobs.seed(id, { token_logprobs: n.token_logprobs, raw_meta: n.raw_meta, items: n.items });
     }
     const ops: TreeOp[] = [

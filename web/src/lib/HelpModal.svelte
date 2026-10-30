@@ -602,7 +602,8 @@ codex plugin add tinkerscope@tinkerscope</pre>
       <p class="help-note">
         A workspace imported from a recorded agent call (<code>tinkerscope import --responses-call</code>)
         shows each turn exactly as the agent saw or produced it: screenshots as thumbnails (click to
-        enlarge), reasoning as encrypted / <b>id only</b> badges, calls and their outputs. Sends there go
+        enlarge), reasoning as a normal Thinking fold (the summary; an edit can only keep or drop it) with
+        encrypted / <b>id only</b> badges, calls and their outputs. Sends there go
         through OpenRouter's Responses API with those items unchanged. A computer call is answered with a
         screenshot file instead of text.
       </p>

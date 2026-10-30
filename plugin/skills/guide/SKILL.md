@@ -229,8 +229,9 @@ model (the pill reads `tools · 2/3`) — and its trash icon removes it (Cancel 
 **"Can I continue a real agent's conversation exactly?"** If you have its recorded
 OpenAI Responses-API call, `tinkerscope import --responses-call FILE` makes a workspace
 whose thread holds the call's items as they were sent. Rows render from those items:
-screenshots as thumbnails (click to enlarge), reasoning with an *encrypted* or *id only*
-badge (id-only = the agent's scaffold replayed it by reference; only its own account
+screenshots as thumbnails (click to enlarge), reasoning as an ordinary **Thinking** fold
+(the provider's summary; it follows the sidebar's Thinking blocks setting like any turn,
+and an edit can only keep or drop it) with an *encrypted* or *id only* badge (id-only = the agent's scaffold replayed it by reference; only its own account
 can resolve that), and the *other account* pill when the encrypted reasoning was made
 under another key, so the model won't see it. Sending there uses OpenRouter's Responses
 API with those items unchanged. A computer call's result form asks for a screenshot

@@ -7,7 +7,7 @@
   // sibling branch instead of "use this".
   import { renderContent, renderPrefilled, splitPrefill } from '$lib/render';
   import { withPrefillGhost } from '$lib/token-prefill';
-  import { thinkingKind, thinkingLabel, thinkingKindTip } from '$lib/reasoning';
+  import { thinkingKind, thinkingLabel, thinkingKindTip, itemsThinkingKind, kindLabel } from '$lib/reasoning';
   // Read-only (static export): the row keeps everything that INSPECTS or COPIES
   // (Raw, token probs, copy message/workspace/node id, bookmark, sample select)
   // and drops everything that would generate or rewrite the tree.
@@ -221,6 +221,11 @@
   // node's blob — fetched when the row mounts, since the items ARE the row.
   let hasItems = $derived(!!msg.items?.length || !!msg.has_items);
   let itemsResolved = $derived(msg.items ?? blob?.items);
+  // Thinking an edit may only keep or drop: a closed model's payload, or a
+  // Responses row's reasoning items (summary text over an encrypted blob).
+  let sealedKind = $derived(
+    tKind ?? (msg.role === 'assistant' && hasItems ? itemsThinkingKind(itemsResolved) : null)
+  );
   $effect(() => {
     if (hasItems && !itemsResolved && msg.nodeId) void nodeBlobs.ensure([msg.nodeId]);
   });
@@ -322,7 +327,7 @@
     editShift = shift;
     editAll = all;
     editDraft = msg.content;
-    editHasReasoning = msg.role === 'assistant' && (!!msg.reasoning || !!tKind);
+    editHasReasoning = msg.role === 'assistant' && (!!msg.reasoning || !!sealedKind);
     editReasoning = msg.reasoning ?? '';
     editDropThinking = false;
     editSystem = msg.system_prompt ?? '';
@@ -330,7 +335,7 @@
   function commitEdit() {
     // Sealed thinking: the ORIGINAL text means "kept" (the tree carries the payload
     // along), '' means dropped — tree.ts editAssistant keys on exactly that.
-    const reasoning = tKind ? (editDropThinking ? '' : msg.reasoning) : editHasReasoning ? editReasoning : undefined;
+    const reasoning = sealedKind ? (editDropThinking ? '' : msg.reasoning) : editHasReasoning ? editReasoning : undefined;
     onEdit(
       editDraft,
       reasoning,
@@ -876,11 +881,11 @@
         ></textarea>
         <div class="edit-field-label">Message</div>
       {/if}
-      {#if editHasReasoning && tKind}
+      {#if editHasReasoning && sealedKind}
         <!-- Closed-model thinking: what the next turn replays is the provider's
              payload, not this text — so it can be kept or dropped, not edited. -->
         <div class="edit-field-label edit-sealed-head">
-          <span>{thinkingLabel(msg.reasoning_details, msg.reasoning_tokens)}</span>
+          <span>{kindLabel(sealedKind, msg.reasoning_tokens)}</span>
           <button
             class="edit-drop-thinking"
             class:dropped={editDropThinking}
@@ -934,7 +939,13 @@
         <TokenLogprobs tlp={tlp!} onLoom={loomHandler} loomCut={loomCutDisplay} />
       {:else if hasItems}
         {#if itemsResolved}
-          <ResponsesItems items={itemsResolved} role={msg.role} foreign={foreignReasoning} />
+          <ResponsesItems
+            items={itemsResolved}
+            role={msg.role}
+            foreign={foreignReasoning}
+            thinkingOpen={thinkingView.open || isLastAssistant || revealOpen}
+            reasoningTokens={msg.reasoning_tokens}
+          />
         {:else}
           {#if msg.content}<div class="message-content">{@html renderContent(msg.content, msg.role)}</div>{/if}
           <div class="blob-loading">loading items…</div>

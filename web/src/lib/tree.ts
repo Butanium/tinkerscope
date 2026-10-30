@@ -601,17 +601,46 @@ function graftDownstream(t: ConvTree, rootId: string, chain: TreeNode[]): void {
   }
 }
 
+/** A Responses turn's items after an edit of its text: the assistant message
+ *  items give way to ONE plain message with the new text (where the first one
+ *  stood; before the calls when there was none), calls stay verbatim, and the
+ *  reasoning items stay only while the thinking is kept — so a kept summary
+ *  still has its encrypted reasoning behind it on the next turn. */
+export function editedItems(items: ResponsesItem[], content: string, keepReasoning: boolean): ResponsesItem[] {
+  const msg: ResponsesItem[] = content ? [{ role: 'assistant', content }] : [];
+  const out: ResponsesItem[] = [];
+  let placed = false;
+  for (const it of items) {
+    const t = it?.type ?? 'message';
+    if (t === 'message' && it.role === 'assistant') {
+      if (!placed) out.push(...msg);
+      placed = true;
+      continue;
+    }
+    if (t === 'reasoning' && !keepReasoning) continue;
+    if (!placed && (t === 'function_call' || t === 'computer_call')) {
+      out.push(...msg);
+      placed = true;
+    }
+    out.push(it);
+  }
+  if (!placed) out.push(...msg);
+  return out;
+}
+
 /** `tokenLogprobs` = the ORIGINAL's token stream, when the caller could resolve
  *  it (inline, or out of the node-blob cache — this module can't fetch). The new
  *  node inherits the part of it the edit left untouched, with the rest as one
- *  data-less ghost entry. See token-edit.ts. */
+ *  data-less ghost entry. See token-edit.ts. `items` = the original's verbatim
+ *  Responses items, likewise resolved by the caller (see editedItems). */
 export function editAssistant(
   t0: ConvTree,
   asstId: string,
   content: string,
   reasoning?: string,
   tokenLogprobs?: TokenLogprob[],
-  copyDownstream = false
+  copyDownstream = false,
+  items?: ResponsesItem[]
 ): { tree: ConvTree; newId: string } | null {
   const orig = t0.nodes[asstId];
   if (!orig || orig.role !== 'assistant') return null;
@@ -641,6 +670,12 @@ export function editAssistant(
           reasoning_details: orig.reasoning_details,
           reasoning_tokens: orig.reasoning_tokens,
           reasoning_account: orig.reasoning_account
+        }
+      : {}),
+    ...(items?.length
+      ? {
+          items: editedItems(items, content, keepPayload),
+          ...(keepPayload ? { reasoning_tokens: orig.reasoning_tokens, reasoning_account: orig.reasoning_account } : {})
         }
       : {}),
     // The calls are part of what the turn DID; editing its text keeps them.

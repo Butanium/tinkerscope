@@ -3434,3 +3434,18 @@ on every fire, so browser and CLI agree. That means handlers ride on every fire 
 with `--no-auto-tools`. `--tools-file` sends its definitions as given: the CLI strips the
 workspace's off switches when it carries an explicit tool list. CLI: `tools set NAME
 --disable/--enable`, `tools rm NAME`.
+
+### 2026-10-30 — Responses reasoning summaries render as ordinary Thinking blocks
+
+Clément: "i don't like that by default i don't see reasoning summaries, it should be
+treated as a normal reasoning in terms of UI … (just i can't edit it)". A Responses row's
+reasoning items were drawn by `ResponsesItems` as their own closed `<details>` (plain
+text, a "reasoning" tag), ignoring the sidebar's Thinking-blocks default and the
+last-turn-open rule. They now use the same block as every turn (`sample-reasoning-block`,
+label `Thinking · summary · N tokens`, markdown + highlights, same open rule passed in by
+ChatMessage), in item order, with the encrypted / id-only / other-account badges on the
+header. The edit dialog treats them as sealed (keep / drop, like `reasoning_details`
+summaries), and keep is now TRUE on the wire: `tree.ts editedItems` rebuilds the edited
+turn's items — reasoning items verbatim, the assistant message items replaced by one plain
+message with the new text, calls verbatim — where the edit used to drop the items and
+with them the encrypted reasoning the "kept" summary stood for.

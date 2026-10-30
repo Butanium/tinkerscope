@@ -2,8 +2,8 @@
 // reasoning payload — run with Node's TS type-stripping:
 //   node web/src/lib/reasoning.test.ts
 
-import { thinkingKind, isSealed, thinkingLabel } from './reasoning.ts';
-import { foldAssistant, editAssistant, ancestryMessages, editUserForkCopy, activePath, type ConvTree } from './tree.ts';
+import { thinkingKind, isSealed, thinkingLabel, itemsThinkingKind } from './reasoning.ts';
+import { foldAssistant, editAssistant, editedItems, ancestryMessages, editUserForkCopy, activePath, type ConvTree } from './tree.ts';
 import type { ReasoningDetail } from './types.ts';
 
 let passed = 0;
@@ -90,6 +90,38 @@ test('a fork-copy keeps the payload with its text', () => {
   const r = editUserForkCopy(t, 'u', 'q, reworded')!;
   const path = activePath(r.tree);
   eq(path[1].reasoning_details, LUNA);
+});
+
+// A Responses-wire turn: reasoning (summary over an encrypted blob), text, a call.
+const RS = { id: 'rs_1', type: 'reasoning', summary: [{ type: 'summary_text', text: '**Plan** reply' }], encrypted_content: 'gAAA' };
+const MSG = { id: 'msg_1', type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'hi', annotations: [] }] };
+const FC = { id: 'fc_1', type: 'function_call', call_id: 'c1', name: 'send', arguments: '{}' };
+
+test('a Responses row reads as summary / encrypted thinking', () => {
+  eq(itemsThinkingKind([RS, MSG]), 'summary');
+  eq(itemsThinkingKind([{ ...RS, summary: [] }, MSG]), 'encrypted');
+  eq(itemsThinkingKind([{ id: 'rs_2', type: 'reasoning', summary: [] }]), 'encrypted'); // id only
+  eq(itemsThinkingKind([MSG]), null);
+});
+
+test('editing a Responses turn swaps its text, keeps or drops the reasoning item', () => {
+  eq(editedItems([RS, MSG, FC], 'hello', true), [RS, { role: 'assistant', content: 'hello' }, FC]);
+  eq(editedItems([RS, MSG, FC], 'hello', false), [{ role: 'assistant', content: 'hello' }, FC]);
+  // no message before: the new text goes before the call; empty text adds none
+  eq(editedItems([RS, FC], 'said', true), [RS, { role: 'assistant', content: 'said' }, FC]);
+  eq(editedItems([RS, MSG], '', true), [RS]);
+});
+
+test('editAssistant on a Responses turn carries the edited items', () => {
+  const u = foldAssistant({ nodes: { u: { id: 'u', role: 'user', content: 'q', parent: null, children: [] } }, rootChildren: ['u'], selected: {} } as ConvTree,
+    'u', [{ content: 'hi', reasoning: '**Plan** reply', reasoning_tokens: 9 }]);
+  const a = u.ids[0];
+  const kept = editAssistant(u.tree, a, 'hello', '**Plan** reply', undefined, false, [RS, MSG])!;
+  eq(kept.tree.nodes[kept.newId].items, [RS, { role: 'assistant', content: 'hello' }]);
+  eq(kept.tree.nodes[kept.newId].reasoning_tokens, 9);
+  const dropped = editAssistant(u.tree, a, 'hello', '', undefined, false, [RS, MSG])!;
+  eq(dropped.tree.nodes[dropped.newId].items, [{ role: 'assistant', content: 'hello' }]);
+  eq(dropped.tree.nodes[dropped.newId].reasoning, undefined);
 });
 
 // A top-level throw exits node non-zero (no @types/node / process needed).
