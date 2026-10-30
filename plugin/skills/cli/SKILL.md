@@ -256,6 +256,8 @@ tinkerscope tools --ws X                                   # tools + how each is
 tinkerscope tools set send_message_to_chat --ws X --static "Message successfully sent back to chat"
 tinkerscope tools set get_time --ws X --python-file get_time.py [--no-auto-continue] [--timeout 30]
 tinkerscope tools set lookup --ws X --schema-file lookup.json --manual   # add a tool
+tinkerscope tools set lookup --ws X --disable      # keep it, but don't offer it (--enable: back on)
+tinkerscope tools rm lookup --ws X                 # delete definition + handler
 tinkerscope tools test get_time --ws X --args '{"tz": "UTC"}'          # run it, no model
 tinkerscope tools max-steps 8 --ws X
 tinkerscope tools save-set "AI Village" --ws X ; tinkerscope tools load-set "AI Village" --ws Y [--handlers-only]
@@ -945,7 +947,7 @@ tinkerscope serve [dirs...] [options]
   --multi-user                      several people on this one instance: each browser (and each `tinkerscope --session <id>`) gets its OWN sidebar — panel selection, open workspace, sampling params, running — while workspaces, highlights and pins stay shared; same as TINKERSCOPE_MULTI_USER=1
   --allow-tool-code                 let PYTHON tool handlers run (each call in a subprocess on this machine, with a timeout); off, they behave like manual tools — static handlers always run; same as TINKERSCOPE_ALLOW_TOOL_CODE=1
 tinkerscope tools set <name> [options]
-  # Add/replace a tool's definition and/or set how its calls are answered.
+  # Add/replace a tool's definition, set how its calls are answered, or switch it off/on.
   --ws TEXT                         workspace (id-prefix/name); default = the open one
   --schema-file TEXT                the tool's definition (JSON: OpenAI function, flat Responses function, or a bare {name, description, parameters}); adds or replaces it
   --static TEXT                     answer every call with this text
@@ -954,6 +956,7 @@ tinkerscope tools set <name> [options]
   --manual                          answer calls by hand again (drops the handler)
   --auto-continue/--no-auto-continueafter answering, sample the next turn (default) or stop there
   --timeout FLOAT                   python: seconds before the handler is killed (default 10)
+  --enable/--disable                offer the tool to the model (default) or switch it off — kept with its handler, not sent
 tinkerscope tools rm <name> [options]
   # Remove a tool from the workspace (definition + handler).
   --ws TEXT                         workspace (id-prefix/name); default = the open one

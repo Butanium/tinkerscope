@@ -190,6 +190,8 @@ export type ToolHandler = {
   code?: string;
   auto_continue?: boolean;
   timeout?: number;
+  /** Switched off: not offered to the model (definition + handler kept). */
+  disabled?: boolean;
 };
 /** A workspace's handlers, keyed by tool name (lib/tools-def.ts toolName). */
 export type ToolHandlers = Record<string, ToolHandler>;

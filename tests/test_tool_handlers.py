@@ -388,3 +388,33 @@ def test_packs_never_carry_python_handlers(backend):
                                            "run": {"mode": "python", "code": "import os; os.system('x')"}}}
     out = packmod._prepare_workspace_body(body, {})
     assert out["tool_handlers"] == {"send": {"mode": "static", "text": "ok"}}
+
+
+def test_a_switched_off_tool_is_not_offered(loop_env, monkeypatch):
+    chat_route, bus, store, ws, _ = loop_env
+    assert th.check_tool_handlers({"look": {"mode": "manual", "disabled": True}}) == {
+        "look": {"mode": "manual", "disabled": True}}
+    assert th.check_tool_handlers({"look": {"mode": "manual", "disabled": False}}) == {"look": {"mode": "manual"}}
+    offered: list = []
+
+    async def stream(**kw):
+        offered.append([t["function"]["name"] for t in kw.get("tools") or []])
+        yield {"content": "hi", "finish_reason": "stop"}
+
+    monkeypatch.setattr("tinkerscope.api.openrouter.sample_one_stream", stream)
+    off = {"look": {"mode": "manual", "disabled": True}}
+    asyncio.run(_events(chat_route, _req(chat_route, ws, tool_handlers=off, auto_tools=False)))
+    asyncio.run(_events(chat_route, _req(chat_route, ws, tool_handlers={**off, "send": {"mode": "manual", "disabled": True}})))
+    assert offered == [["send"], []]
+
+
+def test_cli_tools_file_ignores_the_workspaces_off_switches():
+    from tinkerscope import cli
+
+    ws = {"tool_handlers": {"look": {"mode": "static", "text": "x", "disabled": True}}}
+    body: dict = {}
+    cli._with_handlers(body, ws, False, None)
+    assert body == {"tool_handlers": ws["tool_handlers"], "auto_tools": False}  # off switches still apply
+    body = {}
+    cli._with_handlers(body, ws, True, None, explicit_tools=True)
+    assert body == {"tool_handlers": {"look": {"mode": "static", "text": "x"}}}

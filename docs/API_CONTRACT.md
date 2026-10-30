@@ -162,7 +162,9 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
   "tool_handlers": null,                    // how each tool's calls are answered, keyed by tool name
                                             // (a function's name; "computer" for the native tool):
                                             // {mode: "manual"|"static"|"python", text?, code?,
-                                            //  auto_continue? (default true), timeout? (s, python)}.
+                                            //  auto_continue? (default true), timeout? (s, python),
+                                            //  disabled? (true = kept but NOT offered: the server drops
+                                            //  it from `tools` on every fire that sends the handlers)}.
                                             // No entry = manual. Kept BESIDE `tools` (those are sent
                                             // verbatim). api/tool_handlers.py; set_meta / PATCH.
   "tool_max_steps": null,                   // cap on auto-answered rounds per fire (null = 5)

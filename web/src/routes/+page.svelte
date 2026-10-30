@@ -54,6 +54,7 @@
   import ThreadSystemRow from '$lib/ThreadSystemRow.svelte';
   import ToolResultForm from '$lib/ToolResultForm.svelte';
   import ToolsModal from '$lib/ToolsModal.svelte';
+  import { offeredCount } from '$lib/tools-def';
   import TruncLabel from '$lib/TruncLabel.svelte';
   import { loadHighlightRules, highlightStore, colorRules } from '$lib/highlights.svelte';
   import { logprobView, logprobHighlight, type TokenTintMode } from '$lib/logprobs.svelte';
@@ -3198,7 +3199,7 @@
             onclick={() => (showTools = true)}
             data-tooltip="Tools offered to the model (OpenRouter models only)"
             use:tip
-          >{ws.tools ? `tools · ${ws.tools.length}` : 'tools'}</button>
+          >{#if ws.tools}{@const on = offeredCount(ws.tools, ws.toolHandlers)}tools · {on === ws.tools.length ? on : `${on}/${ws.tools.length}`}{:else}tools{/if}</button>
         </div>
         {#if showSystem}
           <div transition:fold>

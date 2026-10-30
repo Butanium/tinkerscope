@@ -8,6 +8,7 @@ for the native computer tool) to how its calls are answered:
   {"mode": "python", "code": "...",        the BODY of `handler(name, args, call_id,
    "timeout": 10}                          context)`; its return value is the result
   + "auto_continue": true|false            false = answer, but don't sample the next turn
+  + "disabled": true                       the tool is NOT offered to the model (kept, not sent)
 
 Kept in a map BESIDE `tools`, not on the definitions: the tool list is stored and sent
 verbatim (it is what a recorded agent was offered), and a handler is ours, not the
@@ -42,7 +43,6 @@ DEFAULT_MAX_STEPS = 5
 MAX_STEPS_CAP = 100
 DEFAULT_TIMEOUT = 10.0
 TIMEOUT_CAP = 600.0
-_SPEC_KEYS = ("mode", "text", "code", "auto_continue", "timeout")
 
 
 class HandlerError(Exception):
@@ -77,10 +77,13 @@ def check_tool_handlers(v: Any) -> dict | None:
                 if not isinstance(spec[k], str):
                     raise ValueError(f"tool_handlers[{name!r}].{k} must be a string")
                 clean[k] = spec[k]
-        if "auto_continue" in spec and spec["auto_continue"] is not None:
-            if not isinstance(spec["auto_continue"], bool):
-                raise ValueError(f"tool_handlers[{name!r}].auto_continue must be true/false")
-            clean["auto_continue"] = spec["auto_continue"]
+        for k in ("auto_continue", "disabled"):
+            if spec.get(k) is not None:
+                if not isinstance(spec[k], bool):
+                    raise ValueError(f"tool_handlers[{name!r}].{k} must be true/false")
+                clean[k] = spec[k]
+        if clean.get("disabled") is False:
+            del clean["disabled"]
         if spec.get("timeout") is not None:
             t = spec["timeout"]
             if isinstance(t, bool) or not isinstance(t, (int, float)) or not 0 < t <= TIMEOUT_CAP:
@@ -100,6 +103,24 @@ def check_max_steps(v: Any) -> int | None:
     if isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= MAX_STEPS_CAP:
         raise ValueError(f"tool_max_steps must be an integer in [0, {MAX_STEPS_CAP}]")
     return v
+
+
+def tool_def_name(t: dict) -> str:
+    """A tool definition's name, as its handler is keyed (mirrors tools-def.ts
+    toolName): a function's name in either shape, else the native type."""
+    if t.get("type") != "function":
+        return t.get("type") or ""
+    fn = t["function"] if isinstance(t.get("function"), dict) else t
+    return fn.get("name") or ""
+
+
+def offered(tools: list | None, handlers: dict | None) -> list | None:
+    """The tools a fire actually offers: the workspace's, minus the ones switched
+    off (`disabled`). A disabled tool keeps its definition and handler."""
+    off = {k for k, v in (handlers or {}).items() if isinstance(v, dict) and v.get("disabled")}
+    if not tools or not off:
+        return tools
+    return [t for t in tools if not (isinstance(t, dict) and tool_def_name(t) in off)] or None
 
 
 # ── resolution ───────────────────────────────────────────────────────────────

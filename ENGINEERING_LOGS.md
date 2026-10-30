@@ -3422,3 +3422,15 @@ code (and make sure the CLI also is nicely integrating this)". Spec in
 - Observed, not fixed: replaying the 22:53:21 recorded call (3 items) gave a
   reasoning-only output (no message, no call) 3/3 times (Luna ×2, Terra ×1); the
   22:54:02 call gave Terra a `send_message_to_chat` once in two.
+
+### 2026-10-30 — Tools can be switched off and removed from the editor
+
+Clément: "rn i can't delete / disable a tool from the tool menu i can just edit the
+existing ones". Each tools-editor row now has a checkbox (off = kept, not offered) and a
+trash icon (removes the definition from the JSON + its handler; Cancel undoes). The off
+switch is `disabled: true` in that tool's `tool_handlers` entry — the definitions stay
+verbatim, as for handlers — and the SERVER filters `tools` with it (`tool_handlers.offered`)
+on every fire, so browser and CLI agree. That means handlers ride on every fire now, even
+with `--no-auto-tools`. `--tools-file` sends its definitions as given: the CLI strips the
+workspace's off switches when it carries an explicit tool list. CLI: `tools set NAME
+--disable/--enable`, `tools rm NAME`.

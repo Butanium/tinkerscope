@@ -223,6 +223,8 @@ tree. Python runs only on a server started with `--allow-tool-code` — otherwis
 python tool behaves like a manual one and the result form says so. **Stop** stops
 the whole loop. **Tool set** saves definitions + handlers under a name to load in
 another workspace (Shift+Load: handlers only, e.g. onto an imported recorded call).
+Each row's checkbox switches a tool off — kept with its handler but not offered to the
+model (the pill reads `tools · 2/3`) — and its trash icon removes it (Cancel undoes).
 
 **"Can I continue a real agent's conversation exactly?"** If you have its recorded
 OpenAI Responses-API call, `tinkerscope import --responses-call FILE` makes a workspace

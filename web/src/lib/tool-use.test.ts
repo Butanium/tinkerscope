@@ -18,7 +18,7 @@ import {
   lightenTree,
   type ConvTree
 } from './tree.ts';
-import { parseToolDefs, cleanHandlers } from './tools-def.ts';
+import { parseToolDefs, cleanHandlers, offeredCount } from './tools-def.ts';
 import type { ToolCall } from './types.ts';
 
 let passed = 0;
@@ -180,6 +180,13 @@ test('cleanHandlers keeps what each mode uses, drops manual entries and orphans'
     run: { mode: 'python', code: 'return 1', timeout: 5, auto_continue: false }
   });
   eq(cleanHandlers({ look: { mode: 'manual' } }, ['look']), null);
+});
+
+test('a switched-off tool keeps its entry (even manual) and is not counted as offered', () => {
+  const hs = cleanHandlers({ a: { mode: 'manual', disabled: true }, b: { mode: 'static', text: 'x', disabled: true } }, ['a', 'b', 'c']);
+  eq(hs, { a: { mode: 'manual', disabled: true }, b: { mode: 'static', disabled: true, text: 'x' } });
+  const tools = [call('1', 'a'), call('2', 'b'), call('3', 'c')].map((c) => ({ type: 'function', function: { name: c.function.name } }));
+  eq(offeredCount(tools, hs), 1);
 });
 
 console.log(`tool-use: ${passed} passed, ${failed} failed`);

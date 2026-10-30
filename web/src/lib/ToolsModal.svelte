@@ -8,6 +8,7 @@
   import { parseToolDefs, formatToolDefs, toolName, cleanHandlers } from '$lib/tools-def';
   import { api, type ToolSet, type ToolTestResult } from '$lib/api';
   import { tip } from '$lib/tooltip.svelte';
+  import Icon from '$lib/Icon.svelte';
   import type { ToolDef, ToolHandler, ToolHandlers } from '$lib/types';
 
   let {
@@ -55,6 +56,17 @@
   }
   function setMode(name: string, mode: ToolHandler['mode']) {
     hs[name] = { ...h(name), mode };
+  }
+  function setOn(name: string, on: boolean) {
+    const { disabled: _, ...rest } = h(name);
+    hs[name] = on ? rest : { ...rest, disabled: true };
+  }
+  /** Remove a tool: its definition from the JSON and its handler (Cancel undoes). */
+  function remove(name: string) {
+    if (parsed.error !== undefined) return;
+    text = formatToolDefs((parsed.tools ?? []).filter((t) => toolName(t) !== name));
+    delete hs[name];
+    delete testOut[name];
   }
   let missingCode = $derived(names.find((n) => h(n).mode === 'python' && !(h(n).code ?? '').trim()));
   let blocked = $derived(parsed.error !== undefined || stepsBad || !!missingCode);
@@ -157,8 +169,11 @@
       {#each names as name (name)}
         {@const hd = h(name)}
         {@const out = testOut[name]}
-        <div class="th-row" data-tool={name}>
+        <div class="th-row" class:off={hd.disabled} data-tool={name}>
           <div class="th-head">
+            <input type="checkbox" class="th-on" checked={!hd.disabled} onchange={(e) => setOn(name, e.currentTarget.checked)}
+              data-tooltip={hd.disabled ? 'Off: not offered to the model' : 'Offered to the model — untick to switch it off'} use:tip
+              aria-label="Offer {name} to the model" data-testid="tool-on" />
             <code class="th-name">{name}</code>
             <div class="seg-toggle" role="group" aria-label="How {name} is answered">
               {#each MODES as [m, label, hint] (m)}
@@ -171,6 +186,8 @@
                 continue
               </label>
             {/if}
+            <button class="th-del" onclick={() => remove(name)} disabled={parsed.error !== undefined}
+              data-tooltip="Remove this tool (Cancel undoes)" use:tip aria-label="Remove {name}" data-testid="tool-remove"><Icon name="trash" size={13} /></button>
           </div>
           {#if hd.mode === 'static'}
             <textarea class="th-text" rows="2" placeholder="What every call returns" data-testid="handler-static"
@@ -239,6 +256,11 @@
   .th-list { display: flex; flex-direction: column; gap: var(--space-2); margin: var(--space-2) 0; }
   .th-row { border: 1px solid var(--color-border); border-radius: var(--radius); padding: var(--space-2); display: flex; flex-direction: column; gap: 6px; }
   .th-head { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+  .th-row.off > :not(.th-head), .th-row.off .th-name, .th-row.off .seg-toggle, .th-row.off .th-cont { opacity: 0.5; }
+  .th-on { margin: 0; cursor: pointer; }
+  .th-del { background: none; border: none; color: var(--color-text-muted); cursor: pointer; padding: 2px; display: inline-flex; border-radius: var(--radius-sm); }
+  .th-del:hover:not(:disabled) { color: var(--color-no); background: var(--color-surface-alt); }
+  .th-del:disabled { opacity: 0.4; cursor: default; }
   .th-name { font-family: 'Courier New', Courier, monospace; font-weight: 700; font-size: 0.85rem; min-width: 0; overflow-wrap: anywhere; flex: 1 1 140px; }
   .th-cont { display: inline-flex; align-items: center; gap: 4px; font-size: 0.76rem; color: var(--color-text-secondary); cursor: pointer; }
   .th-sig { font-family: 'Courier New', Courier, monospace; font-size: 0.78rem; color: var(--color-text-muted); }

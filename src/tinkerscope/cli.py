@@ -1410,14 +1410,20 @@ def _max_tool_steps_option():
                         help="cap on auto-answered rounds for this call; omit = the workspace's (default 5)")
 
 
-def _with_handlers(body: dict, ws: Optional[dict], auto: bool, max_steps: Optional[int]) -> None:
+def _with_handlers(body: dict, ws: Optional[dict], auto: bool, max_steps: Optional[int],
+                   explicit_tools: bool = False) -> None:
     """The workspace's tool handlers ride on a fire, like its tools: the SERVER
-    answers the calls they cover and samples on (routes/chat.py's loop)."""
+    answers the calls they cover and samples on (routes/chat.py's loop), and
+    leaves out the tools switched off there. `explicit_tools` (--tools-file):
+    those definitions are sent as given, whatever the workspace switched off."""
+    handlers = (ws or {}).get("tool_handlers")
+    if handlers and explicit_tools:
+        handlers = {k: {f: v for f, v in h.items() if f != "disabled"} for k, h in handlers.items()}
+    if handlers:
+        body["tool_handlers"] = handlers
     if not auto:
         body["auto_tools"] = False
         return
-    if (ws or {}).get("tool_handlers"):
-        body["tool_handlers"] = ws["tool_handlers"]
     steps = max_steps if max_steps is not None else (ws or {}).get("tool_max_steps")
     if steps is not None:
         body["max_tool_steps"] = steps
@@ -2022,7 +2028,7 @@ def cmd_send(
         tools = ws_body.get("tools") or None
     wire = ws_body.get("wire") or None
     extra: dict = {}
-    _with_handlers(extra, ws_body, auto_tools, max_tool_steps)
+    _with_handlers(extra, ws_body, auto_tools, max_tool_steps, explicit_tools=tools_file is not None)
     plan_out = sys.stderr if json_out else sys.stdout  # JSON mode: keep stdout pure JSONL
 
     print(f"send (new thread)  n={n} temp={_fmt_param(temperature)}  →  {len(targets)} panel(s)", file=plan_out)
@@ -2524,7 +2530,8 @@ def cmd_continue(
             body["workspace_id"] = c["id"]
             if c.get("wire"):
                 body["wire"] = c["wire"]
-        _with_handlers(body, c if fixed_ancestry is None else None, auto_tools, max_tool_steps)
+        _with_handlers(body, c if fixed_ancestry is None else None, auto_tools, max_tool_steps,
+                       explicit_tools=call_tools is not None)
         if no_persist:
             # a pure read, like `probe`: no panel routing, no bus events, no fold
             body["broadcast"] = False
@@ -4267,7 +4274,7 @@ def cmd_replay(
         body["workspace_id"] = c["id"]
         if c.get("wire"):
             body["wire"] = c["wire"]
-        _with_handlers(body, c, auto_tools, max_tool_steps)
+        _with_handlers(body, c, auto_tools, max_tool_steps, explicit_tools=tools_file is not None)
         _bind_panel_model(body, binding)
         res = _StreamResult()
         _stream_chat(body, None, threading.Lock(), res, False, False, True, io.StringIO())
@@ -4874,6 +4881,8 @@ def _handler_line(h: Optional[dict]) -> str:
         desc = "manual"
     if mode != "manual" and h.get("auto_continue") is False:
         desc += "  (no auto-continue)"
+    if h.get("disabled"):
+        desc += "  [OFF: not offered to the model]"
     return desc
 
 
@@ -4918,8 +4927,9 @@ def cmd_tools_set(
     manual: bool = typer.Option(False, "--manual", help="answer calls by hand again (drops the handler)"),
     auto_continue: Optional[bool] = typer.Option(None, "--auto-continue/--no-auto-continue", help="after answering, sample the next turn (default) or stop there"),
     timeout: Optional[float] = typer.Option(None, "--timeout", help="python: seconds before the handler is killed (default 10)"),
+    enable: Optional[bool] = typer.Option(None, "--enable/--disable", help="offer the tool to the model (default) or switch it off — kept with its handler, not sent"),
 ) -> None:
-    """Add/replace a tool's definition and/or set how its calls are answered."""
+    """Add/replace a tool's definition, set how its calls are answered, or switch it off/on."""
     modes = [x for x in (static is not None or static_file is not None, python_file is not None, manual) if x]
     if len(modes) > 1 or (static is not None and static_file is not None):
         _die("pick one of --static / --static-file / --python-file / --manual")
@@ -4963,13 +4973,17 @@ def cmd_tools_set(
         h["auto_continue"] = auto_continue
     if timeout is not None:
         h["timeout"] = timeout
+    if enable is not None:
+        h.pop("disabled", None)
+        if not enable:
+            h["disabled"] = True
     if h != (handlers.get(name) or {"mode": "manual"}):
         handlers[name] = h
-        if h.get("mode") == "manual":
-            handlers.pop(name)  # manual = no handler
+        if h == {"mode": "manual"}:
+            handlers.pop(name)  # an enabled manual tool needs no entry
         fields["tool_handlers"] = handlers or None
     if not fields:
-        _die("nothing to change — pass --schema-file and/or a handler flag")
+        _die("nothing to change — pass --schema-file, a handler flag or --enable/--disable")
     _send_request("PATCH", f"/api/workspaces/{c['id']}", fields)
     print(f"{name}: {_handler_line(handlers.get(name))}")
     if h.get("mode") == "python" and not (_get("/api/health") or {}).get("tool_code"):

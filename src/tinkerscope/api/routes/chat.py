@@ -745,6 +745,8 @@ async def _open_chat(
     # guard is for the tests that call this function DIRECTLY (no HTTP, so no
     # dependency injection — `sid` arrives as the Depends marker itself).
     bus = get_bus(sid) if isinstance(sid, str) else BUS
+    # Tools switched off in the workspace's handler map are not offered (kept, not sent).
+    req.tools = tool_handlers.offered(req.tools, req.tool_handlers)
     # ── fold placement (§4.3) — request-shape errors are 400s, up front ──────
     # `fold_ws` is resolved ONCE here (explicit → the bus's open workspace) so the
     # fold target and the terminal-broadcast stamp cannot drift apart if the bus

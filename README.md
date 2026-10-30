@@ -225,7 +225,7 @@ tinkerscope trash [action] [handle]           # Recover deleted branches.
 tinkerscope refresh                           # Rescan the filesystem + re-probe sampling capabilities.
 tinkerscope wait                              # Block until no generation is running — the sequential-wave primitive: fire, `tinkerscope...
 tinkerscope serve [dirs...]                   # Serve the API + web UI for DIRS (bare `tinkerscope <dir>` is shorthand for this).
-tinkerscope tools set <name>                  # Add/replace a tool's definition and/or set how its calls are answered.
+tinkerscope tools set <name>                  # Add/replace a tool's definition, set how its calls are answered, or switch it off/on.
 tinkerscope tools rm <name>                   # Remove a tool from the workspace (definition + handler).
 tinkerscope tools max-steps <n>               # Set the workspace's cap on auto-answered rounds per fire (default 5).
 tinkerscope tools test <name>                 # Run a tool's handler on sample arguments (no model, nothing written) and print what the model...

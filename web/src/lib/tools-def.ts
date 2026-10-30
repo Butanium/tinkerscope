@@ -55,16 +55,17 @@ export function formatToolDefs(tools: ToolDef[] | null): string {
   return tools?.length ? JSON.stringify(tools, null, 2) : '';
 }
 
-/** The handlers worth storing for these tool names: manual = no entry (the
- *  default), orphans of removed tools dropped, each spec down to the fields its
+/** The handlers worth storing for these tool names: an enabled manual tool =
+ *  no entry (the default), orphans of removed tools dropped, each spec down to the fields its
  *  mode uses (switching modes in the editor keeps the other mode's draft until
  *  save). null = none. Mirrors tool_handlers.check_tool_handlers' shape. */
 export function cleanHandlers(hs: ToolHandlers, names: string[]): ToolHandlers | null {
   const out: ToolHandlers = {};
   for (const n of names) {
     const h = hs[n];
-    if (!h || h.mode === 'manual') continue;
+    if (!h || (h.mode === 'manual' && !h.disabled)) continue;
     const c: ToolHandler = { mode: h.mode };
+    if (h.disabled) c.disabled = true;
     if (h.mode === 'static') c.text = h.text ?? '';
     if (h.mode === 'python') {
       c.code = h.code ?? '';
@@ -74,4 +75,9 @@ export function cleanHandlers(hs: ToolHandlers, names: string[]): ToolHandlers |
     out[n] = c;
   }
   return Object.keys(out).length ? out : null;
+}
+
+/** How many of these tools a fire offers (the switched-off ones are kept, not sent). */
+export function offeredCount(tools: ToolDef[] | null, hs: ToolHandlers | null): number {
+  return (tools ?? []).filter((t) => !hs?.[toolName(t)]?.disabled).length;
 }
