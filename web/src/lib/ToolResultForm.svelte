@@ -1,7 +1,8 @@
 <script lang="ts">
   // Answer the tool calls the panel's last turn is waiting on: one field per
   // pending call — text for a function call, a screenshot for a computer call
-  // (Responses wire: it goes back as a `computer_call_output` item). Send → the
+  // (Responses wire: sent as the next user message, since OpenRouter has no
+  // computer_call_output item). Send → the
   // results land as tool turns and the model continues from them; "result only"
   // stores them without generating, so a user turn can follow.
   import type { ResponsesItem, ToolCall } from '$lib/types';
@@ -36,11 +37,20 @@
       pending.map((c): Result => {
         if (c.type === 'computer_call') {
           const s = shots[c.id];
+          // OpenRouter's Responses API has no computer_call_output item: the
+          // screenshot goes back as the next user message (+ the optional caption).
+          const caption = (drafts[c.id] ?? '').trim();
           return {
             tool_call_id: c.id,
             name: 'computer',
-            content: `[screenshot ${s.name}]`,
-            items: [{ type: 'computer_call_output', call_id: c.id, output: { type: 'computer_screenshot', image_url: s.url } }]
+            content: `[screenshot ${s.name}]${caption ? ` ${caption}` : ''}`,
+            items: [{
+              role: 'user',
+              content: [
+                ...(caption ? [{ type: 'input_text', text: caption }] : []),
+                { type: 'input_image', detail: 'high', image_url: s.url }
+              ]
+            }]
           };
         }
         return { tool_call_id: c.id, name: c.function.name, content: drafts[c.id] ?? '' };
@@ -65,6 +75,7 @@
           <input type="file" accept="image/*" data-testid="tool-result-image" onchange={(e) => pick(c.id, e)} />
           {#if shots[c.id]}<img src={shots[c.id].url} alt="screenshot to send" />{/if}
         </span>
+        <textarea rows="1" placeholder="Caption (optional)" data-testid="tool-result-caption" bind:value={drafts[c.id]}></textarea>
       {:else}
         <textarea
           rows="2"

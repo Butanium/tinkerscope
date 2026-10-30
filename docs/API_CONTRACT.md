@@ -149,11 +149,21 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
   "system_prompt": null,                    // travels with the workspace (each conv = one experiment)
   "system_enabled": null,                   // its power state (false = kept but muted); absent/null on
                                             // legacy bodies → readers derive from text presence
-  "tools": null,                            // tool definitions sent with every fire, OpenAI function
-                                            // schemas [{type:"function", function:{name, description?,
-                                            // parameters?}}]; null = none. Validated on write
-                                            // (tree_ops.check_tools: names present + unique → else 400/409).
-                                            // A set_meta / PATCH field like system_prompt.
+  "tools": null,                            // tool definitions sent with every fire, stored VERBATIM:
+                                            // chat-shaped {type:"function", function:{name,…}}, flat
+                                            // Responses {type:"function", name, parameters, strict}, or
+                                            // native {type:"computer"} (Responses wire only); null = none.
+                                            // Validated on write (tree_ops.check_tools: a `type`; function
+                                            // names present + unique → else 400/409). set_meta / PATCH.
+  "wire": null,                             // {"api": "responses", "reasoning": {effort?, summary?},
+                                            //  "exact"?, "recovered_reasoning"?, "model"?, "extra"?,
+                                            //  "recorded_extra"?} — `exact` (set by import): requests
+                                            // match the recording (items_recorded, reasoning as recorded,
+                                            // no max_output_tokens); `recovered_reasoning`: send the wire
+                                            // form with recovered blobs instead. This workspace's
+                                            // threads go through OpenRouter's Responses API; `reasoning` is
+                                            // the recorded base object, `extra` request fields SENT,
+                                            // `recorded_extra` kept for export only. Sent by the client.
   "trees": {                                // per-panel LIGHT branch trees, keyed by stable panel id
     "primary": { "nodes": {…}, "rootChildren": [], "selected": {} },
     "p-2": { … }                            // one per open panel; ids are minted p-<n> and NEVER
@@ -192,6 +202,18 @@ keeps the thinking unchanged and dropped by one that changes or drops it.
 payload came from: another account's blob is accepted by OpenRouter and silently
 ignored on replay, so the UI flags a tag that differs from `/api/health`'s
 `openrouter_account` (absent = unknown, never flagged).
+
+**Verbatim Responses items** (`api/openrouter_responses.py`). A node may carry
+`items`: the exact OpenAI Responses-API items it stands for (a recorded agent call:
+messages with `input_text`/`input_image` parts, `reasoning` with `encrypted_content`,
+`function_call`/`function_call_output`, `computer_call`/`computer_call_output`).
+HEAVY — a write-once blob (`has_items`), like `raw_meta`. `items_recorded` (heavy,
+`has_items_recorded`) holds what was originally sent when the wire form differs (an
+id-only reasoning item whose blob was recovered). The node's light fields (`content`,
+`reasoning`, `tool_calls` — a computer call is typed `computer_call`) are derived from
+its items. A chat message referencing items (`items` inline or `items_node`) puts the
+chat on the Responses wire: items go out verbatim, item-less nodes are converted, a
+system node with items replaces the composed system prompt.
 
 **Tool use** (OpenRouter only; OpenAI chat-completions shape). `role` may be
 `"tool"`. An assistant node's `tool_calls` = `[{id, type:"function", function:{name,
@@ -315,8 +337,13 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
                           // continue_tokens (loom) honored; top_k / presence_penalty /
                           // repetition_penalty forwarded. Token-streams at n==1.
   "messages": [{"role":"user","content":"…"}],   // required. An entry may also carry
-                          // reasoning_details (assistant), tool_calls (assistant) or
-                          // tool_call_id + name (role "tool") — forwarded to OpenRouter.
+                          // reasoning_details (assistant), tool_calls (assistant),
+                          // tool_call_id + name (role "tool") — forwarded to OpenRouter —
+                          // and `items` (verbatim Responses items) or `items_node` (the
+                          // node whose stored items the server loads; needs workspace_id).
+  "wire": null,           // optional; the workspace's `wire` — {"api": "responses", …} sends
+                          // this chat through OpenRouter's Responses API (openai/* only).
+                          // A message with `items` / `items_node` does too, regardless.
   "tools": null,          // optional; OpenAI function definitions offered to the model
                           // (the workspace's `tools`, sent by the client like the system
                           // prompt — the server never looks it up). OpenRouter only: any

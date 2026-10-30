@@ -7,7 +7,8 @@
   import type { ResponsesItem } from '$lib/types';
   import { tip } from '$lib/tooltip.svelte';
 
-  let { items, foreign = false }: { items: ResponsesItem[]; foreign?: boolean } = $props();
+  // `role`: the row's own role — an item's role is only tagged when it differs
+  let { items, role = '', foreign = false }: { items: ResponsesItem[]; role?: string; foreign?: boolean } = $props();
 
   let zoom = $state<string | null>(null);
   const LONG = 1500;
@@ -66,7 +67,7 @@
     {@const t = it.type ?? 'message'}
     {#if t === 'message'}
       <div class="ri-item ri-msg" data-item="message">
-        {#if items.length > 1 || it.role === 'system'}<span class="ri-tag">{it.role}{it.phase ? ` · ${it.phase}` : ''}</span>{/if}
+        {#if it.role !== role || it.phase}<span class="ri-tag">{it.role !== role ? it.role : ''}{it.phase ? `${it.role !== role ? ' · ' : ''}${it.phase}` : ''}</span>{/if}
         {#each parts(it.content) as p, j (j)}
           {#if p.kind === 'image'}{@render image(p.url, p.detail)}{:else if p.text}{@render text(p.text)}{:else}<span class="ri-dim">(empty)</span>{/if}
         {/each}
@@ -80,6 +81,8 @@
           {#if it.encrypted_content}
             <span class="ri-badge" data-tooltip="The model's hidden reasoning, encrypted" use:tip>encrypted · {kb(it.encrypted_content.length)}</span>
             {#if foreign}<span class="foreign-reasoning" data-tooltip="Made under another account — the next turn won't see it" use:tip>other account</span>{/if}
+          {:else if 'encrypted_content' in it}
+            <span class="ri-badge" data-tooltip="Encrypted reasoning, left out of this copy" use:tip>encrypted · not included</span>
           {:else}
             <span class="ri-badge ri-idonly" data-tooltip="Sent by id only — only the account that made it can resolve it" use:tip>id only</span>
           {/if}
@@ -89,11 +92,11 @@
       </details>
     {:else if t === 'function_call'}
       <div class="ri-item ri-call" data-item="function_call" data-call-id={it.call_id}>
-        <code><span class="ri-arrow">→</span> <b>{it.name}</b>({args(it.arguments)})</code>
+        <code><span class="ri-sig"><span class="ri-arrow">→</span> <b>{it.name}</b>(</span>{args(it.arguments)})</code>
       </div>
     {:else if t === 'computer_call'}
       <div class="ri-item ri-call" data-item="computer_call" data-call-id={it.call_id}>
-        <code><span class="ri-arrow">→</span> <b>computer</b>({args(it.action ?? it.actions)})</code>
+        <code><span class="ri-sig"><span class="ri-arrow">→</span> <b>computer</b>(</span>{args(it.action ?? it.actions)})</code>
       </div>
     {:else if t === 'function_call_output'}
       <div class="ri-item ri-out" data-item="function_call_output">
@@ -126,7 +129,9 @@
   .ri { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
   .ri-item { min-width: 0; }
   .ri-tag { display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-muted); margin-right: 6px; }
-  .ri-dim { color: var(--color-text-muted); font-size: 0.78rem; }
+  .ri-dim { color: var(--color-text-muted); font-size: 0.78rem; overflow-wrap: anywhere; }
+  .ri-msg + .ri-msg { border-top: 1px dashed var(--color-border); padding-top: var(--space-2); }
+  .ri-sig { white-space: nowrap; }
   .ri-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.88rem; line-height: 1.5; }
   .ri-fold > summary { cursor: pointer; overflow-wrap: anywhere; font-size: 0.86rem; }
   .ri-fold[open] > summary { margin-bottom: var(--space-1); }
@@ -139,6 +144,7 @@
   .ri-call code, .ri-out code { font-family: 'Courier New', Courier, monospace; font-size: 0.82rem; overflow-wrap: anywhere; }
   .ri-out .ri-text { font-family: 'Courier New', Courier, monospace; font-size: 0.8rem; }
   .ri-arrow { color: var(--color-text-muted); }
+  .ri-out .ri-tag { text-transform: none; letter-spacing: 0; font-family: 'Courier New', Courier, monospace; }
   .ri-thumb { display: inline-block; padding: 0; border: 1px solid var(--color-border); border-radius: var(--radius); background: none; cursor: zoom-in; margin: 4px 0; }
   .ri-thumb img { display: block; max-width: min(320px, 100%); max-height: 220px; border-radius: var(--radius); }
   .ri-json { font-size: 0.75rem; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow-y: auto; }

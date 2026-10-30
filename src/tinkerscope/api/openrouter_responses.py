@@ -15,6 +15,13 @@ Wire choice (`routes/chat.py`): this wire whenever a message on the path holds
 items, or the workspace opts in (`wire: {"api": "responses", "reasoning": {…}}`).
 OpenRouter `openai/*` models only.
 
+A computer call can't be answered with a `computer_call_output` item through
+OpenRouter: its Responses schema has no such type (400; probed 2026-10-30), and a
+`function_call_output` for that call id is an OpenAI 400. A user message carrying
+the screenshot after the call works (the model reads it), so that is how a
+computer call is answered (`cli._tool_result_msg`, the browser's result form). A
+`computer_call` item validates only with `pending_safety_checks` present.
+
 Output: the response's `output` items are stored VERBATIM on the new node (incl.
 encrypted reasoning — kept even when it can't be replayed under this key; it may
 be replayable under another one later), and the light fields the rest of the app
@@ -203,31 +210,40 @@ _RESERVED = ("model", "input", "tools", "reasoning", "max_output_tokens", "tempe
 
 def build_body(*, model: str, messages: list[dict], tools: list | None, max_tokens: int,
                temperature: float | None, thinking: bool, effort: str | None, base_reasoning: dict | None,
-               extra: dict | None = None) -> dict:
+               extra: dict | None = None, exact: bool = False) -> dict:
+    """`exact` (a workspace imported from a recorded call): the request matches the
+    recording — its `reasoning` object as recorded (only an explicit effort replaces
+    its effort; the thinking switch is ignored), no max_output_tokens / temperature
+    the recording didn't have."""
     caps = model_caps(model)
-    body: dict = {"model": model, "input": build_input(messages), "max_output_tokens": max_tokens}
+    body: dict = {"model": model, "input": build_input(messages)}
+    if not exact:
+        body["max_output_tokens"] = max_tokens
     # request-level fields a recorded call carried beyond these (e.g. the Village's
     # `prompt_cache_options`), sent as recorded
     body.update({k: v for k, v in (extra or {}).items() if k not in _RESERVED})
     rt = responses_tools(tools)
     if rt:
         body["tools"] = rt
-    reasoning = reasoning_obj(thinking, effort, caps, base_reasoning)
+    if exact:
+        reasoning = {**(base_reasoning or {}), **({"effort": effort} if effort else {})}
+    else:
+        reasoning = reasoning_obj(thinking, effort, caps, base_reasoning)
     if reasoning:
         body["reasoning"] = reasoning
-    if temperature is not None and not (caps and "temperature" in caps.get("ignores", [])):
+    if not exact and temperature is not None and not (caps and "temperature" in caps.get("ignores", [])):
         body["temperature"] = temperature
     return body
 
 
 async def sample_one(*, model: str, messages: list[dict], tools: list | None, max_tokens: int,
                      temperature: float | None, thinking: bool, effort: str | None = None,
-                     base_reasoning: dict | None = None, extra: dict | None = None) -> dict:
+                     base_reasoning: dict | None = None, extra: dict | None = None, exact: bool = False) -> dict:
     """One Responses call. Returns a sample dict: the derived light fields, the
     verbatim `items`, `raw_text` (response view) and `raw_meta` (request + response)."""
     body = build_body(model=model, messages=messages, tools=tools, max_tokens=max_tokens,
                       temperature=temperature, thinking=thinking, effort=effort, base_reasoning=base_reasoning,
-                      extra=extra)
+                      extra=extra, exact=exact)
     key = os.environ.get("OPENROUTER_API_KEY", "")
     if not key:
         raise ValueError("OPENROUTER_API_KEY is required for OpenRouter models")

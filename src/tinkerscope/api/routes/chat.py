@@ -567,10 +567,15 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
         if not items_ws:
             raise HTTPException(400, "items_node needs the workspace: send workspace_id")
         blobs = await asyncio.to_thread(
-            workspace_store.get_blobs, items_ws, [m.items_node for m in need], ["items"]
+            workspace_store.get_blobs, items_ws, [m.items_node for m in need], ["items", "items_recorded"]
         )
+        # What the recording SENT (items_recorded, when it differs) goes out — the
+        # request matches the recorded call. `wire.recovered_reasoning` opts into the
+        # wire form instead (id-only reasoning with its recovered blob).
+        prefer = ("items",) if (req.wire or {}).get("recovered_reasoning") else ("items_recorded", "items")
         for m in need:
-            got = (blobs.get(m.items_node) or {}).get("items")
+            b = blobs.get(m.items_node) or {}
+            got = next((b[k] for k in prefer if b.get(k)), None)
             if not got:
                 raise HTTPException(400, f"no stored items for node {m.items_node!r} in workspace {items_ws!r}")
             m.items = got
@@ -706,6 +711,7 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
                         tools=req.tools, max_tokens=max_tokens, temperature=temperature,
                         thinking=think, effort=params["reasoning_effort"], base_reasoning=base_reasoning,
                         extra=(req.wire or {}).get("extra"),
+                        exact=bool((req.wire or {}).get("exact")),
                     )
 
                 if both:

@@ -3304,3 +3304,57 @@ HTTP and direct OpenRouter scripts. What changed, and the reason each had to:
   health poll then happily answers from the squatter. An August instance was still
   on :8792 and the first test import landed in it (removed). Check `/api/health`'s
   `root` before trusting a port.
+
+### 2026-10-30 — Responses-API wire: replaying recorded agent calls verbatim
+
+The AI Village shared its call log (OpenAI Responses-API requests + raw outputs).
+Chat completions can't express them (native `computer` tool, `input_image` parts,
+reasoning items, function/computer call items), so a thread can now hold the exact
+items and go through OpenRouter's `/api/v1/responses`.
+
+- **Items are a heavy blob on the node** (`items`, plus `items_recorded` when the wire
+  form differs). Light `content` / `reasoning` / `tool_calls` are DERIVED, so search,
+  the CLI, pending-call detection and the answer form work unchanged. A computer call
+  is a `tool_calls` entry typed `computer_call`; its answer is a tool node whose items
+  hold a `computer_call_output` screenshot.
+- **The browser never ships item blobs**: a message carries `items_node`, the server
+  loads the blob (screenshots are ~0.7 MB). Fresh folds carry items inline.
+- **Wire choice is automatic** when any message on the path holds items, else opt-in
+  via workspace meta `wire.api = "responses"`. Item-less nodes are converted.
+- **Grouping on import**: system node / runs of user messages / runs of
+  assistant-side items / one node per tool output — so the tree reads like a chat and
+  the existing tool flow (assistant → tool chain) applies. Export walks the same nodes
+  and emits `items_recorded` or `items`, so `import → export` is byte-identical (checked
+  on a real 39-item call and on synthetic ones).
+- **Reasoning by id** (probes on our key, 2026-10-30): the Village replays earlier
+  reasoning as `{id, summary}` only. On our key an unknown id-only item is accepted and
+  ignored; a blob is bound to its item id (our blob under another id → 400
+  `invalid_encrypted_content`). So import puts the blob recovered from the producing
+  call back on the item under its own id (the wire form) and keeps the id-only original
+  in `items_recorded`. Foreign blobs are kept even though our key can't replay them —
+  an AI Digest key might. Imported encrypted reasoning is stamped
+  `reasoning_account: "recorded"` (another account, by construction).
+- **`prompt_cache_options: {mode: "implicit"}` is a 400 on OpenRouter** (it only takes
+  "explicit"), so request-level extras are kept as `wire.recorded_extra` (export writes
+  them back) and only `wire.extra` is sent. The `prompt_cache_breakpoint` key INSIDE
+  content parts is accepted and goes out verbatim.
+- OpenRouter returns `encrypted_content` without `include`/`store`; our own output
+  items replay verbatim and their reasoning is used (input tokens 962 vs 945 with the
+  reasoning cut to `{id, summary}`).
+- Static site export publishes item blobs with encrypted payloads emptied; packs carry
+  items inline (they ARE the turn).
+
+- **Requests match the recording (Clément: "make sure the request you send matches the
+  call that we got").** An imported workspace is `wire.exact`: the server loads
+  `items_recorded` (what was sent) over the wire form, sends the recorded `reasoning`
+  object as is (the sidebar's thinking switch defaulted Off, which would have turned
+  it into effort "none"), and no `max_output_tokens` / `temperature` (the recording had
+  none; the sidebar default 1024 would truncate). Diffed field by field on a synthetic
+  call: input, reasoning, tools identical; model differs by OpenRouter's `openai/`
+  prefix; `prompt_cache_options` not sent (400). Recovered blobs stay stored;
+  `wire.recovered_reasoning: true` sends them.
+- **Computer calls can't be answered natively through OpenRouter**: its Responses input
+  schema has no `computer_call_output` type (it lists ~70 item types; that one is
+  absent), and a `function_call_output` for a computer call id is an OpenAI 400. A user
+  message carrying the screenshot after the call works (the model read the page). A
+  `computer_call` item also validates only with `pending_safety_checks` present.

@@ -586,6 +586,13 @@ codex plugin add tinkerscope@tinkerscope</pre>
         message next. A call has to be answered before a plain message can follow it.
       </p>
       <p class="help-note">
+        A workspace imported from a recorded agent call (<code>tinkerscope import --responses-call</code>)
+        shows each turn exactly as the agent saw or produced it: screenshots as thumbnails (click to
+        enlarge), reasoning as encrypted / <b>id only</b> badges, calls and their outputs. Sends there go
+        through OpenRouter's Responses API with those items unchanged. A computer call is answered with a
+        screenshot file instead of text.
+      </p>
+      <p class="help-note">
         A result is a normal turn: edit it to fork the thread from a different tool output (Shift-edit:
         fork without a reply), regenerate to resample the model's reaction to it. A thinking fold marked
         <b>other account</b> holds reasoning encrypted under another OpenRouter key; the model won't see it

@@ -2048,8 +2048,8 @@ _IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"
 
 def _tool_result_msg(call: dict, result: str) -> dict:
     """One tool turn answering `call`. `@image:PATH` answers a computer call with
-    that screenshot (a `computer_call_output` item, Responses wire); anything
-    else is the tool's text output."""
+    that screenshot (Responses wire; sent as a user image message — see
+    openrouter_responses); anything else is the tool's text output."""
     import base64
 
     cid = call.get("id") or ""
@@ -2064,12 +2064,20 @@ def _tool_result_msg(call: dict, result: str) -> dict:
         if not mime:
             _die(f"unsupported image type {f.suffix!r} (png, jpg, webp, gif)")
         url = f"data:{mime};base64," + base64.b64encode(f.read_bytes()).decode()
+        # OpenRouter's Responses API has no computer_call_output item (probed
+        # 2026-10-30): the screenshot goes back as the next user message.
         return {"role": "tool", "content": f"[screenshot {f.name}]", "tool_call_id": cid, "name": "computer",
-                "items": [{"type": "computer_call_output", "call_id": cid,
-                           "output": {"type": "computer_screenshot", "image_url": url}}]}
+                "items": [{"role": "user", "content": [{"type": "input_image", "detail": "high", "image_url": url}]}]}
     if call.get("type") == "computer_call":
         _die(f"call {cid} is a computer call — answer it with a screenshot: --tool-result @image:PATH")
     return {"role": "tool", "content": result, "tool_call_id": cid, **({"name": name} if name else {})}
+
+
+def _keep_in_ancestry(m: dict) -> bool:
+    """System-role nodes are dropped from a fire's messages (the server composes the
+    system prompt) — except a recorded one carrying verbatim Responses items, which
+    IS the system message, sent as it was (the server then composes none)."""
+    return m.get("role") != "system" or bool(m.get("items") or m.get("has_items"))
 
 
 def _continue_messages(ancestry: list[dict], prompt: Optional[str], prefill: Optional[str],
@@ -2084,7 +2092,7 @@ def _continue_messages(ancestry: list[dict], prompt: Optional[str], prefill: Opt
         CoT continuation).
     Content is answer-only (CoT excluded): the native renderer rebuilds each turn and
     applies its own history policy. Placement is `parent_node`, never content match."""
-    pairs = [_wire_msg(m) for m in ancestry if m.get("role") != "system"]
+    pairs = [_wire_msg(m) for m in ancestry if _keep_in_ancestry(m)]
     if not pairs:
         _die("empty ancestry — nothing to continue from")
     calls = pairs[-1].get("tool_calls") if pairs[-1]["role"] == "assistant" else None
@@ -4115,7 +4123,7 @@ def cmd_replay(
         t += 1
         if turn and t not in turn:
             continue
-        prefix = [m for m in path[:i] if m.get("role") != "system"]
+        prefix = [m for m in path[:i] if _keep_in_ancestry(m)]
         if not prefix or prefix[-1].get("role") not in ("user", "tool"):
             skipped.append(f"turn {t} ({nd['id']}): follows a {prefix[-1]['role'] if prefix else 'nothing'} turn")
             continue
@@ -4310,10 +4318,15 @@ def _responses_call_body(data: Any, f: Path, model: Optional[str], panel: str, i
         "system_prompt": system or None,
         "system_enabled": bool(system),
         "tools": req.get("tools") or None,
-        "wire": {"api": "responses",
+        # exact: requests from this workspace match the recording (recorded items,
+        # reasoning object as recorded, nothing it didn't carry) — openrouter_responses.build_body
+        "wire": {"api": "responses", "exact": True,
                  **({"model": rec_model} if rec_model else {}),
                  **({"reasoning": req["reasoning"]} if req.get("reasoning") else {}),
-                 **({"extra": extra} if extra else {})},
+                 # request-level fields beyond these are kept as a RECORD, not sent:
+                 # the Village's prompt_cache_options {mode: implicit} is a 400 on
+                 # OpenRouter. Move a field to `extra` to send it.
+                 **({"recorded_extra": extra} if extra else {})},
     }
     kind = (f"Responses call, {len(items)} item(s) → {len(nodes)} turn(s) in {panel}"
             + (f", {n_rec} reasoning blob(s) recovered" if n_rec else "")
@@ -4346,6 +4359,7 @@ def _responses_export(c: dict, panel: Optional[str], thread: Optional[int]) -> d
     req: dict = {"input": items, "model": model, "tools": c.get("tools") or []}
     if wire.get("reasoning"):
         req["reasoning"] = wire["reasoning"]
+    req.update(wire.get("recorded_extra") or {})
     req.update(wire.get("extra") or {})
     return {"input": req}
 

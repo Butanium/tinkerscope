@@ -97,8 +97,8 @@ def test_responses_call_body(tmp_path):
     f.write_text(json.dumps(call))
     body, kind = cli._responses_call_body(call, f, None, "p-1", True, tmp_path)
     assert body["panels"][0]["run_id"] == "openrouter:openai/gpt-5.6-terra"
-    assert body["wire"] == {"api": "responses", "model": "gpt-5.6-terra", "reasoning": {"effort": "medium", "summary": "detailed"},
-                            "extra": {"prompt_cache_options": {"mode": "implicit"}}}
+    assert body["wire"] == {"api": "responses", "exact": True, "model": "gpt-5.6-terra", "reasoning": {"effort": "medium", "summary": "detailed"},
+                            "recorded_extra": {"prompt_cache_options": {"mode": "implicit"}}}
     assert body["system_prompt"] == "You are Wren." and body["tools"] == [{"type": "computer"}]
     nodes = list(body["trees"]["p-1"]["nodes"].values())
     assert [n["role"] for n in nodes] == ["system", "user", "assistant", "assistant"]

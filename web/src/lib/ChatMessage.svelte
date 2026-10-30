@@ -933,7 +933,7 @@
         <TokenLogprobs tlp={tlp!} onLoom={loomHandler} loomCut={loomCutDisplay} />
       {:else if hasItems}
         {#if itemsResolved}
-          <ResponsesItems items={itemsResolved} foreign={foreignReasoning} />
+          <ResponsesItems items={itemsResolved} role={msg.role} foreign={foreignReasoning} />
         {:else}
           {#if msg.content}<div class="message-content">{@html renderContent(msg.content, msg.role)}</div>{/if}
           <div class="blob-loading">loading items…</div>

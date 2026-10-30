@@ -274,7 +274,7 @@ def _blob_node_ids(body: dict, keep: set[str] | None = None) -> list[str]:
         for nid, node in (tree.get("nodes") or {}).items():
             if not isinstance(node, dict):
                 continue
-            if node.get("has_raw_meta"):
+            if node.get("has_raw_meta") or node.get("has_items"):
                 out.append(nid)
             elif node.get("has_token_logprobs") and (keep is None or nid in keep):
                 out.append(nid)
@@ -318,6 +318,19 @@ def _elide_encrypted_reasoning(body: dict) -> None:
             for d in (node.get("reasoning_details") or []) if isinstance(node, dict) else []:
                 if isinstance(d, dict) and d.get("type") == "reasoning.encrypted" and d.get("data"):
                     d["data"] = ""
+
+
+def _elide_item_blobs(items: list) -> list:
+    """Verbatim Responses items for a published page: their encrypted reasoning
+    payloads emptied, for the same reason as `_elide_encrypted_reasoning` (the item
+    stays, so it still reads "reasoning · encrypted"). Screenshots stay — they are
+    what the turn showed the model."""
+    out = []
+    for it in items or []:
+        if isinstance(it, dict) and it.get("type") == "reasoning" and it.get("encrypted_content"):
+            it = {**it, "encrypted_content": ""}
+        out.append(it)
+    return out
 
 
 # ── which turns keep their logprobs (--logprobs chart | last:N) ───────────────
@@ -551,9 +564,10 @@ def export_site(
         _elide_encrypted_reasoning(body)
         for nid, blob in blobs.items():
             payload = {
-                k: v
+                k: _elide_item_blobs(v) if k == "items" else v
                 for k, v in blob.items()
-                if (keep is None or nid in keep) or k != "token_logprobs"
+                # items_recorded: the round-trip record of what was sent, not shown
+                if ((keep is None or nid in keep) or k != "token_logprobs") and k != "items_recorded"
             }
             if not payload:
                 continue

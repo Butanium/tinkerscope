@@ -274,6 +274,28 @@ messages list) as a one-thread workspace: `--model` (default the file's; a bare 
 reads as OpenRouter), `--thread-system` to put `system` on the thread instead of
 the workspace.
 
+**Exact replay of a recorded Responses-API call** (e.g. an AI Village agent's logged call).
+`tinkerscope import --responses-call CALL.json [--include-output] [--name N] [--id ID]
+[--model SEL] [--calls-dir DIR]` builds a workspace: the call's tools verbatim (incl.
+`{"type":"computer"}`), `wire: {api: "responses", reasoning, …}`, and ONE thread whose nodes
+hold the input items VERBATIM — a system node, one node per run of user messages, one per
+run of assistant-side items (reasoning / calls), one per tool output. An id-only reasoning
+item (how such scaffolds replay reasoning) gets the encrypted blob recovered from the call
+that produced it, found in `--calls-dir` (default: the file's folder); `items_recorded`
+keeps what was really sent. `--include-output` appends the call's own output as the last
+assistant turn. Then everything works as usual and goes through OpenRouter's Responses
+API (`/api/v1/responses`) with those items unchanged: `continue [--no-persist]`, `replay`,
+`--tool-result` (a computer call: `--tool-result @image:shot.png`). `export --responses`
+writes the thread back as the exact request (round-trips byte-for-byte).
+Such a workspace is `wire.exact`: its requests MATCH the recording — the items as sent
+(id-only reasoning stays id-only; set `wire.recovered_reasoning: true` to send the
+recovered blobs instead), the recorded `reasoning` object (only an explicit `--effort`
+changes it; the thinking switch is ignored), no `max_output_tokens`. The two forced
+differences: the model id gets OpenRouter's `openai/` prefix, and request-level fields
+beyond model/input/tools/reasoning are kept as a record, not sent (the Village's
+`prompt_cache_options: {mode: implicit}` is a 400 on OpenRouter). A computer call is
+answered with a user image message: OpenRouter has no `computer_call_output` item.
+
 **What an OpenRouter turn was sent.** Its wire request + trimmed response is the
 node's `raw_meta` blob (`tinkerscope node <handle> --meta`, the browser's Raw →
 "request & response"; encrypted reasoning shows as its size); `raw_text` is the

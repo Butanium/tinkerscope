@@ -2931,6 +2931,9 @@
               </div>
             {/if}
             <div class="messages" use:scrollRegister={p.panel}>
+              <!-- a thread that starts with its own system node (a recorded call) has its
+                   prompt right there — no thread-prompt row to edit above it -->
+              {#if threadRoot?.role !== 'system'}
               <ThreadSystemRow
                 system={threadRoot?.system_prompt}
                 empty={!threadRoot}
@@ -2943,6 +2946,7 @@
                 onPending={(v) => (pendingThreadSystem[p.panel] = v)}
                 onSave={(text, copy, all) => saveThreadSystem(p.panel, text, copy, all)}
               />
+              {/if}
               <!-- Rows are deliberately UNKEYED: they reconcile by position, so
                    cycling a branch updates the row's props IN PLACE instead of
                    remounting it (keying by nodeId made every cycle a destroy+mount

@@ -14,6 +14,8 @@ import {
   activePath,
   assertValid,
   applyTreeOp,
+  heavyNodeIds,
+  lightenTree,
   type ConvTree
 } from './tree.ts';
 import { parseToolDefs } from './tools-def.ts';
@@ -114,6 +116,29 @@ test('a tool node survives the op layer (role allowed, fields kept)', () => {
   });
   eq(next.nodes.tool1.tool_call_id, 'c1');
   eq(pendingToolCalls(next), null);
+});
+
+test('a node with verbatim items goes out inline, or by node id once light', () => {
+  __resetIds();
+  const u = appendUserTurn(emptyTree(), 'hi');
+  const items = [{ type: 'reasoning', id: 'rs_1', summary: [], encrypted_content: 'B' }, { type: 'function_call', call_id: 'c1', name: 'f', arguments: '{}' }];
+  const f = foldAssistant(u.tree, u.nodeId, [{ content: '', items, tool_calls: [call('c1', 'f')] }]);
+  const id = f.ids[0];
+  eq(ancestryMessages(f.tree, id)[1].items, items, 'fresh fold: inline');
+  const light = lightenTree(f.tree, heavyNodeIds(f.tree))!;
+  eq([light.nodes[id].items, light.nodes[id].has_items], [undefined, true]);
+  const m = ancestryMessages(light, id)[1];
+  eq([m.items, m.items_node], [undefined, id], 'light: by node');
+});
+
+test('a computer call is pending until a screenshot result answers it', () => {
+  const comp: ToolCall = { id: 'cc1', type: 'computer_call', function: { name: 'computer', arguments: '{"type":"screenshot"}' } };
+  const { t } = withCalls([comp]);
+  eq(pendingToolCalls(t)?.pending[0].type, 'computer_call');
+  const out = [{ role: 'user', content: [{ type: 'input_image', detail: 'high', image_url: 'data:image/png;base64,AA' }] }];
+  const r = appendToolResults(t, [{ tool_call_id: 'cc1', name: 'computer', content: '[screenshot]', items: out }]);
+  eq(pendingToolCalls(r.tree), null);
+  eq(r.tree.nodes[r.ids[0]].items, out);
 });
 
 test('no pending calls on a plain thread', () => {

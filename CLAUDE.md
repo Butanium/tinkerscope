@@ -138,6 +138,14 @@ and in this file's reference section; HANDOFF.md itself is retired.
   UI: `ToolCalls.svelte` (a turn's calls), `ToolResultForm.svelte` (per-panel answer form,
   Send vs Result only), `ToolsModal.svelte` (the composer's **tools** pill). The composer
   refuses a user turn after unanswered calls (provider 400). CLI: `continue --tool-result`.
+- **Responses-API wire** (`src/tinkerscope/api/openrouter_responses.py` — module docstring;
+  `ENGINEERING_LOGS.md` 2026-10-30): nodes may carry the VERBATIM Responses items they stand
+  for (`items`, heavy blob like `raw_meta`; `items_recorded` = what was originally sent when
+  the wire form differs) — light content/reasoning/tool_calls are DERIVED from them. Any
+  message with items (inline or `items_node`) or workspace meta `wire.api = "responses"`
+  sends the chat through OpenRouter's `/api/v1/responses`: items verbatim, other nodes
+  converted. `tinkerscope import --responses-call` / `export --responses` round-trip a
+  recorded call byte-for-byte; render: `lib/ResponsesItems.svelte`.
 - **vLLM backend** (`src/tinkerscope/api/vllm_sampler.py` — module docstring): a
   self-hosted OpenAI-compatible server (`$TINKERSCOPE_VLLM_URL` / `--vllm-url`)
   whose models join the picker as `vllm:<name>` (⚙) and sample NATIVE-shaped —
