@@ -9,7 +9,7 @@
   import type { ResponsesItem } from '$lib/types';
   import { tip } from '$lib/tooltip.svelte';
   import { renderContent } from '$lib/render';
-  import { kindLabel, thinkingKindTip } from '$lib/reasoning';
+  import { thinkingHeader, encryptedNote, thinkingKindTip } from '$lib/reasoning';
 
   // `role`: the row's own role — an item's role is only tagged when it differs.
   // `thinkingOpen`: the fold default every Thinking block follows (ChatMessage).
@@ -59,9 +59,6 @@
   function outputText(o: unknown): string {
     return typeof o === 'string' ? o : JSON.stringify(o, null, 2);
   }
-  function kb(n: number): string {
-    return n > 1024 ? `${Math.round(n / 1024)} KB` : `${n} chars`;
-  }
 </script>
 
 {#snippet text(t: string)}
@@ -93,35 +90,22 @@
       </div>
     {:else if t === 'reasoning'}
       {@const summ = (it.summary ?? []).map((s: any) => s?.text ?? '').filter(Boolean)}
-      {@const kind = summ.length ? 'summary' : 'encrypted'}
-      {@const label = kindLabel(kind, i === firstReasoning ? reasoningTokens : undefined)}
-      {#snippet badges()}
-        {#if it.encrypted_content}
-          <span class="ri-badge" data-tooltip="The model's hidden reasoning, encrypted" use:tip>encrypted · {kb(it.encrypted_content.length)}</span>
-          {#if foreign}<span class="foreign-reasoning" data-tooltip="Made under another account — the next turn won't see it" use:tip>other account</span>{/if}
-        {:else if 'encrypted_content' in it}
-          <span class="ri-badge" data-tooltip="Encrypted reasoning, left out of this copy" use:tip>encrypted · not included</span>
-        {:else}
-          <span class="ri-badge ri-idonly" data-tooltip="Sent by id only — only the account that made it can resolve it" use:tip>id only</span>
-        {/if}
-      {/snippet}
+      {@const tokens = i === firstReasoning ? reasoningTokens : undefined}
       {#if summ.length}
         <details class="ri-item sample-reasoning-block reasoning-primary" data-item="reasoning" open={thinkingOpen}>
           <summary class="sample-reasoning-toggle">
             <span class="ri-thinking-head">
-              <span data-testid="thinking-label" data-tooltip={thinkingKindTip(kind)} use:tip>{label}</span>
-              {@render badges()}
+              <span data-testid="thinking-label" data-tooltip={thinkingKindTip('summary')} use:tip>{thinkingHeader(tokens)}</span>
+              {#if foreign}<span class="foreign-reasoning" data-tooltip="Made under another account — the next turn won't see it" use:tip>other account</span>{/if}
             </span>
             <svg class="thinking-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
           </summary>
           <div class="sample-reasoning">{@html renderContent(summ.join('\n\n'), 'assistant')}</div>
         </details>
       {:else}
-        <!-- reasoning with no readable text: it exists, and the next turn replays it -->
-        <div class="ri-item reasoning-sealed-empty ri-thinking-head" data-item="reasoning">
-          <span data-testid="thinking-label" data-tooltip={thinkingKindTip(kind)} use:tip>{label} — no visible text</span>
-          {@render badges()}
-        </div>
+        <div class="ri-item reasoning-sealed-empty" data-item="reasoning" data-testid="thinking-label"
+          data-tooltip={it.encrypted_content ? thinkingKindTip('encrypted') : 'encrypted_content' in it ? 'Encrypted reasoning, left out of this copy' : 'Sent by id only — only the account that made it can resolve it'}
+          use:tip>{encryptedNote(tokens, it.encrypted_content ? undefined : 'encrypted_content' in it ? 'not included' : 'id only')}{#if it.encrypted_content && foreign}<span class="foreign-reasoning">other account</span>{/if}</div>
       {/if}
     {:else if t === 'function_call'}
       <div class="ri-item ri-call" data-item="function_call" data-call-id={it.call_id}>
@@ -170,9 +154,7 @@
   .ri-fold[open] > summary { margin-bottom: var(--space-1); }
   .ri-thinking-head { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; }
   .ri .sample-reasoning-block { margin-bottom: 0; }
-  .ri-badge, .ri-thinking-head :global(.foreign-reasoning) { text-transform: none; letter-spacing: 0; font-weight: 500; }
-  .ri-badge { font-size: 0.7rem; border: 1px solid var(--color-border); border-radius: 999px; padding: 0 6px; color: var(--color-text-muted); }
-  .ri-idonly { border-style: dashed; }
+  .ri-thinking-head :global(.foreign-reasoning) { text-transform: none; letter-spacing: 0; font-weight: 500; }
   .foreign-reasoning { font-size: 0.68rem; font-weight: 600; color: var(--color-no); border: 1px solid currentColor; border-radius: 999px; padding: 0 6px; }
   .ri-call, .ri-out { border: 1px solid var(--color-tool-border); border-radius: var(--radius); background: var(--color-tool-bg); padding: 4px 8px; }
   .ri-call code, .ri-out code { font-family: 'Courier New', Courier, monospace; font-size: 0.82rem; overflow-wrap: anywhere; }

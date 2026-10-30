@@ -7,7 +7,7 @@
   // sibling branch instead of "use this".
   import { renderContent, renderPrefilled, splitPrefill } from '$lib/render';
   import { withPrefillGhost } from '$lib/token-prefill';
-  import { thinkingKind, thinkingLabel, thinkingKindTip, itemsThinkingKind, kindLabel } from '$lib/reasoning';
+  import { thinkingKind, thinkingHeader, encryptedNote, thinkingKindTip, itemsThinkingKind } from '$lib/reasoning';
   // Read-only (static export): the row keeps everything that INSPECTS or COPIES
   // (Raw, token probs, copy message/workspace/node id, bookmark, sample select)
   // and drops everything that would generate or rewrite the tree.
@@ -500,7 +500,7 @@
         ontoggle={(e) => (reasoningOpen = (e.currentTarget as HTMLDetailsElement).open)}
       >
         <summary class="sample-reasoning-toggle">
-          <span>{thinkingLabel(sample.reasoning_details, sample.reasoning_tokens)}</span>
+          <span>{thinkingHeader(sample.reasoning_tokens)}</span>
           <svg class="thinking-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
         </summary>
         <div class="sample-reasoning">{@html cSplit ? renderPrefilled(sample.reasoning, cSplit.think, 'assistant') : renderContent(sample.reasoning, 'assistant')}</div>
@@ -781,9 +781,9 @@
       <details class="sample-reasoning-block reasoning-primary" open={thinkingView.open || isLastAssistant || revealOpen}>
         <summary class="sample-reasoning-toggle">
           {#if thinkingKindTip(tKind)}
-            <span data-testid="thinking-label" data-tooltip={thinkingKindTip(tKind)} use:tip>{thinkingLabel(msg.reasoning_details, msg.reasoning_tokens)}</span>
+            <span data-testid="thinking-label" data-tooltip={thinkingKindTip(tKind)} use:tip>{thinkingHeader(msg.reasoning_tokens)}</span>
           {:else}
-            <span data-testid="thinking-label">{thinkingLabel(msg.reasoning_details, msg.reasoning_tokens)}</span>
+            <span data-testid="thinking-label">{thinkingHeader(msg.reasoning_tokens)}</span>
           {/if}
           {#if foreignReasoning}{@render foreignTag()}{/if}
           <svg class="thinking-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
@@ -793,7 +793,7 @@
     {:else if msg.role === 'assistant' && tKind && !isMultiSample && !tokView && !editing && !hasItems}
       <!-- Reasoning that came back with no readable text at all (encrypted only):
            it still exists, and the next turn still replays it. -->
-      <div class="reasoning-sealed-empty" data-testid="thinking-label" data-tooltip={thinkingKindTip(tKind)} use:tip>{thinkingLabel(msg.reasoning_details, msg.reasoning_tokens)} — no visible text{#if foreignReasoning}{@render foreignTag()}{/if}</div>
+      <div class="reasoning-sealed-empty" data-testid="thinking-label" data-tooltip={thinkingKindTip(tKind)} use:tip>{encryptedNote(msg.reasoning_tokens)}{#if foreignReasoning}{@render foreignTag()}{/if}</div>
     {/if}
     {#if isMultiSample}
       {@const completedCount = msg.samples ? msg.samples.filter((x) => x && x.content).length : 0}
@@ -887,7 +887,7 @@
         <!-- Closed-model thinking: what the next turn replays is the provider's
              payload, not this text — so it can be kept or dropped, not edited. -->
         <div class="edit-field-label edit-sealed-head">
-          <span>{kindLabel(sealedKind, msg.reasoning_tokens)}</span>
+          <span>{thinkingHeader(msg.reasoning_tokens)}</span>
           <button
             class="edit-drop-thinking"
             class:dropped={editDropThinking}
@@ -900,7 +900,7 @@
         {#if editDropThinking}
           <div class="edit-sealed-text dropped" data-testid="edit-thinking-dropped">dropped</div>
         {:else}
-          <div class="edit-sealed-text" data-testid="edit-thinking-locked">{msg.reasoning || '(encrypted — no visible text)'}</div>
+          <div class="edit-sealed-text" data-testid="edit-thinking-locked">{msg.reasoning || encryptedNote(msg.reasoning_tokens)}</div>
         {/if}
         <div class="edit-field-label">Response</div>
       {:else if editHasReasoning}

@@ -232,8 +232,9 @@ OpenAI Responses-API call, `tinkerscope import --responses-call FILE` makes a wo
 whose thread holds the call's items as they were sent. Rows render from those items:
 screenshots as thumbnails (click to enlarge), reasoning as an ordinary **Thinking** fold
 (the provider's summary; it follows the sidebar's Thinking blocks setting like any turn,
-and an edit can only keep or drop it) with an *encrypted* or *id only* badge (id-only = the agent's scaffold replayed it by reference; only its own account
-can resolve that), and the *other account* pill when the encrypted reasoning was made
+and an edit can only keep or drop it), or — with no summary — a small *encrypted (N
+tokens)* line (*encrypted (id only)* = the agent's scaffold replayed it by reference; only
+its own account can resolve that), and the *other account* pill when the encrypted reasoning was made
 under another key, so the model won't see it. Sending there uses OpenRouter's Responses
 API with those items unchanged. The recorded system message is the thread's first row
 and edits like a first message: a sibling thread under the edited prompt with the
@@ -286,10 +287,10 @@ mean re-clicking each fold. Folds you clicked keep their own state until you fli
 back. Browser preference (like Token probs): remembered locally, not part of the
 workspace, and a reader of a published site sets their own.
 
-**"Is that its real chain of thought?"** Not on closed models. The fold's header
-says what it is: **Thinking · summary** — a summary the provider wrote (OpenAI);
-**signed** — text the provider signed (Anthropic); **encrypted** — no readable
-text came back at all. The token count next to it is the hidden reasoning's real
+**"Is that its real chain of thought?"** Not on closed models. Hovering the fold's
+**Thinking** header says what it is: a summary the provider wrote (OpenAI) or text
+the provider signed (Anthropic); a small *encrypted (N tokens)* line means no
+readable text came back at all. The token count is the hidden reasoning's real
 length (a 1,000-token reasoning can have a three-line summary). The real
 reasoning comes back encrypted, and tinkerscope hands it to the model on the next
 turn, so a follow-up question sees the model's earlier thinking. That's why

@@ -203,7 +203,7 @@ mark.hl-mark.hl-join-r { padding-right: 0; border-top-right-radius: 0; border-bo
 .edit-sealed-text { max-height: 8em; overflow-y: auto; padding: var(--space-2) var(--space-3); border: 1px dashed var(--color-border); border-radius: var(--radius); color: var(--color-text-secondary); font-size: 0.8rem; line-height: 1.5; white-space: pre-wrap; }
 .edit-sealed-text.dropped { color: var(--color-text-muted); font-style: italic; text-decoration: none; }
 /* Reasoning that exists but has no visible text (encrypted only). */
-.reasoning-sealed-empty { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); padding: var(--space-1) 0; margin-bottom: var(--space-2); }
+.reasoning-sealed-empty { font-size: 0.75rem; color: var(--color-text-muted); padding: var(--space-1) 0; margin-bottom: var(--space-2); display: flex; align-items: center; gap: 6px; }
 /* Thread-system editor (root user rows): dimmer than the message box, like the CoT one. */
 .edit-system { border-color: var(--color-border); background: var(--color-system-bg); color: var(--color-text-secondary); font-size: 0.8rem; font-family: var(--font-mono); }
 .edit-system:focus { border-color: var(--color-accent); }

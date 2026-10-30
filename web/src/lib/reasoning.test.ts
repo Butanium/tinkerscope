@@ -2,7 +2,7 @@
 // reasoning payload — run with Node's TS type-stripping:
 //   node web/src/lib/reasoning.test.ts
 
-import { thinkingKind, isSealed, thinkingLabel, itemsThinkingKind } from './reasoning.ts';
+import { thinkingKind, isSealed, thinkingHeader, encryptedNote, itemsThinkingKind } from './reasoning.ts';
 import { foldAssistant, editAssistant, editedItems, ancestryMessages, editUserForkCopy, activePath, type ConvTree } from './tree.ts';
 import type { ReasoningDetail } from './types.ts';
 
@@ -43,8 +43,10 @@ test('kinds', () => {
 });
 
 test('label', () => {
-  eq(thinkingLabel(LUNA, 1234), 'Thinking · summary · 1,234 tokens');
-  eq(thinkingLabel(undefined), 'Thinking');
+  eq(thinkingHeader(1234), 'Thinking · 1,234 tokens');
+  eq(thinkingHeader(undefined), 'Thinking');
+  eq(encryptedNote(103), 'encrypted (103 tokens)');
+  eq(encryptedNote(undefined, 'id only'), 'encrypted (id only)');
 });
 
 function lunaTree(): { t: ConvTree; aid: string } {

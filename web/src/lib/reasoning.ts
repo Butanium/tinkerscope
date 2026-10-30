@@ -28,9 +28,20 @@ export function isSealed(details: ReasoningDetail[] | undefined): boolean {
   return thinkingKind(details) != null;
 }
 
-/** "Thinking · summary · 1,234 tokens" — the block's header text. */
-export function thinkingLabel(details: ReasoningDetail[] | undefined, tokens?: number): string {
-  return kindLabel(thinkingKind(details), tokens);
+function tokensText(tokens?: number): string {
+  return `${tokens!.toLocaleString('en-US')} token${tokens === 1 ? '' : 's'}`;
+}
+
+/** "Thinking · 1,234 tokens" — a thinking block's header. What KIND of text it
+ *  is (a provider summary, signed text) is the hover tip, not header text. */
+export function thinkingHeader(tokens?: number): string {
+  return tokens ? `Thinking · ${tokensText(tokens)}` : 'Thinking';
+}
+
+/** "encrypted (103 tokens)" — reasoning with no readable text at all. */
+export function encryptedNote(tokens?: number, detail?: string): string {
+  const inner = [tokens ? tokensText(tokens) : '', detail ?? ''].filter(Boolean).join(', ');
+  return inner ? `encrypted (${inner})` : 'encrypted';
 }
 
 /** One-line hover text for the kind (null kind ⇒ no tooltip). */
@@ -50,12 +61,4 @@ export function itemsThinkingKind(items: ResponsesItem[] | undefined): ThinkingK
   if (!rs.length) return null;
   if (rs.some((it) => (it.summary ?? []).some((x: { text?: string }) => x?.text))) return 'summary';
   return 'encrypted';
-}
-
-/** "Thinking · summary · 1,234 tokens" for a known kind (the items twin of thinkingLabel). */
-export function kindLabel(kind: ThinkingKind | null, tokens?: number): string {
-  const parts = ['Thinking'];
-  if (kind) parts.push(kind);
-  if (tokens) parts.push(`${tokens.toLocaleString('en-US')} token${tokens === 1 ? '' : 's'}`);
-  return parts.join(' · ');
 }

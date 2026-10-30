@@ -469,10 +469,10 @@ codex plugin add tinkerscope@tinkerscope</pre>
         set independently by whoever reads a published site.
       </p>
       <p class="help-note">
-        Closed models don't show the reasoning they ran on. The fold's header says what you're reading:
-        <b>Thinking · summary</b> is the provider's summary of it (OpenAI), <b>signed</b> is text the
-        provider signed (Anthropic), <b>encrypted</b> means there's no readable text at all; the token
-        count is the hidden reasoning's real length. The reasoning itself comes back encrypted and is
+        Closed models don't show the reasoning they ran on. Hover the <b>Thinking</b> header for what you're
+        reading: the provider's summary (OpenAI) or text the provider signed (Anthropic); a small
+        <i>encrypted (N tokens)</i> means no readable text came back; the token count is the hidden
+        reasoning's real length. The reasoning itself comes back encrypted and is
         handed to the model on the next turn, so it remembers its earlier thinking. That's also why
         <Icon name="edit" /> on such a turn can't rewrite the thinking — only <b>drop thinking</b>, which
         forks the turn without it.
@@ -602,8 +602,8 @@ codex plugin add tinkerscope@tinkerscope</pre>
       <p class="help-note">
         A workspace imported from a recorded agent call (<code>tinkerscope import --responses-call</code>)
         shows each turn exactly as the agent saw or produced it: screenshots as thumbnails (click to
-        enlarge), reasoning as a normal Thinking fold (the summary; an edit can only keep or drop it) with
-        encrypted / <b>id only</b> badges, calls and their outputs. The recorded system message is the
+        enlarge), reasoning as a normal Thinking fold (the summary; an edit can only keep or drop it) or a small
+        <i>encrypted (N tokens)</i> when there's no summary, calls and their outputs. The recorded system message is the
         thread's first row and edits like a first message: a new thread under the edited prompt, the
         conversation copied below it and its first reply regenerated (Shift: copy all, no reply). Sends there go
         through OpenRouter's Responses API with those items unchanged. A computer call is answered with a
