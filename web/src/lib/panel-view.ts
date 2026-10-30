@@ -80,6 +80,7 @@ export function buildPanelView(tree: ConvTree, run: PanelRun, prefill?: string):
     tool_calls: n.tool_calls,
     tool_call_id: n.tool_call_id,
     name: n.name,
+    handler: n.handler,
     items: n.items,
     has_items: n.has_items,
     finish_reason: n.finish_reason,

@@ -149,6 +149,9 @@ export type Health = {
    *  while several sessions are live — can't happen for this app, which always
    *  sends one). Keys the `last_session` pref; shown on the topbar chip. */
   session?: string | null;
+  /** `--allow-tool-code`: python tool handlers run on this server (else they
+   *  behave like manual tools — the tools editor says so). */
+  tool_code?: boolean;
   available?: boolean;
   supported_models?: string[];
   error?: string | null;
@@ -176,6 +179,20 @@ export type ToolDef = {
   function?: { name: string; description?: string; parameters?: Record<string, unknown> };
   [k: string]: unknown;
 };
+
+/** How a tool's calls are answered (api/tool_handlers.py): by hand (manual —
+ *  also what a missing entry means), a fixed text, or python code (the BODY of
+ *  `handler(name, args, call_id, context)`; needs `--allow-tool-code`).
+ *  `auto_continue: false` = answer, but don't sample the next turn. */
+export type ToolHandler = {
+  mode: 'manual' | 'static' | 'python';
+  text?: string;
+  code?: string;
+  auto_continue?: boolean;
+  timeout?: number;
+};
+/** A workspace's handlers, keyed by tool name (lib/tools-def.ts toolName). */
+export type ToolHandlers = Record<string, ToolHandler>;
 
 /** A verbatim OpenAI Responses-API item (message / reasoning / function_call /
  *  function_call_output / computer_call / computer_call_output / …). */
@@ -329,6 +346,10 @@ export type ChatRequest = {
   tools?: ToolDef[] | null;
   /** The workspace's wire setting (Responses API opt-in + its recorded reasoning). */
   wire?: WireSetting | null;
+  /** The workspace's tool handlers + step cap: the server answers the calls they
+   *  cover and samples on (each step its own chat). */
+  tool_handlers?: ToolHandlers | null;
+  max_tool_steps?: number | null;
   /** The THREAD's system prompt, which overrides the global part server-side
    *  (thread if non-empty, else global). Tri-state: absent/null =
    *  inherit the panel's mirrored thread system; '' = explicitly none; the
@@ -405,7 +426,13 @@ export type ConvFields = {
 
 /** set_meta's payload: any subset of the meta fields (+ name). Field-wise LWW
  *  server-side, except panel_seq (monotone max) and seen_panels (union). */
-export type SetMetaFields = Partial<ConvFields> & { name?: string; tools?: ToolDef[] | null; wire?: WireSetting | null };
+export type SetMetaFields = Partial<ConvFields> & {
+  name?: string;
+  tools?: ToolDef[] | null;
+  wire?: WireSetting | null;
+  tool_handlers?: ToolHandlers | null;
+  tool_max_steps?: number | null;
+};
 
 /** One workspace mutation on the wire — POST /api/workspaces/{id}/ops and the
  *  bus `ops` echo alike (docs/HANDOFF_SERVER_AUTHORITY.md §4.1). Panel-level ops
@@ -506,6 +533,10 @@ export type Workspace = {
   tools?: ToolDef[] | null;
   /** Wire setting (Responses API) — see WireSetting. */
   wire?: WireSetting | null;
+  /** How each tool's calls are answered (absent/null = all by hand) + the cap on
+   *  auto-answered rounds per fire (null = the server default, 5). */
+  tool_handlers?: ToolHandlers | null;
+  tool_max_steps?: number | null;
   /** Per-panel branch trees, keyed by panel id ('primary','compare','p-2',…). */
   trees: Record<string, ConvTree>;
   /** Legacy 2-panel shape — present only on un-migrated saved workspaces; the
@@ -594,6 +625,8 @@ export type ViewMessage = {
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   name?: string;
+  /** Tool rows a server-side handler answered (the auto-answered badge). */
+  handler?: 'static' | 'python';
   /** Verbatim Responses items (inline on a fresh fold) / their blob flag. */
   items?: ResponsesItem[];
   has_items?: boolean;

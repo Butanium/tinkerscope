@@ -45,6 +45,7 @@ from typing import Any, Callable, Iterable
 
 import yaml
 
+from .api import tool_handlers
 from .api.state import DEFAULT_PANEL_ID
 
 VERSION = 1
@@ -394,6 +395,12 @@ def apply_pack(pack: Pack, *, force: bool = False, reseed: bool = False, on_conf
             system_enabled=body.get("system_enabled"),
             tools=body.get("tools") or None,
             wire=body.get("wire") or None,
+            # python handlers never travel (see _prepare_workspace_body); a hand-made
+            # pack carrying one gets it dropped here too
+            tool_handlers=tool_handlers.check_tool_handlers(
+                {k: v for k, v in (body.get("tool_handlers") or {}).items()
+                 if isinstance(v, dict) and v.get("mode") != "python"}),
+            tool_max_steps=body.get("tool_max_steps"),
             trees=body.get("trees") or {},
             panels=body.get("panels") or [],
             reduced_panels=body.get("reduced_panels") or [],
@@ -543,8 +550,15 @@ def _prepare_workspace_body(
       whether a `token_logprobs` they are holding is a list or a string — in a pack it is
       always the `_json` one, everywhere else always the list. `_restore_logprobs`
       converts back on apply, mirrored in the browser by lib/pack-install.
-    - **drop the stale presence flags** (`upsert`'s split re-derives them)."""
+    - **drop the stale presence flags** (`upsert`'s split re-derives them);
+    - **drop python tool handlers** (static ones travel): a pack is installed from a
+      link, and code that runs on the installer's machine the next time a model calls
+      that tool must not ride along with one."""
     out = json.loads(json.dumps(body))  # deep copy
+    handlers = {k: v for k, v in (out.get("tool_handlers") or {}).items()
+                if isinstance(v, dict) and v.get("mode") != "python"}
+    if out.get("tool_handlers"):
+        out["tool_handlers"] = handlers or None
     for tree in (out.get("trees") or {}).values():
         if not isinstance(tree, dict):
             continue

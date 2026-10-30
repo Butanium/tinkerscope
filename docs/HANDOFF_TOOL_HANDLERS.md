@@ -1,4 +1,4 @@
-# Handoff — executable tool handlers (written 2026-10-30, not started)
+# Handoff — executable tool handlers (written 2026-10-30; SHIPPED 2026-10-30 — as-built: `api/tool_handlers.py` docstring, `ENGINEERING_LOGS.md` 2026-10-30, `docs/API_CONTRACT.md` "Auto-answered tool calls")
 
 Clément, verbatim: "I don't want to have to type the confirmation at every call of send
 back to chat … able to both change the tools and what they do from the UI with custom

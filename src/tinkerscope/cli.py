@@ -40,6 +40,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import quote
 
 import httpx
 import typer
@@ -271,8 +272,8 @@ def _load_tools_file(path: Optional[str]) -> Optional[list]:
         raw = raw.get("tools", [raw]) if "tools" in raw or "function" in raw or "name" in raw else [raw]
     if not isinstance(raw, list):
         _die("--tools-file must hold a list of tool definitions")
-    tools = [t if isinstance(t, dict) and isinstance(t.get("function"), dict) else {"type": "function", "function": t}
-             for t in raw]
+    tools = [t if isinstance(t, dict) and (isinstance(t.get("function"), dict) or isinstance(t.get("type"), str))
+             else {"type": "function", "function": t} for t in raw]
     try:
         return _check_tools(tools) or []
     except ValueError as e:
@@ -413,7 +414,7 @@ def _fmt_tool_calls(calls: Optional[list], tag: str, mark: str, width: int, full
 
 def _fmt_turn(role: str, content: str, reasoning: Optional[str], width: int, full: bool, mark: str = "",
               tool_calls: Optional[list] = None, tool_call_id: Optional[str] = None,
-              name: Optional[str] = None) -> str:
+              name: Optional[str] = None, handler: Optional[str] = None) -> str:
     """Render one transcript turn.
 
     `full`  → COMPLETE content AND chain-of-thought, line breaks preserved. The CoT
@@ -423,7 +424,7 @@ def _fmt_turn(role: str, content: str, reasoning: Optional[str], width: int, ful
               exists and reach for `--full` to read it)."""
     tag = _ROLE_TAG.get(role or "", role or "?")
     if role == "tool":
-        mark = f"{mark} ←{name or '?'} {tool_call_id or '?'}"
+        mark = f"{mark} ←{name or '?'} {tool_call_id or '?'}" + (f" ·auto:{handler}" if handler else "")
     content = content or ""
     reasoning = (reasoning or "").strip()
     calls = _fmt_tool_calls(tool_calls, tag, mark, width, full)
@@ -456,14 +457,14 @@ def _fmt_node(tree: dict, node: dict, width: int, full: bool = False) -> str:
         except ValueError:
             mark = f"·?/{len(sibs)}"
     return _fmt_turn(node.get("role", ""), node.get("content", ""), node.get("reasoning"), width, full, mark,
-                     node.get("tool_calls"), node.get("tool_call_id"), node.get("name"))
+                     node.get("tool_calls"), node.get("tool_call_id"), node.get("name"), node.get("handler"))
 
 
 def _fmt_msg(msg: dict, width: int, full: bool = False) -> str:
     """One linear message (a flattened active path carries no sibling info, so
     no fork annotation)."""
     return _fmt_turn(msg.get("role", ""), msg.get("content", ""), msg.get("reasoning"), width, full, "",
-                     msg.get("tool_calls"), msg.get("tool_call_id"), msg.get("name"))
+                     msg.get("tool_calls"), msg.get("tool_call_id"), msg.get("name"), msg.get("handler"))
 
 
 _TAG_RE = re.compile(r"<tag>\s*([A-Za-z_]+)\s*</tag>", re.IGNORECASE)
@@ -761,6 +762,11 @@ class _StreamResult:
         # Either one exits _EXIT_STOPPED instead of 1.
         self.cancelled: bool = False
         self.interrupted: bool = False
+        # The auto-answer loop (tool handlers): each round's `tool_results`
+        # payload, the step chats' samples (tagged step/branch), their errors.
+        self.tool_rounds: list[dict] = []
+        self.step_samples: list[dict] = []
+        self.step_errors: list[str] = []
 
 
 # Exit code when a person stopped the sampling (browser Stop or Ctrl+C) — the
@@ -1000,13 +1006,16 @@ def _done_lines(body: dict, done_data: dict) -> list[str]:
     follow-up `continue --node` / `node` never needs the workspace JSON."""
     folded = done_data.get("folded") or []
     parent = body.get("parent_node")
+    steps = done_data.get("tool_steps")
+    tail = [f"[auto] {steps} step(s) sampled after tool handlers answered"
+            + (" (stopped)" if done_data.get("cancelled") else "")] if steps else []
     if not folded or not parent:
-        return ["[done]"]
+        return ["[done]", *tail]
     ws, panel = body.get("workspace_id"), body.get("panel", "")
     lines = [f"[done] saved under turn {_qualified_handle(ws, panel, parent)}"]
     for m in sorted(folded, key=lambda m: m.get("sample_index", 0)):
         lines.append(f"  sample {m.get('sample_index')} → {_qualified_handle(ws, panel, m['node_id'])}")
-    return lines
+    return lines + tail
 
 
 def _json_done(body: dict, done_data: dict) -> dict:
@@ -1183,6 +1192,22 @@ def _stream_chat(
                             pass
                         fail(timeout_msg() if timed_out.is_set() else f"{err}")
                         return
+                    if ev.event in ("tool_results", "step_start", "step_done", "step_error"):
+                        # The auto-answer loop (tool handlers): one round of results,
+                        # then each step chat's lifecycle. The ROOT's own `done`
+                        # still closes the stream.
+                        d = json.loads(ev.data) if ev.data else {}
+                        if ev.event == "tool_results":
+                            st.tool_rounds.append(d)
+                        elif ev.event == "step_error":
+                            st.step_errors.append(f"step {d.get('step')}: {d.get('error')}")
+                        if json_out:
+                            emit_json({"event": ev.event, **d})
+                        else:
+                            lines = _fmt_auto_event(ev.event, d, body)
+                            if lines:
+                                emit_block(*lines)
+                        continue
                     if ev.event == "delta":
                         # Token chunk (n==1). Only streamed inline for single chat;
                         # in block/JSON mode we ignore deltas and print the whole
@@ -1190,6 +1215,8 @@ def _stream_chat(
                         if json_out or not stream_inline or not ev.data:
                             continue
                         d = json.loads(ev.data)
+                        if d.get("step"):
+                            continue  # an auto-answer step prints whole, from its `message`
                         idx = d.get("sample_index", 0)
                         kind = d.get("kind", "content")
                         piece = d.get("delta", "")
@@ -1219,6 +1246,18 @@ def _stream_chat(
                         continue
                     payload = json.loads(ev.data)
                     idx = payload.get("sample_index")
+                    if payload.get("step"):
+                        # a step chat's turn: not one of THIS chat's n samples
+                        if not payload.get("error"):
+                            st.step_samples.append(payload)
+                        if json_out:
+                            emit_json({"event": "sample", **payload})
+                        elif payload.get("error"):
+                            emit_block(f"--- step {payload['step']} · branch {payload.get('branch')} ERROR ---",
+                                       payload["error"])
+                        else:
+                            emit_block(*_fmt_step_sample(payload))
+                        continue
                     if payload.get("error"):
                         n_err += 1
                     else:
@@ -1284,6 +1323,43 @@ def _stream_chat(
         result.ok = True
 
 
+def _fmt_auto_event(kind: str, d: dict, body: dict) -> list[str]:
+    """Human lines for the auto-answer loop's stream events."""
+    tag = f"auto step {d.get('step')} · branch {d.get('branch')}"
+    if kind == "tool_results":
+        out = []
+        for r in d.get("results") or []:
+            where = (f" → {_qualified_handle(body.get('workspace_id'), body.get('panel', ''), r['node_id'])}"
+                     if r.get("node_id") else "")
+            out.append(f"[{tag}] ←{r.get('name') or '?'} {r.get('tool_call_id')} ({r.get('handler')}){where}")
+            out.append(_indent(r.get("content") or "", "   "))
+        if d.get("stopped"):
+            out.append(f"[{tag}] not auto-answered: {d['stopped']}")
+            if d.get("logs"):
+                out.append(_indent(d["logs"].rstrip(), "   │ "))
+        return out
+    if kind == "step_error":
+        return [f"[{tag}] ERROR {d.get('error')}"]
+    if kind == "step_done":
+        folded = d.get("folded") or []
+        if folded and body.get("workspace_id"):
+            return [f"[{tag}] saved → {_qualified_handle(body['workspace_id'], body.get('panel', ''), m['node_id'])}"
+                    for m in folded]
+    return []
+
+
+def _fmt_step_sample(p: dict) -> list[str]:
+    parts = [f"--- step {p.get('step')} · branch {p.get('branch')} ---"]
+    if p.get("reasoning"):
+        parts.append(f"[thinking] {p['reasoning']}")
+    if p.get("content") or not p.get("tool_calls"):
+        parts.append(p.get("content", ""))
+    parts.extend(ln.strip() for ln in _fmt_tool_calls(p.get("tool_calls"), "asst", "", 10**9, True))
+    if p.get("finish_reason"):
+        parts.append(f"[finish_reason={p['finish_reason']}]")
+    return parts
+
+
 def _call_params(
     n: int,
     temperature: Optional[float],
@@ -1319,6 +1395,32 @@ def _effort_option():
              "default (the model's own) | none | minimal | low | medium | high | xhigh | max; "
              "omit = inherit the global param",
     )
+
+
+def _auto_tools_option(default: bool = True):
+    return typer.Option(
+        default, "--auto-tools/--no-auto-tools",
+        help="answer tool calls with the workspace's tool handlers (static / python — see `tinkerscope tools`) "
+             "and keep sampling, up to --max-tool-steps rounds" + ("" if default else " (off by default here)"),
+    )
+
+
+def _max_tool_steps_option():
+    return typer.Option(None, "--max-tool-steps",
+                        help="cap on auto-answered rounds for this call; omit = the workspace's (default 5)")
+
+
+def _with_handlers(body: dict, ws: Optional[dict], auto: bool, max_steps: Optional[int]) -> None:
+    """The workspace's tool handlers ride on a fire, like its tools: the SERVER
+    answers the calls they cover and samples on (routes/chat.py's loop)."""
+    if not auto:
+        body["auto_tools"] = False
+        return
+    if (ws or {}).get("tool_handlers"):
+        body["tool_handlers"] = ws["tool_handlers"]
+    steps = max_steps if max_steps is not None else (ws or {}).get("tool_max_steps")
+    if steps is not None:
+        body["max_tool_steps"] = steps
 
 
 def _check_effort(effort: Optional[str]) -> Optional[str]:
@@ -1786,6 +1888,7 @@ def _fire_send(
     effort: Optional[str] = None,
     tools: Optional[list] = None,
     wire: Optional[dict] = None,
+    extra: Optional[dict] = None,
 ) -> list[tuple[str, dict, _StreamResult]]:
     """Fire one fresh-history chat per target panel, concurrently; join and return
     [(panel_id, panel, result)] with each result's collected samples. The
@@ -1820,6 +1923,7 @@ def _fire_send(
             body["tools"] = tools
         if wire:
             body["wire"] = wire
+        body.update(extra or {})
         res = _StreamResult()
         if conv_id and p["id"] in parents:
             body["workspace_id"] = conv_id
@@ -1866,6 +1970,8 @@ def cmd_send(
     system_file: Optional[str] = typer.Option(None, "--system-file", help="read the thread system prompt from a file"),
     no_system: bool = typer.Option(False, "--no-system", help="fire with NO system prompt at all"),
     tools_file: Optional[str] = typer.Option(None, "--tools-file", help="tool definitions for this call instead of the workspace's (JSON; [] = none)"),
+    auto_tools: bool = _auto_tools_option(),
+    max_tool_steps: Optional[int] = _max_tool_steps_option(),
     prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the models extend; raw `<think>` ok"),
     file: Optional[str] = typer.Option(None, "--file", help="read the user message from a file (a probe template — mutually exclusive with the positional prompt)"),
     prefill_file: Optional[str] = typer.Option(None, "--prefill-file", help="read the assistant prefill from a file (mutually exclusive with --prefill)"),
@@ -1915,6 +2021,8 @@ def cmd_send(
     if tools is None:
         tools = ws_body.get("tools") or None
     wire = ws_body.get("wire") or None
+    extra: dict = {}
+    _with_handlers(extra, ws_body, auto_tools, max_tool_steps)
     plan_out = sys.stderr if json_out else sys.stdout  # JSON mode: keep stdout pure JSONL
 
     print(f"send (new thread)  n={n} temp={_fmt_param(temperature)}  →  {len(targets)} panel(s)", file=plan_out)
@@ -1928,7 +2036,8 @@ def cmd_send(
 
     results = _fire_send(targets, prompt, prefill, n, temperature, max_tokens,
                          think, system, show_logprobs, json_out,
-                         thread_system=thread_system, conv_id=conv_id, effort=effort, tools=tools, wire=wire)
+                         thread_system=thread_system, conv_id=conv_id, effort=effort, tools=tools, wire=wire,
+                         extra=extra)
     if first_token:
         _print_first_token_tables(results, json_out)
     failures, code = _fire_failures(results, lambda pid, p: f"{pid} ({_short_run(p.get('run_id'))})")
@@ -2137,6 +2246,8 @@ def cmd_continue(
     system_file: Optional[str] = typer.Option(None, "--system-file", help="read that system prompt from a file"),
     no_system: bool = typer.Option(False, "--no-system", help="fire with NO system prompt at all (thread part included)"),
     tools_file: Optional[str] = typer.Option(None, "--tools-file", help="tool definitions for this call instead of the workspace's (JSON; [] = none)"),
+    auto_tools: bool = _auto_tools_option(),
+    max_tool_steps: Optional[int] = _max_tool_steps_option(),
     no_persist: bool = typer.Option(False, "--no-persist", help="sample WITHOUT writing anything: no turns added, no fold, nothing on the bus — samples go to stdout only (fidelity checks, ablations)"),
     file: Optional[str] = typer.Option(None, "--file", help="read the user message from a file (mutually exclusive with the positional prompt)"),
     prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the model extends — a thinking opener ('Hmm,') or its own truncated CoT; raw `<think>` ok"),
@@ -2413,6 +2524,7 @@ def cmd_continue(
             body["workspace_id"] = c["id"]
             if c.get("wire"):
                 body["wire"] = c["wire"]
+        _with_handlers(body, c if fixed_ancestry is None else None, auto_tools, max_tool_steps)
         if no_persist:
             # a pure read, like `probe`: no panel routing, no bus events, no fold
             body["broadcast"] = False
@@ -4089,6 +4201,8 @@ def cmd_replay(
     system_file: Optional[str] = typer.Option(None, "--system-file", help="read that system prompt from a file"),
     no_system: bool = typer.Option(False, "--no-system", help="no system prompt at all (thread part included)"),
     tools_file: Optional[str] = typer.Option(None, "--tools-file", help="tool definitions instead of the workspace's (JSON; [] = none)"),
+    auto_tools: bool = _auto_tools_option(default=False),
+    max_tool_steps: Optional[int] = _max_tool_steps_option(),
     concurrency: int = typer.Option(4, "--concurrency", help="turns sampled at once"),
     json_out: bool = typer.Option(False, "--json", help="JSONL: one row per sample, the real turn alongside"),
     width: int = typer.Option(140, "--width", help="human output: per-turn truncation width"),
@@ -4153,6 +4267,7 @@ def cmd_replay(
         body["workspace_id"] = c["id"]
         if c.get("wire"):
             body["wire"] = c["wire"]
+        _with_handlers(body, c, auto_tools, max_tool_steps)
         _bind_panel_model(body, binding)
         res = _StreamResult()
         _stream_chat(body, None, threading.Lock(), res, False, False, True, io.StringIO())
@@ -4191,6 +4306,29 @@ def cmd_replay(
                     print(f"  sample {smp.get('sample_index')} [{kind}] {_oneline(smp.get('content') or '', width)}", flush=True)
                     for ln in _fmt_tool_calls(smp.get("tool_calls"), "smp", "", width, False):
                         print("  " + ln, flush=True)
+            # --auto-tools: what the handlers answered and the turns sampled after
+            for rnd in res.tool_rounds:
+                if json_out:
+                    print(json.dumps({"turn": t, "node": real["id"], "event": "tool_results", **rnd},
+                                     ensure_ascii=False, default=str), flush=True)
+                else:
+                    for r in rnd.get("results") or []:
+                        print(f"    auto step {rnd.get('step')} · sample {rnd.get('branch')} ←{r.get('name')} "
+                              f"({r.get('handler')}) {_oneline(r.get('content') or '', width)}", flush=True)
+                    if rnd.get("stopped"):
+                        print(f"    auto step {rnd.get('step')} · sample {rnd.get('branch')}: "
+                              f"not auto-answered: {rnd['stopped']}", flush=True)
+            for smp in res.step_samples:
+                kind = _turn_kind(smp.get("content"), smp.get("tool_calls"))
+                if json_out:
+                    print(json.dumps({"turn": t, "node": real["id"], "step": smp.get("step"), "branch": smp.get("branch"),
+                                      "sample_kind": kind, "sample": _turn_record(smp)},
+                                     ensure_ascii=False, default=str), flush=True)
+                else:
+                    print(f"    step {smp.get('step')} · sample {smp.get('branch')} [{kind}] "
+                          f"{_oneline(smp.get('content') or '', width)}", flush=True)
+            for err in res.step_errors:
+                print(f"  (turn {t}: {err})", file=plan_out, flush=True)
             if res.error:
                 print(f"  (turn {t}: {res.error})", file=plan_out, flush=True)
     print(f"\nkind agreement: {agree}/{total}", file=plan_out)
@@ -4366,7 +4504,7 @@ def _responses_export(c: dict, panel: Optional[str], thread: Optional[int]) -> d
 
 # ---------- import / export: a workspace as a file ----------
 
-_IMPORT_KEYS = ("name", "system_prompt", "system_enabled", "tools", "wire", "trees", "panels",
+_IMPORT_KEYS = ("name", "system_prompt", "system_enabled", "tools", "wire", "tool_handlers", "tool_max_steps", "trees", "panels",
                 "reduced_panels", "send_targets", "seen_panels", "panel_seq")
 _HEAVY_FLAGS = {"has_token_logprobs": "token_logprobs", "has_raw_meta": "raw_meta", "has_items": "items",
                 "has_items_recorded": "items_recorded"}
@@ -4389,6 +4527,7 @@ def cmd_import(
     responses_call: bool = typer.Option(False, "--responses-call", help="FILE is one recorded Responses-API call ({input: {input, model, tools, reasoning}, output}) — imported VERBATIM for exact replay"),
     include_output: bool = typer.Option(False, "--include-output", help="--responses-call: append the call's own output as the last assistant turn"),
     calls_dir: Optional[str] = typer.Option(None, "--calls-dir", help="--responses-call: where to look for the calls that PRODUCED id-only reasoning items, to recover their encrypted blobs (default: the file's directory)"),
+    tool_set: Optional[str] = typer.Option(None, "--tool-set", help="apply this named tool set's HANDLERS (+ step cap); the file's own tool definitions stay as they are (a set's tools are used only when the file has none)"),
 ) -> None:
     """Create a workspace from a file. A workspace body is created as-is (heavy
     node data restores only if it was exported with --blobs); a chat transcript
@@ -4459,6 +4598,17 @@ def cmd_import(
     tools = _load_tools_file(tools_file)
     if tools is not None:
         body["tools"] = tools or None
+    if tool_set is not None:
+        ts = _tool_set(tool_set)
+        body["tool_handlers"] = ts.get("tool_handlers")
+        body["tool_max_steps"] = ts.get("tool_max_steps")
+        if not body.get("tools"):
+            body["tools"] = ts.get("tools")
+        names = {_def_name(t) for t in body.get("tools") or []}
+        auto = [k for k, v in (ts.get("tool_handlers") or {}).items() if v.get("mode") != "manual"]
+        print(f"tool set {tool_set!r}: handlers for {', '.join(k for k in auto if k in names) or 'none of these tools'}"
+              + (f"; unused: {', '.join(k for k in auto if k not in names)}" if any(k not in names for k in auto) else ""),
+              file=sys.stderr)
     body["name"] = name or body.get("name") or f.stem
     if ws_id is not None:
         body["id"] = ws_id
@@ -4657,13 +4807,298 @@ def cmd_serve(
         False, "--multi-user",
         help="several people on this one instance: each browser (and each `tinkerscope --session <id>`) gets its OWN sidebar — panel selection, open workspace, sampling params, running — while workspaces, highlights and pins stay shared; same as TINKERSCOPE_MULTI_USER=1",
     ),
+    allow_tool_code: bool = typer.Option(
+        False, "--allow-tool-code",
+        help="let PYTHON tool handlers run (each call in a subprocess on this machine, with a timeout); off, they behave like manual tools — static handlers always run; same as TINKERSCOPE_ALLOW_TOOL_CODE=1",
+    ),
 ) -> None:
     """Serve the API + web UI for DIRS (bare `tinkerscope <dir>` is shorthand for this)."""
     from .serve import run_server  # lazy: keeps uvicorn off the driver-verb hot path
 
     run_server(dirs or None, host=host, port=port, reload=reload,
                pack=pack, force=force, reseed=reseed, vllm_url=vllm_url,
-               multi_user=multi_user)
+               multi_user=multi_user, allow_tool_code=allow_tool_code)
+
+
+# ---------- Tool definitions + handlers ----------
+
+tools_app = typer.Typer(
+    add_completion=False, invoke_without_command=True,
+    help="A workspace's tools and how their calls are answered: by hand (manual), a fixed "
+         "text (static) or python code (needs a server started with --allow-tool-code).",
+)
+app.add_typer(tools_app, name="tools")
+
+
+def _send_request(method: str, path: str, body: Optional[dict] = None) -> Any:
+    try:
+        with _client() as c:
+            return _check(c.request(method, path, json=body))
+    except httpx.TransportError as e:
+        _conn_die(e)
+
+
+def _tools_workspace(sel: Optional[str]) -> dict:
+    """--ws, else the workspace open in the browser — as a full body."""
+    if sel is not None:
+        return _get(f"/api/workspaces/{_resolve_workspace(sel)['id']}")
+    wid = (_get("/api/state") or {}).get("workspace_id")
+    if not wid:
+        _die("no workspace open in the browser — pass --ws")
+    return _get(f"/api/workspaces/{wid}")
+
+
+def _tool_def(raw: Any) -> dict:
+    """A tool definition as the browser's editor accepts it: anything with a
+    `type` verbatim, a bare `{name, description, parameters}` wrapped."""
+    if not isinstance(raw, dict):
+        _die("a tool definition must be a JSON object")
+    return raw if isinstance(raw.get("type"), str) and raw["type"] else {"type": "function", "function": raw}
+
+
+def _def_name(t: dict) -> str:
+    if t.get("type") != "function":
+        return t.get("type") or "?"
+    return ((t.get("function") or {}).get("name") if isinstance(t.get("function"), dict) else t.get("name")) or "?"
+
+
+def _handler_line(h: Optional[dict]) -> str:
+    h = h or {"mode": "manual"}
+    mode = h.get("mode", "manual")
+    if mode == "static":
+        desc = f"static  {json.dumps(h.get('text') or '', ensure_ascii=False)}"
+    elif mode == "python":
+        n = len((h.get("code") or "").splitlines())
+        desc = f"python  {n} line(s)" + (f", timeout {h['timeout']:g}s" if h.get("timeout") else "")
+    else:
+        desc = "manual"
+    if mode != "manual" and h.get("auto_continue") is False:
+        desc += "  (no auto-continue)"
+    return desc
+
+
+@tools_app.callback()
+def cmd_tools(
+    ctx: typer.Context,
+    ws: Optional[str] = typer.Option(None, "--ws", "--conv", help="workspace (id-prefix/name); default = the open one"),
+    json_out: bool = typer.Option(False, "--json", help="the tools, handlers and step cap as JSON"),
+) -> None:
+    """List the workspace's tools with how each one's calls are answered."""
+    if ctx.invoked_subcommand is not None:
+        return
+    c = _tools_workspace(ws)
+    tools = c.get("tools") or []
+    handlers = c.get("tool_handlers") or {}
+    steps = c.get("tool_max_steps")
+    code_on = bool((_get("/api/health") or {}).get("tool_code"))
+    if json_out:
+        _print_json({"workspace": c.get("id"), "tools": tools, "tool_handlers": handlers or None,
+                     "tool_max_steps": steps, "python_handlers_enabled": code_on})
+        return
+    print(f"{c.get('name')!r} ({(c.get('id') or '')[:8]}) — {len(tools)} tool(s), auto-answer cap "
+          f"{steps if steps is not None else 5} step(s); python handlers "
+          f"{'ON' if code_on else 'OFF on this server (start it with --allow-tool-code)'}")
+    names = [_def_name(t) for t in tools]
+    width = max([len(n) for n in names + list(handlers)] + [4])
+    for n in names:
+        print(f"  {n:<{width}}  {_handler_line(handlers.get(n))}")
+    for n in handlers:
+        if n not in names:
+            print(f"  {n:<{width}}  {_handler_line(handlers[n])}  (no tool by this name)")
+
+
+@tools_app.command("set")
+def cmd_tools_set(
+    name: str = typer.Argument(..., help="the tool's name (a function's name; `computer` for the native computer tool)"),
+    ws: Optional[str] = typer.Option(None, "--ws", "--conv", help="workspace (id-prefix/name); default = the open one"),
+    schema_file: Optional[str] = typer.Option(None, "--schema-file", help="the tool's definition (JSON: OpenAI function, flat Responses function, or a bare {name, description, parameters}); adds or replaces it"),
+    static: Optional[str] = typer.Option(None, "--static", help="answer every call with this text"),
+    static_file: Optional[str] = typer.Option(None, "--static-file", help="answer every call with this file's text"),
+    python_file: Optional[str] = typer.Option(None, "--python-file", help="answer with python: the file is the BODY of handler(name, args, call_id, context) — `return` the result"),
+    manual: bool = typer.Option(False, "--manual", help="answer calls by hand again (drops the handler)"),
+    auto_continue: Optional[bool] = typer.Option(None, "--auto-continue/--no-auto-continue", help="after answering, sample the next turn (default) or stop there"),
+    timeout: Optional[float] = typer.Option(None, "--timeout", help="python: seconds before the handler is killed (default 10)"),
+) -> None:
+    """Add/replace a tool's definition and/or set how its calls are answered."""
+    modes = [x for x in (static is not None or static_file is not None, python_file is not None, manual) if x]
+    if len(modes) > 1 or (static is not None and static_file is not None):
+        _die("pick one of --static / --static-file / --python-file / --manual")
+    c = _tools_workspace(ws)
+    tools = list(c.get("tools") or [])
+    handlers = dict(c.get("tool_handlers") or {})
+    fields: dict = {}
+    if schema_file is not None:
+        f = Path(schema_file)
+        if not f.is_file():
+            _die(f"schema file not found: {schema_file}")
+        try:
+            t = _tool_def(json.loads(f.read_text()))
+        except json.JSONDecodeError as e:
+            _die(f"--schema-file must be JSON: {e}")
+        if _def_name(t) != name:
+            fn = t.get("function") if isinstance(t.get("function"), dict) else t
+            if t.get("type") == "function" and not fn.get("name"):
+                fn["name"] = name
+            else:
+                _die(f"the schema names {_def_name(t)!r}, not {name!r}")
+        idx = next((i for i, x in enumerate(tools) if _def_name(x) == name), None)
+        if idx is None:
+            tools.append(t)
+        else:
+            tools[idx] = t
+        fields["tools"] = tools
+    elif not any(_def_name(x) == name for x in tools):
+        _die(f"no tool named {name!r} in {c.get('name')!r} — pass --schema-file to add it "
+             f"(tools: {', '.join(_def_name(x) for x in tools) or 'none'})")
+    h = dict(handlers.get(name) or {"mode": "manual"})
+    if static is not None or static_file is not None:
+        text = static if static is not None else _arg_or_file(None, static_file, "static text", "--static-file")
+        h = {**h, "mode": "static", "text": text}
+    elif python_file is not None:
+        code = _arg_or_file(None, python_file, "handler code", "--python-file")
+        h = {**h, "mode": "python", "code": code}
+    elif manual:
+        h = {**h, "mode": "manual"}
+    if auto_continue is not None:
+        h["auto_continue"] = auto_continue
+    if timeout is not None:
+        h["timeout"] = timeout
+    if h != (handlers.get(name) or {"mode": "manual"}):
+        handlers[name] = h
+        if h.get("mode") == "manual":
+            handlers.pop(name)  # manual = no handler
+        fields["tool_handlers"] = handlers or None
+    if not fields:
+        _die("nothing to change — pass --schema-file and/or a handler flag")
+    _send_request("PATCH", f"/api/workspaces/{c['id']}", fields)
+    print(f"{name}: {_handler_line(handlers.get(name))}")
+    if h.get("mode") == "python" and not (_get("/api/health") or {}).get("tool_code"):
+        print("note: python handlers are OFF on this server — they behave like manual tools until it is "
+              "restarted with --allow-tool-code", file=sys.stderr)
+
+
+@tools_app.command("rm")
+def cmd_tools_rm(
+    name: str = typer.Argument(..., help="the tool to remove (its definition and its handler)"),
+    ws: Optional[str] = typer.Option(None, "--ws", "--conv", help="workspace (id-prefix/name); default = the open one"),
+) -> None:
+    """Remove a tool from the workspace (definition + handler)."""
+    c = _tools_workspace(ws)
+    tools = [t for t in (c.get("tools") or []) if _def_name(t) != name]
+    handlers = {k: v for k, v in (c.get("tool_handlers") or {}).items() if k != name}
+    if len(tools) == len(c.get("tools") or []) and handlers == (c.get("tool_handlers") or {}):
+        _die(f"no tool named {name!r}")
+    _send_request("PATCH", f"/api/workspaces/{c['id']}", {"tools": tools or None, "tool_handlers": handlers or None})
+    print(f"removed {name}")
+
+
+@tools_app.command("max-steps")
+def cmd_tools_max_steps(
+    n: int = typer.Argument(..., help="auto-answered rounds per fire before the loop stops (0 = never auto-answer)"),
+    ws: Optional[str] = typer.Option(None, "--ws", "--conv", help="workspace (id-prefix/name); default = the open one"),
+) -> None:
+    """Set the workspace's cap on auto-answered rounds per fire (default 5)."""
+    c = _tools_workspace(ws)
+    _send_request("PATCH", f"/api/workspaces/{c['id']}", {"tool_max_steps": n})
+    print(f"auto-answer cap: {n} step(s)")
+
+
+@tools_app.command("test")
+def cmd_tools_test(
+    name: str = typer.Argument(..., help="the tool whose handler to run"),
+    ws: Optional[str] = typer.Option(None, "--ws", "--conv", help="workspace (id-prefix/name); default = the open one"),
+    args: str = typer.Option("{}", "--args", help="the call's arguments, as JSON"),
+    python_file: Optional[str] = typer.Option(None, "--python-file", help="test this code instead of the saved handler"),
+    json_out: bool = typer.Option(False, "--json", help="the raw result object"),
+) -> None:
+    """Run a tool's handler on sample arguments (no model, nothing written) and
+    print what the model would receive."""
+    c = _tools_workspace(ws)
+    try:
+        parsed = json.loads(args)
+    except json.JSONDecodeError as e:
+        _die(f"--args must be JSON: {e}")
+    h = dict((c.get("tool_handlers") or {}).get(name) or {"mode": "manual"})
+    if python_file is not None:
+        h = {**h, "mode": "python", "code": _arg_or_file(None, python_file, "handler code", "--python-file")}
+    if h.get("mode", "manual") == "manual":
+        _die(f"{name!r} is answered by hand — no handler to test (see `tinkerscope tools set`)")
+    out = _post("/api/tool-handlers/test", {
+        "handler": h, "name": name, "args": parsed,
+        "context": {"workspace_id": c.get("id"), "panel": None, "step": 1, "thread": []},
+    })
+    if json_out:
+        _print_json(out)
+    else:
+        if out.get("logs"):
+            print(_dim(out["logs"].rstrip()), file=sys.stderr)
+        if out.get("ok"):
+            if out.get("image"):
+                print(f"[image, {len(out['image'])} chars]")
+            print(out.get("text") or "")
+            print(_dim(f"[{h['mode']}, {out.get('ms')} ms]"), file=sys.stderr)
+        else:
+            print(out.get("error") or "failed", file=sys.stderr)
+    if not out.get("ok"):
+        raise typer.Exit(1)
+
+
+@tools_app.command("sets")
+def cmd_tools_sets(json_out: bool = typer.Option(False, "--json", help="the sets as JSON")) -> None:
+    """List the named tool sets saved on this instance."""
+    sets = _get("/api/tool-sets") or []
+    if json_out:
+        _print_json(sets)
+        return
+    if not sets:
+        print("no tool sets — save one with `tinkerscope tools save-set NAME`")
+    for s in sets:
+        tools = s.get("tools") or []
+        auto = [k for k, v in (s.get("tool_handlers") or {}).items() if v.get("mode") != "manual"]
+        print(f"{s['name']}: {len(tools)} tool(s)" + (f", handlers: {', '.join(auto)}" if auto else ""))
+
+
+@tools_app.command("save-set")
+def cmd_tools_save_set(
+    set_name: str = typer.Argument(..., help="the set's name (replaces a set of that name)"),
+    ws: Optional[str] = typer.Option(None, "--ws", "--conv", help="workspace (id-prefix/name); default = the open one"),
+) -> None:
+    """Save the workspace's tools + handlers + step cap as a named set."""
+    c = _tools_workspace(ws)
+    _send_request("PUT", f"/api/tool-sets/{quote(set_name, safe='')}", {
+        "tools": c.get("tools"), "tool_handlers": c.get("tool_handlers"), "tool_max_steps": c.get("tool_max_steps")})
+    print(f"saved tool set {set_name!r} from {c.get('name')!r}")
+
+
+def _tool_set(set_name: str) -> dict:
+    sets = _get("/api/tool-sets") or []
+    hit = next((s for s in sets if s.get("name") == set_name), None)
+    if hit is None:
+        _die(f"no tool set {set_name!r} (have: {', '.join(s['name'] for s in sets) or 'none'})")
+    return hit
+
+
+@tools_app.command("load-set")
+def cmd_tools_load_set(
+    set_name: str = typer.Argument(..., help="the set to load"),
+    ws: Optional[str] = typer.Option(None, "--ws", "--conv", help="workspace (id-prefix/name); default = the open one"),
+    handlers_only: bool = typer.Option(False, "--handlers-only", help="keep the workspace's tool definitions (e.g. an imported recorded call's), take only the set's handlers + step cap"),
+) -> None:
+    """Load a named set into the workspace (replaces its tools + handlers)."""
+    s = _tool_set(set_name)
+    c = _tools_workspace(ws)
+    fields = {"tool_handlers": s.get("tool_handlers"), "tool_max_steps": s.get("tool_max_steps")}
+    if not handlers_only:
+        fields["tools"] = s.get("tools")
+    _send_request("PATCH", f"/api/workspaces/{c['id']}", fields)
+    print(f"loaded {set_name!r} into {c.get('name')!r}" + (" (handlers only)" if handlers_only else ""))
+
+
+@tools_app.command("delete-set")
+def cmd_tools_delete_set(set_name: str = typer.Argument(..., help="the set to delete")) -> None:
+    """Delete a named tool set (workspaces that loaded it keep their copy)."""
+    _send_request("DELETE", f"/api/tool-sets/{quote(set_name, safe='')}")
+    print(f"deleted tool set {set_name!r}")
 
 
 pack_app = typer.Typer(

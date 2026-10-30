@@ -32,6 +32,10 @@ export type PanelRun = {
   startedAt?: number;
   /** Latest `chat_status` — what tinker says about the requests (same readout). */
   tinker?: TinkerStatus;
+  /** chat_done's `tool_note`: why the server's tool handlers stopped short of
+   *  answering this chat's calls (a handler failed, python is off, the step cap).
+   *  Shown on the result form those calls then open. */
+  toolNote?: string | null;
 };
 
 export function emptyPanel(): PanelRun {
@@ -319,7 +323,7 @@ class LiveStore {
         this.onChatDone?.(panel, data);
         const cur = this.panels[panel] ?? emptyPanel();
         if (cur.chat_id != null && data.chat_id != null && data.chat_id !== cur.chat_id) break;
-        this.panels[panel] = { ...cur, running: false };
+        this.panels[panel] = { ...cur, running: false, toolNote: data?.tool_note ?? null };
         break;
       }
       case 'chat_error': {

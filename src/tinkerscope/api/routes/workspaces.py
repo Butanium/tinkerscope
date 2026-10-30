@@ -32,7 +32,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from ..state import DEFAULT_PANEL_ID, broadcast_all
-from .. import tree_ops
+from .. import tool_handlers, tree_ops
 from .. import workspace_store as store
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
@@ -55,6 +55,10 @@ class WorkspaceCreate(BaseModel):
     # Wire setting: {"api": "responses", "reasoning": {…}, …} sends this workspace's
     # threads through OpenRouter's Responses API (api/openrouter_responses.py).
     wire: dict[str, Any] | None = None
+    # How calls to each tool are answered ({tool name: {mode, text?, code?,
+    # auto_continue?, timeout?}}; api/tool_handlers.py) + the auto-answer step cap.
+    tool_handlers: dict[str, Any] | None = None
+    tool_max_steps: int | None = None
     # N-panel shape: {panel_id: opaque tree}.
     trees: dict[str, Any] | None = None
     # legacy 2-panel shape (transitional CLI callers) — synthesized into `trees`.
@@ -83,6 +87,8 @@ class WorkspacePatch(BaseModel):
     system_enabled: bool | None = None
     tools: list[dict[str, Any]] | None = None
     wire: dict[str, Any] | None = None
+    tool_handlers: dict[str, Any] | None = None
+    tool_max_steps: int | None = None
     panels: list[dict[str, Any]] | None = None
     reduced_panels: list[str] | None = None
     send_targets: list[str] | None = None
@@ -197,6 +203,8 @@ def create_workspace(req: WorkspaceCreate) -> dict:
         trees = {DEFAULT_PANEL_ID: {}}
     try:
         tools = tree_ops.check_tools(req.tools)
+        handlers = tool_handlers.check_tool_handlers(req.tool_handlers)
+        max_steps = tool_handlers.check_max_steps(req.tool_max_steps)
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
     return store.upsert(
@@ -206,6 +214,8 @@ def create_workspace(req: WorkspaceCreate) -> dict:
         system_enabled=req.system_enabled,
         tools=tools,
         wire=req.wire,
+        tool_handlers=handlers,
+        tool_max_steps=max_steps,
         trees=trees,
         panels=req.panels or [],
         reduced_panels=req.reduced_panels,

@@ -18,7 +18,7 @@ import {
   lightenTree,
   type ConvTree
 } from './tree.ts';
-import { parseToolDefs } from './tools-def.ts';
+import { parseToolDefs, cleanHandlers } from './tools-def.ts';
 import type { ToolCall } from './types.ts';
 
 let passed = 0;
@@ -163,6 +163,23 @@ test('parseToolDefs: full shape, bare functions, blank, errors', () => {
   eq(typeof parseToolDefs('[{').error, 'string');
   eq(parseToolDefs('[{"description":"x"}]').error, 'Tool 1 has no "name"');
   eq(parseToolDefs('[{"name":"a"},{"name":"a"}]').error, 'Two tools are named "a"');
+});
+
+test('cleanHandlers keeps what each mode uses, drops manual entries and orphans', () => {
+  const out = cleanHandlers(
+    {
+      send: { mode: 'static', text: 'ok', code: 'draft', auto_continue: true },
+      run: { mode: 'python', code: 'return 1', text: 'old', timeout: 5, auto_continue: false },
+      look: { mode: 'manual', text: 'x' },
+      gone: { mode: 'static', text: 'orphan' }
+    },
+    ['send', 'run', 'look']
+  );
+  eq(out, {
+    send: { mode: 'static', text: 'ok' },
+    run: { mode: 'python', code: 'return 1', timeout: 5, auto_continue: false }
+  });
+  eq(cleanHandlers({ look: { mode: 'manual' } }, ['look']), null);
 });
 
 console.log(`tool-use: ${passed} passed, ${failed} failed`);

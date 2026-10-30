@@ -9,7 +9,7 @@
 // (tree_ops.check_tools); this is so a typo is reported in the editor instead of
 // as a 400 on save.
 
-import type { ToolDef } from './types.ts';
+import type { ToolDef, ToolHandler, ToolHandlers } from './types.ts';
 
 export type ParsedTools = { tools: ToolDef[] | null; error?: undefined } | { tools?: undefined; error: string };
 
@@ -53,4 +53,25 @@ export function parseToolDefs(text: string): ParsedTools {
 
 export function formatToolDefs(tools: ToolDef[] | null): string {
   return tools?.length ? JSON.stringify(tools, null, 2) : '';
+}
+
+/** The handlers worth storing for these tool names: manual = no entry (the
+ *  default), orphans of removed tools dropped, each spec down to the fields its
+ *  mode uses (switching modes in the editor keeps the other mode's draft until
+ *  save). null = none. Mirrors tool_handlers.check_tool_handlers' shape. */
+export function cleanHandlers(hs: ToolHandlers, names: string[]): ToolHandlers | null {
+  const out: ToolHandlers = {};
+  for (const n of names) {
+    const h = hs[n];
+    if (!h || h.mode === 'manual') continue;
+    const c: ToolHandler = { mode: h.mode };
+    if (h.mode === 'static') c.text = h.text ?? '';
+    if (h.mode === 'python') {
+      c.code = h.code ?? '';
+      if (h.timeout) c.timeout = h.timeout;
+    }
+    if (h.auto_continue === false) c.auto_continue = false;
+    out[n] = c;
+  }
+  return Object.keys(out).length ? out : null;
 }

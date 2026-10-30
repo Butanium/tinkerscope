@@ -871,6 +871,8 @@ def upsert(
     panels: list[dict],
     tools: list[dict] | None = None,
     wire: dict | None = None,
+    tool_handlers: dict | None = None,
+    tool_max_steps: int | None = None,
     reduced_panels: list[str],
     send_targets: list[str],
     seen_panels: list[str],
@@ -889,6 +891,8 @@ def upsert(
             "system_enabled": system_enabled,
             "tools": tools,
             "wire": wire,
+            "tool_handlers": tool_handlers,
+            "tool_max_steps": tool_max_steps,
             "trees": trees,
             # Phantom-panel heal on every layout SET (see tree_ops.normalize_panels):
             # the browser used to do this on load, and with the layout

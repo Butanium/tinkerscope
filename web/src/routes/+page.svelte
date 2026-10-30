@@ -2992,6 +2992,7 @@
                 {#if toolWait}
                   <ToolResultForm
                     pending={toolWait.pending}
+                    note={run.toolNote ?? null}
                     busy={panelBusy(p.panel)}
                     onSubmit={(results, fire) => branchOps.answerToolCalls(p.panel, results, fire)}
                   />
@@ -3335,7 +3336,15 @@
 
 <!-- OpenRouter Manager Modal -->
 {#if showTools}
-  <ToolsModal tools={ws.tools} onsave={(t) => ws.setTools(t)} onclose={() => (showTools = false)} />
+  <ToolsModal
+    tools={ws.tools}
+    handlers={ws.toolHandlers}
+    maxSteps={ws.toolMaxSteps}
+    codeAllowed={!!health?.tool_code}
+    workspaceId={ws.activeId}
+    onsave={(t, h, n) => ws.setToolConfig(t, h, n)}
+    onclose={() => (showTools = false)}
+  />
 {/if}
 
 {#if showOrManager}

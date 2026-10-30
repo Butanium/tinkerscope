@@ -11,10 +11,13 @@
   type Result = { tool_call_id: string; name?: string; content: string; items?: ResponsesItem[] };
   let {
     pending,
+    note = null,
     busy,
     onSubmit
   }: {
     pending: ToolCall[];
+    /** Why the workspace's tool handlers didn't answer these (chat_done tool_note). */
+    note?: string | null;
     busy: boolean;
     onSubmit: (results: Result[], fire: boolean) => void;
   } = $props();
@@ -67,6 +70,7 @@
 
 <div class="tool-form" data-testid="tool-result-form">
   <div class="tool-form-title">{pending.length === 1 ? 'Tool result' : `${pending.length} tool results`}</div>
+  {#if note}<div class="tool-form-note" data-testid="tool-note">{note}</div>{/if}
   {#each pending as c (c.id)}
     <label class="tool-form-call">
       <code class="tool-form-sig"><b>{c.function.name}</b>({oneline(c.function.arguments || '')})</code>
@@ -98,6 +102,7 @@
 <style>
   .tool-form { border: 1px dashed var(--color-tool-border); border-radius: var(--radius); background: var(--color-tool-bg); padding: var(--space-2) var(--space-3); margin: var(--space-2) 0; display: flex; flex-direction: column; gap: var(--space-2); }
   .tool-form-title { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); }
+  .tool-form-note { font-size: 0.78rem; color: var(--color-no); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow-y: auto; }
   .tool-form-call { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
   .tool-form-sig { font-family: 'Courier New', Courier, monospace; font-size: 0.78rem; color: var(--color-text-secondary); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .tool-form textarea { width: 100%; box-sizing: border-box; font-family: 'Courier New', Courier, monospace; font-size: 0.85rem; resize: vertical; background: var(--color-surface); color: var(--color-text); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 6px 8px; }

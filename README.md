@@ -225,6 +225,14 @@ tinkerscope trash [action] [handle]           # Recover deleted branches.
 tinkerscope refresh                           # Rescan the filesystem + re-probe sampling capabilities.
 tinkerscope wait                              # Block until no generation is running — the sequential-wave primitive: fire, `tinkerscope...
 tinkerscope serve [dirs...]                   # Serve the API + web UI for DIRS (bare `tinkerscope <dir>` is shorthand for this).
+tinkerscope tools set <name>                  # Add/replace a tool's definition and/or set how its calls are answered.
+tinkerscope tools rm <name>                   # Remove a tool from the workspace (definition + handler).
+tinkerscope tools max-steps <n>               # Set the workspace's cap on auto-answered rounds per fire (default 5).
+tinkerscope tools test <name>                 # Run a tool's handler on sample arguments (no model, nothing written) and print what the model...
+tinkerscope tools sets                        # List the named tool sets saved on this instance.
+tinkerscope tools save-set <set_name>         # Save the workspace's tools + handlers + step cap as a named set.
+tinkerscope tools load-set <set_name>         # Load a named set into the workspace (replaces its tools + handlers).
+tinkerscope tools delete-set <set_name>       # Delete a named tool set (workspaces that loaded it keep their copy).
 tinkerscope pack export <out>                 # Export the current setup to a pack YAML file.
 tinkerscope site export <out>                 # Write a self-contained static site into a directory.
 ```

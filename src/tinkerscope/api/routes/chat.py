@@ -60,7 +60,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Awaitable, Callable, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -68,8 +68,12 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from .. import discovery, inflight, openrouter, openrouter_responses, tinker_oai, tree_ops, vllm_sampler, workspace_store
+from .. import (
+    discovery, inflight, openrouter, openrouter_responses, tinker_oai, tool_handlers, tree_ops, vllm_sampler,
+    workspace_store,
+)
 from ..session import resolve_session
+from ..settings import SETTINGS
 from ..state import DEFAULT_PANEL_ID, BUS, get_bus  # noqa: F401  (BUS: the default bus, patched by tests)
 from ..tinker_sampler import get_sampler, select_renderer_name
 from .models import ckpt_label
@@ -105,6 +109,10 @@ _TERMINAL_TASKS: set[asyncio.Task] = set()
 # Strong refs to the background drivers of detached (fire-and-forget) chats: with
 # no client consuming the SSE, nothing else keeps the task alive to completion.
 _DETACHED_TASKS: set[asyncio.Task] = set()
+
+# chat_id -> the auto-answer loop it belongs to (root or step chat), so a cancel of
+# ANY chat of a loop stops the whole loop — see _ToolLoop.
+_LOOP_OF: dict[int, "_ToolLoop"] = {}
 
 
 class ChatMessage(BaseModel):
@@ -166,6 +174,15 @@ class ChatRequest(BaseModel):
     # OpenRouter's Responses API (with that recorded reasoning object as the base).
     # Messages carrying items use that wire regardless. None = chat completions.
     wire: dict | None = None
+    # Auto-answering tool calls (api/tool_handlers.py) — the workspace's
+    # `tool_handlers` + `tool_max_steps`, sent by the client like `tools`. A sampled
+    # turn whose calls ALL have a static/python handler is answered server-side
+    # (tool turns folded under it), and the next turn is sampled from there, each
+    # step its own chat, up to `max_tool_steps` rounds (default 5). n>1: each
+    # sample's branch runs its own loop, at n=1. `auto_tools=false` = off for this fire.
+    tool_handlers: dict | None = None
+    max_tool_steps: int | None = None
+    auto_tools: bool = True
     # Thread-level system prompt: REPLACES the global/call system part at sample
     # time when non-empty (compose_system) and is recorded on the thread's ROOT
     # node. None ≡ "" = no thread part. (Until the P3
@@ -268,6 +285,157 @@ class ChatRequest(BaseModel):
     # ones (CLI / another tab) it must fold via transcript reconciliation. The
     # server never interprets it.
     client_token: str | None = None
+
+
+@dataclass
+class _Step:
+    """A continuation an auto-answer queued: one branch's next turn."""
+
+    messages: list[ChatMessage]
+    parent_node: str | None  # the last tool node (None when nothing persists)
+    thinking: bool
+    depth: int  # 1 = the turn after the first auto-answered round
+    branch: int  # the ROOT sample index this branch grew from
+    visible: bool  # streams to the browser bucket (the selected branch only)
+
+
+@dataclass
+class _ToolLoop:
+    """One fire's auto-answer loop: the root chat plus the step chats it fires.
+
+    Each step is its own chat (own chat_id, bus lifecycle, fold), so the browser
+    renders it like any fire; the ROOT chat's caller stream relays them all, so a
+    CLI that holds one stream sees every step. Branches of an n>1 root run their
+    chains concurrently; only the selected branch (the fold selects the first
+    sibling) streams into the panel's single-slot bucket — the others are
+    bus-quiet and land as ops (the tree is the truth)."""
+
+    handlers: dict
+    max_steps: int
+    template: ChatRequest  # the root request: every step request is a copy of it
+    params: dict  # the root's RESOLVED params — steps pin them (params_scope "call")
+    workspace_id: str | None
+    sid: Any
+    cancelled: bool = False
+    chat_ids: set[int] = field(default_factory=set)
+    fired: int = 0
+
+    def stop(self) -> None:
+        """Cancel every live chat of this loop and fire no further step."""
+        self.cancelled = True
+        for cid in list(self.chat_ids):
+            inf = _INFLIGHT.get(cid)
+            if inf is not None and not inf.task.done():
+                inf.cancelled = True
+                inf.task.cancel()
+
+
+def _light_msg(m: dict) -> dict:
+    """A message as a python handler's `context["thread"]` shows it (no items:
+    a recorded thread's screenshots would be megabytes per call)."""
+    out = {"role": m.get("role"), "content": m.get("content") or ""}
+    for k in ("tool_calls", "tool_call_id", "name"):
+        if m.get(k):
+            out[k] = m[k]
+    return out
+
+
+def _step_request(loop: _ToolLoop, st: _Step) -> ChatRequest:
+    """The request for one step chat: the root's, at n=1 on this branch's
+    messages, its resolved params pinned (call scope: a step never writes the
+    sidebar, and must not inherit a sidebar that moved since the root fired)."""
+    p = loop.params
+    return loop.template.model_copy(update={
+        "messages": st.messages,
+        "n_samples": 1,
+        "thinking": st.thinking,
+        "params_scope": "call",
+        "system_prompt": p["system_prompt"] or "",
+        "thread_system_prompt": p["thread_system_prompt"],
+        "temperature": p["temperature"],
+        "max_tokens": p["max_tokens"],
+        "top_p": p["top_p"],
+        "reasoning_effort": p["reasoning_effort"] or "default",
+        "prefill_scope": None,
+        "prefill_thinking_only": False,
+        "continue_tokens": None,
+        "renderer_name": None,
+        "workspace_id": loop.workspace_id,
+        "parent_node": st.parent_node,
+        "broadcast": loop.template.broadcast and st.visible,
+        "detached": False,
+        "client_token": None,
+    })
+
+
+async def _merge(gens: list) -> AsyncIterator[dict]:
+    """Interleave several event generators (each branch's chain of steps)."""
+    q: asyncio.Queue = asyncio.Queue()
+
+    async def pump(g) -> None:
+        try:
+            async for ev in g:
+                q.put_nowait(ev)
+        except Exception as e:  # reported, not swallowed: the stream says the branch died
+            q.put_nowait({"event": "step_error", "data": json.dumps({"error": f"{type(e).__name__}: {e}"})})
+        finally:
+            q.put_nowait(None)
+
+    tasks = [asyncio.create_task(pump(g)) for g in gens]
+    try:
+        live = len(tasks)
+        while live:
+            ev = await q.get()
+            if ev is None:
+                live -= 1
+            else:
+                yield ev
+    finally:
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def _step_chat(loop: _ToolLoop, st: _Step, sink: list[_Step]) -> AsyncIterator[dict]:
+    """Fire one step chat and relay its caller-stream events tagged with
+    {step, branch}: `start`/`done`/`error` become `step_start`/`step_done`/
+    `step_error` (the ROOT's own `done` closes the stream)."""
+    tag = {"step": st.depth, "branch": st.branch}
+    loop.fired += 1
+    try:
+        events = await _open_chat(_step_request(loop, st), loop.sid, loop=loop, depth=st.depth,
+                                  sink=sink, branch=st.branch, visible=st.visible)
+    except HTTPException as e:
+        yield {"event": "step_error", "data": json.dumps({**tag, "error": str(e.detail)})}
+        return
+    try:
+        async for ev in events:
+            kind = ev.get("event")
+            if kind == "tool_results":
+                yield ev  # already tagged by the step chat's own terminal
+                continue
+            data = json.loads(ev["data"]) if ev.get("data") else {}
+            name = {"start": "step_start", "done": "step_done", "error": "step_error"}.get(kind, kind)
+            yield {"event": name, "data": json.dumps({**data, **tag})}
+    finally:
+        await events.aclose()
+
+
+async def _drive_steps(loop: _ToolLoop, steps: list[_Step]) -> AsyncIterator[dict]:
+    """Each queued branch runs its own CHAIN — fire a step, and when its
+    auto-answer queues the next one, fire that — concurrently across branches."""
+
+    async def chain(first: _Step) -> AsyncIterator[dict]:
+        st: _Step | None = first
+        while st is not None and not loop.cancelled:
+            sink: list[_Step] = []
+            async for ev in _step_chat(loop, st, sink):
+                yield ev
+            st = sink[0] if sink else None
+
+    async for ev in _merge([chain(st) for st in steps]):
+        yield ev
 
 
 def _has_tool_use(req: ChatRequest) -> bool:
@@ -536,6 +704,41 @@ def compose_system(global_part: str | None, thread_part: str | None) -> str:
 
 @router.post("/chat")
 async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
+    events = await _open_chat(req, sid)
+    if req.detached:
+        # Fire-and-forget: drive the chat to completion in the background, discarding
+        # the client-facing events (everything the browser needs is on the bus).
+        # The POST returns NOW, so the browser never holds this stream — its
+        # per-host connection budget stays free for the other panels. gen()'s own
+        # try/finally still guarantees exactly one terminal, and Stop still reaches
+        # this chat through the cancel endpoint (it cancels the producer worker,
+        # driving the same terminal a disconnect would).
+        async def _drive() -> None:
+            async for _ in events:
+                pass
+
+        task = asyncio.create_task(_drive())
+        _DETACHED_TASKS.add(task)
+        task.add_done_callback(_DETACHED_TASKS.discard)
+        return {"status": "started"}
+
+    return EventSourceResponse(events)
+
+
+async def _open_chat(
+    req: ChatRequest,
+    sid: Any,
+    *,
+    loop: "_ToolLoop | None" = None,
+    depth: int = 0,
+    sink: "list[_Step] | None" = None,
+    branch: int = 0,
+    visible: bool = True,
+) -> AsyncIterator[dict]:
+    """Validate a chat request and return its event generator (the caller stream).
+    Request-shape errors raise HTTPException up front. `loop`/`depth`/`sink`/
+    `branch`/`visible` are set for an auto-answer STEP chat (_step_chat); a
+    root request opens its own loop when its tool handlers can answer anything."""
     # The SESSION's bus (api/session.py): where this chat's params inherit from,
     # whose open workspace is its default home, and whose subscribers see its
     # samples stream. Single-user mode: always the default bus. The isinstance
@@ -672,6 +875,25 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
         (n == 1) and not both
         and req.run_id is None and req.base_model is None and req.sampler_path is None
     )
+
+    # A ROOT request whose handlers can answer something opens the auto-answer loop
+    # (step chats arrive with theirs). `root_steps` collects the continuations its
+    # own terminal queues; the root drives them after its terminal.
+    root_steps: list[_Step] = []
+    if loop is None and req.auto_tools and req.tool_handlers:
+        try:
+            handlers = tool_handlers.check_tool_handlers(req.tool_handlers) or {}
+            max_steps = tool_handlers.check_max_steps(req.max_tool_steps)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        if any(h["mode"] != "manual" for h in handlers.values()):
+            loop = _ToolLoop(
+                handlers=handlers,
+                max_steps=tool_handlers.DEFAULT_MAX_STEPS if max_steps is None else max_steps,
+                template=req, params=params,
+                workspace_id=fold_ws or req.workspace_id or bus.state.workspace_id, sid=sid,
+            )
+            sink = root_steps
 
     # In-flight placement bookkeeping, shared by the wrapper (registers/backstops)
     # and _gen_inner's terminal (folds, then releases). `released` makes release
@@ -980,6 +1202,8 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
         # headless CLI, the one that can't read the bus or the server log — can
         # tell "persisted" from "silently lost".
         fold_outcome: dict = {}
+        tool_events: list[dict] = []  # the auto-answer's `tool_results` caller events
+        tool_notes: list[str] = []  # why it stopped short, for the chat_done broadcast
         terminated = False
 
         async def _terminal(*, error: str | None = None, cancelled: bool = False) -> None:
@@ -1006,6 +1230,13 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
             # The transcript echo commit that used to happen here retired with
             # P3: the fold below IS the multi-turn memory (the workspace tree),
             # and the CLI reads it over /api/workspaces.
+            # The fold's nodes (built for every terminal with samples — an
+            # unplaced chat's auto-answer loop needs them in memory) + manifest.
+            fold_nodes, fold_manifest = (
+                _build_fold_nodes(msgs, samples, incorporated, scope, thinking, n, req.parent_node)
+                if samples else ([], [])
+            )
+
             async def _apply_fold() -> "tuple[list[dict] | None, int | None, str | None]":
                 """Fold every completed sample under `parent_node` — ONE
                 `add_nodes` op through the SAME locked apply + bus fan-out every
@@ -1017,10 +1248,7 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
                 sticks. The reason reaches the CALLER STREAM (`fold_error` on the
                 done/error SSE event), not just the server log — a headless CLI
                 is exactly the consumer that can't read the log."""
-                nodes, manifest = _build_fold_nodes(
-                    msgs, samples, incorporated, scope, thinking, n, req.parent_node
-                )
-                op = {"op": "add_nodes", "panel": req.panel, "nodes": nodes, "select": True}
+                op = {"op": "add_nodes", "panel": req.panel, "nodes": fold_nodes, "select": True}
                 out = await run_in_threadpool(workspace_store.apply_ops, fold_ws, [op])
                 if out is None:
                     reason = f"workspace {fold_ws} vanished mid-chat"
@@ -1040,13 +1268,11 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
                     )
                     return None, None, reason
                 await _broadcast_ops(fold_ws, out)
-                return manifest, out["rev"], None
+                return fold_manifest, out["rev"], None
 
-            async def _fire() -> None:
-                # Ordering guarantee (§4.3): the fold's `ops` event goes out — and
-                # its write lands — BEFORE chat_end releases `running` and before
-                # the chat_done/chat_error broadcast. Runs on error/cancel
-                # terminals too: ≥1 completed sample is real data and folds.
+            async def _fold() -> None:
+                # Runs on error/cancel terminals too: ≥1 completed sample is real
+                # data and folds.
                 folded: "list[dict] | None" = None
                 fold_rev: "int | None" = None
                 if placement is not None and samples:
@@ -1063,6 +1289,14 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
                         fold_outcome["fold_rev"] = fold_rev
                     else:
                         fold_outcome["fold_error"] = fold_err or "fold produced no manifest"
+
+            async def _close(fold_task: asyncio.Task) -> None:
+                # Ordering guarantee (§4.3): the fold's `ops` event goes out — and
+                # its write lands — BEFORE chat_end releases `running` and before
+                # the chat_done/chat_error broadcast. So do the auto-answer's tool
+                # turns: the browser never sees this chat end with calls its
+                # handlers were about to answer (the result form would flash).
+                await asyncio.gather(fold_task, return_exceptions=True)
                 _release_placement()
                 # No state patch rides the terminal anymore: the fold above IS
                 # the durable record, and retiring the echo commit retired the
@@ -1080,17 +1314,21 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
                                # the resolved thread part — the browser's foreign-fold
                                # reconcile stamps it onto the thread's root node
                                "thread_system_prompt": thread_system}
-                    if folded is not None:
+                    if "folded" in fold_outcome:
                         # The bucket→server-id seam: which server-minted node each
                         # bucket sample became, so the browser seeds its blob cache
                         # without positional guessing (error samples shift positions).
-                        payload["folded"] = folded
-                        payload["fold_rev"] = fold_rev
+                        payload["folded"] = fold_outcome["folded"]
+                        payload["fold_rev"] = fold_outcome["fold_rev"]
                     if err_msg is not None:
                         payload["error"] = err_msg
+                    if tool_notes:
+                        # why the auto-answer stopped short (a handler failed, python
+                        # is off, the step cap) — the panel shows it next to the form
+                        payload["tool_note"] = "; ".join(tool_notes)
                     await bus.broadcast(event, payload)
 
-            # Decoupled task + asyncio.shield, NOT an inline await or an anyio
+            # Decoupled tasks + asyncio.shield, NOT an inline await or an anyio
             # shielded scope: a disconnect can cancel gen() while _terminal is
             # already mid-flight (suspended on the contended bus lock) — `terminated`
             # is True by then so the finally skips, and the CancelledError is
@@ -1101,10 +1339,123 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
             # completion, and the cancellation still re-raises here (never
             # swallowed). _TERMINAL_TASKS keeps a strong ref — the loop holds only
             # weak refs, and after the awaiter is torn down nothing else would.
-            t = asyncio.create_task(_fire())
-            _TERMINAL_TASKS.add(t)
-            t.add_done_callback(_TERMINAL_TASKS.discard)
-            await asyncio.shield(t)
+            # The auto-answer between the two is NOT shielded: a disconnect may cut
+            # it short (its subprocess is killed), and the close still runs.
+            ft = asyncio.create_task(_fold())
+            _TERMINAL_TASKS.add(ft)
+            ft.add_done_callback(_TERMINAL_TASKS.discard)
+            try:
+                await asyncio.shield(ft)
+                if (loop is not None and error is None and not cancelled and not loop.cancelled
+                        and fold_nodes and "fold_error" not in fold_outcome):
+                    await _auto_answer(fold_nodes, fold_manifest)
+            finally:
+                ct = asyncio.create_task(_close(ft))
+                _TERMINAL_TASKS.add(ct)
+                ct.add_done_callback(_TERMINAL_TASKS.discard)
+                await asyncio.shield(ct)
+
+        async def _auto_answer(fold_nodes: list[dict], fold_manifest: list[dict]) -> None:
+            """Answer this chat's tool calls with their handlers (api/tool_handlers.py):
+            per sample whose calls ALL have a runnable handler, run them in call
+            order, fold the results as a tool-turn chain under the sample's node
+            (placed chats only) and — when every tool auto-continues and the step
+            cap allows — queue the branch's next turn into `sink` for the driver.
+            Each sample reports a `tool_results` event on the caller stream; a
+            stop short of the end (a failed handler, python off, the cap) is also a
+            `tool_note` on chat_done. A failed handler leaves its call UNANSWERED
+            (the result form opens on it) rather than feeding the model an error
+            text the human didn't choose."""
+            assert loop is not None
+            base = list(req.messages)
+            if base and base[-1].role == "assistant":
+                base = base[:-1]  # a prefill: the folded content already carries it
+            ops: list[dict] = []
+            queued: list[_Step] = []
+            events: list[dict] = []
+            first = True
+            for nd, man in zip(fold_nodes, fold_manifest):
+                calls = nd.get("tool_calls") or []
+                if not calls:
+                    continue
+                specs = [tool_handlers.spec_for(loop.handlers, c) for c in calls]
+                # the root's first folded sample is the SELECTED sibling: its branch streams
+                vis = visible if depth else (req.broadcast and first)
+                first = False
+                if all(s["mode"] == "manual" for s in specs):
+                    continue  # nothing to automate: the plain manual flow
+                ev: dict = {"step": depth + 1, "branch": branch if depth else man["sample_index"],
+                            "node": nd["id"] if placement is not None else None, "results": []}
+                events.append(ev)
+                if depth >= loop.max_steps:
+                    ev["stopped"] = f"auto-answer stopped after {loop.max_steps} step(s) (max tool steps)"
+                    tool_notes.append(ev["stopped"])
+                    continue
+                why = next((w for s, c in zip(specs, calls)
+                            if (w := tool_handlers.blocker(s, c, SETTINGS.allow_tool_code))), None)
+                if why:
+                    ev["stopped"] = why
+                    tool_notes.append(why)
+                    continue
+                thread = [_light_msg(m.model_dump()) for m in base] + [_light_msg(nd)]
+                ctx = {"workspace_id": loop.workspace_id, "panel": req.panel, "step": depth + 1, "thread": thread}
+                answers: list[dict] = []
+                for c, sp in zip(calls, specs):
+                    if loop.cancelled:
+                        ev["stopped"] = "cancelled"
+                        break
+                    try:
+                        res, logs = await tool_handlers.run(sp, c, ctx, SETTINGS.allow_tool_code)
+                        msg = tool_handlers.tool_message(c, res, sp["mode"])
+                    except tool_handlers.HandlerError as e:
+                        ev["stopped"] = f"the {tool_handlers.handler_key(c)!r} handler failed: {e.message}"
+                        if e.logs:
+                            ev["logs"] = e.logs
+                        tool_notes.append(ev["stopped"])
+                        break
+                    answers.append(msg)
+                    ev["results"].append({k: msg[k] for k in ("tool_call_id", "name", "content", "handler") if k in msg}
+                                         | ({"logs": logs} if logs else {}))
+                if not answers:
+                    continue
+                parent = nd["id"]
+                chain = []
+                for msg, r in zip(answers, ev["results"]):
+                    node = {"id": tree_ops.mint_node_id(), **msg, "parent": parent}
+                    chain.append(node)
+                    parent = node["id"]
+                    if placement is not None:
+                        r["node_id"] = node["id"]
+                if placement is not None:
+                    ops.append({"op": "add_nodes", "panel": req.panel, "nodes": chain, "select": True})
+                if len(answers) == len(calls) and all(s.get("auto_continue", True) for s in specs):
+                    asst = ChatMessage(
+                        role="assistant", content=nd.get("content") or "", reasoning=nd.get("reasoning"),
+                        reasoning_details=nd.get("reasoning_details"), tool_calls=nd.get("tool_calls"),
+                        items=nd.get("items"),
+                    )
+                    tools_msgs = [ChatMessage(role="tool", content=m["content"], tool_call_id=m["tool_call_id"],
+                                              name=m.get("name"), items=m.get("items")) for m in answers]
+                    queued.append(_Step(
+                        messages=[*base, asst, *tools_msgs],
+                        parent_node=parent if placement is not None else None,
+                        thinking=nd["thinking"] if isinstance(nd.get("thinking"), bool) else thinking is True,
+                        depth=depth + 1, branch=ev["branch"], visible=vis,
+                    ))
+            if ops:
+                out = await run_in_threadpool(workspace_store.apply_ops, fold_ws, ops)
+                if out is None or "rejected" in out:
+                    why = ("workspace vanished" if out is None
+                           else f"rejected by the op layer: {out['rejected'].get('error')}")
+                    tool_notes.append(f"auto-answers not saved: {why}")
+                    for ev in events:
+                        ev["stopped"] = f"auto-answers not saved: {why}"
+                    queued = []
+                else:
+                    await _broadcast_ops(fold_ws, out)
+            if sink is not None:
+                sink.extend(queued)
+            tool_events.extend({"event": "tool_results", "data": json.dumps(ev, default=str)} for ev in events)
 
         # Run the producer in its OWN task, relaying items through a queue. This is what
         # lets the cancel endpoint stop a chat we're not the consumer of: cancelling
@@ -1127,6 +1478,9 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
         worker = asyncio.create_task(_pump())
         inflight = _InFlight(task=worker)
         _INFLIGHT[chat_id] = inflight
+        if loop is not None:
+            loop.chat_ids.add(chat_id)
+            _LOOP_OF[chat_id] = loop
 
         prod_error: str | None = None
         try:
@@ -1187,9 +1541,33 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
                 yield {"event": "error", "data": json.dumps({"error": prod_error, **fold_outcome, **stopped})}
             else:
                 await _terminal(cancelled=inflight.cancelled)
-                yield {"event": "done", "data": json.dumps({**fold_outcome, **stopped})}
+                done = {**fold_outcome, **stopped}
+                if depth:
+                    # A step chat: its own end, then the round its handlers answered
+                    # (the root's relay then prints them in the order they happened).
+                    yield {"event": "done", "data": json.dumps(done)}
+                    for ev in tool_events:
+                        yield ev
+                else:
+                    for ev in tool_events:
+                        yield ev
+                    if loop is not None:
+                        # The ROOT drives the steps its terminal queued (each branch
+                        # a chain of step chats), relaying their events on THIS
+                        # stream — still inside the try, so this chat_id stays
+                        # cancellable and a cancel of it stops the loop.
+                        if root_steps and not loop.cancelled:
+                            async for ev in _drive_steps(loop, root_steps):
+                                yield ev
+                        done["tool_steps"] = loop.fired
+                        if loop.cancelled:
+                            done["cancelled"] = True
+                    yield {"event": "done", "data": json.dumps(done)}
         finally:
             _INFLIGHT.pop(chat_id, None)
+            if loop is not None:
+                loop.chat_ids.discard(chat_id)
+                _LOOP_OF.pop(chat_id, None)
             if not worker.done():
                 worker.cancel()  # client gone / endpoint cancel → stop the producer
             # A client disconnect cancels gen() mid-await (q.get, a broadcast, even
@@ -1248,24 +1626,7 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
             await inner.aclose()
             _release_placement()
 
-    if req.detached:
-        # Fire-and-forget: drive gen() to completion in the background, discarding
-        # the client-facing events (everything the browser needs is on the bus).
-        # The POST returns NOW, so the browser never holds this stream — its
-        # per-host connection budget stays free for the other panels. gen()'s own
-        # try/finally still guarantees exactly one terminal, and Stop still reaches
-        # this chat through the cancel endpoint (it cancels the producer worker,
-        # driving the same terminal a disconnect would).
-        async def _drive() -> None:
-            async for _ in gen():
-                pass
-
-        task = asyncio.create_task(_drive())
-        _DETACHED_TASKS.add(task)
-        task.add_done_callback(_DETACHED_TASKS.discard)
-        return {"status": "started"}
-
-    return EventSourceResponse(gen())
+    return gen()
 
 
 @router.post("/chat/{chat_id}/cancel")
@@ -1276,6 +1637,9 @@ async def cancel_chat(chat_id: int) -> dict:
     disconnect — chat_end fires, `running` clears for every subscriber, and any samples
     that already completed are still committed. Idempotent: a chat that already ended
     isn't in the registry, so this is a harmless not_found."""
+    loop = _LOOP_OF.get(chat_id)
+    if loop is not None:
+        loop.stop()  # a step of an auto-answer loop: Stop means the whole loop
     inflight = _INFLIGHT.get(chat_id)
     if inflight is None:
         return {"status": "not_found", "chat_id": chat_id}

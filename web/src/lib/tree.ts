@@ -94,6 +94,9 @@ export type TreeNode = {
   /** Tool nodes: which call this result answers, and that function's name. */
   tool_call_id?: string;
   name?: string;
+  /** Tool nodes the SERVER answered with the workspace's handler ('static' /
+   *  'python') rather than a person — the auto-answered badge. */
+  handler?: 'static' | 'python';
   /** The VERBATIM Responses-API items this turn stands for (a recorded agent call,
    *  or a Responses-wire sample's output). HEAVY — a write-once blob server-side
    *  (screenshots), so loaded nodes carry `has_items`; on the wire they go out as

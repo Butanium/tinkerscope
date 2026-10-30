@@ -61,6 +61,7 @@ def run_server(
     reseed: bool = False,
     vllm_url: str | None = None,
     multi_user: bool = False,
+    allow_tool_code: bool = False,
 ) -> None:
     """The old `tinkerscope` main(), minus argparse (that's `cli.py`'s now)."""
     if vllm_url:
@@ -69,6 +70,8 @@ def run_server(
         os.environ["TINKERSCOPE_VLLM_URL"] = vllm_url
     if multi_user:
         os.environ["TINKERSCOPE_MULTI_USER"] = "1"
+    if allow_tool_code:
+        os.environ["TINKERSCOPE_ALLOW_TOOL_CODE"] = "1"
     if dirs:
         resolved = [d.expanduser().resolve() for d in dirs]
     elif os.environ.get("TINKERSCOPE_SCAN_ROOTS"):
@@ -126,6 +129,8 @@ def run_server(
         print(f"  vLLM models from {os.environ['TINKERSCOPE_VLLM_URL']}")
     if os.environ.get("TINKERSCOPE_MULTI_USER"):
         print("  multi-user: each browser (and `tinkerscope --session <id>`) gets its own sidebar; workspaces stay shared")
+    if os.environ.get("TINKERSCOPE_ALLOW_TOOL_CODE"):
+        print("  python tool handlers: ON (they run as subprocesses on this machine)")
     try:
         uvicorn.run(
             "tinkerscope.api.main:app",

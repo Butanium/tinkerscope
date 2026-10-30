@@ -210,6 +210,20 @@ A turn where the model produced nothing (no text, no call) shows as a muted
 **empty turn** row — for an agent, silence is often the behavior being studied,
 so it stays visible and can be regenerated like any turn.
 
+**"Can it answer the tools itself?"** Yes: the tools editor gives each tool a
+handler — **Manual** (the form), **Static** (always the same text, e.g. a
+`send_message_to_chat` that just says "Message successfully sent back to chat") or
+**Python** (a function body over `name`, `args`, `call_id`, `context`; **Test**
+runs it on sample arguments). When every call in a turn has a handler, the server
+answers them (rows tagged **auto**) and samples the next turn, up to **Max steps**
+rounds per send (default 5). It stops at a manual tool, a turn without calls, or a
+tool whose **continue** box is off. With several samples, each sample's branch
+runs its own loop and the column streams the selected one; the others land in the
+tree. Python runs only on a server started with `--allow-tool-code` — otherwise a
+python tool behaves like a manual one and the result form says so. **Stop** stops
+the whole loop. **Tool set** saves definitions + handlers under a name to load in
+another workspace (Shift+Load: handlers only, e.g. onto an imported recorded call).
+
 **"Can I continue a real agent's conversation exactly?"** If you have its recorded
 OpenAI Responses-API call, `tinkerscope import --responses-call FILE` makes a workspace
 whose thread holds the call's items as they were sent. Rows render from those items:

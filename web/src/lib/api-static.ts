@@ -447,7 +447,17 @@ const impl: ApiClient = {
   chat: async () => {
     throw new Error('sampling needs a backend — this is a read-only static site');
   },
-  cancelChat: async (chat_id: number) => ({ status: 'not_found', chat_id })
+  cancelChat: async (chat_id: number) => ({ status: 'not_found', chat_id }),
+  testToolHandler: async () => {
+    throw new Error('running a tool handler needs a backend — this is a read-only static site');
+  },
+  listToolSets: async () => [],
+  saveToolSet: async () => {
+    throw new Error('read-only site: cannot save tool sets');
+  },
+  deleteToolSet: async () => {
+    throw new Error('read-only site: cannot delete tool sets');
+  }
 };
 
 // The overlay map is hydrated from IndexedDB asynchronously, but every read above is

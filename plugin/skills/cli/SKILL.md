@@ -238,6 +238,37 @@ Encrypted reasoning is stamped `reasoning_account` (a hash of the OpenRouter key
 a workspace made under another account replays WITHOUT that reasoning — the
 provider ignores another org's blob without an error.
 
+**Tool handlers: tools that answer themselves.** Each tool can have a handler —
+`manual` (you answer, as above), `static` (always the same text) or `python` (a
+function BODY over `name`, `args` (parsed JSON), `call_id`, `context` = {workspace_id,
+panel, step, thread}; `return` the result — a string, anything JSON-able, or for a
+computer call `{"image": <path or data URL>, "text"?}`). When EVERY call of a turn has
+a handler, the server runs them, folds the results as tool turns tagged `·auto:<mode>`,
+and samples the next turn — each step its own chat, the whole loop on the stream of
+the command that fired it — up to the workspace's step cap (default 5). It stops at a
+manual tool, a turn without calls, a handler whose `auto_continue` is off, a failed
+handler (that call is left unanswered; the error is printed), or the cap. n>1: every
+sample's branch runs its own loop at n=1. Python runs only on a server started with
+`--allow-tool-code` (in a subprocess, timeout 10 s, no API keys in its env); elsewhere
+a python tool behaves like a manual one.
+```bash
+tinkerscope tools --ws X                                   # tools + how each is answered
+tinkerscope tools set send_message_to_chat --ws X --static "Message successfully sent back to chat"
+tinkerscope tools set get_time --ws X --python-file get_time.py [--no-auto-continue] [--timeout 30]
+tinkerscope tools set lookup --ws X --schema-file lookup.json --manual   # add a tool
+tinkerscope tools test get_time --ws X --args '{"tz": "UTC"}'          # run it, no model
+tinkerscope tools max-steps 8 --ws X
+tinkerscope tools save-set "AI Village" --ws X ; tinkerscope tools load-set "AI Village" --ws Y [--handlers-only]
+tinkerscope import --responses-call call.json --tool-set "AI Village"  # the call's tools + the set's handlers
+```
+`send` / `continue` run handlers by default (`--no-auto-tools` to answer by hand,
+`--max-tool-steps N` per call); `replay` does NOT unless `--auto-tools` (a replay
+then also rolls each resampled turn forward — `step`/`branch` rows in `--json`).
+Stream output: `[auto step k · branch b] ←name <call id> (static)` + the result, then
+`--- step k · branch b ---` and the next turn; `--json` adds `tool_results` /
+`step_start` / `step_done` / `step_error` events, and step samples carry `step` +
+`branch`. Ctrl+C / `--timeout` stop the whole loop.
+
 **Which system prompt a `send` / `continue` gets.** The TARGET workspace's own
 (its text when enabled, nothing when muted) — the same thing the browser sends for
 it — so `--ws X` from a headless terminal samples under X's prompt, not under
@@ -686,6 +717,8 @@ tinkerscope send [prompt] [options]
   --system-file TEXT                read the thread system prompt from a file
   --no-system                       fire with NO system prompt at all
   --tools-file TEXT                 tool definitions for this call instead of the workspace's (JSON; [] = none)
+  --auto-tools/--no-auto-tools      answer tool calls with the workspace's tool handlers (static / python — see `tinkerscope tools`) and keep sampling, up to --max-tool-steps rounds
+  --max-tool-steps INTEGER          cap on auto-answered rounds for this call; omit = the workspace's (default 5)
   --prefill TEXT                    assistant prefill the models extend; raw `<think>` ok
   --file TEXT                       read the user message from a file (a probe template — mutually exclusive with the positional prompt)
   --prefill-file TEXT               read the assistant prefill from a file (mutually exclusive with --prefill)
@@ -710,6 +743,8 @@ tinkerscope continue [prompt] [options]
   --system-file TEXT                read that system prompt from a file
   --no-system                       fire with NO system prompt at all (thread part included)
   --tools-file TEXT                 tool definitions for this call instead of the workspace's (JSON; [] = none)
+  --auto-tools/--no-auto-tools      answer tool calls with the workspace's tool handlers (static / python — see `tinkerscope tools`) and keep sampling, up to --max-tool-steps rounds
+  --max-tool-steps INTEGER          cap on auto-answered rounds for this call; omit = the workspace's (default 5)
   --no-persist                      sample WITHOUT writing anything: no turns added, no fold, nothing on the bus — samples go to stdout only (fidelity checks, ablations)
   --file TEXT                       read the user message from a file (mutually exclusive with the positional prompt)
   --prefill TEXT                    assistant prefill the model extends — a thinking opener ('Hmm,') or its own truncated CoT; raw `<think>` ok
@@ -862,6 +897,8 @@ tinkerscope replay [options]
   --system-file TEXT                read that system prompt from a file
   --no-system                       no system prompt at all (thread part included)
   --tools-file TEXT                 tool definitions instead of the workspace's (JSON; [] = none)
+  --auto-tools/--no-auto-tools      answer tool calls with the workspace's tool handlers (static / python — see `tinkerscope tools`) and keep sampling, up to --max-tool-steps rounds (off by default here)
+  --max-tool-steps INTEGER          cap on auto-answered rounds for this call; omit = the workspace's (default 5)
   --concurrency INTEGER             turns sampled at once  [default: 4]
   --json                            JSONL: one row per sample, the real turn alongside
   --width INTEGER                   human output: per-turn truncation width  [default: 140]
@@ -877,6 +914,7 @@ tinkerscope import <file> [options]
   --responses-call                  FILE is one recorded Responses-API call ({input: {input, model, tools, reasoning}, output}) — imported VERBATIM for exact replay
   --include-output                  --responses-call: append the call's own output as the last assistant turn
   --calls-dir TEXT                  --responses-call: where to look for the calls that PRODUCED id-only reasoning items, to recover their encrypted blobs (default: the file's directory)
+  --tool-set TEXT                   apply this named tool set's HANDLERS (+ step cap); the file's own tool definitions stay as they are (a set's tools are used only when the file has none)
 tinkerscope export <ws> [options]
   # Print a workspace as JSON: its body (what `import` takes back, `--blobs` for a complete...
   --blobs                           inline each node's heavy data (raw_meta, token_logprobs) so `import` restores it
@@ -905,6 +943,41 @@ tinkerscope serve [dirs...] [options]
   --reseed                          with --pack: fully rebuild the pack's workspaces (delete + re-import, so re-exported raw_meta/logprob blobs refresh and dropped nodes are removed) and overwrite default params — for iterating on a pack you keep re-exporting (implies --force)
   --vllm-url URL                    a vLLM (OpenAI-compatible) server whose served models join the picker as `vllm:<name>` — sampled natively (token ids, logprobs, loom); same as $TINKERSCOPE_VLLM_URL
   --multi-user                      several people on this one instance: each browser (and each `tinkerscope --session <id>`) gets its OWN sidebar — panel selection, open workspace, sampling params, running — while workspaces, highlights and pins stay shared; same as TINKERSCOPE_MULTI_USER=1
+  --allow-tool-code                 let PYTHON tool handlers run (each call in a subprocess on this machine, with a timeout); off, they behave like manual tools — static handlers always run; same as TINKERSCOPE_ALLOW_TOOL_CODE=1
+tinkerscope tools set <name> [options]
+  # Add/replace a tool's definition and/or set how its calls are answered.
+  --ws TEXT                         workspace (id-prefix/name); default = the open one
+  --schema-file TEXT                the tool's definition (JSON: OpenAI function, flat Responses function, or a bare {name, description, parameters}); adds or replaces it
+  --static TEXT                     answer every call with this text
+  --static-file TEXT                answer every call with this file's text
+  --python-file TEXT                answer with python: the file is the BODY of handler(name, args, call_id, context) — `return` the result
+  --manual                          answer calls by hand again (drops the handler)
+  --auto-continue/--no-auto-continueafter answering, sample the next turn (default) or stop there
+  --timeout FLOAT                   python: seconds before the handler is killed (default 10)
+tinkerscope tools rm <name> [options]
+  # Remove a tool from the workspace (definition + handler).
+  --ws TEXT                         workspace (id-prefix/name); default = the open one
+tinkerscope tools max-steps <n> [options]
+  # Set the workspace's cap on auto-answered rounds per fire (default 5).
+  --ws TEXT                         workspace (id-prefix/name); default = the open one
+tinkerscope tools test <name> [options]
+  # Run a tool's handler on sample arguments (no model, nothing written) and print what the model...
+  --ws TEXT                         workspace (id-prefix/name); default = the open one
+  --args TEXT                       the call's arguments, as JSON  [default: {}]
+  --python-file TEXT                test this code instead of the saved handler
+  --json                            the raw result object
+tinkerscope tools sets [options]
+  # List the named tool sets saved on this instance.
+  --json                            the sets as JSON
+tinkerscope tools save-set <set_name> [options]
+  # Save the workspace's tools + handlers + step cap as a named set.
+  --ws TEXT                         workspace (id-prefix/name); default = the open one
+tinkerscope tools load-set <set_name> [options]
+  # Load a named set into the workspace (replaces its tools + handlers).
+  --ws TEXT                         workspace (id-prefix/name); default = the open one
+  --handlers-only                   keep the workspace's tool definitions (e.g. an imported recorded call's), take only the set's handlers + step cap
+tinkerscope tools delete-set <set_name>
+  # Delete a named tool set (workspaces that loaded it keep their copy).
 tinkerscope pack export <out> [options]
   # Export the current setup to a pack YAML file.
   --dir PATH (repeatable)           scan root(s) whose state to export (default: cwd) — must match how the instance was launched

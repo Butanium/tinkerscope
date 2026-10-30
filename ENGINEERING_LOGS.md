@@ -3358,3 +3358,65 @@ items and go through OpenRouter's `/api/v1/responses`.
   absent), and a `function_call_output` for a computer call id is an OpenAI 400. A user
   message carrying the screenshot after the call works (the model read the page). A
   `computer_call` item also validates only with `pending_safety_checks` present.
+
+### 2026-10-30 — Executable tool handlers: tools that answer themselves
+
+Clément: "I don't want to have to type the confirmation at every call of send back to
+chat … able to both change the tools and what they do from the UI with custom python
+code (and make sure the CLI also is nicely integrating this)". Spec in
+`docs/HANDOFF_TOOL_HANDLERS.md`; code in `api/tool_handlers.py` + `routes/chat.py`.
+
+- **Handlers live in a map BESIDE `tools`** (`tool_handlers: {name: {mode, text?, code?,
+  auto_continue?, timeout?}}` + `tool_max_steps`), keyed by tool name (`computer` for
+  the native tool). The definitions are sent verbatim — a recorded agent's tool list
+  must not grow fields the agent was never offered.
+- **The loop is server-side, one chat per step.** At a chat's terminal, after its fold
+  and before `chat_done`, the handlers run and their tool chain folds (so the browser
+  never sees the turn end with calls about to be answered — the result form would
+  flash; it is gated on `!running`). The next turn is a NEW chat (own id, bus
+  lifecycle, fold under the last tool node), so the browser renders each step like a
+  CLI fire with no client changes beyond sending the handlers. The ROOT chat's stream
+  relays every step (`tool_results`, `step_start/done/error`, tagged messages) and
+  ends last, so a CLI holding one stream sees the whole loop, `--timeout` and Ctrl+C
+  included (a cancel of any chat of a loop stops the loop: `_ToolLoop`, `_LOOP_OF`).
+- **Messages, not the tree, carry the loop**: a step's request is built in memory from
+  the parent request + the folded node + the tool messages, so `--no-persist` /
+  `replay --auto-tools` loop with nothing written. Persisted or not, a step request is
+  what the browser would build after a manual answer (checked on a real Village call:
+  31 recorded items + reasoning + function_call + function_call_output, same top-level
+  keys as the recording in `wire.exact`).
+- **n>1: every sample's branch runs its own chain at n=1**, concurrently. The panel's
+  live bucket is single-slot, so only the selected branch (the fold's first sibling)
+  broadcasts; the others run `broadcast:false` and arrive as `ops`. The tree is the
+  truth; the column shows the branch you're looking at.
+- **Steps pin the root's resolved params at call scope**: a step must neither write
+  the sidebar (n=1 would have overwritten the sample count) nor inherit a sidebar that
+  moved since the root fired. Effort None is sent as "default", system None as "".
+- **A failed handler leaves its call UNANSWERED** (the result form opens, with the
+  error as `tool_note`), rather than folding an error text the human didn't choose to
+  show the model. Same for python on a server without `--allow-tool-code`. Manual
+  tools stop the loop silently. The alternative (fold the error as the result, flag it)
+  was considered; it makes the model's next turn depend on our bug.
+- **Python**: a subprocess per call (`sys.executable -I -c <shim>`), payload on stdin
+  (a thread context won't fit argv), the code AST-wrapped as the body of
+  `handler(name, args, call_id, context)` so tracebacks keep the user's line numbers,
+  prints → logs (stderr), result → stdout JSON, env minus `*_API_KEY` / `*_TOKEN` /
+  SECRET / PASSWORD names, killed on timeout (default 10 s) or cancel. Off unless
+  `serve --allow-tool-code` (:8770 is public behind ngrok basic auth).
+- **Share packs drop python handlers** (static ones travel): a pack installs from a
+  link, and code that runs the next time a model calls the tool must not ride along.
+- **`replay` doesn't auto-answer by default** (`--auto-tools` to opt in), unlike
+  `send`/`continue`: replay's job is per-turn fidelity, and rolling every resampled
+  turn forward multiplies its cost by up to the step cap.
+- Named tool sets are instance-wide (`tool_sets.json`, like pins); loading one writes
+  the workspace meta, which is all a fire reads. `import --responses-call --tool-set`
+  takes the set's handlers and keeps the call's tool definitions verbatim.
+- `--tools-file` used to wrap ANY object without a nested `function` into the chat
+  shape, so a flat Responses function or `{"type":"computer"}` got mangled; it now
+  follows the browser editor's rule (anything with a `type` is verbatim).
+- The Village's own `send_message_to_chat` output is
+  `Output: "Message successfully sent back to chat"\n` (62 of 62 recorded outputs) —
+  the static text to use for an exact replay.
+- Observed, not fixed: replaying the 22:53:21 recorded call (3 items) gave a
+  reasoning-only output (no message, no call) 3/3 times (Luna ×2, Terra ×1); the
+  22:54:02 call gave Terra a `send_message_to_chat` once in two.

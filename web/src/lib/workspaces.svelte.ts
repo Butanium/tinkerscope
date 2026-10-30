@@ -53,6 +53,7 @@ import type {
   ConvFields,
   SetMetaFields,
   ToolDef,
+  ToolHandlers,
   WireSetting
 } from './types';
 
@@ -108,6 +109,11 @@ class ConversationsStore {
   /** The open workspace's wire setting (Responses API opt-in), sent with every
    *  fire. Set by `import --responses-call` / PATCH; mirrored like `tools`. */
   wire = $state.raw<WireSetting | null>(null);
+  /** How each tool's calls are answered (null = all by hand) + the cap on
+   *  auto-answered rounds per fire (null = the server's 5). Sent with every fire
+   *  like `tools`; written with them by setToolConfig. */
+  toolHandlers = $state.raw<ToolHandlers | null>(null);
+  toolMaxSteps = $state.raw<number | null>(null);
 
   /** Hook (assigned by +page, which owns patchState): flush the pending debounced
    *  /api/state patch — assigning its response into live.state — BEFORE any
@@ -657,7 +663,9 @@ class ConversationsStore {
       const body = await api.createWorkspace({
         id, name, ...this.#fields(), trees: { ...this.trees },
         ...(this.tools ? { tools: this.tools } : {}),
-        ...(this.wire ? { wire: this.wire } : {})
+        ...(this.wire ? { wire: this.wire } : {}),
+        ...(this.toolHandlers ? { tool_handlers: this.toolHandlers } : {}),
+        ...(this.toolMaxSteps != null ? { tool_max_steps: this.toolMaxSteps } : {})
       });
       // The create is this mirror's rev BASELINE (same role as a body GET) —
       // ops events for the follow-up batches arrive contiguously above it.
@@ -870,6 +878,8 @@ class ConversationsStore {
     this.#seenPanels = new Set(ids);
     this.tools = null;
     this.wire = null;
+    this.toolHandlers = null;
+    this.toolMaxSteps = null;
     // A fresh workspace gets its OWN counter, seeded from the ids it starts with —
     // not whatever the previously-open one had reached. Carrying that over is safe
     // (mintPanelId also refuses anything in `taken`) but it persists a number with
@@ -1047,6 +1057,8 @@ class ConversationsStore {
     this.#applyPanelUi(conv);
     this.tools = conv.tools?.length ? conv.tools : null;
     this.wire = conv.wire ?? null;
+    this.toolHandlers = conv.tool_handlers && Object.keys(conv.tool_handlers).length ? conv.tool_handlers : null;
+    this.toolMaxSteps = conv.tool_max_steps ?? null;
     // The STORE-OWNED layout: the workspace's stored panels, or — for a
     // layout-less legacy body — whatever layout was already shown (kept, as
     // before; its first save then bakes it in).
@@ -1262,14 +1274,27 @@ class ConversationsStore {
    *  at once, not debounced: the next fire must carry them, and a draft
    *  materializes with them. */
   setTools(tools: ToolDef[] | null): void {
+    this.setToolConfig(tools, this.toolHandlers, this.toolMaxSteps);
+  }
+
+  /** Replace the tool definitions, their handlers and the step cap in ONE
+   *  set_meta (the tools editor saves all three together). */
+  setToolConfig(tools: ToolDef[] | null, handlers: ToolHandlers | null, maxSteps: number | null): void {
     this.tools = tools?.length ? tools : null;
+    this.toolHandlers = handlers && Object.keys(handlers).length ? handlers : null;
+    this.toolMaxSteps = maxSteps;
     if (!this.activeId || this.#loadFailed) return;
-    this.#emit([{ op: 'set_meta', fields: { tools: this.tools } }]);
+    this.#emit([{ op: 'set_meta', fields: {
+      tools: this.tools, tool_handlers: this.toolHandlers, tool_max_steps: this.toolMaxSteps
+    } }]);
   }
 
   #applyMetaEvent(fields: SetMetaFields): void {
     if ('tools' in fields) this.tools = fields.tools?.length ? fields.tools : null;
     if ('wire' in fields) this.wire = fields.wire ?? null;
+    if ('tool_handlers' in fields)
+      this.toolHandlers = fields.tool_handlers && Object.keys(fields.tool_handlers).length ? fields.tool_handlers : null;
+    if ('tool_max_steps' in fields) this.toolMaxSteps = fields.tool_max_steps ?? null;
     if (fields.name != null && this.activeId) {
       const id = this.activeId;
       this.list = this.list.map((c) => (c.id === id ? { ...c, name: fields.name! } : c));

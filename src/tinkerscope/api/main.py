@@ -35,6 +35,7 @@ from .routes import (
     samplescope,
     search,
     state,
+    tools,
     vllm_models,
 )
 from .settings import SETTINGS
@@ -90,6 +91,7 @@ app.include_router(workspaces.router)
 app.include_router(packs.router)
 app.include_router(samplescope.router)
 app.include_router(search.router)
+app.include_router(tools.router)
 
 
 @app.get("/api/health")
@@ -114,6 +116,9 @@ def health(request: Request) -> dict:
         # it; in single-user mode always "default"), or null when the request
         # would have been refused as ambiguous.
         "multi_user": SETTINGS.multi_user,
+        # `--allow-tool-code`: python tool handlers run here (api/tool_handlers.py);
+        # off, the UI says so and treats them as manual tools.
+        "tool_code": SETTINGS.allow_tool_code,
         "session": resolve_session_soft(request),
         # caps: {"available": bool, "supported_models": [str, ...], "error": str|None}
         **caps,

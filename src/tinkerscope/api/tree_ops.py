@@ -62,6 +62,8 @@ import string
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from . import tool_handlers
+
 log = logging.getLogger("tinkerscope.tree_ops")
 
 ROOT = "__root__"
@@ -97,6 +99,8 @@ META_FIELDS = (
     "panel_seq",
     "tools",
     "wire",
+    "tool_handlers",
+    "tool_max_steps",
 )
 
 # Reserved panel ids the pre-multipanel {tree, compare_tree} shape maps onto.
@@ -448,6 +452,10 @@ def apply_meta(body: dict, fields: dict, trees: Any = None) -> tuple[dict, bool]
             v = normalize_panels(v, trees)
         elif k == "tools":
             v = check_tools(v)
+        elif k == "tool_handlers":
+            v = tool_handlers.check_tool_handlers(v)
+        elif k == "tool_max_steps":
+            v = tool_handlers.check_max_steps(v)
         if k not in body or body[k] != v:
             changed = True
         body[k] = v

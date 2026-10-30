@@ -138,6 +138,13 @@ and in this file's reference section; HANDOFF.md itself is retired.
   UI: `ToolCalls.svelte` (a turn's calls), `ToolResultForm.svelte` (per-panel answer form,
   Send vs Result only), `ToolsModal.svelte` (the composer's **tools** pill). The composer
   refuses a user turn after unanswered calls (provider 400). CLI: `continue --tool-result`.
+- **Tool handlers** (`src/tinkerscope/api/tool_handlers.py` — module docstring; the loop is
+  `routes/chat.py` `_auto_answer` / `_drive_steps`; `ENGINEERING_LOGS.md` 2026-10-30):
+  workspace meta `tool_handlers` {name: manual|static|python} + `tool_max_steps`, sent by
+  the client like `tools`. The server answers fully-covered calls at a chat's terminal
+  (before `chat_done`) and samples on, ONE CHAT PER STEP, relayed on the root's stream.
+  Python only with `serve --allow-tool-code`, in a subprocess. A failed handler leaves the
+  call pending. CLI: `tinkerscope tools …`, `--no-auto-tools`; named sets `/api/tool-sets`.
 - **Responses-API wire** (`src/tinkerscope/api/openrouter_responses.py` — module docstring;
   `ENGINEERING_LOGS.md` 2026-10-30): nodes may carry the VERBATIM Responses items they stand
   for (`items`, heavy blob like `raw_meta`; `items_recorded` = what was originally sent when

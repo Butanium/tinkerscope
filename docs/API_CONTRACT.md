@@ -98,7 +98,7 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
 
 | Method | Path | Body / params | Returns |
 |---|---|---|---|
-| GET | `/api/health` | — | `{ok, root, scan_roots[], tinker_key, openrouter_key, openrouter_account, vllm_url, multi_user, session, available, supported_models[], error}` — `openrouter_account` = this key's 10-hex tag (`openrouter.account_tag`), what encrypted reasoning is stamped with (see `reasoning_account` below); `vllm_url` = the configured vLLM server (normalized, `$TINKERSCOPE_VLLM_URL` / `--vllm-url`) or null; `multi_user` = started with `--multi-user`; `session` = the session id THIS request resolved to (see "Sessions" below; always `"default"` on a single-user server; `null` when the request would be refused as ambiguous); `available`/`supported_models`/`error` = the tinker capabilities probe, cached server-side 10 min after a success and 60 s after a failure — past that the stale answer is served while one background re-probe runs |
+| GET | `/api/health` | — | `{ok, root, scan_roots[], tinker_key, openrouter_key, openrouter_account, vllm_url, multi_user, session, tool_code, available, supported_models[], error}` — `tool_code` = started with `--allow-tool-code` (python tool handlers run here; off = they act like manual tools); `openrouter_account` = this key's 10-hex tag (`openrouter.account_tag`), what encrypted reasoning is stamped with (see `reasoning_account` below); `vllm_url` = the configured vLLM server (normalized, `$TINKERSCOPE_VLLM_URL` / `--vllm-url`) or null; `multi_user` = started with `--multi-user`; `session` = the session id THIS request resolved to (see "Sessions" below; always `"default"` on a single-user server; `null` when the request would be refused as ambiguous); `available`/`supported_models`/`error` = the tinker capabilities probe, cached server-side 10 min after a success and 60 s after a failure — past that the stale answer is served while one background re-probe runs |
 | GET | `/api/models` | — | `Run[]` (with `supports_thinking`) |
 | POST | `/api/models/refresh` | — | `{status, count}` (rescans fs + capabilities) |
 | GET | `/api/tinker-models` | `?refresh` | `{available, error, models:[…]}` — everything sampleable through tinker, one filterable list. Each entry has `kind` + unified `id` + `label`. `kind:"base"` (+`base_model`, +`supports_thinking`) = raw base models from `get_server_capabilities` (no LoRA); `supports_thinking` = the family exposes a binary thinking toggle (so the composer can hide its thinking control for base picks with none). `kind:"checkpoint"` (+`sampler_path`,`created`) = every sampler checkpoint the account still has (the REST `list_user_checkpoints` sweep — not the 20-capped oai /v1/models), newest first, UUID-only (no `supports_thinking` — base/renderer unknown ⇒ the UI assumes thinking-capable). Base models first, then checkpoints. `?refresh=1` re-probes both the capabilities and the checkpoint sweep now (otherwise the same TTL cache as `/api/health`). Entries a **share pack** injected (see `docs/PACK.md`) are appended with `pack:true` and deduped by `id` against the sweep — these carry explicit sampler paths / base models the account sweep won't list (public checkpoints trained elsewhere), so they appear even offline / cross-account. A registry label **OVERRIDES** a sweep entry's derived one (same `id` ⇒ one row, not two) and sets `named:true`; an entry with no registry label has no `named` flag, which is how the UI knows its label is derived and offers to name it. |
@@ -139,6 +139,10 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
 | GET | `/api/workspaces/{id}/trash` | — | `[{id, ts, panel, kind, count, roots, selected, layout?, layout_index?}]` NEWEST-first — one entry per save that made nodes disappear. Node BODIES excluded (a listing is for choosing; bodies can be MBs). `roots` = the deleted subtree anchors `{id, parent, index, role, preview}`. `kind` is `"nodes"` (branches vanished) or `"panel"` (the whole column did) — a `"panel"` entry also carries `layout`, that panel's layout row, and `layout_index`, its position in `panels`, so the column can come back bound to its model and in its old slot. Both absent on entries journaled before they were recorded. `[]` for unknown / never-deleted (never 404, same convention as node-blobs) |
 | POST | `/api/workspaces/{id}/trash/restore` | `{handle}` | `{ok, restored, panel, recreated_panel, unbound_panel, entry}` — splices a journaled subtree back at its recorded sibling `index`. `handle` = an entry id, a subtree-root node id, or any node id inside an entry. Blobs need no work (write-once, never removed), so logprobs come back too. `recreated_panel` = this restore re-added a whole column; its tree and its layout row are checked SEPARATELY because they drift (a stale tab's save wipes the row while the partial tree upsert keeps the tree), which is also what keeps restore re-runnable. `unbound_panel` = the re-added row binds no model, so the browser's phantom filter will drop it on load — the caller should say so rather than promise a re-bind. `{ok: false, error}` with **200** when nothing matches — that's an answer, not a transport failure |
 | DELETE | `/api/workspaces/{id}/trash` | — | `{ok}` — forget the journal (the deliberate-deletion escape hatch) |
+| POST | `/api/tool-handlers/test` | `{handler: {mode, text?, code?, timeout?}, name, args, call_id?, context?}` | Run ONE tool handler on sample arguments — no model, no tree (the tools editor's **Test**, `tinkerscope tools test`). `{ok, text?, image?, error?, logs, ms}`; `logs` = what the code printed. Python on a server without `--allow-tool-code` → `{ok: false, error}`; a manual handler → 400 |
+| GET | `/api/tool-sets` | — | `[{name, tools, tool_handlers, tool_max_steps, updated_at}]` — named tool sets, instance-wide (`<state_dir>/tool_sets.json`), sorted by name |
+| PUT | `/api/tool-sets/{name}` | `{tools?, tool_handlers?, tool_max_steps?}` | the stored set; validated like the workspace meta (400). Replaces a set of that name. Loading one = writing those fields into a workspace (`set_meta` / PATCH) |
+| DELETE | `/api/tool-sets/{name}` | — | `{ok}`; 404 if unknown |
 | GET | `/api/search` | `?q=<text>` + optional `regex=1`, `case=1` (case-SENSITIVE; default insensitive), `ws=<id>` (one workspace), `max_hits` (default 200), `width` (snippet chars, default 160), `scopes=<csv>` (subset of `reply,user,thinking,system,name,model`; omitted = all; unknown scope = 422 — the palette's filter chips send this so counts/truncation reflect the filter, with `model` off by default there) | Cross-workspace text search over EVERY branch of every saved workspace — node `content`, assistant `reasoning`, thread `system_prompt` (root user nodes) — plus workspace-LEVEL matches (name / global system prompt / a panel's model id). Engine: `api/search.py` (cached linear scan; wire shape deliberately index-agnostic). Returns `{query, workspace_hits[], hits[], workspace_totals[], total, truncated, workspaces_searched, workspaces_matched}`. Each node hit = full tree address (`workspace_id`, `panel`, `node_id`, `parent`, `role`, `field`, `thread` (1-indexed root thread), `on_active_path`, `sib_index`, `sib_count`) + the FIRST match in that field (`match` = matched text; `before`/`match_display`/`after` = the display snippet triple, each whitespace-collapsed separately so clients highlight without offset math). `hits` is capped at `max_hits`; `total`/`workspace_totals` keep counting past the cap. Workspaces ordered newest-`updated_at` first. Consumers: the browser's **Ctrl+K palette** and `tinkerscope grep`. 400 on a bad regex. The static-site mirror is `web/src/lib/search-scan.ts` |
 | POST | `/api/pack/apply` | `{source, on_conflict?, force?}` | Install a **share pack** at runtime — what makes `?w=<path-or-url>` work (a launch-time `--pack` flag can't serve a link). `source` = local filesystem path (read by THIS server — the only way a path works at all) or http(s) URL; YAML or JSON. **Two-phase.** Omit `on_conflict` for a dry-run **preview**: `{status:"preview", pack, description, models, workspaces:[{id, name, exists}]}` — `id` is the deterministic `pack-<pack-slug>-<ws-slug>`, `exists` says it's already here. With `on_conflict:"overwrite"` (idempotent re-apply, historical behavior) or `"new"` (renames the incoming copy to `<name> (2)` ⇒ fresh id, existing untouched) it applies and returns `{status:"applied", pack, models, openrouter, workspaces, workspace_ids:[{id,name}], params}`. `workspace_ids` is in pack order — the browser opens the first, or the one `&open=` names. 404 unreadable source, 400 unparseable pack, 422 bad `on_conflict`. A **gzipped** pack (`.yaml.gz`) is accepted from either source — detection is by magic bytes, not extension — and a pack authored with `pack export --logprobs` carries per-node `token_logprobs_json` (a compact JSON string) which apply converts back into ordinary write-once logprob blobs. See `docs/STATIC_SITE.md` §2 and `docs/PACK.md` |
 
@@ -155,6 +159,13 @@ warning, not a block; a send to one surfaces the backend 404. Runs with
                                             // native {type:"computer"} (Responses wire only); null = none.
                                             // Validated on write (tree_ops.check_tools: a `type`; function
                                             // names present + unique → else 400/409). set_meta / PATCH.
+  "tool_handlers": null,                    // how each tool's calls are answered, keyed by tool name
+                                            // (a function's name; "computer" for the native tool):
+                                            // {mode: "manual"|"static"|"python", text?, code?,
+                                            //  auto_continue? (default true), timeout? (s, python)}.
+                                            // No entry = manual. Kept BESIDE `tools` (those are sent
+                                            // verbatim). api/tool_handlers.py; set_meta / PATCH.
+  "tool_max_steps": null,                   // cap on auto-answered rounds per fire (null = 5)
   "wire": null,                             // {"api": "responses", "reasoning": {effort?, summary?},
                                             //  "exact"?, "recovered_reasoning"?, "model"?, "extra"?,
                                             //  "recorded_extra"?} — `exact` (set by import): requests
@@ -188,7 +199,7 @@ The **tree** is a per-panel branch structure owned by the frontend
 (`web/src/lib/tree.ts`): `nodes[id] = {id, role, content, reasoning?, raw_text?,
 prefill?, loom_cut?, loom_text?, finish_reason?, parent, children[],
 has_token_logprobs?, has_raw_meta?, reasoning_details?, reasoning_tokens?,
-reasoning_account?, tool_calls?, tool_call_id?, name?,
+reasoning_account?, tool_calls?, tool_call_id?, name?, handler?,
 prefill_unsupported?}`
 + a `selected` map (parentId|`"__root__"` → selected child id). `finish_reason:
 "length"` marks a turn cut off by the max-tokens limit (the UI badges it).
@@ -224,7 +235,9 @@ form a CHAIN under it in call order (asst → tool(c1) → tool(c2) → …), an
 model's next turn folds under the last result (`parent_node` may be a tool node).
 A user node may also follow a result. The browser shows a result form while the
 active path has unanswered calls, and refuses a plain user turn there (the
-provider would 400 the thread).
+provider would 400 the thread). A tool node carrying `handler: "static"|"python"`
+was answered by the server with the workspace's handler (see "Auto-answered tool
+calls" under the chat endpoint); its other fields are exactly a manual answer's.
 `loom_cut`/`loom_text` mark a loom branch's forced prefix (see the `message`
 event below). The
 linear ACTIVE PATH (root→leaf via `selected`) is what the sampler and the CLI
@@ -348,6 +361,10 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
                           // (the workspace's `tools`, sent by the client like the system
                           // prompt — the server never looks it up). OpenRouter only: any
                           // other backend errors on a thread with tools / tool turns.
+  "tool_handlers": null,  // optional; the workspace's `tool_handlers` (+ `max_tool_steps`
+  "max_tool_steps": null, // = its `tool_max_steps`), sent like `tools`. When some handler is
+  "auto_tools": true,     // static/python, the server answers covered calls and samples on —
+                          // see "Auto-answered tool calls". auto_tools=false: off for this fire.
   "system_prompt": null,  // optional; the GLOBAL system-prompt part.
                           // "" = EXPLICITLY none (never inherits — see params_scope).
                           // The "call"-scope inherit SKIPS a muted global prompt
@@ -532,6 +549,30 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
   Ctrl+C) — CALLER stream only: the bus still says `chat_done` for a stop that
   kept samples. Without it a stop after sample 1 of 10 read as a clean 1-sample
   run; `tinkerscope` now exits 130 on it and names how many of `n` finished.
+- **Auto-answered tool calls** (a request with a static/python `tool_handlers`
+  entry). At a chat's terminal, after its fold and BEFORE `chat_done`: for each
+  sample whose calls ALL have a runnable handler, the handlers run in call order
+  and the results fold as a tool chain under the sample's node (same op as a
+  manual answer, plus `handler`). If every tool auto-continues and the step cap
+  allows, the branch's next turn is sampled as its OWN chat (own `chat_id`, bus
+  `chat_start`…`chat_done`, fold under the last tool node; n=1; params pinned to
+  the root's, call scope). The ROOT stream relays all of it, then ends:
+  - `event: tool_results` → `{step, branch, node, results: [{tool_call_id, name,
+    content, handler, node_id?, logs?}], stopped?, logs?}` — `branch` = the root
+    sample index the branch grew from; `stopped` = why a call was left unanswered
+    (manual tools are silent; python off / a failed handler / the cap say so).
+  - `event: step_start` / `step_done` / `step_error` → the step chat's own
+    `start` / `done` / `error` payload + `{step, branch}`; its `message` / `delta`
+    events carry `step` + `branch` too.
+  - the root's final `done` adds `tool_steps` (step chats fired) and
+    `cancelled: true` when the loop was stopped. Cancelling ANY chat of a loop
+    (root or step id) stops the whole loop.
+  A failed handler leaves its call pending (no error text is fed to the model).
+  On the bus, a `chat_done` whose calls weren't all answered carries `tool_note`.
+  With n>1 only the selected branch (the first sibling) streams to the panel's
+  bucket; the others fire `broadcast:false` and land as `ops`. Python handlers run
+  only with `--allow-tool-code`: a subprocess (`sys.executable -I`), the server's
+  env minus credential-looking variables, default timeout 10 s.
 - `event: error` → `data: {error, …}` (whole request failed, e.g. unsampleable
   run; a mid-stream producer fault after ≥1 completed sample also carries the
   fold-outcome fields above — partial data is real data and folds)
@@ -727,7 +768,7 @@ Event names = the message's `type`:
 - `chat_status` → `{type:"chat_status", chat_id, panel, state, reason, heard_ago_s, http, reconnects, resubmits}` (the caller stream's `event: status`, relayed per panel — drives the "waiting on the model" readout. Session-scoped like every chat event; drop stragglers by `chat_id`. A reconnect resets the server's record, so `heard_ago_s` can return to null mid-chat: keep the last answer time you had)
 - `delta` → `{type:"delta", chat_id, panel, sample_index, delta, kind}` (streamed token chunk; only a token-streaming producer at n==1 — openrouter, NOT run_id / base_model / loose sampler_path which all render native — accumulate per chat_id/panel/sample_index, then the `sample` event finalizes)
 - `sample` → `{type:"sample", chat_id, panel, sample_index, content, raw_text, finish_reason, reasoning?, thinking?}` (`thinking` only on `thinking:"both"` chats — which half drew this sample)
-- `chat_done` → `{type:"chat_done", chat_id, panel, client_token?, workspace_id?, thread_system_prompt?, folded?, fold_rev?}` (`folded` + `fold_rev` appear iff a server-authored fold landed — the `[{sample_index, node_id}]` manifest (how the firing browser seeds its blob cache from the bucket) + the rev its `ops` event carried; see "Server-authored folds". The fold itself already arrived as that `ops` event — a terminal drives NO tree mutation in any client. A `parent_node`-less chat's terminal means nothing was persisted anywhere: no-placement fires are fully ephemeral (bucket render + caller stream only — the §9.4 accepted default; give a chat a home workspace if you want to keep it))
+- `chat_done` → `{type:"chat_done", chat_id, panel, client_token?, workspace_id?, thread_system_prompt?, folded?, fold_rev?, tool_note?}` (`tool_note` = why the tool handlers left this chat's calls unanswered — the result form shows it; `folded` + `fold_rev` appear iff a server-authored fold landed — the `[{sample_index, node_id}]` manifest (how the firing browser seeds its blob cache from the bucket) + the rev its `ops` event carried; see "Server-authored folds". The fold itself already arrived as that `ops` event — a terminal drives NO tree mutation in any client. A `parent_node`-less chat's terminal means nothing was persisted anywhere: no-placement fires are fully ephemeral (bucket render + caller stream only — the §9.4 accepted default; give a chat a home workspace if you want to keep it))
 - `chat_error` → `{type:"chat_error", chat_id, panel, error, client_token?, workspace_id?, thread_system_prompt?}`
 - `ops` → `{type:"ops", workspace, rev, ops:[…]}` (a workspace TREE changed — see the op protocol above. `ops` is the batch AS APPLIED: light node bodies only (heavy fields went to write-once blobs, nodes carry `has_token_logprobs`/`has_raw_meta` instead) and merged `set_meta` values. A mirror **applies every event in rev order, its own echoes included** — idempotent/LWW ops make replaying your own batch a no-op, and skipping it provably breaks convergence when two tabs contend. Match the `workspace` BEFORE checking the rev gap: gap-checking a foreign event either refetches for nothing or, worse, advances the local rev so the next genuine event looks stale. Any mismatch — a gap forward, or a rev that went BACKWARDS, which a pack install can do — means refetch the light body)
 - `workspace_deleted` → `{type:"workspace_deleted", workspace}` (that workspace is gone — `DELETE /api/workspaces/{id}` succeeded). Its OWN event rather than an `ops` entry, because a deletion has no `rev` to ride: the workspace the rev would belong to no longer exists. A tab holding it open otherwise learns nothing and its next refetch 404s, which is indistinguishable from server trouble. Fires only on a real deletion (a 404 announces nothing). The store's delete is SOFT, so the id can come back via `workspaces/.deleted/`

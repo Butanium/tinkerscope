@@ -20,7 +20,9 @@ import type {
   SearchResponse
 } from './types';
 import type { ConvTree } from './tree';
-import type { ConvFields, WorkspaceOp, OpsResponse, OpenRouterCaps, ToolDef, WireSetting } from './types';
+import type {
+  ConvFields, WorkspaceOp, OpsResponse, OpenRouterCaps, ToolDef, ToolHandler, ToolHandlers, WireSetting
+} from './types';
 import { isStatic } from './static-mode';
 import { staticApi, staticSse } from './api-static';
 import { sessionId, SESSION_HEADER, SESSION_QUERY } from './session';
@@ -149,6 +151,8 @@ const httpApi = {
     seen_panels?: string[];
     tools?: ToolDef[] | null;
     wire?: WireSetting | null;
+    tool_handlers?: ToolHandlers | null;
+    tool_max_steps?: number | null;
   }) => j<Workspace>('/api/workspaces', { method: 'POST', body: JSON.stringify(entry) }),
   patchWorkspace: (id: string, patch: Partial<ConvFields> & { name?: string }) =>
     j<WorkspaceSummary>(`/api/workspaces/${encodeURIComponent(id)}`, {
@@ -197,7 +201,25 @@ const httpApi = {
   // own (CLI / another tab, so no local AbortController). Server fires the same
   // terminal a client disconnect would. not_found if it already ended.
   cancelChat: (chat_id: number) =>
-    j<{ status: string; chat_id: number }>(`/api/chat/${chat_id}/cancel`, { method: 'POST' })
+    j<{ status: string; chat_id: number }>(`/api/chat/${chat_id}/cancel`, { method: 'POST' }),
+  // Tool handlers (api/routes/tools.py): run one on sample arguments (the tools
+  // editor's Test), and the instance's named tool sets.
+  testToolHandler: (body: { handler: ToolHandler; name: string; args: unknown; context?: Record<string, unknown> }) =>
+    j<ToolTestResult>('/api/tool-handlers/test', { method: 'POST', body: JSON.stringify(body) }),
+  listToolSets: () => j<ToolSet[]>('/api/tool-sets'),
+  saveToolSet: (name: string, set: Omit<ToolSet, 'name' | 'updated_at'>) =>
+    j<ToolSet>(`/api/tool-sets/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify(set) }),
+  deleteToolSet: (name: string) =>
+    j<{ ok: boolean }>(`/api/tool-sets/${encodeURIComponent(name)}`, { method: 'DELETE' })
+};
+
+export type ToolTestResult = { ok: boolean; text?: string; image?: string; error?: string; logs?: string; ms?: number };
+export type ToolSet = {
+  name: string;
+  tools: ToolDef[] | null;
+  tool_handlers: ToolHandlers | null;
+  tool_max_steps: number | null;
+  updated_at?: string;
 };
 
 /** The transport contract. `api-static.ts` implements it against baked JSON, so

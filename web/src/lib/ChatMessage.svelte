@@ -752,6 +752,7 @@
         <div class="message-role">{msg.role}</div>
         {#if msg.role === 'tool'}
           <code class="tool-result-name" data-tooltip={msg.tool_call_id ? `answers call ${msg.tool_call_id}` : undefined} use:tip>{msg.name || 'result'}</code>
+          {#if msg.handler}<span class="auto-tag" data-testid="auto-answered" data-tooltip="Answered by its {msg.handler} handler, not by hand" use:tip>auto</span>{/if}
         {/if}
         {#if msg.finish_reason === 'length' && !isMultiSample}{@render truncatedTag()}{/if}
         {#if msg.prefill_ignored && !isMultiSample}{@render prefillIgnoredTag(msg.prefill_unsupported)}{/if}
@@ -1053,6 +1054,7 @@
   .hidden-below-strip { display: block; width: 100%; margin-top: var(--space-2); padding: 3px 8px; text-align: center; font-size: 0.7rem; color: var(--color-text-muted); background: none; border: 1px dashed var(--color-border); border-radius: var(--radius); cursor: pointer; transition: all 0.15s; }
   .hidden-below-strip:hover { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
   /* Amber "truncated" pill — the turn/sample hit the max-tokens limit. */
+  .auto-tag { font-size: 0.62rem; color: var(--color-text-secondary); border: 1px solid var(--color-tool-border); border-radius: var(--radius-pill); padding: 0 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; cursor: default; }
   .truncated-tag { font-size: 0.62rem; color: #b45309; background: #f59e0b14; border: 1px solid #f59e0b66; border-radius: var(--radius-pill); padding: 0 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; cursor: default; }
   .mode-tag { font-size: 0.62rem; color: var(--color-text-muted); background: var(--color-bg); border: 1px solid var(--color-border); border-radius: var(--radius-pill); padding: 0 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; cursor: default; white-space: nowrap; }
   /* Header rows (a row's head, a card's header) CENTRE their items, and the text in
@@ -1063,7 +1065,7 @@
   @supports (text-box: trim-both cap alphabetic) {
     /* the padding gives back exactly what the trim took (1lh − 1cap), so no box
        changes height — only where its caps sit inside it */
-    .message-head .message-role, .sample-label, .active-sample-tag, .seg-n, .truncated-tag, .mode-tag {
+    .message-head .message-role, .sample-label, .active-sample-tag, .seg-n, .truncated-tag, .auto-tag, .mode-tag {
       text-box: trim-both cap alphabetic; padding-block: calc((1lh - 1cap) / 2);
     }
   }

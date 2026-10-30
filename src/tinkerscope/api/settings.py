@@ -51,6 +51,9 @@ class Settings:
     # `tinkerscope serve --multi-user`: the state bus is per SESSION instead of
     # per process — see api/session.py. Off = exactly the pre-sessions wire.
     multi_user: bool
+    # `tinkerscope serve --allow-tool-code`: python tool handlers may run (in a
+    # subprocess — api/tool_handlers.py). Off = they behave like manual tools.
+    allow_tool_code: bool = False
 
     @property
     def base_url(self) -> str:
@@ -124,6 +127,7 @@ def load_settings() -> Settings:
         vllm_url=os.environ.get("TINKERSCOPE_VLLM_URL") or None,
         vllm_api_key=os.environ.get("TINKERSCOPE_VLLM_API_KEY") or None,
         multi_user=os.environ.get("TINKERSCOPE_MULTI_USER", "").strip().lower() in ("1", "true", "yes"),
+        allow_tool_code=os.environ.get("TINKERSCOPE_ALLOW_TOOL_CODE", "").strip().lower() in ("1", "true", "yes"),
     )
 
 

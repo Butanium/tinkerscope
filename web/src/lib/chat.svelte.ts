@@ -122,6 +122,10 @@ class ChatStore {
         // The workspace's tools + wire setting ride on every fire, like the system prompt.
         ...(ws.tools ? { tools: ws.tools } : {}),
         ...(ws.wire ? { wire: ws.wire } : {}),
+        // …and its tool handlers: the server answers the calls they cover and
+        // samples on, each step its own chat on this panel (renders like a CLI fire)
+        ...(ws.toolHandlers ? { tool_handlers: ws.toolHandlers } : {}),
+        ...(ws.toolMaxSteps != null ? { max_tool_steps: ws.toolMaxSteps } : {}),
         broadcast: true, detached: true, client_token: token,
         // SERVER-AUTHORED FOLD (P2): the samples fold under this user node at
         // terminal, server-side — all n, blobs included, zero browsers needed.

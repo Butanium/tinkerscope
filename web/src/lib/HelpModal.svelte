@@ -586,6 +586,18 @@ codex plugin add tinkerscope@tinkerscope</pre>
         message next. A call has to be answered before a plain message can follow it.
       </p>
       <p class="help-note">
+        Under the definitions, each tool gets a handler: <b>Manual</b> (the form above), <b>Static</b> (every
+        call returns the same text, e.g. "Message successfully sent back to chat") or <b>Python</b> (the body
+        of <code>handler(name, args, call_id, context)</code>; its return value is the result, <b>Test</b> runs
+        it on sample arguments). When every call in a turn has a handler, the server answers them, marks the
+        results <b>auto</b>, and samples the next turn, up to <b>Max steps</b> rounds per send (default 5). It
+        stops at a manual tool, a turn without calls, or a tool whose <b>continue</b> box is unticked. With
+        several samples, each sample's branch continues on its own; the column streams the selected one.
+        Python handlers run only on a server started with <code>--allow-tool-code</code>; elsewhere they
+        act like manual tools, and the result form says why a call was left for you. <b>Tool set</b> saves
+        the definitions and handlers under a name for other workspaces (Shift+Load takes only the handlers).
+      </p>
+      <p class="help-note">
         A workspace imported from a recorded agent call (<code>tinkerscope import --responses-call</code>)
         shows each turn exactly as the agent saw or produced it: screenshots as thumbnails (click to
         enlarge), reasoning as encrypted / <b>id only</b> badges, calls and their outputs. Sends there go
