@@ -3253,3 +3253,14 @@ while raw OpenAI blobs pass through OpenRouter and work when the org matches. Th
 `reasoning_account` flag stands: a cross-account replay loses the reasoning
 silently on every path. (The tag hashes the OpenRouter key, so it approximates the
 org behind it: a BYOK key change within one org would false-flag.)
+
+### 2026-10-30 — Empty assistant turns are shown, and silent samples count as folds
+Replaying an AI Village agent (GPT-5.6 Terra) means a thread that is mostly turns
+where the model produced nothing — and for that agent the silence IS the behavior.
+`ChatMessage` dropped any assistant row without content/reasoning/tool calls, so the
+41-turn replay rendered as user turns stacked back to back and an encrypted-only
+turn vanished too. A committed node (`nodeId` set, not running) now always renders:
+a muted "empty turn" body plus the normal toolbar (regenerate/cycle/delete work on
+it). Separately, `panel-view.ts`'s bucket→node map counted a sample as folded only
+if it had content or tool calls, but `_build_fold_nodes` folds every non-error
+sample, so one silent sample in an n>1 fire shifted the ‹k/N› mapping by one.
