@@ -32,6 +32,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from ..state import DEFAULT_PANEL_ID, broadcast_all
+from .. import tree_ops
 from .. import workspace_store as store
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
@@ -48,6 +49,9 @@ class WorkspaceCreate(BaseModel):
     # Power state of the workspace's system prompt (False = kept but muted).
     # None/absent (legacy bodies, old clients) → readers derive from text presence.
     system_enabled: bool | None = None
+    # Tool definitions sent with every fire (OpenAI function schemas; see
+    # tree_ops.check_tools). None = no tools.
+    tools: list[dict[str, Any]] | None = None
     # N-panel shape: {panel_id: opaque tree}.
     trees: dict[str, Any] | None = None
     # legacy 2-panel shape (transitional CLI callers) — synthesized into `trees`.
@@ -74,6 +78,7 @@ class WorkspacePatch(BaseModel):
     name: str | None = None
     system_prompt: str | None = None
     system_enabled: bool | None = None
+    tools: list[dict[str, Any]] | None = None
     panels: list[dict[str, Any]] | None = None
     reduced_panels: list[str] | None = None
     send_targets: list[str] | None = None
@@ -186,11 +191,16 @@ def create_workspace(req: WorkspaceCreate) -> dict:
             trees["compare"] = req.compare_tree
     if not trees:
         trees = {DEFAULT_PANEL_ID: {}}
+    try:
+        tools = tree_ops.check_tools(req.tools)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
     return store.upsert(
         id=req.id,
         name=req.name,
         system_prompt=req.system_prompt,
         system_enabled=req.system_enabled,
+        tools=tools,
         trees=trees,
         panels=req.panels or [],
         reduced_panels=req.reduced_panels,
@@ -240,7 +250,10 @@ async def patch_workspace(workspace_id: str, req: WorkspacePatch) -> dict:
     tree bytes. Sugar over the `set_meta` op: same locked apply, same rev bump, same
     `ops` broadcast, so tabs converge on metadata live. Returns the updated summary."""
     fields = req.model_dump(exclude_unset=True)
-    out = await run_in_threadpool(store.set_meta, workspace_id, fields)
+    try:
+        out = await run_in_threadpool(store.set_meta, workspace_id, fields)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
     if out is None:
         raise HTTPException(404, f"no workspace {workspace_id}")
     await _broadcast_ops(workspace_id, out)

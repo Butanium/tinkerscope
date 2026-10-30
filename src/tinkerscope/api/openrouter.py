@@ -26,9 +26,11 @@ model's own).
 from __future__ import annotations
 
 import copy
+import json
 import os
 import re
 import time
+from typing import Any
 
 import httpx
 from openai import AsyncOpenAI
@@ -173,9 +175,33 @@ def replayable_details(details: list | None, model: str) -> list[dict]:
     return out
 
 
+def clean_tool_calls(calls: Any) -> list[dict]:
+    """Tool calls in the OpenAI chat-completions shape, keeping only the fields the
+    API defines: `[{id, type: "function", function: {name, arguments}}]`.
+    `arguments` stays the model's raw JSON string — re-serializing it would change
+    what the model sees of its own call on replay."""
+    out = []
+    for c in calls or []:
+        c = _as_dict(c)
+        if not c:
+            continue
+        fn = _as_dict(c.get("function")) or {}
+        args = fn.get("arguments")
+        out.append({
+            "id": c.get("id") or "",
+            "type": c.get("type") or "function",
+            "function": {
+                "name": fn.get("name") or "",
+                "arguments": args if isinstance(args, str) else json.dumps(args if args is not None else {}),
+            },
+        })
+    return out
+
+
 def prepare_messages(messages: list[dict], model: str) -> list[dict]:
     """Wire messages for one OpenRouter call: {role, content}, plus an assistant
-    turn's stored `reasoning_details` when they can be replayed to `model`."""
+    turn's stored `reasoning_details` when they can be replayed to `model`, its
+    `tool_calls`, and a tool turn's `tool_call_id` / `name`."""
     out = []
     for m in messages:
         msg = {"role": m["role"], "content": m["content"]}
@@ -183,13 +209,24 @@ def prepare_messages(messages: list[dict], model: str) -> list[dict]:
             rd = replayable_details(m.get("reasoning_details"), model)
             if rd:
                 msg["reasoning_details"] = rd
+            calls = clean_tool_calls(m.get("tool_calls"))
+            if calls:
+                msg["tool_calls"] = calls
+                # A calls-only turn: null content, as the API returns it. An empty
+                # string is an empty text block to some providers, which they reject.
+                if not m["content"]:
+                    msg["content"] = None
+        elif m["role"] == "tool":
+            msg["tool_call_id"] = m.get("tool_call_id") or ""
+            if m.get("name"):
+                msg["name"] = m["name"]
         out.append(msg)
     return out
 
 
 def _build_kwargs(
     *, model, messages, temperature, max_tokens, thinking,
-    top_p, top_k, presence_penalty, repetition_penalty, effort=None,
+    top_p, top_k, presence_penalty, repetition_penalty, effort=None, tools=None,
 ) -> dict:
     kwargs: dict = {
         "model": model,
@@ -197,6 +234,8 @@ def _build_kwargs(
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
+    if tools:
+        kwargs["tools"] = tools
     if top_p is not None:
         kwargs["top_p"] = top_p
     if presence_penalty is not None:
@@ -258,8 +297,33 @@ def _elide(details: list[dict]) -> list[dict]:
     return out
 
 
+def merge_tool_call_chunks(acc: list[dict], chunk) -> None:
+    """Fold one streamed `delta.tool_calls` list into `acc`. A call arrives as
+    pieces sharing an `index`: the id / name in the first, the arguments JSON
+    split across the rest."""
+    for raw in chunk or []:
+        d = _as_dict(raw)
+        if not d:
+            continue
+        idx = d.get("index")
+        cur = next((a for a in acc if a.get("index") == idx), None) if idx is not None else None
+        if cur is None:
+            cur = {"index": idx, "id": "", "type": "function", "function": {"name": "", "arguments": ""}}
+            acc.append(cur)
+        if d.get("id"):
+            cur["id"] = d["id"]
+        if d.get("type"):
+            cur["type"] = d["type"]
+        fn = _as_dict(d.get("function")) or {}
+        if fn.get("name"):
+            cur["function"]["name"] += fn["name"]
+        if fn.get("arguments"):
+            cur["function"]["arguments"] += fn["arguments"]
+
+
 def _raw_text(request_kwargs: dict, content: str, reasoning: str | None,
-              details: list[dict] | None = None, usage: dict | None = None) -> str:
+              details: list[dict] | None = None, usage: dict | None = None,
+              tool_calls: list[dict] | None = None) -> str:
     """Raw view for the OpenRouter backend: the actual request body sent over
     the wire, plus the response trimmed to just its output + thinking fields.
 
@@ -283,6 +347,8 @@ def _raw_text(request_kwargs: dict, content: str, reasoning: str | None,
     if details:
         response["reasoning_details"] = _elide(details)
     response["content"] = content
+    if tool_calls:
+        response["tool_calls"] = tool_calls
     if usage:
         response["usage"] = usage
     return format_request_response(body, response)
@@ -306,7 +372,7 @@ def _usage_view(usage) -> dict | None:
 
 
 def _finish(content: str, reasoning: str | None, details: list[dict], usage, kwargs: dict,
-            finish: str | None) -> dict:
+            finish: str | None, tool_calls: list[dict] | None = None) -> dict:
     if "<think>" in content:
         content, think = _split_think(content)
         if think:
@@ -323,7 +389,10 @@ def _finish(content: str, reasoning: str | None, details: list[dict], usage, kwa
     rt = _reasoning_tokens(usage)
     if rt:
         result["reasoning_tokens"] = rt
-    result["raw_text"] = _raw_text(kwargs, content, reasoning, details, _usage_view(usage))
+    calls = clean_tool_calls(tool_calls)
+    if calls:
+        result["tool_calls"] = calls
+    result["raw_text"] = _raw_text(kwargs, content, reasoning, details, _usage_view(usage), calls)
     if finish:
         result["finish_reason"] = finish  # "length" ⇒ cut by max_tokens
     return result
@@ -341,13 +410,14 @@ async def sample_one(
     presence_penalty: float | None = None,
     repetition_penalty: float | None = None,
     effort: str | None = None,
+    tools: list[dict] | None = None,
 ) -> dict:
-    """Run a single chat completion via OpenRouter.
-    Returns {content, reasoning?, reasoning_details?, reasoning_tokens?, raw_text, finish_reason?}."""
+    """Run a single chat completion via OpenRouter. Returns {content, reasoning?,
+    reasoning_details?, reasoning_tokens?, tool_calls?, raw_text, finish_reason?}."""
     client = _get_client()
     kwargs = _build_kwargs(
         model=model, messages=messages, temperature=temperature, max_tokens=max_tokens,
-        thinking=thinking, top_p=top_p, top_k=top_k, effort=effort,
+        thinking=thinking, top_p=top_p, top_k=top_k, effort=effort, tools=tools,
         presence_penalty=presence_penalty, repetition_penalty=repetition_penalty,
     )
     response = await client.chat.completions.create(**kwargs)
@@ -365,7 +435,7 @@ async def sample_one(
     details: list[dict] = []
     merge_detail_chunks(details, getattr(choice.message, "reasoning_details", None))
     return _finish(content, reasoning, details, getattr(response, "usage", None), kwargs,
-                   getattr(choice, "finish_reason", None))
+                   getattr(choice, "finish_reason", None), getattr(choice.message, "tool_calls", None))
 
 
 async def sample_one_stream(
@@ -380,19 +450,21 @@ async def sample_one_stream(
     presence_penalty: float | None = None,
     repetition_penalty: float | None = None,
     effort: str | None = None,
+    tools: list[dict] | None = None,
 ):
     """Stream a single OpenRouter completion. Yields {"delta","kind"} chunks
     (reasoning tagged live), then the final message dict."""
     client = _get_client()
     kwargs = _build_kwargs(
         model=model, messages=messages, temperature=temperature, max_tokens=max_tokens,
-        thinking=thinking, top_p=top_p, top_k=top_k, effort=effort,
+        thinking=thinking, top_p=top_p, top_k=top_k, effort=effort, tools=tools,
         presence_penalty=presence_penalty, repetition_penalty=repetition_penalty,
     )
     kwargs["stream"] = True
 
     content_acc, reason_acc = "", ""
     details: list[dict] = []
+    calls: list[dict] = []
     usage = None
     finish: str | None = None
     stream = await client.chat.completions.create(**kwargs)
@@ -405,6 +477,7 @@ async def sample_one_stream(
         d = ch.delta if ch else None
         if d is not None:
             merge_detail_chunks(details, getattr(d, "reasoning_details", None))
+            merge_tool_call_chunks(calls, getattr(d, "tool_calls", None))
         rsn = (getattr(d, "reasoning_content", None) or getattr(d, "reasoning", None) or "") if d else ""
         cnt = (getattr(d, "content", None) or "") if d else ""
         if rsn:
@@ -414,4 +487,4 @@ async def sample_one_stream(
             content_acc += cnt
             yield {"delta": cnt, "kind": "content"}
 
-    yield _finish(content_acc, reason_acc or None, details, usage, kwargs, finish)
+    yield _finish(content_acc, reason_acc or None, details, usage, kwargs, finish, calls)

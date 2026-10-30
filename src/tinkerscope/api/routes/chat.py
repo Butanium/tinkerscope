@@ -119,6 +119,13 @@ class ChatMessage(BaseModel):
     # the model sees its own earlier reasoning (openrouter.prepare_messages);
     # ignored by every other backend. The display text is `reasoning`.
     reasoning_details: list[dict] | None = None
+    # Tool use (OpenAI chat-completions shape). An assistant turn's calls
+    # `[{id, type:"function", function:{name, arguments}}]` (arguments = the raw JSON
+    # string), and a role="tool" turn's `tool_call_id` (+ the function `name`).
+    # OpenRouter only — see _has_tool_use.
+    tool_calls: list[dict] | None = None
+    tool_call_id: str | None = None
+    name: str | None = None
 
 
 Effort = Literal["default", "none", "minimal", "low", "medium", "high", "xhigh", "max"]
@@ -143,6 +150,11 @@ class ChatRequest(BaseModel):
     # transiently-empty UI input can't 422 the request)
     messages: list[ChatMessage]
     system_prompt: str | None = None
+    # Tool definitions offered to the model, OpenAI function schemas
+    # `[{type:"function", function:{name, description?, parameters?}}]` — the
+    # workspace's `tools` meta, sent by the client like the system prompt (the
+    # server never looks it up). None / [] = no tools. OpenRouter only.
+    tools: list[dict] | None = None
     # Thread-level system prompt: REPLACES the global/call system part at sample
     # time when non-empty (compose_system) and is recorded on the thread's ROOT
     # node. None ≡ "" = no thread part. (Until the P3
@@ -247,6 +259,13 @@ class ChatRequest(BaseModel):
     client_token: str | None = None
 
 
+def _has_tool_use(req: ChatRequest) -> bool:
+    """Does this chat need tool-call support from its backend? The native
+    renderers and the vLLM path would silently drop or mangle tool turns, so they
+    refuse instead (OpenRouter is the only backend wired for tools)."""
+    return bool(req.tools) or any(m.role == "tool" or m.tool_calls for m in req.messages)
+
+
 def _drop_trailing_assistant(msgs: list[dict]) -> list[dict]:
     """Strip the prefill convention's trailing assistant turn (used by
     prefill_scope to drop the prefill from whichever side it doesn't apply to)."""
@@ -329,7 +348,7 @@ def _committed_turn(
 _FOLD_SAMPLE_FIELDS = (
     "reasoning", "raw_text", "raw_meta", "finish_reason", "thinking",
     "token_logprobs", "loom_cut", "loom_text", "prefill_ignored",
-    "prefill_unsupported", "reasoning_details", "reasoning_tokens",
+    "prefill_unsupported", "reasoning_details", "reasoning_tokens", "tool_calls",
 )
 
 
@@ -545,7 +564,10 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
     # reasoning_details (openrouter.prepare_messages decides what is replayable).
     or_msgs = [
         {"role": m.role, "content": m.content,
-         **({"reasoning_details": m.reasoning_details} if m.reasoning_details else {})}
+         **({"reasoning_details": m.reasoning_details} if m.reasoning_details else {}),
+         **({"tool_calls": m.tool_calls} if m.tool_calls else {}),
+         **({"tool_call_id": m.tool_call_id} if m.role == "tool" else {}),
+         **({"name": m.name} if m.role == "tool" and m.name else {})}
         for m in req.messages
     ]
     params = resolve_params(req, bus.state)
@@ -628,6 +650,11 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
         # ── resolve the model + build the per-sample producer ───────────────
         total = n  # expected sample count for this chat (2n when thinking="both")
         try:
+            if _has_tool_use(req) and not req.openrouter_model:
+                raise ValueError(
+                    "tool use (tool definitions, tool calls or tool results in the thread) "
+                    "is supported on OpenRouter models only"
+                )
             if req.continue_tokens:
                 if req.openrouter_model:
                     raise ValueError("continue_tokens requires a native tinker model")
@@ -641,7 +668,7 @@ async def chat(req: ChatRequest, sid: str = Depends(resolve_session)):
                         model=req.openrouter_model,
                         messages=or_on if think else or_off,
                         temperature=temperature, max_tokens=max_tokens, thinking=think,
-                        effort=params["reasoning_effort"],
+                        effort=params["reasoning_effort"], tools=req.tools or None,
                         top_p=top_p, top_k=req.top_k, presence_penalty=req.presence_penalty,
                         repetition_penalty=req.repetition_penalty,
                     )

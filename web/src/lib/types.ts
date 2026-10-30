@@ -152,14 +152,34 @@ export type Health = {
   error?: string | null;
 };
 
+/** One tool call an assistant turn made (OpenAI chat-completions shape).
+ *  `arguments` is the model's raw JSON string — kept verbatim, never re-serialized,
+ *  because it is replayed to the model as its own earlier call. */
+export type ToolCall = {
+  id: string;
+  type: 'function';
+  function: { name: string; arguments: string };
+};
+
+/** A tool offered to the model: an OpenAI function definition. A workspace's
+ *  `tools` list is sent with every fire (OpenRouter only). */
+export type ToolDef = {
+  type: 'function';
+  function: { name: string; description?: string; parameters?: Record<string, unknown> };
+};
+
 // `reasoning` (assistant turns only) travels with the message so the sampler can hand the
 // renderer the full turn and let it apply its own history policy; `content` stays answer-only.
 export type ChatMessage = {
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
   reasoning?: string;
   /** An OpenRouter turn's reasoning payload — replayed to that provider's models. */
   reasoning_details?: ReasoningDetail[];
+  /** The calls an assistant turn made / the call a tool turn answers (+ its name). */
+  tool_calls?: ToolCall[];
+  tool_call_id?: string;
+  name?: string;
 };
 
 /** A render-time text-coloring rule (see lib/highlight-match.ts + the backend
@@ -277,6 +297,8 @@ export type ChatRequest = {
   openrouter_model?: string | null;
   messages: ChatMessage[];
   system_prompt?: string | null;
+  /** The workspace's tool definitions (OpenRouter only). Absent/null/[] = none. */
+  tools?: ToolDef[] | null;
   /** The THREAD's system prompt, which overrides the global part server-side
    *  (thread if non-empty, else global). Tri-state: absent/null =
    *  inherit the panel's mirrored thread system; '' = explicitly none; the
@@ -353,7 +375,7 @@ export type ConvFields = {
 
 /** set_meta's payload: any subset of the meta fields (+ name). Field-wise LWW
  *  server-side, except panel_seq (monotone max) and seen_panels (union). */
-export type SetMetaFields = Partial<ConvFields> & { name?: string };
+export type SetMetaFields = Partial<ConvFields> & { name?: string; tools?: ToolDef[] | null };
 
 /** One workspace mutation on the wire — POST /api/workspaces/{id}/ops and the
  *  bus `ops` echo alike (docs/HANDOFF_SERVER_AUTHORITY.md §4.1). Panel-level ops
@@ -447,6 +469,8 @@ export type Workspace = {
   /** Power state of the workspace's system prompt (false = kept but muted).
    *  Absent on legacy bodies → readers derive from text presence. */
   system_enabled?: boolean | null;
+  /** Tool definitions sent with every fire (null/absent = none). */
+  tools?: ToolDef[] | null;
   /** Per-panel branch trees, keyed by panel id ('primary','compare','p-2',…). */
   trees: Record<string, ConvTree>;
   /** Legacy 2-panel shape — present only on un-migrated saved workspaces; the
@@ -506,6 +530,8 @@ export type SampleData = {
   reasoning_details?: ReasoningDetail[];
   /** Hidden reasoning tokens the provider billed (the summary is much shorter). */
   reasoning_tokens?: number;
+  /** The tool calls this sample made (finish_reason 'tool_calls'). */
+  tool_calls?: ToolCall[];
   /** LOOM provenance (continue_tokens fires only): how many leading stream
    *  entries were FORCED (replayed prefix + picked alternative), and that prefix
    *  as frame-normalized display text — tinted like a prefill so n samples don't
@@ -523,8 +549,12 @@ export type SampleData = {
  * cards (by index) to their folded sibling node ids for click-to-select.
  */
 export type ViewMessage = {
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
+  /** Assistant rows: the calls this turn made. Tool rows: the call answered. */
+  tool_calls?: ToolCall[];
+  tool_call_id?: string;
+  name?: string;
   reasoning?: string;
   raw_text?: string;
   raw_meta?: string;

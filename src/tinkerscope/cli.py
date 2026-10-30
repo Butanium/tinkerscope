@@ -297,7 +297,7 @@ def _active_forks(tree: dict) -> int:
 
 # ---------- Transcript digest formatting ----------
 
-_ROLE_TAG = {"assistant": "asst", "user": "user", "system": "sys"}
+_ROLE_TAG = {"assistant": "asst", "user": "user", "system": "sys", "tool": "tool"}
 
 
 def _oneline(s: str, width: int) -> str:
@@ -320,7 +320,21 @@ def _indent(s: str, prefix: str = "      ") -> str:
     return "\n".join(prefix + ln for ln in (s or "").splitlines())
 
 
-def _fmt_turn(role: str, content: str, reasoning: Optional[str], width: int, full: bool, mark: str = "") -> str:
+def _fmt_tool_calls(calls: Optional[list], tag: str, mark: str, width: int, full: bool) -> list[str]:
+    """One line per tool call an assistant turn made: `name(arguments)` — the raw
+    arguments JSON, capped at `width` unless `full`."""
+    out = []
+    for c in calls or []:
+        fn = (c or {}).get("function") or {}
+        args = fn.get("arguments") or ""
+        call = f"{fn.get('name') or '?'}({args if full else _oneline(args, width)})"
+        out.append(f"   [{tag}{mark} →call {(c or {}).get('id') or '?'}] {call}")
+    return out
+
+
+def _fmt_turn(role: str, content: str, reasoning: Optional[str], width: int, full: bool, mark: str = "",
+              tool_calls: Optional[list] = None, tool_call_id: Optional[str] = None,
+              name: Optional[str] = None) -> str:
     """Render one transcript turn.
 
     `full`  → COMPLETE content AND chain-of-thought, line breaks preserved. The CoT
@@ -329,8 +343,11 @@ def _fmt_turn(role: str, content: str, reasoning: Optional[str], width: int, ful
               preview whenever the turn carried reasoning (so you can SEE a CoT
               exists and reach for `--full` to read it)."""
     tag = _ROLE_TAG.get(role or "", role or "?")
+    if role == "tool":
+        mark = f"{mark} ←{name or '?'} {tool_call_id or '?'}"
     content = content or ""
     reasoning = (reasoning or "").strip()
+    calls = _fmt_tool_calls(tool_calls, tag, mark, width, full)
     if full:
         out: list[str] = []
         if reasoning:
@@ -341,13 +358,13 @@ def _fmt_turn(role: str, content: str, reasoning: Optional[str], width: int, ful
         elif "\n" in content:
             out.append(f"   [{tag}{mark}]")
             out.append(_indent(content))
-        else:
+        elif content or not calls:
             out.append(f"   [{tag}{mark}] {content}")
-        return "\n".join(out)
-    line = f"   [{tag}{mark}] {_oneline(content, width)}"
+        return "\n".join(out + calls)
+    lines = [f"   [{tag}{mark}] {_oneline(content, width)}"] if content or not calls else []
     if reasoning:
-        line += f"\n   [{tag}{mark} ·think] {_oneline(reasoning, width)}"
-    return line
+        lines.append(f"   [{tag}{mark} ·think] {_oneline(reasoning, width)}")
+    return "\n".join(lines + calls)
 
 
 def _fmt_node(tree: dict, node: dict, width: int, full: bool = False) -> str:
@@ -359,13 +376,15 @@ def _fmt_node(tree: dict, node: dict, width: int, full: bool = False) -> str:
             mark = f"·{sibs.index(node['id']) + 1}/{len(sibs)}"
         except ValueError:
             mark = f"·?/{len(sibs)}"
-    return _fmt_turn(node.get("role", ""), node.get("content", ""), node.get("reasoning"), width, full, mark)
+    return _fmt_turn(node.get("role", ""), node.get("content", ""), node.get("reasoning"), width, full, mark,
+                     node.get("tool_calls"), node.get("tool_call_id"), node.get("name"))
 
 
 def _fmt_msg(msg: dict, width: int, full: bool = False) -> str:
     """One linear message (a flattened active path carries no sibling info, so
     no fork annotation)."""
-    return _fmt_turn(msg.get("role", ""), msg.get("content", ""), msg.get("reasoning"), width, full)
+    return _fmt_turn(msg.get("role", ""), msg.get("content", ""), msg.get("reasoning"), width, full, "",
+                     msg.get("tool_calls"), msg.get("tool_call_id"), msg.get("name"))
 
 
 _TAG_RE = re.compile(r"<tag>\s*([A-Za-z_]+)\s*</tag>", re.IGNORECASE)
@@ -1651,6 +1670,18 @@ def _emit_user_turns(
     return parents, None
 
 
+def _workspace_tools(conv_id: str) -> Optional[list]:
+    """The workspace's tool definitions (None = none). Read after its user turns
+    were persisted, so the workspace exists; a failed read returns None rather
+    than dying, because battery calls this in a loop that must not abort."""
+    try:
+        with _client() as c:
+            r = c.get(f"/api/workspaces/{conv_id}")
+        return (r.json() or {}).get("tools") if r.status_code == 200 else None
+    except Exception:
+        return None
+
+
 def _fire_send(
     targets: list[dict],
     prompt: str,
@@ -1668,13 +1699,15 @@ def _fire_send(
     effort: Optional[str] = None,
 ) -> list[tuple[str, dict, _StreamResult]]:
     """Fire one fresh-history chat per target panel, concurrently; join and return
-    [(panel_id, panel, result)] with each result's collected samples.
+    [(panel_id, panel, result)] with each result's collected samples. The
+    workspace's tool definitions (if any) ride along.
 
     With `conv_id` (the open workspace), each panel's user turn is persisted as an
     op first and the fire carries `workspace_id` + `parent_node`, so the SERVER
     folds all n replies — durable with no browser attached. Without one, NOTHING
     persists: the fire is ephemeral (bucket render + stdout only)."""
     parents: dict[str, str] = {}
+    tools = None
     if conv_id:
         parents, turn_err = _emit_user_turns(conv_id, targets, prompt, thread_system)
         if turn_err is not None:
@@ -1686,6 +1719,7 @@ def _fire_send(
                 res.error = turn_err
                 failed.append((p["id"], p, res))
             return failed
+        tools = _workspace_tools(conv_id)
     lock = threading.Lock()
     threads: list[threading.Thread] = []
     results: list[tuple[str, dict, _StreamResult]] = []
@@ -1693,6 +1727,8 @@ def _fire_send(
         body = _panel_chat_body(p, prompt, n, temperature, max_tokens, think, system, prefill,
                                 thread_system=thread_system)
         _with_effort(body, effort)
+        if tools:
+            body["tools"] = tools
         res = _StreamResult()
         if conv_id and p["id"] in parents:
             body["workspace_id"] = conv_id
@@ -1873,7 +1909,35 @@ def _find_workspace_holding_node(node: str) -> Optional[dict]:
     return holders[0] if holders else None
 
 
-def _continue_messages(ancestry: list[dict], prompt: Optional[str], prefill: Optional[str]) -> list[dict]:
+def _wire_msg(m: dict) -> dict:
+    """One /api/chat message from a tree node / transcript entry: role + content,
+    plus the fields the server forwards to OpenRouter — a closed model's
+    `reasoning_details` (so it sees its own earlier thinking), an assistant turn's
+    `tool_calls`, a tool turn's `tool_call_id` / `name`."""
+    out = {"role": m["role"], "content": m.get("content", "")}
+    for k in ("reasoning_details", "tool_calls"):
+        if m.get(k):
+            out[k] = m[k]
+    if m["role"] == "tool":
+        out["tool_call_id"] = m.get("tool_call_id") or ""
+        if m.get("name"):
+            out["name"] = m["name"]
+    return out
+
+
+def _tool_result_msgs(calls: list[dict], results: list[str]) -> list[dict]:
+    """The tool turns answering `calls`, one per call in order (the tree stores
+    them as a chain under the calling turn)."""
+    if len(results) != len(calls):
+        _die(f"the target turn made {len(calls)} tool call(s) — pass exactly that many "
+             f"--tool-result values, in call order (got {len(results)})")
+    return [{"role": "tool", "content": r, "tool_call_id": c.get("id") or "",
+             **({"name": (c.get("function") or {}).get("name")} if (c.get("function") or {}).get("name") else {})}
+            for c, r in zip(calls, results)]
+
+
+def _continue_messages(ancestry: list[dict], prompt: Optional[str], prefill: Optional[str],
+                       tool_results: Optional[list[str]] = None) -> list[dict]:
     """Assemble the /api/chat messages from an ancestry (root→target, role/content)
     plus optional appends, and REFUSE invalid sequences up front (the server would
     reject them anyway, less legibly). The ancestry's LAST role decides:
@@ -1884,15 +1948,23 @@ def _continue_messages(ancestry: list[dict], prompt: Optional[str], prefill: Opt
         CoT continuation).
     Content is answer-only (CoT excluded): the native renderer rebuilds each turn and
     applies its own history policy. Placement is `parent_node`, never content match."""
-    # A closed model's reasoning payload (OpenRouter) rides along: the server
-    # replays it to that provider's models so they see their own earlier thinking.
-    pairs = [{"role": m["role"], "content": m.get("content", ""),
-              **({"reasoning_details": m["reasoning_details"]} if m.get("reasoning_details") else {})}
-             for m in ancestry if m.get("role") != "system"]
+    pairs = [_wire_msg(m) for m in ancestry if m.get("role") != "system"]
     if not pairs:
         _die("empty ancestry — nothing to continue from")
+    calls = pairs[-1].get("tool_calls") if pairs[-1]["role"] == "assistant" else None
+    if tool_results:
+        if not calls:
+            _die("--tool-result answers a tool call, but the target turn made none")
+        pairs.extend(_tool_result_msgs(calls, tool_results))
+    elif calls:
+        _die(f"the target turn made {len(calls)} tool call(s) — answer them with --tool-result "
+             "(one per call, in order) before continuing")
     last = pairs[-1]["role"]
-    if last == "assistant":
+    if last == "tool":
+        # the model's turn after its tool results; a message adds a user turn first
+        if prompt is not None:
+            pairs.append({"role": "user", "content": prompt})
+    elif last == "assistant":
         if prompt is None:
             _die("target ends on an ASSISTANT turn — pass a user message (inline / --file) to add a "
                  "turn, or target a user turn (--node/--turn) with --prefill to loom its answer")
@@ -1928,6 +2000,11 @@ def cmd_continue(
     turn: Optional[int] = typer.Option(None, "--turn", help="1-indexed user turn on the thread's path to loom from; default = the leaf"),
     node: Optional[str] = typer.Option(None, "--node", help="target node handle — `<node>`, `<panel>:<node>` or `<ws>:<panel>:<node>` (the browser's Copy-node-id button gives the last form); pinpoints the loom point in ONE panel's tree"),
     conv: Optional[str] = typer.Option(None, "--ws", "--conv", help="workspace for --thread/--turn/--node targeting (id-prefix/name); default = the one open in the browser"),
+    tool_result: list[str] = typer.Option(
+        [], "--tool-result",
+        help="answer the target turn's tool calls: one value per call, in call order (repeatable); "
+             "persisted as tool turns, then the model continues from them",
+    ),
     ancestry_file: Optional[str] = typer.Option(
         None, "--ancestry-file",
         help="loom from an EXPLICIT full transcript instead of a tree/panel: a JSON list of "
@@ -1975,8 +2052,8 @@ def cmd_continue(
         if not isinstance(fixed_ancestry, list) or not fixed_ancestry:
             _die("--ancestry-file must be a non-empty JSON list of {role, content} dicts")
         for m in fixed_ancestry:
-            if not isinstance(m, dict) or m.get("role") not in ("user", "assistant", "system") or not isinstance(m.get("content"), str):
-                _die(f"bad ancestry entry (need role in user/assistant/system + string content): {m!r}")
+            if not isinstance(m, dict) or m.get("role") not in ("user", "assistant", "system", "tool") or not isinstance(m.get("content"), str):
+                _die(f"bad ancestry entry (need role in user/assistant/system/tool + string content): {m!r}")
     # A qualified handle (`<ws>:<panel>:<node>` from the browser's Copy-node-id
     # button, or `<panel>:<node>`) carries the panel —
     # and optionally the workspace — that a loom target needs to be unambiguous.
@@ -2099,7 +2176,7 @@ def cmd_continue(
             thread_system = (ancestry[0].get("system_prompt") if ancestry else "") or ""
         if no_system:
             thread_system = ""  # --no-system suppresses the thread part too
-        plans.append((p, _continue_messages(ancestry, prompt, prefill), thread_system, anchor))
+        plans.append((p, _continue_messages(ancestry, prompt, prefill, tool_result or None), thread_system, anchor))
 
     if fixed_ancestry is not None:
         # No anchor → no parent_node → the server folds nothing. Same loudness
@@ -2127,22 +2204,34 @@ def cmd_continue(
             turn_ops.extend(_select_path_ops(trees.get(p["id"]) or {}, p["id"], anchor["id"]))
             if anchor.get("role") == "user":
                 fire_parent[p["id"]] = anchor["id"]
-            elif prompt is not None:  # ends-on-assistant ⇒ _continue_messages required a prompt
+                continue
+            # The turns this continue appends under the anchor, as one chain: the
+            # tool results answering its calls, then the user message.
+            added: list[dict] = []
+            if tool_result:
+                added.extend(_tool_result_msgs(anchor.get("tool_calls") or [], tool_result))
+            if prompt is not None:
+                added.append({"role": "user", "content": prompt})
+            parent_id = anchor["id"]
+            chain = []
+            for m in added:
                 new_id = _mint_node_id()
-                turn_ops.append({
-                    "op": "add_nodes", "panel": p["id"], "select": True,
-                    "nodes": [{"id": new_id, "role": "user", "content": prompt,
-                               "parent": anchor["id"]}],
-                })
-                fire_parent[p["id"]] = new_id
+                chain.append({"id": new_id, **m, "parent": parent_id})
+                parent_id = new_id
+            if chain:
+                turn_ops.append({"op": "add_nodes", "panel": p["id"], "select": True, "nodes": chain})
+            if chain or anchor.get("role") == "tool":
+                fire_parent[p["id"]] = parent_id
         if turn_ops:
             _post(f"/api/workspaces/{c['id']}/ops", {"ops": turn_ops})
 
     plan_out = sys.stderr if json_out else sys.stdout  # JSON mode: keep stdout pure JSONL
     print(f"continue (loom)  n={n} temp={_fmt_param(temperature)}  →  {len(targets)} panel(s)", file=plan_out)
     for (p, msgs, _ts, _anchor) in plans:
-        base = len(msgs) - (1 if prompt is not None else 0) - (1 if prefill is not None else 0)
+        base = len(msgs) - (1 if prompt is not None else 0) - (1 if prefill is not None else 0) - len(tool_result)
         add = []
+        if tool_result:
+            add.append(f"+{len(tool_result)} tool result(s)")
         if prompt is not None:
             add.append("+user")
         if prefill is not None:
@@ -2163,6 +2252,8 @@ def cmd_continue(
         body = _panel_body(p, msgs, n, temperature, max_tokens, think, system, prefill_scope,
                            thread_system=ts)
         _with_effort(body, effort)
+        if c is not None and c.get("tools"):
+            body["tools"] = c["tools"]
         res = _StreamResult()
         if c is not None and p["id"] in fire_parent:
             body["workspace_id"] = c["id"]

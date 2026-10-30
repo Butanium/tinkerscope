@@ -51,7 +51,8 @@ import type {
   WorkspaceOp,
   OpsEvent,
   ConvFields,
-  SetMetaFields
+  SetMetaFields,
+  ToolDef
 } from './types';
 
 function asTree(x: unknown): ConvTree {
@@ -99,6 +100,10 @@ class ConversationsStore {
   layout = $state.raw<PanelLayout[]>([{ id: FIRST_PANEL_ID, run_id: null, checkpoint: null }]);
   /** Transient hint shown when the terminal/another tab branched the workspace. */
   externalNotice = $state<string | null>(null);
+  /** The open workspace's tool definitions, sent with every fire (lib/chat).
+   *  null = none. Written through setTools (an immediate set_meta), mirrored from
+   *  other tabs by #applyMetaEvent. $state.raw: replaced wholesale. */
+  tools = $state.raw<ToolDef[] | null>(null);
 
   /** Hook (assigned by +page, which owns patchState): flush the pending debounced
    *  /api/state patch — assigning its response into live.state — BEFORE any
@@ -645,7 +650,10 @@ class ConversationsStore {
     this.#draftId = null;
     try {
       const name = this.list.find((c) => c.id === id)?.name ?? 'Untitled';
-      const body = await api.createWorkspace({ id, name, ...this.#fields(), trees: { ...this.trees } });
+      const body = await api.createWorkspace({
+        id, name, ...this.#fields(), trees: { ...this.trees },
+        ...(this.tools ? { tools: this.tools } : {})
+      });
       // The create is this mirror's rev BASELINE (same role as a body GET) —
       // ops events for the follow-up batches arrive contiguously above it.
       if (this.activeId === id) this.#rev = body.rev ?? 0;
@@ -855,6 +863,7 @@ class ConversationsStore {
     this.reducedPanels = new Set();
     this.sendTargets = new Set(ids);
     this.#seenPanels = new Set(ids);
+    this.tools = null;
     // A fresh workspace gets its OWN counter, seeded from the ids it starts with —
     // not whatever the previously-open one had reached. Carrying that over is safe
     // (mintPanelId also refuses anything in `taken`) but it persists a number with
@@ -1030,6 +1039,7 @@ class ConversationsStore {
       this.trees = map;
     }
     this.#applyPanelUi(conv);
+    this.tools = conv.tools?.length ? conv.tools : null;
     // The STORE-OWNED layout: the workspace's stored panels, or — for a
     // layout-less legacy body — whatever layout was already shown (kept, as
     // before; its first save then bakes it in).
@@ -1241,7 +1251,17 @@ class ConversationsStore {
    *  so an own stale echo can't briefly revert a rapid second edit. The two
    *  system_* fields are deliberately NOT applied here: the bus patch machinery
    *  (mergeBusState + the +page flush) already owns their live propagation. */
+  /** Replace the open workspace's tool definitions (null/[] = none). Emitted
+   *  at once, not debounced: the next fire must carry them, and a draft
+   *  materializes with them. */
+  setTools(tools: ToolDef[] | null): void {
+    this.tools = tools?.length ? tools : null;
+    if (!this.activeId || this.#loadFailed) return;
+    this.#emit([{ op: 'set_meta', fields: { tools: this.tools } }]);
+  }
+
   #applyMetaEvent(fields: SetMetaFields): void {
+    if ('tools' in fields) this.tools = fields.tools?.length ? fields.tools : null;
     if (fields.name != null && this.activeId) {
       const id = this.activeId;
       this.list = this.list.map((c) => (c.id === id ? { ...c, name: fields.name! } : c));

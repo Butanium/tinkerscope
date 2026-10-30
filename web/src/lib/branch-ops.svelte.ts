@@ -31,6 +31,9 @@ import {
   editUserFork,
   editUserForkCopy,
   editAssistant,
+  editToolResult,
+  appendToolResults,
+  pendingToolCalls,
   deleteSubtree,
   deleteSiblings,
   setSelected,
@@ -543,6 +546,10 @@ class BranchOps {
     systemPrompt?: string
   ) {
     if (this.#d.panelBusy(panel) || msg.nodeId == null) return;
+    if (msg.role === 'tool') {
+      this.#editToolResult(panel, msg.nodeId, content, copyDownstream);
+      return;
+    }
     const text = content.trim();
     // Assistant turns may be thinking-only (empty answer) — keep the edit if
     // either field has text; user turns still require a non-empty body.
@@ -569,6 +576,41 @@ class BranchOps {
       const r = editAssistant(ws.treeFor(panel), msg.nodeId, text, reasoning, tlp, copyDownstream);
       if (r) this.#commitChain(panel, r.tree, r.newId);
     }
+  }
+
+  /** Fork a tool result with new content (verbatim — a tool's output can be
+   *  empty or whitespace-significant) and, unless `noReply` (Shift) or other
+   *  calls of that turn are still unanswered on the new branch, fire the
+   *  model's next turn from it. */
+  #editToolResult(panel: Panel, nodeId: string, content: string, noReply: boolean) {
+    const r = editToolResult(ws.treeFor(panel), nodeId, content);
+    if (!r) return;
+    panelScroll.preserve(panel);
+    chat.clearPanelBucket(panel);
+    ws.setTree(panel, r.tree, { ops: [{ op: 'add_nodes', nodes: [opNode(r.tree, r.newId)], select: true }] });
+    if (noReply || pendingToolCalls(r.tree)) return;
+    this.#fireForPanel(panel, r.newId, ancestryMessages(r.tree, r.newId) as ChatMessage[]);
+  }
+
+  /** Answer the active path's pending tool calls: append the results as a
+   *  chain of tool turns, then fire the model's next turn from the last one —
+   *  unless `fire` is false (results only, a user turn follows) or some calls
+   *  are still unanswered. */
+  answerToolCalls(
+    panel: Panel,
+    results: { tool_call_id: string; name?: string; content: string }[],
+    fire = true
+  ) {
+    if (this.#d.panelBusy(panel) || !results.length) return;
+    chat.clearPanelBucket(panel);
+    const r = appendToolResults(ws.treeFor(panel), results);
+    ws.setTree(panel, r.tree, {
+      ops: [{ op: 'add_nodes', nodes: r.ids.map((id) => opNode(r.tree, id)), select: true }]
+    });
+    panelScroll.snap(panel);
+    if (!fire || pendingToolCalls(r.tree)) return;
+    const last = r.ids[r.ids.length - 1];
+    this.#fireForPanel(panel, last, ancestryMessages(r.tree, last) as ChatMessage[]);
   }
 
   /** Commit a fork-copy/edit result whose new nodes form a selected CHAIN from

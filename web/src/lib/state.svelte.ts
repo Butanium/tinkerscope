@@ -376,7 +376,8 @@ export function parseSample(data: any): SampleData {
     prefill_ignored: data?.prefill_ignored === true ? true : undefined,
     prefill_unsupported: data?.prefill_unsupported === true ? true : undefined,
     reasoning_details: Array.isArray(data?.reasoning_details) ? data.reasoning_details : undefined,
-    reasoning_tokens: typeof data?.reasoning_tokens === 'number' ? data.reasoning_tokens : undefined
+    reasoning_tokens: typeof data?.reasoning_tokens === 'number' ? data.reasoning_tokens : undefined,
+    tool_calls: Array.isArray(data?.tool_calls) && data.tool_calls.length ? data.tool_calls : undefined
   };
 }
 

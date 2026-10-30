@@ -65,7 +65,7 @@ from typing import Any, Optional
 log = logging.getLogger("tinkerscope.tree_ops")
 
 ROOT = "__root__"
-ROLES = ("user", "assistant", "system")
+ROLES = ("user", "assistant", "system", "tool")
 
 # Per-process random session prefix for server-minted node ids — the Python
 # `nid()` (tree.ts:172). One namespace, two kinds of writer: browser tabs and
@@ -95,6 +95,7 @@ META_FIELDS = (
     "send_targets",
     "seen_panels",
     "panel_seq",
+    "tools",
 )
 
 # Reserved panel ids the pre-multipanel {tree, compare_tree} shape maps onto.
@@ -396,6 +397,26 @@ def normalize_panels(panels: Any, trees: Any) -> Any:
     return kept or [panels[0]]
 
 
+def check_tools(v: Any) -> Optional[list]:
+    """Validate a workspace's `tools` meta: OpenAI function definitions
+    `[{type: "function", function: {name, description?, parameters?}}]`. None and
+    [] both mean "no tools" and store as None. Raises ValueError on anything else —
+    a malformed definition would otherwise surface as a provider 400 on every send."""
+    if v is None or v == []:
+        return None
+    if not isinstance(v, list):
+        raise ValueError("tools must be a list of function definitions")
+    names = set()
+    for i, t in enumerate(v):
+        fn = t.get("function") if isinstance(t, dict) else None
+        if not isinstance(fn, dict) or not isinstance(fn.get("name"), str) or not fn["name"]:
+            raise ValueError(f"tools[{i}]: expected {{type: 'function', function: {{name, …}}}}")
+        if fn["name"] in names:
+            raise ValueError(f"tools[{i}]: duplicate tool name {fn['name']!r}")
+        names.add(fn["name"])
+    return v
+
+
 def apply_meta(body: dict, fields: dict, trees: Any = None) -> tuple[dict, bool]:
     """Apply a `set_meta` field map to `body` IN PLACE (the caller owns the copy).
 
@@ -418,6 +439,8 @@ def apply_meta(body: dict, fields: dict, trees: Any = None) -> tuple[dict, bool]
             v = merge_seen_panels(body.get(k), v)
         elif k == "panels":
             v = normalize_panels(v, trees)
+        elif k == "tools":
+            v = check_tools(v)
         if k not in body or body[k] != v:
             changed = True
         body[k] = v
@@ -860,7 +883,10 @@ def _op_set_meta(ctx: _Ctx, op: dict) -> tuple[bool, dict]:
     unknown = [k for k in fields if k not in META_FIELDS]
     if unknown:
         raise OpError(f"set_meta: unknown field(s) {unknown}")
-    applied, changed = apply_meta(ctx.body, fields, trees=ctx.trees)
+    try:
+        applied, changed = apply_meta(ctx.body, fields, trees=ctx.trees)
+    except ValueError as e:
+        raise OpError(f"set_meta: {e}") from None
     return changed, {"op": "set_meta", "fields": applied}
 
 

@@ -119,6 +119,8 @@ class ChatStore {
       .then(() => api
         .chat({
         ...model, messages, ...params, thread_system_prompt, panel,
+        // The workspace's tools ride on every fire, like the system prompt.
+        ...(ws.tools ? { tools: ws.tools } : {}),
         broadcast: true, detached: true, client_token: token,
         // SERVER-AUTHORED FOLD (P2): the samples fold under this user node at
         // terminal, server-side — all n, blobs included, zero browsers needed.

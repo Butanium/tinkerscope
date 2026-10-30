@@ -24,6 +24,7 @@
   import OverflowRow from '$lib/OverflowRow.svelte';
   import TokenLogprobs from '$lib/TokenLogprobs.svelte';
   import TokenHeatOverlay from '$lib/TokenHeatOverlay.svelte';
+  import ToolCalls from '$lib/ToolCalls.svelte';
   import type { ViewMessage, SampleData, TokenLogprob } from '$lib/types';
 
   let {
@@ -218,6 +219,7 @@
   function roleColor(role: string): string {
     if (role === 'user') return 'var(--color-user-bg)';
     if (role === 'assistant') return 'var(--color-assistant-bg)';
+    if (role === 'tool') return 'var(--color-tool-bg)';
     return 'var(--color-system-bg)';
   }
 
@@ -485,7 +487,10 @@
     {:else if sampleTok(sample)}
       <TokenLogprobs tlp={cTlp!} loomCut={cLoomCut} />
     {:else}
-      <div class="sample-content">{@html cSplit ? renderPrefilled(sample.content, cSplit.answer, 'assistant') : renderContent(sample.content, 'assistant')}</div>
+      {#if sample.content || !sample.tool_calls?.length}
+        <div class="sample-content">{@html cSplit ? renderPrefilled(sample.content, cSplit.answer, 'assistant') : renderContent(sample.content, 'assistant')}</div>
+      {/if}
+      {#if sample.tool_calls?.length}<ToolCalls calls={sample.tool_calls} />{/if}
     {/if}
     {#if sampleOverlay(sample) && !rawSamples.has(idx)}
       <!-- keyed on the sample's node so switching cards remounts from scratch -->
@@ -711,7 +716,7 @@
   <!-- Status strip (e.g. 'stopped' after a deliberate 0-sample cancel) — not a
        message: no role header, no toolbar, muted. -->
   <div class="message-notice" data-row={rowIndex}>⏹ {msg.notice}</div>
-{:else if msg.role !== 'assistant' || msg.content || msg.reasoning || isMultiSample || (msg.samples && msg.samples.some((x) => x && x.content))}
+{:else if msg.role !== 'assistant' || msg.content || msg.reasoning || msg.tool_calls?.length || isMultiSample || (msg.samples && msg.samples.some((x) => x && (x.content || x.tool_calls?.length)))}
   <!-- Row click (anywhere, buttons included) moves the keyboard focus here.
        svelte-ignore: this is a mouse-only convenience — the keyboard already
        has its own path to focus (↑/↓), so no key handler belongs on the div. -->
@@ -727,6 +732,9 @@
     <div class="message-head">
       <div class="message-head-left">
         <div class="message-role">{msg.role}</div>
+        {#if msg.role === 'tool'}
+          <code class="tool-result-name" data-tooltip={msg.tool_call_id ? `answers call ${msg.tool_call_id}` : undefined} use:tip>{msg.name || 'result'}</code>
+        {/if}
         {#if msg.finish_reason === 'length' && !isMultiSample}{@render truncatedTag()}{/if}
         {#if msg.prefill_ignored && !isMultiSample}{@render prefillIgnoredTag(msg.prefill_unsupported)}{/if}
         <!-- Not while running: the pill is a verdict on a finished turn, and the
@@ -904,8 +912,21 @@
           {#if rawMeta}{@render rawMetaDisclosure(rawMeta)}{:else if hasMeta}<div class="blob-loading">loading request &amp; response…</div>{/if}
       {:else if tokView}
         <TokenLogprobs tlp={tlp!} onLoom={loomHandler} loomCut={loomCutDisplay} />
+      {:else if msg.role === 'tool'}
+        {@const lines = msg.content.split('\n').length}
+        {#if lines > 12 || msg.content.length > 1500}
+          <details class="tool-result-fold">
+            <summary>{msg.content.split('\n', 1)[0].slice(0, 120) || '(empty first line)'} <span class="tool-result-size">· {lines} lines</span></summary>
+            <pre class="tool-result" data-testid="tool-result">{msg.content}</pre>
+          </details>
+        {:else}
+          <pre class="tool-result" data-testid="tool-result">{msg.content || '(empty result)'}</pre>
+        {/if}
       {:else}
-        <div class="message-content">{@html prefillSplit ? renderPrefilled(msg.content, prefillSplit.answer, msg.role) : renderContent(msg.content, msg.role)}</div>
+        {#if msg.content || !msg.tool_calls?.length}
+          <div class="message-content">{@html prefillSplit ? renderPrefilled(msg.content, prefillSplit.answer, msg.role) : renderContent(msg.content, msg.role)}</div>
+        {/if}
+        {#if msg.tool_calls?.length}<ToolCalls calls={msg.tool_calls} />{/if}
         {#if tokOverlay}
           <!-- Keyed on the NODE so a ‹k/N› cycle remounts against the new prose.
                Not on content: a streaming row has no nodeId yet, and keying on
@@ -921,7 +942,7 @@
       {#if msg.running && !isMultiSample && onStop && !readOnly}
         <div class="stop-turn-row">{@render stopBtn()}</div>
       {/if}
-      {#if msg.role !== 'system' && (msg.content || msg.raw_text || msg.reasoning)}
+      {#if msg.role !== 'system' && (msg.content || msg.raw_text || msg.reasoning || msg.role === 'tool' || msg.tool_calls?.length)}
         <OverflowRow klass="hover-actions" resetKey={msg.nodeId ?? msg.content}>
           {#if msg.raw_text}
             <!-- Raw leads the row (Clément: very left, always visible — first
@@ -939,7 +960,9 @@
                 ? 'Edit a copy of the conversation (no reply)'
                 : msg.role === 'user'
                   ? 'Edit and regenerate (Shift: copy, no reply)'
-                  : 'Edit (keeps the original; Shift: copy)'}${allActive ? ' — in ALL panels' : ''}`}
+                  : msg.role === 'tool'
+                    ? 'Edit the result and regenerate (Shift: no reply)'
+                    : 'Edit (keeps the original; Shift: copy)'}${allActive ? ' — in ALL panels' : ''}`}
               use:tip
               aria-label="Edit"
               onclick={(e) => startEdit(e.shiftKey, e.ctrlKey || e.metaKey)}
@@ -970,6 +993,10 @@
 {/if}
 
 <style>
+  .tool-result-name { font-family: 'Courier New', Courier, monospace; font-size: 0.78rem; font-weight: 700; color: var(--color-text-secondary); overflow-wrap: anywhere; }
+  .tool-result { font-family: 'Courier New', Courier, monospace; font-size: 0.8rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; margin: var(--space-1) 0 0; color: var(--color-text-secondary); max-height: 480px; overflow-y: auto; }
+  .tool-result-fold > summary { cursor: pointer; font-family: 'Courier New', Courier, monospace; font-size: 0.8rem; color: var(--color-text-secondary); overflow-wrap: anywhere; }
+  .tool-result-size { color: var(--color-text-muted); }
   /* transient strip while a light node's raw_meta blob is being fetched */
   .blob-loading {
     font-size: 0.72rem;

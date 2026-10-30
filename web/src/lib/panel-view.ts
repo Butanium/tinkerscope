@@ -49,6 +49,7 @@ export function bucketTurn(run: PanelRun, prefill?: string): ViewMessage {
     prefill_unsupported: one?.prefill_unsupported,
     reasoning_details: one?.reasoning_details,
     reasoning_tokens: one?.reasoning_tokens,
+    tool_calls: one?.tool_calls,
     finish_reason: one?.finish_reason,
     token_logprobs: one?.token_logprobs,
     running: run.running
@@ -73,6 +74,9 @@ export function buildPanelView(tree: ConvTree, run: PanelRun, prefill?: string):
     prefill_unsupported: n.prefill_unsupported,
     reasoning_details: n.reasoning_details,
     reasoning_tokens: n.reasoning_tokens,
+    tool_calls: n.tool_calls,
+    tool_call_id: n.tool_call_id,
+    name: n.name,
     finish_reason: n.finish_reason,
     thinking: n.thinking,
     token_logprobs: n.token_logprobs,
@@ -106,7 +110,8 @@ export function buildPanelView(tree: ConvTree, run: PanelRun, prefill?: string):
         // A sample is "folded" iff it has content AND no error — matching
         // foldAssistant's skip rule (error samples carry an "Error: …" content
         // string, so gating on content alone would miscount). Error slots map to ''.
-        const isFold = (x: (typeof run.samples)[number]) => !!(x && x.content && !x.error);
+        const isFold = (x: (typeof run.samples)[number]) =>
+          !!(x && !x.error && (x.content || x.tool_calls?.length));
         const filledCount = run.samples.filter(isFold).length;
         const batch = kids.slice(Math.max(0, kids.length - filledCount)); // this turn's folds
         sampleNodeIds = [];
@@ -170,7 +175,7 @@ export function expandTurnSamples(
   // went to CoT (content '' but reasoning present) still counts.
   const sibs = tree.nodes[parentId].children
     .map((id) => tree.nodes[id])
-    .filter((n) => n && n.role === 'assistant' && (n.content || n.reasoning));
+    .filter((n) => n && n.role === 'assistant' && (n.content || n.reasoning || n.tool_calls?.length));
   if (sibs.length < 2) return view;
   const row = view[idx];
   // The card view colors ONE msg-level prefill across all cards; siblings from
@@ -192,6 +197,7 @@ export function expandTurnSamples(
       prefill_unsupported: n.prefill_unsupported,
       reasoning_details: n.reasoning_details,
       reasoning_tokens: n.reasoning_tokens,
+      tool_calls: n.tool_calls,
       token_logprobs: n.token_logprobs ?? getBlob?.(n.id)?.token_logprobs
     })),
     totalSamples: sibs.length,

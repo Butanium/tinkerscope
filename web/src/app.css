@@ -19,6 +19,8 @@
   --color-user-bg: #2a3040;
   --color-assistant-bg: #1e2e1e;
   --color-system-bg: #3a2a1e;
+  --color-tool-bg: #1f2a33;
+  --color-tool-border: #3a5566;
 
   --font-sans: 'Inter', -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
@@ -57,6 +59,8 @@ html.light {
   --color-user-bg: #e8edf5;
   --color-assistant-bg: #e8f0e8;
   --color-system-bg: #f5ece4;
+  --color-tool-bg: #e9f1f5;
+  --color-tool-border: #a9c4d2;
 }
 
 * {

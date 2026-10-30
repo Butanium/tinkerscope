@@ -392,6 +392,7 @@ def apply_pack(pack: Pack, *, force: bool = False, reseed: bool = False, on_conf
             name=ws.name,
             system_prompt=body.get("system_prompt"),
             system_enabled=body.get("system_enabled"),
+            tools=body.get("tools") or None,
             trees=body.get("trees") or {},
             panels=body.get("panels") or [],
             reduced_panels=body.get("reduced_panels") or [],

@@ -52,6 +52,8 @@
   import PrefillScopeToggle from '$lib/PrefillScopeToggle.svelte';
   import { fold } from '$lib/motion';
   import ThreadSystemRow from '$lib/ThreadSystemRow.svelte';
+  import ToolResultForm from '$lib/ToolResultForm.svelte';
+  import ToolsModal from '$lib/ToolsModal.svelte';
   import TruncLabel from '$lib/TruncLabel.svelte';
   import { loadHighlightRules, highlightStore, colorRules } from '$lib/highlights.svelte';
   import { logprobView, logprobHighlight, type TokenTintMode } from '$lib/logprobs.svelte';
@@ -79,6 +81,7 @@
     activePath,
     activeMessages,
     appendUserTurn,
+    pendingToolCalls,
     siblingsOf,
     threadStarts,
     tokenBlobNodeIds
@@ -843,8 +846,15 @@
     // Append a user node to each TARGET panel's TREE (the single source of truth)
     // and fire it. A panel already mid-generation is skipped (don't double-fire);
     // the others fire concurrently. Only selected send-target panels fire.
+    const waiting: string[] = [];
     for (const p of targetSels) {
       if (panelBusy(p.panel)) continue;
+      // A user turn can't follow unanswered tool calls (the provider rejects
+      // the thread) — those panels wait for their tool-result form.
+      if (!branchFromRoot && pendingToolCalls(ws.treeFor(p.panel))) {
+        waiting.push(panelLabel(p));
+        continue;
+      }
       // A new user turn lands at the active LEAF — below anything an open
       // all-samples view hides. Close it, or the send looks like nothing happened.
       samplesOpen[p.panel] = null;
@@ -864,6 +874,10 @@
       fireOne(p, nodeId, fireMsgs, prefill, paramsOverride);
       panelScroll.snap(p.panel); // show the new user turn + arm stream-follow
     }
+    if (waiting.length) {
+      backendError = `Not sent to ${waiting.join(', ')}: answer the pending tool call first (form under the last turn).`;
+      if (waiting.length === targetSels.length) userInput = text;
+    }
   }
 
   /** Send to ONE panel only (the per-panel "continue this panel" bubble). Fires
@@ -873,6 +887,10 @@
     if (!pSel) return;
     const text = (panelDraft[panel] ?? '').trim();
     if (!text || panelBusy(panel) || !panelCanChat(pSel) || !ws.activeId) return;
+    if (pendingToolCalls(ws.treeFor(panel))) {
+      backendError = 'Answer the pending tool call first (form under the last turn).';
+      return;
+    }
     pushHistory(text);
     panelDraft[panel] = '';
     // The per-panel bubble ALWAYS continues this panel's active thread; ⑂
@@ -1753,6 +1771,7 @@
 
   // ── OpenRouter model management (UI-driven, no config files) ───────
   let showOrManager = $state(false);
+  let showTools = $state(false);
   let orAddPanel = $state<Panel>('primary'); // which panel to auto-select the new model into
   let orBusy = $state(false);
 
@@ -2940,6 +2959,16 @@
                   onTag={(content, sampleIndex, totalSamples, reasoning, quick) => quick ? quickTag(p.panel, content, sampleIndex, totalSamples, reasoning) : openTagForm(p.panel, content, sampleIndex, totalSamples, reasoning)}
                 />
               {/each}
+              {#if !readOnly && !run.running}
+                {@const toolWait = pendingToolCalls(ws.treeFor(p.panel))}
+                {#if toolWait}
+                  <ToolResultForm
+                    pending={toolWait.pending}
+                    busy={panelBusy(p.panel)}
+                    onSubmit={(results, fire) => branchOps.answerToolCalls(p.panel, results, fire)}
+                  />
+                {/if}
+              {/if}
               {#if run.running && run.n <= 1 && run.samples.filter((x) => x && (x.content || x.reasoning)).length === 0}
                 <!-- Pre-first-token placeholder. It carries the same stop as the row
                      that replaces it, so the affordance doesn't blink into existence
@@ -3132,6 +3161,15 @@
             />
           {/if}
           <ThreadSwitcher />
+          <button
+            class="prefill-toggle"
+            class:on={!!ws.tools}
+            data-testid="tools-toggle"
+            disabled={!ws.activeId}
+            onclick={() => (showTools = true)}
+            data-tooltip="Tools offered to the model (OpenRouter models only)"
+            use:tip
+          >{ws.tools ? `tools · ${ws.tools.length}` : 'tools'}</button>
         </div>
         {#if showSystem}
           <div transition:fold>
@@ -3261,6 +3299,10 @@
 {/if}
 
 <!-- OpenRouter Manager Modal -->
+{#if showTools}
+  <ToolsModal tools={ws.tools} onsave={(t) => ws.setTools(t)} onclose={() => (showTools = false)} />
+{/if}
+
 {#if showOrManager}
   <OrManagerModal
     models={modelCatalog.openrouterModels}

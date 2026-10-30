@@ -11,11 +11,11 @@
 //  - every op is immutable: clone → mutate → return.
 
 import { logprobsAfterEdit } from './token-edit.ts';
-import type { ReasoningDetail } from './types.ts';
+import type { ReasoningDetail, ToolCall } from './types.ts';
 
 export const ROOT = '__root__';
 
-export type NodeRole = 'user' | 'assistant' | 'system';
+export type NodeRole = 'user' | 'assistant' | 'system' | 'tool';
 
 /** Per-generated-token logprob record (native tinker sampling only — see
  *  docs/API_CONTRACT.md). Raw data: persisted on the node so later features can
@@ -83,6 +83,13 @@ export type TreeNode = {
   reasoning_details?: ReasoningDetail[];
   /** Hidden reasoning tokens the provider billed for this turn. */
   reasoning_tokens?: number;
+  /** Assistant nodes: the tool calls this turn made (OpenAI shape, `arguments`
+   *  verbatim). Answered by a CHAIN of role='tool' children, one per call in
+   *  order; until every call is answered the composer offers the result inputs. */
+  tool_calls?: ToolCall[];
+  /** Tool nodes: which call this result answers, and that function's name. */
+  tool_call_id?: string;
+  name?: string;
   /** How generation ended ('stop' | 'length' | …) — 'length' ⇒ cut off by the
    *  max-tokens limit; persisted so the truncation badge survives reload. */
   finish_reason?: string;
@@ -145,6 +152,7 @@ export type SampleLike = {
   prefill_unsupported?: boolean;
   reasoning_details?: ReasoningDetail[];
   reasoning_tokens?: number;
+  tool_calls?: ToolCall[];
   /** The authored prefill this sample was generated from (raw text) — folded onto
    *  the node so the rendered turn can color the prefilled prefix. */
   prefill?: string;
@@ -160,7 +168,15 @@ export type SampleLike = {
   sample_index?: number;
 };
 
-export type Msg = { role: NodeRole; content: string; reasoning?: string; reasoning_details?: ReasoningDetail[] };
+export type Msg = {
+  role: NodeRole;
+  content: string;
+  reasoning?: string;
+  reasoning_details?: ReasoningDetail[];
+  tool_calls?: ToolCall[];
+  tool_call_id?: string;
+  name?: string;
+};
 
 /** Tree node → wire Msg. Carries `reasoning` ONLY when present, so the sampler can hand
  *  the renderer the full turn ([thinking, text] structured content) and let the model's
@@ -174,7 +190,9 @@ function nodeToMsg(n: TreeNode): Msg {
     role: n.role,
     content: n.content,
     ...(n.reasoning ? { reasoning: n.reasoning } : {}),
-    ...(n.reasoning_details?.length ? { reasoning_details: n.reasoning_details } : {})
+    ...(n.reasoning_details?.length ? { reasoning_details: n.reasoning_details } : {}),
+    ...(n.tool_calls?.length ? { tool_calls: n.tool_calls } : {}),
+    ...(n.role === 'tool' ? { tool_call_id: n.tool_call_id ?? '', ...(n.name ? { name: n.name } : {}) } : {})
   };
 }
 
@@ -362,6 +380,7 @@ export function foldAssistant(
       prefill_unsupported: s.prefill_unsupported,
       reasoning_details: s.reasoning_details,
       reasoning_tokens: s.reasoning_tokens,
+      tool_calls: s.tool_calls,
       finish_reason: s.finish_reason,
       thinking: s.thinking,
       token_logprobs: cloneTokenLogprobs(s.token_logprobs),
@@ -375,6 +394,14 @@ export function foldAssistant(
   return { tree: t, ids };
 }
 
+/** Can an assistant turn be generated under this node? A user turn, or a tool
+ *  result (the model's turn after its tool calls are answered). */
+export function isFireParent(n: TreeNode | undefined): boolean {
+  return n?.role === 'user' || n?.role === 'tool';
+}
+
+/** `userParentId` is the node the regenerated turn folds under — a user turn or a
+ *  tool result (the name predates tool use). */
 export function regenTarget(
   t: ConvTree,
   nodeId: string
@@ -382,8 +409,84 @@ export function regenTarget(
   const node = t.nodes[nodeId];
   if (!node) return null;
   const userId = node.role === 'assistant' ? node.parent : nodeId;
-  if (!userId || t.nodes[userId]?.role !== 'user') return null;
+  if (!userId || !isFireParent(t.nodes[userId])) return null;
   return { userParentId: userId, fireMessages: ancestryMessages(t, userId) };
+}
+
+/** The tool calls on the active path still waiting for a result: the active
+ *  leaf is an assistant turn with `tool_calls`, or a tool result answering one
+ *  of them, and some of those calls have no result on the path yet. Results
+ *  are matched by `tool_call_id`. null when nothing is pending. */
+export function pendingToolCalls(
+  t: ConvTree
+): { assistantId: string; leafId: string; pending: ToolCall[] } | null {
+  const path = activePath(t);
+  let i = path.length - 1;
+  while (i >= 0 && path[i].role === 'tool') i--;
+  const asst = i >= 0 ? path[i] : undefined;
+  if (!asst || asst.role !== 'assistant' || !asst.tool_calls?.length) return null;
+  const answered = new Set(path.slice(i + 1).map((n) => n.tool_call_id));
+  const pending = asst.tool_calls.filter((c) => !answered.has(c.id));
+  return pending.length ? { assistantId: asst.id, leafId: path[path.length - 1].id, pending } : null;
+}
+
+/** Append tool results under the active leaf as a chain (one tool node per
+ *  result, in the order given), selecting each — the composer's answer to
+ *  `pendingToolCalls`. Returns the new ids; the LAST one is where the model's
+ *  next turn folds. */
+export function appendToolResults(
+  t0: ConvTree,
+  results: { tool_call_id: string; name?: string; content: string }[]
+): { tree: ConvTree; ids: string[] } {
+  const t = cloneTree(t0);
+  const path = activePath(t);
+  let parent = path.length ? path[path.length - 1].id : null;
+  const ids: string[] = [];
+  for (const r of results) {
+    const id = nid();
+    t.nodes[id] = {
+      id,
+      role: 'tool',
+      content: r.content,
+      tool_call_id: r.tool_call_id,
+      ...(r.name ? { name: r.name } : {}),
+      parent,
+      children: []
+    };
+    const key = parent ?? ROOT;
+    childArray(t, key).push(id);
+    t.selected[key] = id;
+    ids.push(id);
+    parent = id;
+  }
+  return { tree: t, ids };
+}
+
+/** Fork a tool result: a sibling with the edited content answering the same
+ *  call, selected. Later results in the chain are NOT copied — the composer then
+ *  shows the calls still unanswered on the new branch. */
+export function editToolResult(
+  t0: ConvTree,
+  toolId: string,
+  content: string
+): { tree: ConvTree; newId: string } | null {
+  const orig = t0.nodes[toolId];
+  if (!orig || orig.role !== 'tool') return null;
+  const t = cloneTree(t0);
+  const parentKey = orig.parent ?? ROOT;
+  const id = nid();
+  t.nodes[id] = {
+    id,
+    role: 'tool',
+    content,
+    tool_call_id: orig.tool_call_id,
+    ...(orig.name ? { name: orig.name } : {}),
+    parent: orig.parent,
+    children: []
+  };
+  childArray(t, parentKey).push(id);
+  t.selected[parentKey] = id;
+  return { tree: t, newId: id };
 }
 
 /** Fork a sibling of `userId` with the edited content (+ regen by the caller).
@@ -459,6 +562,8 @@ function graftDownstream(t: ConvTree, rootId: string, chain: TreeNode[]): void {
       // under a different user turn (probed 2026-10-15), so a copy still carries it
       reasoning_details: node.reasoning_details,
       reasoning_tokens: node.reasoning_tokens,
+      tool_calls: node.tool_calls,
+      ...(node.role === 'tool' ? { tool_call_id: node.tool_call_id, name: node.name } : {}),
       raw_text: node.raw_text,
       raw_meta: node.raw_meta,
       parent: curParent,
@@ -508,6 +613,8 @@ export function editAssistant(
     ...(keepPayload && orig.reasoning_details?.length
       ? { reasoning_details: orig.reasoning_details, reasoning_tokens: orig.reasoning_tokens }
       : {}),
+    // The calls are part of what the turn DID; editing its text keeps them.
+    ...(orig.tool_calls?.length ? { tool_calls: orig.tool_calls } : {}),
     token_logprobs: cloneTokenLogprobs(kept),
     parent: orig.parent,
     children: []
@@ -1029,6 +1136,9 @@ export function reconcileExternal(
       // preserve thinking carried on an external/echoed turn so a CLI/cross-tab
       // reply round-trips its CoT into the tree (not just answer-only)
       ...(m.reasoning ? { reasoning: m.reasoning } : {}),
+      ...(m.reasoning_details?.length ? { reasoning_details: m.reasoning_details } : {}),
+      ...(m.tool_calls?.length ? { tool_calls: m.tool_calls } : {}),
+      ...(m.role === 'tool' ? { tool_call_id: m.tool_call_id, ...(m.name ? { name: m.name } : {}) } : {}),
       // a fresh ROOT carries the transcript's thread system prompt (provenance —
       // the whole point of the field for CLI-fired probe threads)
       ...(parentKey === ROOT && threadSystem ? { system_prompt: threadSystem } : {}),
