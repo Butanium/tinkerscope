@@ -3449,3 +3449,28 @@ summaries), and keep is now TRUE on the wire: `tree.ts editedItems` rebuilds the
 turn's items — reasoning items verbatim, the assistant message items replaced by one plain
 message with the new text, calls verbatim — where the edit used to drop the items and
 with them the encrypted reasoning the "kept" summary stood for.
+
+### 2026-10-30 — A recorded thread's system message: sent by the browser, editable
+
+Clément: "i thought i said to earlier sessions re: system prompt that I wanted it to be
+editable like a normal message". He had (2026-10-09), and it shipped as the thread
+system row (`ThreadSystemRow`, the root user node's `system_prompt`). A thread imported
+from a recorded call has no such row: its prompt is a SYSTEM NODE carrying the recorded
+item, and that row was drawn without a toolbar.
+
+Found on the way, and worse: the browser's `ancestryMessages` dropped every system node,
+so a browser fire from a recorded thread went out with NO system prompt whenever the
+workspace prompt was muted — "Terra — forks" has it muted, on purpose, because the CLI
+sends the system node (`cli._keep_in_ancestry`). The 104 Terra samples under system
+roots on :8770 all carry a system message, so none of them came from the browser with
+that bug; the next one would have. `tree.ts sentInFire` now mirrors the CLI rule.
+
+Editing a system node = editing a first message: a sibling root with the edited text
+(one plain item, the recorded role kept), the conversation copied below it — up to the
+first reply, which regenerates; Shift copies everything and generates nothing. The
+copies point at the original's items blob (`items_ref`) instead of re-uploading
+megabytes of screenshots: blobs are write-once per workspace, so the reference can't
+dangle. `graftDownstream` used to drop items entirely, so a Shift-edit (fork-copy) of a
+recorded thread silently turned its copied screenshots into text — fixed by the same
+field. Checked live: an edited 58k-char Village prompt, the copied user run went out
+with its screenshot, the reply folded under it.

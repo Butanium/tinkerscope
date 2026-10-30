@@ -106,6 +106,10 @@ export type TreeNode = {
   items_recorded?: ResponsesItem[];
   has_items?: boolean;
   has_items_recorded?: boolean;
+  /** A COPY of a node with items (a fork-copy, a system-prompt edit's graft)
+   *  points at the original's blob instead of duplicating megabytes of
+   *  screenshots — blobs are write-once per workspace, so it never dangles. */
+  items_ref?: string;
   /** How generation ended ('stop' | 'length' | …) — 'length' ⇒ cut off by the
    *  max-tokens limit; persisted so the truncation badge survives reload. */
   finish_reason?: string;
@@ -214,7 +218,7 @@ function nodeToMsg(n: TreeNode): Msg {
     ...(n.tool_calls?.length ? { tool_calls: n.tool_calls } : {}),
     ...(n.role === 'tool' ? { tool_call_id: n.tool_call_id ?? '', ...(n.name ? { name: n.name } : {}) } : {}),
     // verbatim Responses items: inline when held, else by node (the server loads the blob)
-    ...(n.items?.length ? { items: n.items } : n.has_items ? { items_node: n.id } : {})
+    ...(n.items?.length ? { items: n.items } : n.has_items ? { items_node: n.items_ref ?? n.id } : {})
   };
 }
 
@@ -299,11 +303,17 @@ export function activePath(t: ConvTree): TreeNode[] {
   return path;
 }
 
-/** The active path as [{role,content}] (system turns excluded) — feeds messages. */
+/** Does this node go out with a fire? Everything but system turns — except a
+ *  system node carrying verbatim items (a recorded call's system message, or an
+ *  edit of one): that IS the system prompt, and the server then composes none.
+ *  Mirrors cli.py `_keep_in_ancestry`. */
+export function sentInFire(n: TreeNode): boolean {
+  return n.role !== 'system' || !!n.items?.length || !!n.has_items;
+}
+
+/** The active path as [{role,content}] (system turns excluded, see sentInFire). */
 export function activeMessages(t: ConvTree): Msg[] {
-  return activePath(t)
-    .filter((n) => n.role !== 'system')
-    .map(nodeToMsg);
+  return activePath(t).filter(sentInFire).map(nodeToMsg);
 }
 
 export function parentKeyOf(t: ConvTree, id: string): string {
@@ -335,7 +345,7 @@ export function ancestryMessages(t: ConvTree, id: string): Msg[] {
     cur = cur.parent ? t.nodes[cur.parent] : undefined;
   }
   chain.reverse();
-  return chain.filter((n) => n.role !== 'system').map(nodeToMsg);
+  return chain.filter(sentInFire).map(nodeToMsg);
 }
 
 /** The active-path nodes strictly BELOW `id` (or [] if id isn't on the path). */
@@ -592,6 +602,12 @@ function graftDownstream(t: ConvTree, rootId: string, chain: TreeNode[]): void {
       ...(node.role === 'tool' ? { tool_call_id: node.tool_call_id, name: node.name } : {}),
       raw_text: node.raw_text,
       raw_meta: node.raw_meta,
+      // a recorded turn's items: inline when held, else a reference to the original's blob
+      ...(node.items?.length
+        ? { items: node.items }
+        : node.has_items
+          ? { has_items: true, items_ref: node.items_ref ?? node.id }
+          : {}),
       parent: curParent,
       children: []
     };
@@ -599,6 +615,45 @@ function graftDownstream(t: ConvTree, rootId: string, chain: TreeNode[]): void {
     t.selected[curParent] = cid;
     curParent = cid;
   }
+}
+
+/** Edit a SYSTEM node (a recorded call's system message) like a first message:
+ *  a sibling system node with the new text, and below it a copy of the
+ *  conversation — all of it with `copyDownstream` (nothing is generated), else
+ *  only the turns up to the first reply, which `fireFrom` then regenerates. The
+ *  new node keeps the original item's role (system / developer); its text is
+ *  one plain part. */
+export function editSystemFork(
+  t0: ConvTree,
+  sysId: string,
+  content: string,
+  copyDownstream: boolean,
+  items?: ResponsesItem[]
+): { tree: ConvTree; newId: string; fireFrom: string | null } | null {
+  const orig = t0.nodes[sysId];
+  if (!orig || orig.role !== 'system') return null;
+  const below = downstreamActivePath(t0, sysId);
+  const firstReply = below.findIndex((n) => n.role === 'assistant');
+  const graft = copyDownstream ? below : firstReply < 0 ? below : below.slice(0, firstReply);
+  const t = cloneTree(t0);
+  const parentKey = orig.parent ?? ROOT;
+  const id = nid();
+  const role = (items ?? []).find((it) => it?.role === 'system' || it?.role === 'developer')?.role ?? 'system';
+  t.nodes[id] = {
+    id,
+    role: 'system',
+    content,
+    ...(orig.has_items || orig.items?.length ? { items: [{ role, content }] } : {}),
+    parent: orig.parent,
+    children: []
+  };
+  childArray(t, parentKey).push(id);
+  t.selected[parentKey] = id;
+  graftDownstream(t, id, graft);
+  let last = id;
+  while (t.nodes[last].children.length) last = t.nodes[last].children[0];
+  const fireFrom = !copyDownstream && last !== id && t.nodes[last].role !== 'assistant' ? last : null;
+  return { tree: t, newId: id, fireFrom };
 }
 
 /** A Responses turn's items after an edit of its text: the assistant message

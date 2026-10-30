@@ -603,7 +603,9 @@ codex plugin add tinkerscope@tinkerscope</pre>
         A workspace imported from a recorded agent call (<code>tinkerscope import --responses-call</code>)
         shows each turn exactly as the agent saw or produced it: screenshots as thumbnails (click to
         enlarge), reasoning as a normal Thinking fold (the summary; an edit can only keep or drop it) with
-        encrypted / <b>id only</b> badges, calls and their outputs. Sends there go
+        encrypted / <b>id only</b> badges, calls and their outputs. The recorded system message is the
+        thread's first row and edits like a first message: a new thread under the edited prompt, the
+        conversation copied below it and its first reply regenerated (Shift: copy all, no reply). Sends there go
         through OpenRouter's Responses API with those items unchanged. A computer call is answered with a
         screenshot file instead of text.
       </p>

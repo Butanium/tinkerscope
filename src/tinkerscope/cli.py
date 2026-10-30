@@ -2145,7 +2145,7 @@ def _wire_msg(m: dict) -> dict:
     if m.get("items"):
         out["items"] = m["items"]
     elif m.get("has_items") and m.get("id"):
-        out["items_node"] = m["id"]
+        out["items_node"] = m.get("items_ref") or m["id"]  # a copy reads the original's blob
     return out
 
 
@@ -4487,11 +4487,11 @@ def _responses_export(c: dict, panel: Optional[str], thread: Optional[int]) -> d
     if pid is None:
         _die("the workspace has no thread")
     path = _thread_nodes(c, pid, thread)
-    heavy = [nd["id"] for nd in path if nd.get("has_items") or nd.get("has_items_recorded")]
+    heavy = [nd.get("items_ref") or nd["id"] for nd in path if nd.get("has_items") or nd.get("has_items_recorded")]
     blobs = _post(f"/api/workspaces/{c['id']}/node-blobs", {"nodes": heavy, "fields": ["items", "items_recorded"]}) if heavy else {}
     items: list[dict] = []
     for nd in path:
-        b = (blobs or {}).get(nd["id"]) or {}
+        b = (blobs or {}).get(nd.get("items_ref") or nd["id"]) or {}
         rec = nd.get("items_recorded") or b.get("items_recorded") or nd.get("items") or b.get("items")
         items.extend(rec if rec else _oresp.message_items(_wire_msg(nd)))
     if not any((it.get("role") in ("system", "developer")) for it in items):

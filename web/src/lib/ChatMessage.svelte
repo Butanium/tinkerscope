@@ -220,14 +220,16 @@
   // Verbatim Responses items (lib/ResponsesItems): inline on a fresh fold, else the
   // node's blob — fetched when the row mounts, since the items ARE the row.
   let hasItems = $derived(!!msg.items?.length || !!msg.has_items);
-  let itemsResolved = $derived(msg.items ?? blob?.items);
+  // a copied turn reads the original's blob (TreeNode.items_ref)
+  let itemsId = $derived(msg.items_ref ?? msg.nodeId);
+  let itemsResolved = $derived(msg.items ?? (itemsId ? nodeBlobs.get(itemsId)?.items : undefined));
   // Thinking an edit may only keep or drop: a closed model's payload, or a
   // Responses row's reasoning items (summary text over an encrypted blob).
   let sealedKind = $derived(
     tKind ?? (msg.role === 'assistant' && hasItems ? itemsThinkingKind(itemsResolved) : null)
   );
   $effect(() => {
-    if (hasItems && !itemsResolved && msg.nodeId) void nodeBlobs.ensure([msg.nodeId]);
+    if (hasItems && !itemsResolved && itemsId) void nodeBlobs.ensure([itemsId]);
   });
   let foreignReasoning = $derived(
     (!!tKind || hasItems) && !!msg.reasoning_account && !!modelCatalog.orAccount && msg.reasoning_account !== modelCatalog.orAccount
@@ -920,7 +922,7 @@
       <textarea
         class="edit-textarea"
         bind:value={editDraft}
-        rows="4"
+        rows={msg.role === 'system' ? 16 : 4}
         autofocus
         onkeydown={(e) => {
           if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commitEdit(); }
@@ -985,7 +987,7 @@
       {#if msg.running && !isMultiSample && onStop && !readOnly}
         <div class="stop-turn-row">{@render stopBtn()}</div>
       {/if}
-      {#if msg.role !== 'system' && (msg.content || msg.raw_text || msg.reasoning || msg.role === 'tool' || msg.tool_calls?.length || (msg.nodeId != null && !msg.running))}
+      {#if (msg.role !== 'system' || msg.nodeId != null) && (msg.content || msg.raw_text || msg.reasoning || msg.role === 'tool' || msg.tool_calls?.length || (msg.nodeId != null && !msg.running))}
         <OverflowRow klass="hover-actions" resetKey={msg.nodeId ?? msg.content}>
           {#if msg.raw_text}
             <!-- Raw leads the row (Clément: very left, always visible — first
@@ -993,7 +995,7 @@
             <button class="btn-raw" class:active={rawSingle} onclick={() => (rawSingle = !rawSingle)} data-tooltip="Raw model output, tags preserved" use:tip>Raw</button>
           {/if}
           {#if canEdit && !readOnly}
-            {@render regenGroup()}
+            {#if msg.role !== 'system'}{@render regenGroup()}{/if}
             {#if msg.role === 'assistant'}{@render continueBtn()}{/if}
             <button
               class="btn-act"
@@ -1003,6 +1005,8 @@
                 ? 'Edit a copy of the conversation (no reply)'
                 : msg.role === 'user'
                   ? 'Edit and regenerate (Shift: copy, no reply)'
+                  : msg.role === 'system'
+                  ? 'Edit and regenerate the first reply (Shift: copy, no reply)'
                   : msg.role === 'tool'
                     ? 'Edit the result and regenerate (Shift: no reply)'
                     : 'Edit (keeps the original; Shift: copy)'}${allActive ? ' — in ALL panels' : ''}`}

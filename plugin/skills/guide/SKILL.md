@@ -234,7 +234,10 @@ screenshots as thumbnails (click to enlarge), reasoning as an ordinary **Thinkin
 and an edit can only keep or drop it) with an *encrypted* or *id only* badge (id-only = the agent's scaffold replayed it by reference; only its own account
 can resolve that), and the *other account* pill when the encrypted reasoning was made
 under another key, so the model won't see it. Sending there uses OpenRouter's Responses
-API with those items unchanged. A computer call's result form asks for a screenshot
+API with those items unchanged. The recorded system message is the thread's first row
+and edits like a first message: a sibling thread under the edited prompt with the
+conversation copied below it (screenshots included) and the first reply regenerated;
+Shift copies the whole conversation without generating. A computer call's result form asks for a screenshot
 file instead of text.
 
 **"Do these two checkpoints differ?"** Add a panel per checkpoint, send the same

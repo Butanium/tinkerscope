@@ -629,9 +629,11 @@ export type ViewMessage = {
   name?: string;
   /** Tool rows a server-side handler answered (the auto-answered badge). */
   handler?: 'static' | 'python';
-  /** Verbatim Responses items (inline on a fresh fold) / their blob flag. */
+  /** Verbatim Responses items (inline on a fresh fold) / their blob flag, and
+   *  the node whose blob holds them when this is a copy (TreeNode.items_ref). */
   items?: ResponsesItem[];
   has_items?: boolean;
+  items_ref?: string;
   reasoning?: string;
   raw_text?: string;
   raw_meta?: string;

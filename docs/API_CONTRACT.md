@@ -222,7 +222,9 @@ messages with `input_text`/`input_image` parts, `reasoning` with `encrypted_cont
 `function_call`/`function_call_output`, `computer_call`/`computer_call_output`).
 HEAVY — a write-once blob (`has_items`), like `raw_meta`. `items_recorded` (heavy,
 `has_items_recorded`) holds what was originally sent when the wire form differs (an
-id-only reasoning item whose blob was recovered). The node's light fields (`content`,
+id-only reasoning item whose blob was recovered). `items_ref` (light): a COPY of such a
+node (fork-copy, a system-prompt edit) reads the original node's blobs — clients send
+`items_node: items_ref`. The node's light fields (`content`,
 `reasoning`, `tool_calls` — a computer call is typed `computer_call`) are derived from
 its items. A chat message referencing items (`items` inline or `items_node`) puts the
 chat on the Responses wire: items go out verbatim, item-less nodes are converted, a

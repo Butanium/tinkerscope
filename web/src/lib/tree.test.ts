@@ -8,6 +8,8 @@ import {
   treeFromMessages,
   activePath,
   activeMessages,
+  ancestryMessages,
+  editSystemFork,
   appendUserTurn,
   foldAssistant,
   regenTarget,
@@ -102,6 +104,44 @@ test('treeFromMessages round-trips active messages', () => {
 test('activeMessages excludes system turns', () => {
   const t = treeFromMessages([{ role: 'system', content: 'sys' }, U('hi'), A('yo')]);
   eq(activeMessages(t), [U('hi'), A('yo')]);
+});
+
+// A recorded call's thread: system node (items) → user (items, a screenshot) → reply.
+function recordedThread(): ConvTree {
+  const t = treeFromMessages([{ role: 'system', content: 'be Pip' }, U('look'), A('ok'), U('more'), A('done')]);
+  const [sys, u1] = activePath(t);
+  sys.has_items = true;
+  u1.has_items = true;
+  return t;
+}
+
+test('a recorded system node goes out with a fire (its items by reference)', () => {
+  const t = recordedThread();
+  const path = activePath(t);
+  const msgs = ancestryMessages(t, path[2].id);
+  eq(msgs.map((m) => m.role), ['system', 'user', 'assistant']);
+  eq(msgs[0].items_node, path[0].id);
+});
+
+test('editing a recorded system node forks a thread and regenerates the first reply', () => {
+  const t = recordedThread();
+  const [sys, u1] = activePath(t);
+  const r = editSystemFork(t, sys.id, 'be Pop', false, [{ role: 'developer', content: [{ type: 'input_text', text: 'be Pip' }] }])!;
+  assertValid(r.tree);
+  const path = activePath(r.tree);
+  eq(path.map((n) => n.role), ['system', 'user']); // copied up to the first reply
+  eq(path[0].items, [{ role: 'developer', content: 'be Pop' }]);
+  eq(path[1].items_ref, u1.id); // the copy reads the original's screenshot blob
+  eq(r.fireFrom, path[1].id);
+  eq(ancestryMessages(r.tree, path[1].id)[1].items_node, u1.id);
+  eq(r.tree.rootChildren.length, 2); // the original thread is untouched
+});
+
+test('Shift: the whole conversation is copied under the new prompt, nothing fires', () => {
+  const t = recordedThread();
+  const r = editSystemFork(t, activePath(t)[0].id, 'be Pop', true)!;
+  eq(activePath(r.tree).map((n) => n.content), ['be Pop', 'look', 'ok', 'more', 'done']);
+  eq(r.fireFrom, null);
 });
 
 // ── appendUserTurn ───────────────────────────────────────────────────

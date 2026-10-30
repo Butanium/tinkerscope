@@ -35,6 +35,7 @@ import {
   appendToolResults,
   isFireParent,
   pendingToolCalls,
+  editSystemFork,
   deleteSubtree,
   deleteSiblings,
   setSelected,
@@ -447,8 +448,9 @@ class BranchOps {
     if (!node) return undefined;
     if (node.items?.length) return node.items;
     if (!node.has_items) return undefined;
-    if (!nodeBlobs.get(nodeId)?.items) await nodeBlobs.ensure([nodeId]);
-    return nodeBlobs.get(nodeId)?.items;
+    const id = node.items_ref ?? nodeId;
+    if (!nodeBlobs.get(id)?.items) await nodeBlobs.ensure([id]);
+    return nodeBlobs.get(id)?.items;
   }
 
   /** The node's raw_meta blob (same inline-first / fetch-on-demand resolution as
@@ -562,6 +564,10 @@ class BranchOps {
       this.#editToolResult(panel, msg.nodeId, content, copyDownstream);
       return;
     }
+    if (msg.role === 'system') {
+      await this.#editSystem(panel, msg.nodeId, content, copyDownstream);
+      return;
+    }
     const text = content.trim();
     // Assistant turns may be thinking-only (empty answer) — keep the edit if
     // either field has text; user turns still require a non-empty body.
@@ -589,6 +595,20 @@ class BranchOps {
       const r = editAssistant(ws.treeFor(panel), msg.nodeId, text, reasoning, tlp, copyDownstream, items);
       if (r) this.#commitChain(panel, r.tree, r.newId);
     }
+  }
+
+  /** Edit a system node (a recorded call's system message) like a first message:
+   *  a sibling thread under the new prompt, the conversation copied below it
+   *  (Shift: all of it, no reply; else up to the first reply, regenerated). */
+  async #editSystem(panel: Panel, nodeId: string, content: string, copyDownstream: boolean) {
+    if (!content.trim()) return;
+    const items = await this.#itemsOf(panel, nodeId);
+    const r = editSystemFork(ws.treeFor(panel), nodeId, content, copyDownstream, items);
+    if (!r) return;
+    panelScroll.preserve(panel);
+    chat.clearPanelBucket(panel);
+    this.#commitChain(panel, r.tree, r.newId);
+    if (r.fireFrom) this.#fireForPanel(panel, r.fireFrom, ancestryMessages(r.tree, r.fireFrom) as ChatMessage[]);
   }
 
   /** Fork a tool result with new content (verbatim — a tool's output can be
