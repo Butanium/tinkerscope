@@ -5,7 +5,7 @@
   // auto-answered rounds, and named sets shared across workspaces.
   import { onMount, untrack } from 'svelte';
   import Modal from '$lib/Modal.svelte';
-  import { parseToolDefs, formatToolDefs, toolName, cleanHandlers } from '$lib/tools-def';
+  import { parseToolDefs, formatToolDefs, toolName, cleanHandlers, defFields, withDefFields } from '$lib/tools-def';
   import { api, type ToolSet, type ToolTestResult } from '$lib/api';
   import { tip } from '$lib/tooltip.svelte';
   import Icon from '$lib/Icon.svelte';
@@ -62,6 +62,46 @@
     hs[name] = on ? rest : { ...rest, disabled: true };
   }
   /** Remove a tool: its definition from the JSON and its handler (Cancel undoes). */
+  // ── one tool's definition, unfolded under its row (edits rewrite the JSON) ──
+  let defOpen = $state<Record<string, boolean>>({});
+  // a parameters / raw-definition box that doesn't parse yet keeps its own text
+  let defDraft = $state<Record<string, { text: string; error: string } | undefined>>({});
+  function defOf(name: string): ToolDef | undefined {
+    return parsed.error === undefined ? parsed.tools?.find((t) => toolName(t) === name) : undefined;
+  }
+  function putDef(name: string, next: ToolDef) {
+    if (parsed.error !== undefined) return;
+    const newName = toolName(next);
+    text = formatToolDefs((parsed.tools ?? []).map((t) => (toolName(t) === name ? next : t)));
+    if (newName !== name) {
+      // a rename carries the handler, the fold and the test box along
+      if (hs[name]) { hs[newName] = hs[name]; delete hs[name]; }
+      defOpen[newName] = defOpen[name];
+      testArgs[newName] = testArgs[name];
+      delete defOpen[name];
+    }
+  }
+  function editField(name: string, field: 'name' | 'description', v: string) {
+    const t = defOf(name);
+    if (t) putDef(name, withDefFields(t, { [field]: v }));
+  }
+  function editJson(name: string, v: string, native: boolean) {
+    const t = defOf(name);
+    if (!t) return;
+    try {
+      const val = v.trim() ? JSON.parse(v) : undefined;
+      if (native && (!val || typeof val !== 'object' || typeof val.type !== 'string'))
+        throw new Error('a tool definition needs a "type"');
+      defDraft[name] = undefined;
+      putDef(name, native ? val : withDefFields(t, { parameters: val }));
+    } catch (e) {
+      defDraft[name] = { text: v, error: (e as Error).message };
+    }
+  }
+  function pretty(v: unknown): string {
+    return v === undefined ? '' : JSON.stringify(v, null, 2);
+  }
+
   function remove(name: string) {
     if (parsed.error !== undefined) return;
     text = formatToolDefs((parsed.tools ?? []).filter((t) => toolName(t) !== name));
@@ -174,7 +214,10 @@
             <input type="checkbox" class="th-on" checked={!hd.disabled} onchange={(e) => setOn(name, e.currentTarget.checked)}
               data-tooltip={hd.disabled ? 'Off: not offered to the model' : 'Offered to the model — untick to switch it off'} use:tip
               aria-label="Offer {name} to the model" data-testid="tool-on" />
-            <code class="th-name">{name}</code>
+            <button class="th-name" onclick={() => (defOpen[name] = !defOpen[name])} aria-expanded={!!defOpen[name]} data-testid="tool-def-toggle">
+              <svg class="section-chevron" class:open={defOpen[name]} width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+              <code>{name}</code>
+            </button>
             <div class="seg-toggle" role="group" aria-label="How {name} is answered">
               {#each MODES as [m, label, hint] (m)}
                 <button class="seg-btn" class:active={hd.mode === m} data-mode={m} onclick={() => setMode(name, m)} data-tooltip={hint} use:tip>{label}</button>
@@ -189,6 +232,32 @@
             <button class="th-del" onclick={() => remove(name)} disabled={parsed.error !== undefined}
               data-tooltip="Remove this tool (Cancel undoes)" use:tip aria-label="Remove {name}" data-testid="tool-remove"><Icon name="trash" size={13} /></button>
           </div>
+          {#if defOpen[name]}
+            {@const def = defOf(name)}
+            <div class="th-def" data-testid="tool-def">
+              {#if !def}
+                <div class="tools-status err">Fix the definitions JSON to edit this tool here.</div>
+              {:else}
+                {@const f = defFields(def)}
+                {@const draft = defDraft[name]}
+                {#if f.native}
+                  <span class="th-label">Definition</span>
+                  <textarea class="th-code" rows="4" spellcheck="false" value={draft?.text ?? pretty(def)} oninput={(e) => editJson(name, e.currentTarget.value, true)} data-testid="tool-def-json"></textarea>
+                {:else}
+                  <label class="th-field"><span class="th-label">Name</span>
+                    <input class="th-args" value={f.name} onchange={(e) => editField(name, 'name', e.currentTarget.value.trim())} data-testid="tool-def-name" />
+                  </label>
+                  <label class="th-field"><span class="th-label">Description</span>
+                    <textarea class="th-text" rows="3" value={f.description} oninput={(e) => editField(name, 'description', e.currentTarget.value)} data-testid="tool-def-desc"></textarea>
+                  </label>
+                  <label class="th-field"><span class="th-label">Parameters (JSON schema)</span>
+                    <textarea class="th-code" rows="8" spellcheck="false" value={draft?.text ?? pretty(f.parameters)} oninput={(e) => editJson(name, e.currentTarget.value, false)} onkeydown={codeKeys} data-testid="tool-def-params"></textarea>
+                  </label>
+                {/if}
+                {#if draft}<div class="tools-status err">{draft.error}</div>{/if}
+              {/if}
+            </div>
+          {/if}
           {#if hd.mode === 'static'}
             <textarea class="th-text" rows="2" placeholder="What every call returns" data-testid="handler-static"
               value={hd.text ?? ''} oninput={(e) => (hs[name] = { ...hd, text: e.currentTarget.value })}></textarea>
@@ -261,7 +330,11 @@
   .th-del { background: none; border: none; color: var(--color-text-muted); cursor: pointer; padding: 2px; display: inline-flex; border-radius: var(--radius-sm); }
   .th-del:hover:not(:disabled) { color: var(--color-no); background: var(--color-surface-alt); }
   .th-del:disabled { opacity: 0.4; cursor: default; }
-  .th-name { font-family: 'Courier New', Courier, monospace; font-weight: 700; font-size: 0.85rem; min-width: 0; overflow-wrap: anywhere; flex: 1 1 140px; }
+  .th-name { display: inline-flex; align-items: center; gap: 4px; background: none; border: none; padding: 0; cursor: pointer; color: var(--color-text); text-align: left; min-width: 0; flex: 1 1 140px; }
+  .th-name code { font-family: 'Courier New', Courier, monospace; font-weight: 700; font-size: 0.85rem; overflow-wrap: anywhere; }
+  .th-def { display: flex; flex-direction: column; gap: 6px; padding-left: 20px; }
+  .th-field { display: flex; flex-direction: column; gap: 3px; }
+  .th-label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-muted); }
   .th-cont { display: inline-flex; align-items: center; gap: 4px; font-size: 0.76rem; color: var(--color-text-secondary); cursor: pointer; }
   .th-sig { font-family: 'Courier New', Courier, monospace; font-size: 0.78rem; color: var(--color-text-muted); }
   .th-off { font-size: 0.76rem; color: var(--color-no); }

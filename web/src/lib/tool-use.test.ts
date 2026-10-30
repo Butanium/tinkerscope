@@ -18,7 +18,7 @@ import {
   lightenTree,
   type ConvTree
 } from './tree.ts';
-import { parseToolDefs, cleanHandlers, offeredCount } from './tools-def.ts';
+import { parseToolDefs, cleanHandlers, offeredCount, defFields, withDefFields } from './tools-def.ts';
 import type { ToolCall } from './types.ts';
 
 let passed = 0;
@@ -187,6 +187,15 @@ test('a switched-off tool keeps its entry (even manual) and is not counted as of
   eq(hs, { a: { mode: 'manual', disabled: true }, b: { mode: 'static', disabled: true, text: 'x' } });
   const tools = [call('1', 'a'), call('2', 'b'), call('3', 'c')].map((c) => ({ type: 'function', function: { name: c.function.name } }));
   eq(offeredCount(tools, hs), 1);
+});
+
+test('definition fields edit in place, in either function shape', () => {
+  const nested = { type: 'function', function: { name: 'send', description: 'post it', parameters: { type: 'object' } } };
+  eq(defFields(nested), { native: false, name: 'send', description: 'post it', parameters: { type: 'object' } });
+  eq(withDefFields(nested, { description: 'Post to chat.' }).function, { name: 'send', description: 'Post to chat.', parameters: { type: 'object' } });
+  const flat = { type: 'function', name: 'send', strict: true, parameters: {} };
+  eq(withDefFields(flat, { name: 'say', description: '' }), { type: 'function', name: 'say', strict: true, parameters: {} });
+  eq(defFields({ type: 'computer' }), { native: true });
 });
 
 console.log(`tool-use: ${passed} passed, ${failed} failed`);

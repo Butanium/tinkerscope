@@ -596,7 +596,7 @@ codex plugin add tinkerscope@tinkerscope</pre>
         Python handlers run only on a server started with <code>--allow-tool-code</code>; elsewhere they
         act like manual tools, and the result form says why a call was left for you. <b>Tool set</b> saves
         the definitions and handlers under a name for other workspaces (Shift+Load takes only the handlers).
-        A row's checkbox switches the tool off (kept, but not offered to the model; the pill then reads
+        Click a tool's name to unfold its name, description and parameters and edit them there. A row's checkbox switches the tool off (kept, but not offered to the model; the pill then reads
         <code>tools · 2/3</code>), and its trash icon removes it.
       </p>
       <p class="help-note">

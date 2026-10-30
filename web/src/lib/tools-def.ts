@@ -81,3 +81,35 @@ export function cleanHandlers(hs: ToolHandlers, names: string[]): ToolHandlers |
 export function offeredCount(tools: ToolDef[] | null, hs: ToolHandlers | null): number {
   return (tools ?? []).filter((t) => !hs?.[toolName(t)]?.disabled).length;
 }
+
+/** The editable parts of one definition, whatever its shape: a function's name /
+ *  description / parameters (nested chat shape or flat Responses shape), or — for
+ *  a native tool (`{type:'computer'}`) — nothing but the raw definition. */
+export type DefFields = { native: false; name: string; description: string; parameters: unknown } | { native: true };
+
+export function defFields(t: ToolDef): DefFields {
+  if (t.type !== 'function') return { native: true };
+  const fn = (t.function ?? t) as Record<string, unknown>;
+  return {
+    native: false,
+    name: typeof fn.name === 'string' ? fn.name : '',
+    description: typeof fn.description === 'string' ? fn.description : '',
+    parameters: fn.parameters
+  };
+}
+
+/** `t` with some of its function fields replaced, in the shape it came in (an
+ *  empty description is removed rather than stored as ""). */
+export function withDefFields(
+  t: ToolDef,
+  patch: Partial<{ name: string; description: string; parameters: unknown }>
+): ToolDef {
+  const apply = (fn: Record<string, unknown>) => {
+    const out = { ...fn, ...patch };
+    if (patch.description !== undefined && !patch.description) delete out.description;
+    if ('parameters' in patch && patch.parameters === undefined) delete out.parameters;
+    return out;
+  };
+  if (t.function) return { ...t, function: apply(t.function) as ToolDef['function'] };
+  return apply(t) as ToolDef;
+}
