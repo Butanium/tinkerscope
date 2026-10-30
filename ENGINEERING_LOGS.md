@@ -3403,8 +3403,10 @@ code (and make sure the CLI also is nicely integrating this)". Spec in
   prints → logs (stderr), result → stdout JSON, env minus `*_API_KEY` / `*_TOKEN` /
   SECRET / PASSWORD names, killed on timeout (default 10 s) or cancel. Off unless
   `serve --allow-tool-code` (:8770 is public behind ngrok basic auth).
-- **Share packs drop python handlers** (static ones travel): a pack installs from a
-  link, and code that runs the next time a model calls the tool must not ride along.
+- **Share packs and static sites drop python handlers** (static ones travel): a pack
+  installs from a link, and code that runs the next time a model calls the tool must
+  not ride along; a site is public, and handler code can name internal hosts/paths.
+  Checked by exporting a seeded workspace and grepping the site for the code.
 - **`replay` doesn't auto-answer by default** (`--auto-tools` to opt in), unlike
   `send`/`continue`: replay's job is per-turn fidelity, and rolling every resampled
   turn forward multiplies its cost by up to the step cap.

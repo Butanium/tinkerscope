@@ -1373,15 +1373,15 @@ async def _open_chat(
             ops: list[dict] = []
             queued: list[_Step] = []
             events: list[dict] = []
-            first = True
             for nd, man in zip(fold_nodes, fold_manifest):
                 calls = nd.get("tool_calls") or []
                 if not calls:
                     continue
                 specs = [tool_handlers.spec_for(loop.handlers, c) for c in calls]
-                # the root's first folded sample is the SELECTED sibling: its branch streams
-                vis = visible if depth else (req.broadcast and first)
-                first = False
+                # the root's first folded node is the SELECTED sibling: only its branch
+                # streams (when it made no calls, none does — another branch's step
+                # would overlay the bucket on the wrong leaf)
+                vis = visible if depth else (req.broadcast and nd is fold_nodes[0])
                 if all(s["mode"] == "manual" for s in specs):
                     continue  # nothing to automate: the plain manual flow
                 ev: dict = {"step": depth + 1, "branch": branch if depth else man["sample_index"],

@@ -308,3 +308,83 @@ def test_auto_tools_off(loop_env):
     handlers = {"send": {"mode": "static", "text": "ok"}}
     asyncio.run(_events(chat_route, _req(chat_route, ws, tool_handlers=handlers, auto_tools=False)))
     assert _roles(_path(store, ws))[-1] == ("assistant", "send") and len(seen) == 1
+
+
+def test_only_the_selected_branch_streams_to_the_panel(loop_env, monkeypatch):
+    """n>1: the step chats of a branch that isn't the selected sibling (the
+    first folded sample) stay off the bus — the panel's single bucket overlays
+    the ACTIVE leaf, so another branch's step there would show on the wrong one."""
+    chat_route, bus, store, ws, seen = loop_env
+    k = iter(range(100))
+
+    async def one(**kw):
+        last = kw["messages"][-1]
+        if last["role"] == "user":
+            # sample 0 answers in text, sample 1 calls a tool
+            return ({"content": "plain answer", "finish_reason": "stop"} if next(k) == 0 else
+                    {"content": "", "tool_calls": [_call("send", "s1")], "finish_reason": "tool_calls"})
+        return {"content": "after the tool", "finish_reason": "stop"}
+
+    async def stream(**kw):
+        yield await one(**kw)
+
+    monkeypatch.setattr("tinkerscope.api.openrouter.sample_one", one)
+    monkeypatch.setattr("tinkerscope.api.openrouter.sample_one_stream", stream)
+    handlers = {"send": {"mode": "static", "text": "ok"}}
+
+    async def run():
+        sub = await bus.subscribe()
+        evs = await _events(chat_route, _req(chat_route, ws, tool_handlers=handlers, n_samples=2))
+        out = []
+        while not sub.empty():
+            out.append(sub.get_nowait())
+        return evs, out
+
+    evs, bus_evs = asyncio.run(run())
+    assert [e for e in bus_evs if e.get("type") == "chat_start"].__len__() == 1  # the root only
+    assert [d["branch"] for k_, d in evs if k_ == "step_done"] == [1]  # but branch 1 did continue
+    tree = store.get_body(ws)["trees"][PANEL]
+    assert sorted(n["content"] for n in tree["nodes"].values() if not n.get("children")) == [
+        "after the tool", "plain answer"]
+
+
+def test_cancelling_a_step_stops_the_whole_loop(loop_env, monkeypatch):
+    chat_route, bus, store, ws, _ = loop_env
+
+    async def stream(**kw):
+        if kw["messages"][-1]["role"] == "user":
+            yield {"content": "", "tool_calls": [_call("send", "s1")], "finish_reason": "tool_calls"}
+            return
+        await asyncio.Event().wait()  # the step hangs until cancelled
+        yield {}
+
+    monkeypatch.setattr("tinkerscope.api.openrouter.sample_one_stream", stream)
+    handlers = {"send": {"mode": "static", "text": "ok"}}
+
+    async def run():
+        task = asyncio.create_task(_events(chat_route, _req(chat_route, ws, tool_handlers=handlers)))
+        for _ in range(200):
+            if len(chat_route._LOOP_OF) >= 2:
+                break
+            await asyncio.sleep(0.01)
+        assert len(chat_route._LOOP_OF) == 2, chat_route._LOOP_OF
+        step_id = max(chat_route._LOOP_OF)
+        assert (await chat_route.cancel_chat(step_id))["status"] == "cancelling"
+        return await asyncio.wait_for(task, timeout=5)
+
+    evs = asyncio.run(run())
+    assert evs[-1][0] == "done" and evs[-1][1].get("cancelled") is True and evs[-1][1]["tool_steps"] == 1
+    assert [d.get("cancelled") for k, d in evs if k == "step_done"] == [True]
+    assert _roles(_path(store, ws))[-1] == ("tool", "send")
+    assert not chat_route._INFLIGHT and not chat_route._LOOP_OF  # nothing leaked
+
+
+def test_packs_never_carry_python_handlers(backend):
+    """A pack installs from a link: python handler code must not ride along
+    (static handlers do). site_export applies the same filter."""
+    from tinkerscope import pack as packmod
+
+    body = {"trees": {}, "tool_handlers": {"send": {"mode": "static", "text": "ok"},
+                                           "run": {"mode": "python", "code": "import os; os.system('x')"}}}
+    out = packmod._prepare_workspace_body(body, {})
+    assert out["tool_handlers"] == {"send": {"mode": "static", "text": "ok"}}

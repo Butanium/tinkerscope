@@ -527,6 +527,11 @@ def export_site(
             continue
         body = json.loads(json.dumps(body))  # own it before rewriting
         packmod.rewrite_panels(body, resolve=resolve)
+        # python tool handlers stay on this machine (same rule as packs): a published
+        # page is public, and handler code can name internal hosts or paths
+        if body.get("tool_handlers"):
+            body["tool_handlers"] = {k: v for k, v in body["tool_handlers"].items()
+                                     if isinstance(v, dict) and v.get("mode") != "python"} or None
 
         before = stats.bytes_written
         # `keep is None` = every node keeps its logprobs (the `all` default).
