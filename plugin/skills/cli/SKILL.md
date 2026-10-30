@@ -238,6 +238,47 @@ Encrypted reasoning is stamped `reasoning_account` (a hash of the OpenRouter key
 a workspace made under another account replays WITHOUT that reasoning — the
 provider ignores another org's blob without an error.
 
+**Which system prompt a `send` / `continue` gets.** The TARGET workspace's own
+(its text when enabled, nothing when muted) — the same thing the browser sends for
+it — so `--ws X` from a headless terminal samples under X's prompt, not under
+whatever workspace a browser happens to have open. A thread's own prompt (on its
+first message) still overrides it. `--system` / `--system-file` replace it for one
+call (on `send` they author the new thread's prompt); `--no-system` sends none.
+`--tools-file` replaces the workspace's tools for one call (`[]` = no tools).
+
+**Models that aren't runs.** Everywhere a run is taken (`chat`, `compare`, `probe`,
+`open`, `replay --model`), a selector works too: `openrouter:<id>`, `base:<model>`,
+`ckpt:<sampler_path>`, `vllm:<name>`.
+
+**Measuring a fork / reconstructed conversation without touching it.**
+- `tinkerscope continue --ws X --panel P --no-persist --n 10 --json` samples the
+  thread's next turn from its exact context (path incl. tool turns, thread +
+  workspace system prompt, workspace tools) and writes NOTHING — no turns, no
+  fold, no bus events. `--node` aims it at any earlier point.
+- `tinkerscope replay --ws X --panel P --n 3 --json [--turn K…] [--concurrency 8]`
+  does that at EVERY assistant turn of the thread: one JSONL row per sample with
+  the real turn alongside (`real` / `sample`, plus coarse `real_kind` /
+  `sample_kind`: `call:<tools>` / `text` / `empty`); the human output ends with a
+  kind-agreement table. Same per-call overrides (`--model`, `--system-file`,
+  `--tools-file`, `--effort`, …) — that's an ablation.
+- `probe … --ancestry-file f.json` takes an OpenAI-shape transcript (tool_calls,
+  `role:"tool"` turns, null content on a calls-only turn) and `--tools-file`.
+
+**A workspace as a file.** `tinkerscope export X > body.json` (`--blobs` inlines
+raw_meta/token_logprobs so it's a complete copy) and `tinkerscope import body.json
+[--id ID] [--name N]` (a new id unless `--id`; an existing `--id` is REPLACED, its
+old nodes journaled to its trash). `export X --openai [--panel P] [--thread K]`
+writes one thread as `{model, system, tools, messages}` — exactly what its next
+turn would be sampled from — and `import` takes that shape back (or a bare
+messages list) as a one-thread workspace: `--model` (default the file's; a bare id
+reads as OpenRouter), `--thread-system` to put `system` on the thread instead of
+the workspace.
+
+**What an OpenRouter turn was sent.** Its wire request + trimmed response is the
+node's `raw_meta` blob (`tinkerscope node <handle> --meta`, the browser's Raw →
+"request & response"; encrypted reasoning shows as its size); `raw_text` is the
+response alone. `ws --provenance` reads the producing model from it.
+
 **Thread system prompts (`send --system`).** A thread's first message can carry
 its OWN system prompt, which REPLACES the global one for that thread at fire
 time (the global stays the default for threads without one, never clobbered). On `send` (always a

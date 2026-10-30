@@ -1002,7 +1002,7 @@ def _done_lines(body: dict, done_data: dict) -> list[str]:
     if not folded or not parent:
         return ["[done]"]
     ws, panel = body.get("workspace_id"), body.get("panel", "")
-    lines = [f"[done] saved under user turn {_qualified_handle(ws, panel, parent)}"]
+    lines = [f"[done] saved under turn {_qualified_handle(ws, panel, parent)}"]
     for m in sorted(folded, key=lambda m: m.get("sample_index", 0)):
         lines.append(f"  sample {m.get('sample_index')} → {_qualified_handle(ws, panel, m['node_id'])}")
     return lines
@@ -4134,8 +4134,8 @@ def cmd_replay(
                                      ensure_ascii=False, default=str), flush=True)
                 else:
                     print(f"  sample {smp.get('sample_index')} [{kind}] {_oneline(smp.get('content') or '', width)}", flush=True)
-                    for ln in _fmt_tool_calls(smp.get("tool_calls"), "  smp", "", width, False):
-                        print(ln, flush=True)
+                    for ln in _fmt_tool_calls(smp.get("tool_calls"), "smp", "", width, False):
+                        print("  " + ln, flush=True)
             if res.error:
                 print(f"  (turn {t}: {res.error})", file=plan_out, flush=True)
     print(f"\nkind agreement: {agree}/{total}", file=plan_out)

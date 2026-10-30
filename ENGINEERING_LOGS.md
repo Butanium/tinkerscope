@@ -3264,3 +3264,43 @@ a muted "empty turn" body plus the normal toolbar (regenerate/cycle/delete work 
 it). Separately, `panel-view.ts`'s bucket→node map counted a sample as folded only
 if it had content or tool calls, but `_build_fold_nodes` folds every non-error
 sample, so one silent sample in an n>1 fire shifted the ‹k/N› mapping by one.
+
+### 2026-10-30 — CLI gaps found running a reconstructed-agent study
+
+The Terra study (`~/projects2/village-terra`) had to work around the CLI with raw
+HTTP and direct OpenRouter scripts. What changed, and the reason each had to:
+
+- **`send`/`continue` sampled under the wrong system prompt headless.** With no
+  `--system` the server inherited the BUS global — the prompt of whatever workspace
+  a browser had open, or nothing. A workspace whose meaning lives in its
+  workspace-level prompt (a 34k-char memory) was silently sampled without it. Both
+  now send the TARGET workspace's own prompt explicitly (text when enabled, "" when
+  muted — what the browser sends for it). Verified by planting a WRONG prompt on the
+  bus and reading the request back from `raw_meta`.
+- **OpenRouter's wire request moved from `raw_text` to `raw_meta`.** It was there
+  all along, in `raw_text` — which `node-blobs` never returns, so it looked missing.
+  And it is the wrong home: the request repeats the whole conversation (system
+  prompt included) on EVERY turn, so a 44-turn thread under a 34k prompt carried
+  ~2.6 MB of near-duplicate request text in its LIGHT tree, the thing storage v2
+  exists to keep small. Now `raw_meta` (write-once blob, lazy in the browser's Raw
+  dropdown, `node --meta`, and `ws --provenance` reads the model from it — it
+  already expected OpenRouter's top-level `model`) and `raw_text` = the response
+  section. Older OpenRouter nodes keep their full `raw_text`; nothing migrates.
+- **`replay`** = the study's fidelity script, generic: resample every assistant
+  turn from its exact prefix, JSONL with the real turn alongside, nothing written
+  (`broadcast=false, commit=false`, the `probe` shape). The kind labels are coarse
+  on purpose (`call:<tools>` / `text` / `empty`); study-specific labels belong in
+  the study, reading the JSONL.
+- **`continue --no-persist`** instead of a `probe --from-node`: `continue` already
+  rebuilds the exact ancestry from a tree point and binds the panel's model, so the
+  only missing piece was not writing.
+- **`import` / `export` are top-level commands**, not `ws import`: `ws` takes a
+  positional workspace selector, so `ws import FILE` would read "import" as a
+  workspace name. A body import strips `has_*` flags whose data isn't inline
+  (without `export --blobs` nothing would back them).
+- **Model selectors everywhere a run is taken** (`chat`, `compare`; `probe`/`open`
+  already had them) through one resolver, `_resolve_model_arg`.
+- Testing note: `scripts/dev-isolated.sh --port N` exits if N is taken, and a
+  health poll then happily answers from the squatter. An August instance was still
+  on :8792 and the first test import landed in it (removed). Check `/api/health`'s
+  `root` before trusting a port.

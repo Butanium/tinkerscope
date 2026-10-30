@@ -259,7 +259,9 @@ unbound columns.
 **Storage v2 — light trees + write-once node blobs** (see `docs/STORAGE_V2.md`,
 `api/workspace_store.py`). A node's two HEAVY fields — **`token_logprobs` and
 `raw_meta`** — live OUT of the tree, in per-node **write-once blobs**; the light
-node keeps `raw_text` (small) and carries `has_token_logprobs` / `has_raw_meta`
+node keeps `raw_text` (small: tinker's decoded tokens, OpenRouter's response section
+alone — an OpenRouter turn's wire REQUEST is its `raw_meta`, since it repeats the
+whole conversation every turn) and carries `has_token_logprobs` / `has_raw_meta`
 presence flags (present only when the field is truthy). Consumers gate affordances
 off the flags and lazy-fetch the data via `POST /{id}/node-blobs`. On-disk layout,
 per instance dir:
@@ -457,7 +459,7 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
   model" below), and n>1 sends whole samples for every producer. A consumer that
   saw deltas for a sample uses the later `message` event to *finalize* (clean
   content), not to reprint.
-- `event: message` → `data:` one sample: `{sample_index, content, raw_text, finish_reason, reasoning?, thinking?, token_logprobs?, loom_cut?, loom_text?, reasoning_details?, reasoning_tokens?, reasoning_account?, tool_calls?, prefill_ignored?, prefill_unsupported?}` or `{sample_index, error}`. `tool_calls` (with `finish_reason:"tool_calls"`): the calls the turn made, folded onto the node.
+- `event: message` → `data:` one sample: `{sample_index, content, raw_text, finish_reason, reasoning?, thinking?, token_logprobs?, loom_cut?, loom_text?, reasoning_details?, reasoning_tokens?, reasoning_account?, tool_calls?, prefill_ignored?, prefill_unsupported?}` or `{sample_index, error}`. `tool_calls` (with `finish_reason:"tool_calls"`): the calls the turn made, folded onto the node. OpenRouter samples carry `raw_meta` = the wire request + trimmed response (encrypted reasoning payloads elided to their size) and `raw_text` = the response section only.
   `reasoning_details` / `reasoning_tokens`: OpenRouter only — the provider's reasoning
   payload (see the tree node above) and its billed length. A request's assistant
   `messages[]` entries may carry `reasoning_details` back; the server forwards them to

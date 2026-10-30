@@ -24,7 +24,7 @@ def test_done_lines_print_paste_ready_handles():
     body = {"workspace_id": WID, "panel": "p-2", "parent_node": "u9"}
     done = {"folded": [{"sample_index": 1, "node_id": "n-b"}, {"sample_index": 0, "node_id": "n-a"}]}
     assert cli._done_lines(body, done) == [
-        "[done] saved under user turn aaaaaaaa:p-2:u9",
+        "[done] saved under turn aaaaaaaa:p-2:u9",
         "  sample 0 → aaaaaaaa:p-2:n-a",
         "  sample 1 → aaaaaaaa:p-2:n-b",
     ]

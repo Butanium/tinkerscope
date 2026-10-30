@@ -505,9 +505,9 @@ export type SampleData = {
   content: string;
   reasoning?: string;
   raw_text?: string;
-  /** Tinker only: the request sent + trimmed response, shown in a dropdown
-   *  beneath the decoded-token `raw_text`. (OpenRouter has no tokens, so its
-   *  request/response lives in `raw_text` itself.) */
+  /** The request sent + trimmed response, shown in a dropdown beneath
+   *  `raw_text` (tinker: the decoded tokens; OpenRouter: the response alone —
+   *  its request repeats the whole conversation, so it lives here, heavy). */
   raw_meta?: string;
   finish_reason?: string;
   error?: string;
