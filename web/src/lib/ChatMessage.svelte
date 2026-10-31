@@ -955,7 +955,8 @@
       ></textarea>
       {/if}
       <div class="edit-actions">
-        {#if isInstruction(msg.role)}
+        <!-- a thread's opening prompt only: mid-thread, the row's trash does the same -->
+        {#if isInstruction(msg.role) && msg.isRoot}
           <button
             class="edit-drop-thinking edit-drop-message"
             class:dropped={editDropSystem}
