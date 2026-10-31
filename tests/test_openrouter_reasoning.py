@@ -128,3 +128,16 @@ def test_route_drops_prefill_for_a_model_that_cannot_be_prefilled(client, monkey
     sample = next(json.loads(line[6:]) for line in r.text.splitlines()
                   if line.startswith("data: ") and '"content"' in line)
     assert sample["prefill_ignored"] is True and sample["prefill_unsupported"] is True
+
+
+def test_openai_models_ask_for_detailed_summaries():
+    from tinkerscope.api import openrouter
+
+    def reasoning(model, thinking=True, effort="max"):
+        kw = openrouter._build_kwargs(model=model, messages=[], temperature=1, max_tokens=10, thinking=thinking,
+                                      top_p=None, top_k=None, presence_penalty=None, repetition_penalty=None, effort=effort)
+        return kw["extra_body"]["reasoning"]
+
+    assert reasoning("openai/gpt-5.6-terra") == {"effort": "max", "summary": "detailed"}
+    assert reasoning("openai/gpt-5.6-terra", thinking=False) == {"effort": "none"}
+    assert "summary" not in reasoning("anthropic/claude-x")

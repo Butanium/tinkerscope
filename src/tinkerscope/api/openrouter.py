@@ -261,7 +261,12 @@ def _build_kwargs(
         kwargs["top_p"] = top_p
     if presence_penalty is not None:
         kwargs["presence_penalty"] = presence_penalty
-    extra_body: dict = {"reasoning": reasoning_param(thinking, effort, model_caps(model))}
+    reasoning = reasoning_param(thinking, effort, model_caps(model))
+    if model.lstrip("~").startswith("openai/") and reasoning.get("effort") != "none":
+        # OpenAI summarizes its reasoning only when asked; "detailed" is the most
+        # it gives (auto / concise / detailed) — the Responses wire sends the same
+        reasoning["summary"] = "detailed"
+    extra_body: dict = {"reasoning": reasoning}
     if top_k is not None:
         extra_body["top_k"] = top_k
     if repetition_penalty is not None:

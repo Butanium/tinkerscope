@@ -3474,3 +3474,14 @@ dangle. `graftDownstream` used to drop items entirely, so a Shift-edit (fork-cop
 recorded thread silently turned its copied screenshots into text — fixed by the same
 field. Checked live: an edited 58k-char Village prompt, the copied user run went out
 with its screenshot, the reply folded under it.
+
+### 2026-10-30 — OpenAI models get `reasoning.summary: "detailed"` on the chat path too
+
+Clément noticed a "vanilla terra" request (chat completions) carried only
+`{"effort": "max"}`: 6,510 reasoning tokens came back as encrypted items with no summary
+at all. The Responses wire already sent the recorded `summary: "detailed"`; the chat path
+(`openrouter._build_kwargs`) now adds it for `openai/*` models whenever reasoning is on.
+OpenRouter accepts the field there (200). Whether it changes what comes back is not
+established: a short probe (gpt-5-nano ×4 per arm, Terra ×5 with ~25 reasoning tokens)
+showed no difference, and the long-reasoning case wasn't measured. Even with "detailed",
+Terra on the Responses wire returned summary text in 10 of 40 and 11 of 40 recent calls.
