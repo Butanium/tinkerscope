@@ -3532,3 +3532,17 @@ gpt-oss renders a real developer message, and the DeepSeek V3 renderer's source 
 live on an isolated instance: an edited user→developer row and a composer developer send
 on gpt-6-luna (request: thread prompt first, developer turns in place), `continue --role
 system`, `send --role developer`, Qwen3-8B and gpt-oss-20b native renders.
+
+### 2026-10-30 — Transcript import keeps several opening system messages as rows
+
+Clément asked whether OpenAI accepts a conversation opening with two system messages:
+it does, on both wires (`[system, system, user]` → 200 on chat completions and on the
+Responses API, gpt-6-luna, probed via OpenRouter; the reply followed the second one).
+`tinkerscope import` of a transcript merged all opening system messages into one
+workspace prompt, so the thread went out as a different conversation. Now one opening
+system message (or the file's `system`) still becomes the prompt; when it is followed by
+another system / developer message they all stay rows, in order — hoisting just the
+first would also lose it, since the server composes no prompt for a thread that opens
+with an instruction. Checked on an isolated instance: two_sys / sys_dev imports keep
+their rows and a `continue` sends them as in the file; a lone `system` still becomes the
+workspace prompt.

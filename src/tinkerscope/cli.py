@@ -4587,15 +4587,17 @@ def cmd_import(
         if not isinstance(tr, dict) or not isinstance(tr.get("messages"), list):
             _die("expected a workspace body (with `trees`) or a transcript (with `messages`)")
         msgs = _norm_msgs(tr["messages"], "messages")
-        # leading system messages are the prompt; later ones are turns, kept in place
-        lead = next((i for i, m in enumerate(msgs) if m["role"] != "system"), len(msgs))
-        sys_parts = [m["content"] for m in msgs[:lead]]
+        # ONE opening system message (the file's `system`, or a first message) becomes
+        # the prompt; followed by another system / developer one, they all stay rows,
+        # in order — the server composes no prompt for a thread that opens with one,
+        # and merging them would send a different conversation.
         if tr.get("system"):
-            sys_parts.insert(0, tr["system"])
-        msgs = msgs[lead:]
+            msgs = [{"role": "system", "content": tr["system"]}, *msgs]
+        sys_text = ""
+        if msgs[0]["role"] == "system" and (len(msgs) == 1 or msgs[1]["role"] not in _INSTRUCTION_ROLES):
+            sys_text, msgs = msgs[0]["content"], msgs[1:]
         if not msgs:
             _die("the transcript has no non-system message")
-        sys_text = "\n\n".join(sys_parts)
         nodes: dict = {}
         selected: dict = {}
         parent = None

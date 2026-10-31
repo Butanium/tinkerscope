@@ -315,7 +315,8 @@ writes one thread as `{model, system, tools, messages}` — exactly what its nex
 turn would be sampled from — and `import` takes that shape back (or a bare
 messages list) as a one-thread workspace: `--model` (default the file's; a bare id
 reads as OpenRouter), `--thread-system` to put `system` on the thread instead of
-the workspace.
+the workspace. One opening system message becomes that prompt; several (or a system
+followed by a developer one) stay rows in order, sent exactly as in the file.
 
 **Exact replay of a recorded Responses-API call** (e.g. an AI Village agent's logged call).
 `tinkerscope import --responses-call CALL.json [--include-output] [--name N] [--id ID]
