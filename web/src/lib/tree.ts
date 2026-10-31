@@ -572,13 +572,22 @@ export function editedInputItems(items: ResponsesItem[], content: string, role: 
  *  turns that followed it up to the first reply, which `fireFrom` regenerates
  *  (`copyDownstream`: the whole conversation is copied, nothing fires). Empty
  *  `content` DROPS the turn: the copy hangs where it stood. `systemPrompt` is a
- *  root user fork's thread system prompt (none when empty). `items` = the
- *  original's recorded Responses items, resolved by the caller. */
+ *  root user fork's thread system prompt (none when empty). `openingPrompt` = the
+ *  prompt a thread's first user turn ran under: when that turn becomes a system /
+ *  developer one, the fork opens with it as a system row — a thread that opens with
+ *  an instruction gets no composed prompt, so it would otherwise vanish. `items` =
+ *  the original's recorded Responses items, resolved by the caller. */
 export function editInputFork(
   t0: ConvTree,
   id: string,
   content: string,
-  opts: { role: InputRole; copyDownstream?: boolean; systemPrompt?: string; items?: ResponsesItem[] }
+  opts: {
+    role: InputRole;
+    copyDownstream?: boolean;
+    systemPrompt?: string;
+    openingPrompt?: string;
+    items?: ResponsesItem[];
+  }
 ): { tree: ConvTree; newId: string; fireFrom: string | null } | null {
   const orig = t0.nodes[id];
   if (!orig || !isInputRole(orig.role)) return null;
@@ -586,22 +595,35 @@ export function editInputFork(
   const firstReply = below.findIndex((n) => n.role === 'assistant');
   const graft = opts.copyDownstream || firstReply < 0 ? below : below.slice(0, firstReply);
   const t = cloneTree(t0);
-  const parentKey = orig.parent ?? ROOT;
+  let parentKey = orig.parent ?? ROOT;
   let newId: string;
   if (content.trim()) {
+    let head: string | null = null;
+    if (orig.parent === null && orig.role === 'user' && isInstruction(opts.role) && opts.openingPrompt?.trim()) {
+      head = nid();
+      t.nodes[head] = { id: head, role: 'system', content: opts.openingPrompt, parent: null, children: [] };
+      t.rootChildren.push(head);
+      t.selected[ROOT] = head;
+      parentKey = head;
+    }
     newId = nid();
     t.nodes[newId] = {
       id: newId,
       role: opts.role,
       content,
-      ...(orig.parent === null && opts.role === 'user' && opts.systemPrompt ? { system_prompt: opts.systemPrompt } : {}),
+      ...(parentKey === ROOT && opts.role === 'user' && opts.systemPrompt ? { system_prompt: opts.systemPrompt } : {}),
       ...(opts.items?.length ? { items: editedInputItems(opts.items, content, opts.role) } : {}),
-      parent: orig.parent,
+      parent: head ?? orig.parent,
       children: []
     };
     childArray(t, parentKey).push(newId);
     t.selected[parentKey] = newId;
     graftDownstream(t, newId, graft);
+    if (head) {
+      let last = newId;
+      while (t.nodes[last].children.length) last = t.nodes[last].children[0];
+      return { tree: t, newId: head, fireFrom: opts.copyDownstream ? null : last };
+    }
   } else {
     if (!graft.length) return null; // nothing would be left of the thread
     graftDownstream(t, parentKey, graft);

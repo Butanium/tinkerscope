@@ -3546,3 +3546,15 @@ first would also lose it, since the server composes no prompt for a thread that 
 with an instruction. Checked on an isolated instance: two_sys / sys_dev imports keep
 their rows and a `continue` sends them as in the file; a lone `system` still becomes the
 workspace prompt.
+
+### 2026-10-30 — A first user turn turned into system keeps the thread's prompt
+
+Clément: "when i edit message 2 which is user into system … [it] replace[s] the system
+rather than having 2 systems". In "Terra — clement" the thread prompt lives on the first
+user turn (`system_prompt`, drawn as the system row above it). Turning that turn into a
+system message made the thread OPEN with an instruction, so the server composed no prompt
+and the field on the old node no longer applied: the edit silently dropped the prompt.
+`editInputFork` now takes `openingPrompt` — the thread's own prompt, else the workspace's
+when it's on (`branchOps` seam `workspacePrompt`) — and, for a root user turn becoming
+system / developer, starts the fork with it as a plain system row. Checked on an isolated
+instance: [system: prompt, system: edited turn] and the reply still follows the prompt.

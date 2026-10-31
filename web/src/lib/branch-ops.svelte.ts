@@ -87,6 +87,8 @@ export type BranchOpsDeps = {
   /** false ⇒ the panel's model never continues a prefill (openai/* through
    *  OpenRouter), so Continue — a prefill — skips it. Unknown ⇒ true. */
   canPrefill?: (pSel: PanelSel) => boolean;
+  /** The workspace system prompt a send carries ('' when muted or empty). */
+  workspacePrompt?: () => string;
 };
 
 /** The same comparable key for a turn's raw_meta record (null = unparseable). */
@@ -607,6 +609,8 @@ class BranchOps {
       role,
       copyDownstream,
       systemPrompt: systemPrompt?.trim() || undefined,
+      // the prompt the thread ran under: its own, else the workspace's
+      openingPrompt: orig.system_prompt?.trim() ? orig.system_prompt : this.#d.workspacePrompt?.(),
       items
     });
     if (!r) return;

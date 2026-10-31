@@ -197,6 +197,19 @@ test('a role change forks a sibling with the new role; recorded items follow it'
   eq(dev.tree.nodes[dev.newId].system_prompt, undefined);
 });
 
+test('a first user turn turned into an instruction keeps the thread prompt as a system row', () => {
+  const r = appendTurn(emptyTree(), 'hi terra', true, 'You are Terra');
+  const f = foldAssistant(r.tree, r.nodeId, [{ content: 'hello' }]);
+  const e = editInputFork(f.tree, r.nodeId, 'hi terra', { role: 'system', openingPrompt: 'You are Terra' })!;
+  assertValid(e.tree);
+  eq(activeMessages(e.tree), [{ role: 'system', content: 'You are Terra' }, { role: 'system', content: 'hi terra' }]);
+  eq(e.fireFrom, activePath(e.tree)[1].id);
+  eq(chainFrom(e.tree, e.newId).length, 2); // what branchOps commits: the prompt row + the edited one
+  eq(e.tree.rootChildren.length, 2); // the original thread is untouched
+  // no prompt to keep, or a non-root turn: no extra row
+  eq(activePath(editInputFork(f.tree, r.nodeId, 'x', { role: 'developer' })!.tree).length, 1);
+});
+
 test('editing a mid-thread instruction regenerates the reply below it', () => {
   const t = treeFromMessages([U('q'), A('a'), { role: 'developer', content: 'be brief' }, A('b')]);
   const dev = activePath(t)[2];

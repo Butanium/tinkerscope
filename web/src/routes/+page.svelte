@@ -1463,7 +1463,8 @@
     withPrefill,
     fireOne,
     resolveModelKey,
-    canPrefill: (pSel) => modelCatalog.orCapsBySel(pSel.run_id)?.prefill !== false
+    canPrefill: (pSel) => modelCatalog.orCapsBySel(pSel.run_id)?.prefill !== false,
+    workspacePrompt: () => (systemActive ? (s.system_prompt ?? '') : '')
   });
 
   // ── Undo ──────────────────────────────────────────────────────────
