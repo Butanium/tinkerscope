@@ -1031,7 +1031,7 @@
             <button class="btn-raw" class:active={rawSingle} onclick={() => (rawSingle = !rawSingle)} data-tooltip="Raw model output, tags preserved" use:tip>Raw</button>
           {/if}
           {#if canEdit && !readOnly}
-            {#if !isInstruction(msg.role)}{@render regenGroup()}{/if}
+            {@render regenGroup()}
             {#if msg.role === 'assistant'}{@render continueBtn()}{/if}
             <button
               class="btn-act"

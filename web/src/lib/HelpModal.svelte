@@ -296,7 +296,7 @@ codex plugin add tinkerscope@tinkerscope</pre>
         that role. The same switch sits at the left of the composer row and sets the role of what you
         send. Every system and developer message is sent where it stands in the thread; the workspace
         or thread prompt is still sent first, unless the thread itself opens with a system or developer
-        message. Each role goes to the model as is: OpenAI models read <code>developer</code>, and a
+        message. Regenerate on a system or developer row samples a reply right under it. Each role goes to the model as is: OpenAI models read <code>developer</code>, and a
         provider or chat template that doesn't know a role answers with its own error.
       </p>
       <p class="help-note">

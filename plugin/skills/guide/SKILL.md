@@ -174,7 +174,8 @@ becomes a `user · system · developer` switch; pick another role and Save forks
 turn under it (same rules as any edit: regenerate below, Shift copies, Ctrl does
 every panel). The same switch at the left of the composer row sets the role of what
 you send. System and developer messages are sent where they stand; the workspace or
-thread prompt still goes first unless the thread itself opens with one. Roles go out
+thread prompt still goes first unless the thread itself opens with one. Regenerate on
+a system / developer row samples a reply right under it. Roles go out
 as is — OpenAI models read `developer`, and a provider or chat template that doesn't
 know a role answers with its own error (Qwen's template just writes the role header).
 

@@ -3558,3 +3558,11 @@ and the field on the old node no longer applied: the edit silently dropped the p
 when it's on (`branchOps` seam `workspacePrompt`) — and, for a root user turn becoming
 system / developer, starts the fork with it as a plain system row. Checked on an isolated
 instance: [system: prompt, system: edited turn] and the reply still follows the prompt.
+
+### 2026-10-30 — Regenerate on system / developer rows
+
+Clément asked whether OpenAI answers a request holding only a system (or developer)
+message: it does, on chat completions and Responses, both roles (gpt-6-luna). So those
+rows get the regenerate button too: it samples a reply directly under the row, a sibling
+of whatever followed it. `regenTarget` already allowed it (any non-assistant turn is a
+fire parent since the roles change); only `ChatMessage` hid the button.
