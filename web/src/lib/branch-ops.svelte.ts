@@ -20,6 +20,7 @@ import { panelScroll } from './scroll.svelte';
 import { undo } from './undo.svelte';
 import { assembleAssistantRaw } from './render';
 import { isSealed } from './reasoning';
+import { conversationText } from './conv-text';
 import { parseRawMetaModel, thinkResumeCut, type RawMetaModel } from './loom';
 import {
   activePath,
@@ -709,9 +710,14 @@ class BranchOps {
         : (content ?? '');
     let text: string;
     if (all) {
-      const nodes = activePath(ws.treeFor(panel)).filter((n) => n.role !== 'system');
-      const header = (r: string) => (r === 'user' ? 'User' : r === 'assistant' ? 'Assistant' : 'System');
-      text = nodes.map((n) => `## ${header(n.role)}\n\n${fmt(n.content, n.reasoning)}`).join('\n\n');
+      // the system prompt the thread runs under heads it: its system row, its
+      // thread prompt, or the workspace prompt when that one is on
+      const st = live.state;
+      const wsOn = st?.system_enabled ?? !!st?.system_prompt?.trim();
+      text = conversationText(activePath(ws.treeFor(panel)), {
+        withThinking,
+        workspaceSystem: wsOn ? (st?.system_prompt ?? '') : ''
+      });
     } else {
       text = fmt(msg.content, msg.reasoning);
     }
