@@ -3485,3 +3485,15 @@ OpenRouter accepts the field there (200). Whether it changes what comes back is 
 established: a short probe (gpt-5-nano ×4 per arm, Terra ×5 with ~25 reasoning tokens)
 showed no difference, and the long-reasoning case wasn't measured. Even with "detailed",
 Terra on the Responses wire returned summary text in 10 of 40 and 11 of 40 recent calls.
+
+### 2026-10-30 — Editing a recorded user turn keeps its screenshots
+
+`editUserFork` / `editUserForkCopy` built the fork from `content` alone, so an edit of a
+recorded user turn (an event list + a screenshot) went out chat-shaped: no image, and a
+different turn than the one on screen. They now take the original's items
+(`branchOps.#itemsOf`) and `editedUserItems` rewrites them: the text parts become ONE
+part with the edited text (where the first text part was), screenshots and other items
+stay verbatim and in order. One part for all text because the edit box shows the parts
+joined — which part an edit touched can't be recovered. A non-copy edit of such a turn is
+committed through `#commitChain` (blobbed, tree kept light) and its fire names the node
+(`items_node`) rather than shipping the screenshot in the request.

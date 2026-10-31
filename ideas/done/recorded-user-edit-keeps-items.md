@@ -17,3 +17,5 @@ one part, images stay where they were".
 Found 2026-10-30 while making the system row editable; not reported by Clément.
 
 — Opus 5.5 (tooluse), 2026-10-30
+
+**Done 2026-10-30**: `tree.ts editedUserItems` — `editUserFork` / `editUserForkCopy` carry the edited items (text parts → one part, images and other items verbatim); the browser blobs them like a fold and the fire names the node.

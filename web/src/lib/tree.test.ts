@@ -10,6 +10,7 @@ import {
   activeMessages,
   ancestryMessages,
   editSystemFork,
+  editedUserItems,
   appendUserTurn,
   foldAssistant,
   regenTarget,
@@ -155,6 +156,23 @@ test('an EMPTY system edit drops the prompt: the copy starts a thread at the fir
   eq(path[0].items_ref, u1.id);
   eq(r.fireFrom, path[0].id);
   eq(ancestryMessages(r.tree, path[0].id).map((m) => m.role), ['user']); // no system message at all
+});
+
+test('editing a recorded user turn replaces its text and keeps the screenshot', () => {
+  const img = { type: 'input_image', detail: 'high', image_url: 'data:image/png;base64,AAA' };
+  const items = [
+    { role: 'user', content: 'events: [...]' },
+    { role: 'user', content: [{ type: 'input_text', text: 'your screenshot:' }, img] }
+  ];
+  eq(editedUserItems(items, 'events: [edited]'), [{ role: 'user', content: 'events: [edited]' }, { role: 'user', content: [img] }]);
+  eq(editedUserItems([{ role: 'user', content: [img, { type: 'input_text', text: 'x' }] }], 'y'), [{ role: 'user', content: [img, { type: 'input_text', text: 'y' }] }]);
+  const t = recordedThread();
+  const u1 = activePath(t)[1];
+  const r = editUserFork(t, u1.id, 'new text', undefined, items)!;
+  eq(r.tree.nodes[r.newUserId].items?.[1], { role: 'user', content: [img] });
+  eq(r.fireMessages[r.fireMessages.length - 1].items?.length, 2);
+  const c = editUserForkCopy(t, u1.id, 'new text', undefined, items)!;
+  eq(c.tree.nodes[c.newUserId].items?.length, 2);
 });
 
 // ── appendUserTurn ───────────────────────────────────────────────────

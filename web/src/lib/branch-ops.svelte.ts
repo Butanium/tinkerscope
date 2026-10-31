@@ -577,12 +577,21 @@ class BranchOps {
     chat.clearPanelBucket(panel);
     const sys = systemPrompt?.trim() || undefined;
     if (msg.role === 'user') {
+      // a recorded turn keeps its screenshots: the edit replaces only its text
+      const items = await this.#itemsOf(panel, msg.nodeId);
       if (copyDownstream) {
-        const r = editUserForkCopy(ws.treeFor(panel), msg.nodeId, text, sys);
+        const r = editUserForkCopy(ws.treeFor(panel), msg.nodeId, text, sys, items);
         if (r) this.#commitChain(panel, r.tree, r.newUserId);
       } else {
-        const r = editUserFork(ws.treeFor(panel), msg.nodeId, text, sys);
+        const r = editUserFork(ws.treeFor(panel), msg.nodeId, text, sys, items);
         if (!r) return;
+        if (items?.length) {
+          // blobbed like a fold (screenshots stay out of the light tree); the fire
+          // then names the node instead of shipping the images in the request
+          this.#commitChain(panel, r.tree, r.newUserId);
+          this.#fireForPanel(panel, r.newUserId, ancestryMessages(ws.treeFor(panel), r.newUserId) as ChatMessage[]);
+          return;
+        }
         ws.setTree(panel, r.tree, {
           ops: [{ op: 'add_nodes', nodes: [opNode(r.tree, r.newUserId)], select: true }]
         });

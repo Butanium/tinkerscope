@@ -37,3 +37,4 @@ happened.
 - [System prompt at the top of the conversation](system-prompt-at-top-of-conversation.md) — the first row of every panel, foldable; composer chip removed — **done 2026-10-09**
 - [A plain-words pass over the remaining tooltips](tooltip-plain-words-pass.md) — 15 tooltips + their Shift variants without thread/fork/sibling jargon — **done 2026-10-13**
 - [Bring the older glyphs inside the ink rules](glyph-ink-centering-pass.md) — all ten pass; judged in the app, which also needed ten half-pixel icon-size fixes and centred Help-prose icons — **done 2026-10-14**
+- [Editing a recorded user turn drops its screenshots](recorded-user-edit-keeps-items.md) — done 2026-10-30: `editedUserItems`

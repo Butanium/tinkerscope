@@ -528,11 +528,45 @@ export function editToolResult(
  *  `systemPrompt` applies only when the edited node is a ROOT (thread) node: it
  *  becomes the fork's thread system prompt ('' / undefined ⇒ none — the edit UI
  *  passes the field's full value, so "keep" needs no special case). */
+/** A recorded user turn's items after an edit of its text: the text parts give
+ *  way to ONE part with the new text (where the first one stood), and every
+ *  other part (screenshots) and item stays verbatim, in order. The edit box
+ *  shows the parts joined, so there's no telling which part an edit touched —
+ *  one part for all of it is the honest mapping. */
+export function editedUserItems(items: ResponsesItem[], content: string): ResponsesItem[] {
+  const out: ResponsesItem[] = [];
+  let placed = false;
+  const isText = (p: ResponsesItem) => p?.type === 'input_text' || p?.type === 'text' || p?.type === 'output_text';
+  for (const it of items) {
+    if ((it?.type ?? 'message') !== 'message') {
+      out.push(it);
+      continue;
+    }
+    if (typeof it.content === 'string') {
+      if (!placed && content) out.push({ role: it.role ?? 'user', content });
+      placed = true;
+      continue;
+    }
+    const kept: ResponsesItem[] = [];
+    for (const part of Array.isArray(it.content) ? it.content : []) {
+      if (!isText(part)) kept.push(part);
+      else if (!placed) {
+        if (content) kept.push({ type: 'input_text', text: content });
+        placed = true;
+      }
+    }
+    if (kept.length) out.push({ ...it, content: kept });
+  }
+  if (!placed && content) out.unshift({ role: 'user', content });
+  return out;
+}
+
 export function editUserFork(
   t0: ConvTree,
   userId: string,
   content: string,
-  systemPrompt?: string
+  systemPrompt?: string,
+  items?: ResponsesItem[]
 ): { tree: ConvTree; newUserId: string; fireMessages: Msg[] } | null {
   const orig = t0.nodes[userId];
   if (!orig || orig.role !== 'user') return null;
@@ -544,6 +578,7 @@ export function editUserFork(
     role: 'user',
     content,
     ...(orig.parent === null && systemPrompt ? { system_prompt: systemPrompt } : {}),
+    ...(items?.length ? { items: editedUserItems(items, content) } : {}),
     parent: orig.parent,
     children: []
   };
@@ -556,7 +591,8 @@ export function editUserForkCopy(
   t0: ConvTree,
   userId: string,
   content: string,
-  systemPrompt?: string
+  systemPrompt?: string,
+  items?: ResponsesItem[]
 ): { tree: ConvTree; newUserId: string } | null {
   const orig = t0.nodes[userId];
   if (!orig || orig.role !== 'user') return null;
@@ -569,6 +605,7 @@ export function editUserForkCopy(
     role: 'user',
     content,
     ...(orig.parent === null && systemPrompt ? { system_prompt: systemPrompt } : {}),
+    ...(items?.length ? { items: editedUserItems(items, content) } : {}),
     parent: orig.parent,
     children: []
   };

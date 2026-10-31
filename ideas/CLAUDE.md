@@ -82,7 +82,6 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 
 ### Known bugs
 
-- [Editing a recorded user turn drops its screenshots](recorded-user-edit-keeps-items.md) — `editUserFork` rebuilds from `content`; the assistant/system rows already keep items, a user row should too
 
 
 ### Docs
