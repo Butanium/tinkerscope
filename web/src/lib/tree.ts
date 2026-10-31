@@ -15,7 +15,22 @@ import type { ReasoningDetail, ResponsesItem, ToolCall } from './types.ts';
 
 export const ROOT = '__root__';
 
-export type NodeRole = 'user' | 'assistant' | 'system' | 'tool';
+export type NodeRole = 'user' | 'assistant' | 'system' | 'developer' | 'tool';
+
+/** The roles a person writes a turn as: the edit dialog's and the composer's
+ *  role toggle. Each is sent as is; a provider that doesn't know one errors. */
+export const INPUT_ROLES = ['user', 'system', 'developer'] as const;
+export type InputRole = (typeof INPUT_ROLES)[number];
+
+export function isInputRole(role: string | undefined): role is InputRole {
+  return (INPUT_ROLES as readonly string[]).includes(role ?? '');
+}
+
+/** A system / developer turn. Sent in place like any turn; one that OPENS a
+ *  thread is the thread's prompt, and the server then composes none. */
+export function isInstruction(role: string | undefined): boolean {
+  return role === 'system' || role === 'developer';
+}
 
 /** Per-generated-token logprob record (native tinker sampling only — see
  *  docs/API_CONTRACT.md). Raw data: persisted on the node so later features can
@@ -124,7 +139,7 @@ export type TreeNode = {
   token_logprobs?: TokenLogprob[];
   /** Blob-presence flags (storage v2): the server stores heavy fields
    *  (token_logprobs / raw_meta) out-of-tree and marks a light node with these.
-   *  Write-once, id-bound — a node COPY (fresh id, e.g. editUserForkCopy) must
+   *  Write-once, id-bound — a node COPY (fresh id, e.g. a Shift-edit copy) must
    *  NOT inherit them (no blob exists under the new id). */
   has_token_logprobs?: boolean;
   has_raw_meta?: boolean;
@@ -303,17 +318,9 @@ export function activePath(t: ConvTree): TreeNode[] {
   return path;
 }
 
-/** Does this node go out with a fire? Everything but system turns — except a
- *  system node carrying verbatim items (a recorded call's system message, or an
- *  edit of one): that IS the system prompt, and the server then composes none.
- *  Mirrors cli.py `_keep_in_ancestry`. */
-export function sentInFire(n: TreeNode): boolean {
-  return n.role !== 'system' || !!n.items?.length || !!n.has_items;
-}
-
-/** The active path as [{role,content}] (system turns excluded, see sentInFire). */
+/** The active path as wire messages. */
 export function activeMessages(t: ConvTree): Msg[] {
-  return activePath(t).filter(sentInFire).map(nodeToMsg);
+  return activePath(t).map(nodeToMsg);
 }
 
 export function parentKeyOf(t: ConvTree, id: string): string {
@@ -334,7 +341,7 @@ export function siblingInfo(t: ConvTree, id: string): { index: number; count: nu
 }
 
 /** Messages from the root down to `id` inclusive, via the PARENT chain (so it
- *  works regardless of the current selection). System turns excluded. */
+ *  works regardless of the current selection). */
 export function ancestryMessages(t: ConvTree, id: string): Msg[] {
   const chain: TreeNode[] = [];
   let cur: TreeNode | undefined = t.nodes[id];
@@ -345,7 +352,7 @@ export function ancestryMessages(t: ConvTree, id: string): Msg[] {
     cur = cur.parent ? t.nodes[cur.parent] : undefined;
   }
   chain.reverse();
-  return chain.filter(sentInFire).map(nodeToMsg);
+  return chain.map(nodeToMsg);
 }
 
 /** The active-path nodes strictly BELOW `id` (or [] if id isn't on the path). */
@@ -356,16 +363,18 @@ function downstreamActivePath(t: ConvTree, id: string): TreeNode[] {
 }
 
 // ── mutations (immutable) ────────────────────────────────────────────
-/** Append a user turn under the active leaf — or, with `atRoot`, as a NEW
- *  root-level branch (a sibling first message) that becomes the active path.
- *  `systemPrompt` stamps the new thread's system prompt on the root node — when
- *  the turn IS a root (atRoot, or the tree's first message); ignored for
- *  mid-thread appends (the field is root-only). */
-export function appendUserTurn(
+/** Append a turn (a user one unless `role`) under the active leaf — or, with
+ *  `atRoot`, as a NEW root-level branch (a sibling first message) that becomes
+ *  the active path. `systemPrompt` stamps the new thread's system prompt on a
+ *  root USER node — when the turn IS a root (atRoot, or the tree's first
+ *  message); ignored mid-thread (the field is root-only) and on an instruction,
+ *  which is the thread's prompt itself. */
+export function appendTurn(
   t0: ConvTree,
   content: string,
   atRoot = false,
-  systemPrompt?: string
+  systemPrompt?: string,
+  role: InputRole = 'user'
 ): { tree: ConvTree; nodeId: string } {
   const t = cloneTree(t0);
   const path = activePath(t);
@@ -374,9 +383,9 @@ export function appendUserTurn(
   const id = nid();
   t.nodes[id] = {
     id,
-    role: 'user',
+    role,
     content,
-    ...(!leaf && systemPrompt ? { system_prompt: systemPrompt } : {}),
+    ...(!leaf && role === 'user' && systemPrompt ? { system_prompt: systemPrompt } : {}),
     parent: leaf ? leaf.id : null,
     children: []
   };
@@ -428,14 +437,14 @@ export function foldAssistant(
   return { tree: t, ids };
 }
 
-/** Can an assistant turn be generated under this node? A user turn, or a tool
- *  result (the model's turn after its tool calls are answered). */
+/** Can an assistant turn be generated under this node? Any turn but an
+ *  assistant one (tree_ops.is_fire_parent). */
 export function isFireParent(n: TreeNode | undefined): boolean {
-  return n?.role === 'user' || n?.role === 'tool';
+  return !!n && n.role !== 'assistant';
 }
 
-/** `userParentId` is the node the regenerated turn folds under — a user turn or a
- *  tool result (the name predates tool use). */
+/** `userParentId` is the node the regenerated turn folds under — any non-assistant
+ *  turn (the name predates tool use). */
 export function regenTarget(
   t: ConvTree,
   nodeId: string
@@ -524,16 +533,13 @@ export function editToolResult(
   return { tree: t, newId: id };
 }
 
-/** Fork a sibling of `userId` with the edited content (+ regen by the caller).
- *  `systemPrompt` applies only when the edited node is a ROOT (thread) node: it
- *  becomes the fork's thread system prompt ('' / undefined ⇒ none — the edit UI
- *  passes the field's full value, so "keep" needs no special case). */
-/** A recorded user turn's items after an edit of its text: the text parts give
- *  way to ONE part with the new text (where the first one stood), and every
- *  other part (screenshots) and item stays verbatim, in order. The edit box
- *  shows the parts joined, so there's no telling which part an edit touched —
- *  one part for all of it is the honest mapping. */
-export function editedUserItems(items: ResponsesItem[], content: string): ResponsesItem[] {
+/** A recorded turn's items after an edit of its text and role: the text parts
+ *  give way to ONE part with the new text (where the first one stood), every
+ *  other part (screenshots) and item stays verbatim and in order, and each
+ *  message takes the new role. The edit box shows the parts joined, so there's
+ *  no telling which part an edit touched — one part for all of it is the honest
+ *  mapping. */
+export function editedInputItems(items: ResponsesItem[], content: string, role: InputRole): ResponsesItem[] {
   const out: ResponsesItem[] = [];
   let placed = false;
   const isText = (p: ResponsesItem) => p?.type === 'input_text' || p?.type === 'text' || p?.type === 'output_text';
@@ -543,7 +549,7 @@ export function editedUserItems(items: ResponsesItem[], content: string): Respon
       continue;
     }
     if (typeof it.content === 'string') {
-      if (!placed && content) out.push({ role: it.role ?? 'user', content });
+      if (!placed && content) out.push({ ...it, role, content });
       placed = true;
       continue;
     }
@@ -555,64 +561,55 @@ export function editedUserItems(items: ResponsesItem[], content: string): Respon
         placed = true;
       }
     }
-    if (kept.length) out.push({ ...it, content: kept });
+    if (kept.length) out.push({ ...it, role, content: kept });
   }
-  if (!placed && content) out.unshift({ role: 'user', content });
+  if (!placed && content) out.unshift({ role, content });
   return out;
 }
 
-export function editUserFork(
+/** Edit a turn a person wrote (user / system / developer) — its text, its role
+ *  or both: a sibling with the new text and `role`, and below it a copy of the
+ *  turns that followed it up to the first reply, which `fireFrom` regenerates
+ *  (`copyDownstream`: the whole conversation is copied, nothing fires). Empty
+ *  `content` DROPS the turn: the copy hangs where it stood. `systemPrompt` is a
+ *  root user fork's thread system prompt (none when empty). `items` = the
+ *  original's recorded Responses items, resolved by the caller. */
+export function editInputFork(
   t0: ConvTree,
-  userId: string,
+  id: string,
   content: string,
-  systemPrompt?: string,
-  items?: ResponsesItem[]
-): { tree: ConvTree; newUserId: string; fireMessages: Msg[] } | null {
-  const orig = t0.nodes[userId];
-  if (!orig || orig.role !== 'user') return null;
+  opts: { role: InputRole; copyDownstream?: boolean; systemPrompt?: string; items?: ResponsesItem[] }
+): { tree: ConvTree; newId: string; fireFrom: string | null } | null {
+  const orig = t0.nodes[id];
+  if (!orig || !isInputRole(orig.role)) return null;
+  const below = downstreamActivePath(t0, id);
+  const firstReply = below.findIndex((n) => n.role === 'assistant');
+  const graft = opts.copyDownstream || firstReply < 0 ? below : below.slice(0, firstReply);
   const t = cloneTree(t0);
   const parentKey = orig.parent ?? ROOT;
-  const id = nid();
-  t.nodes[id] = {
-    id,
-    role: 'user',
-    content,
-    ...(orig.parent === null && systemPrompt ? { system_prompt: systemPrompt } : {}),
-    ...(items?.length ? { items: editedUserItems(items, content) } : {}),
-    parent: orig.parent,
-    children: []
-  };
-  childArray(t, parentKey).push(id);
-  t.selected[parentKey] = id;
-  return { tree: t, newUserId: id, fireMessages: ancestryMessages(t, id) };
-}
-
-export function editUserForkCopy(
-  t0: ConvTree,
-  userId: string,
-  content: string,
-  systemPrompt?: string,
-  items?: ResponsesItem[]
-): { tree: ConvTree; newUserId: string } | null {
-  const orig = t0.nodes[userId];
-  if (!orig || orig.role !== 'user') return null;
-  const downstream = downstreamActivePath(t0, userId); // from the ORIGINAL selection
-  const t = cloneTree(t0);
-  const parentKey = orig.parent ?? ROOT;
-  const newUserId = nid();
-  t.nodes[newUserId] = {
-    id: newUserId,
-    role: 'user',
-    content,
-    ...(orig.parent === null && systemPrompt ? { system_prompt: systemPrompt } : {}),
-    ...(items?.length ? { items: editedUserItems(items, content) } : {}),
-    parent: orig.parent,
-    children: []
-  };
-  childArray(t, parentKey).push(newUserId);
-  t.selected[parentKey] = newUserId;
-  graftDownstream(t, newUserId, downstream);
-  return { tree: t, newUserId };
+  let newId: string;
+  if (content.trim()) {
+    newId = nid();
+    t.nodes[newId] = {
+      id: newId,
+      role: opts.role,
+      content,
+      ...(orig.parent === null && opts.role === 'user' && opts.systemPrompt ? { system_prompt: opts.systemPrompt } : {}),
+      ...(opts.items?.length ? { items: editedInputItems(opts.items, content, opts.role) } : {}),
+      parent: orig.parent,
+      children: []
+    };
+    childArray(t, parentKey).push(newId);
+    t.selected[parentKey] = newId;
+    graftDownstream(t, newId, graft);
+  } else {
+    if (!graft.length) return null; // nothing would be left of the thread
+    graftDownstream(t, parentKey, graft);
+    newId = t.selected[parentKey];
+  }
+  let last = newId;
+  while (t.nodes[last].children.length) last = t.nodes[last].children[0];
+  return { tree: t, newId, fireFrom: opts.copyDownstream ? null : last };
 }
 
 /** Deep-copy `chain` (an active-path slice from the ORIGINAL tree) under `rootId`
@@ -652,54 +649,6 @@ function graftDownstream(t: ConvTree, rootId: string, chain: TreeNode[]): void {
     t.selected[curParent] = cid;
     curParent = cid;
   }
-}
-
-/** Edit a SYSTEM node (a recorded call's system message) like a first message:
- *  a sibling system node with the new text, and below it a copy of the
- *  conversation — all of it with `copyDownstream` (nothing is generated), else
- *  only the turns up to the first reply, which `fireFrom` then regenerates. The
- *  new node keeps the original item's role (system / developer); its text is
- *  one plain part. Empty `content` DROPS the prompt: the copy starts a new thread
- *  at the first turn below it, with no system message at all. */
-export function editSystemFork(
-  t0: ConvTree,
-  sysId: string,
-  content: string,
-  copyDownstream: boolean,
-  items?: ResponsesItem[]
-): { tree: ConvTree; newId: string; fireFrom: string | null } | null {
-  const orig = t0.nodes[sysId];
-  if (!orig || orig.role !== 'system') return null;
-  const below = downstreamActivePath(t0, sysId);
-  const firstReply = below.findIndex((n) => n.role === 'assistant');
-  const graft = copyDownstream ? below : firstReply < 0 ? below : below.slice(0, firstReply);
-  const t = cloneTree(t0);
-  const parentKey = orig.parent ?? ROOT;
-  if (!content.trim()) {
-    if (!graft.length) return null; // nothing would be left of the thread
-    graftDownstream(t, parentKey, graft);
-    const newId = t.selected[parentKey];
-    let last = newId;
-    while (t.nodes[last].children.length) last = t.nodes[last].children[0];
-    return { tree: t, newId, fireFrom: !copyDownstream && t.nodes[last].role !== 'assistant' ? last : null };
-  }
-  const id = nid();
-  const role = (items ?? []).find((it) => it?.role === 'system' || it?.role === 'developer')?.role ?? 'system';
-  t.nodes[id] = {
-    id,
-    role: 'system',
-    content,
-    ...(orig.has_items || orig.items?.length ? { items: [{ role, content }] } : {}),
-    parent: orig.parent,
-    children: []
-  };
-  childArray(t, parentKey).push(id);
-  t.selected[parentKey] = id;
-  graftDownstream(t, id, graft);
-  let last = id;
-  while (t.nodes[last].children.length) last = t.nodes[last].children[0];
-  const fireFrom = !copyDownstream && last !== id && t.nodes[last].role !== 'assistant' ? last : null;
-  return { tree: t, newId: id, fireFrom };
 }
 
 /** A Responses turn's items after an edit of its text: the assistant message
@@ -999,7 +948,7 @@ export function opNode(t: ConvTree, id: string): OpNode {
 
 /** The single-child chain hanging from `startId` along `selected` — exactly what
  *  graftDownstream wrote. Lets a call-site recover the ids of a fork-copy's
- *  grafted tail (editUserForkCopy / editAssistant don't return them). */
+ *  grafted tail (editInputFork / editAssistant don't return them). */
 export function chainFrom(t: ConvTree, startId: string): string[] {
   const out: string[] = [startId];
   let cur = startId;

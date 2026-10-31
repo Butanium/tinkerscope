@@ -473,7 +473,7 @@ async def test_assistant_parent_is_rejected(fold_env, monkeypatch):
     }])
     events = await _run_to_done(chat_route, _req(chat_route, ws_id, parent_node="a0"))
     assert events and events[0]["event"] == "error"
-    assert "USER" in events[0]["data"]
+    assert "'assistant' turn" in events[0]["data"]
 
 
 # --------------------------------------------------------------------------- #

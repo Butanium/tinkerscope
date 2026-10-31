@@ -38,7 +38,7 @@ class HighlightRule(BaseModel):
     is_regex: bool = False
     case_sensitive: bool = False
     color: str = "#fde047"
-    scope_role: Optional[str] = None  # user | assistant | system | None (any)
+    scope_role: Optional[str] = None  # user | assistant | system | developer | None (any)
     sort_order: int = 0
 
 

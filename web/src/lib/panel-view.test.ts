@@ -2,7 +2,7 @@
 // built-in TS type-stripping:   node web/src/lib/panel-view.test.ts
 // (no dep added; respects the supply-chain age gate). Exit code != 0 on failure.
 
-import { emptyTree, appendUserTurn, foldAssistant, activePath } from './tree.ts';
+import { emptyTree, appendTurn, foldAssistant, activePath } from './tree.ts';
 import { buildPanelView, bucketTurn, expandTurnSamples } from './panel-view.ts';
 import type { PanelRun } from './state.svelte.ts';
 
@@ -33,7 +33,7 @@ function run(p: Partial<PanelRun>): PanelRun {
 }
 /** A [user, assistant×k] tree; returns the tree + user node id + the k assistant ids. */
 function folded(k: number): { tree: ReturnType<typeof emptyTree>; userId: string; kids: string[] } {
-  let { tree, nodeId: userId } = appendUserTurn(emptyTree(), 'q');
+  let { tree, nodeId: userId } = appendTurn(emptyTree(), 'q');
   ({ tree } = foldAssistant(tree, userId, Array.from({ length: k }, (_, i) => ({ content: `s${i}` }))));
   return { tree, userId, kids: tree.nodes[userId].children };
 }
@@ -83,7 +83,7 @@ test('error sample slot maps to empty id, keeping the card→node alignment', ()
 
 // ── thinking='both' folds: the per-node mode reaches the rendered row ──
 test('a folded node’s thinking mode lands on its ViewMessage', () => {
-  let { tree, nodeId: userId } = appendUserTurn(emptyTree(), 'q');
+  let { tree, nodeId: userId } = appendTurn(emptyTree(), 'q');
   ({ tree } = foldAssistant(tree, userId, [
     { content: 'plain', thinking: false, sample_index: 0 },
     { content: 'cot', thinking: true, sample_index: 1 }
@@ -95,7 +95,7 @@ test('a folded node’s thinking mode lands on its ViewMessage', () => {
 
 // ── run.error appends a trailing error row ──
 test('a folded bucket is not redrawn once the path moved past its turn (auto-answered tool)', () => {
-  const u = appendUserTurn(emptyTree(), 'q');
+  const u = appendTurn(emptyTree(), 'q');
   const f = foldAssistant(u.tree, u.nodeId, [{ content: '', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'send', arguments: '{}' } }] }]);
   const asst = f.ids[0];
   const t = structuredClone(f.tree);
@@ -139,11 +139,11 @@ test('bucketTurn: n=1 carries no samples array; n>1 does', () => {
 
 /** u0 → [a1×2 siblings] → u2 → a3, active path through the FIRST a1 sibling. */
 function deepTree() {
-  let { tree, nodeId: u0 } = appendUserTurn(emptyTree(), 'q0');
+  let { tree, nodeId: u0 } = appendTurn(emptyTree(), 'q0');
   ({ tree } = foldAssistant(tree, u0, [{ content: 'A' }, { content: 'B', reasoning: 'cot' }]));
   const a1 = tree.nodes[u0].children;
   let u2: string;
-  ({ tree, nodeId: u2 } = appendUserTurn(tree, 'q2'));
+  ({ tree, nodeId: u2 } = appendTurn(tree, 'q2'));
   ({ tree } = foldAssistant(tree, u2, [{ content: 'C' }]));
   return { tree, u0, a1, u2 };
 }
@@ -173,7 +173,7 @@ test('expand: no-ops — unknown parent, off-path turn, <2 siblings', () => {
 });
 
 test('expand: call-only and empty siblings are samples too', () => {
-  let { tree, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+  let { tree, nodeId: u } = appendTurn(emptyTree(), 'q');
   const call = { id: 'c1', type: 'function' as const, function: { name: 'send', arguments: '{}' } };
   ({ tree } = foldAssistant(tree, u, [{ content: '', tool_calls: [call] }, { content: '' }, { content: 'hi' }]));
   const out = expandTurnSamples(buildPanelView(tree, run({})), tree, u);

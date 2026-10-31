@@ -45,8 +45,9 @@ def test_norm_msgs_openai_shape():
     assert out[1] == {"role": "user", "content": "hi"}
     assert out[2] == {"role": "assistant", "content": "", "tool_calls": [CALL]}
     assert out[3] == {"role": "tool", "content": "ok", "tool_call_id": "c1", "name": "send"}
+    assert cli._norm_msgs([{"role": "developer", "content": "x"}], "x") == [{"role": "developer", "content": "x"}]
     with pytest.raises(typer.Exit):
-        cli._norm_msgs([{"role": "developer", "content": "x"}], "x")
+        cli._norm_msgs([{"role": "critic", "content": "x"}], "x")
     with pytest.raises(typer.Exit):
         cli._norm_msgs([{"role": "user"}], "x")  # content missing (only a calls-only assistant may omit it)
     with pytest.raises(typer.Exit):

@@ -823,7 +823,9 @@ async def _open_chat(
     # writes back to the shared state below); only the composed effective prompt
     # reaches the model.
     effective_system = compose_system(system_prompt, thread_system)
-    if effective_system and not any(m["role"] == "system" for m in msgs):
+    # A thread that OPENS with a system / developer message carries its own prompt
+    # (a recorded call's, or one written in place); later ones add to it.
+    if effective_system and not (msgs and msgs[0]["role"] in tree_ops.INSTRUCTION_ROLES):
         sys_msg = {"role": "system", "content": effective_system}
         sampling_msgs = [sys_msg, *sampling_msgs]
         native_msgs = [sys_msg, *native_msgs]

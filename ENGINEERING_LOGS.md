@@ -3497,3 +3497,38 @@ stay verbatim and in order. One part for all text because the edit box shows the
 joined — which part an edit touched can't be recovered. A non-copy edit of such a turn is
 committed through `#commitChain` (blobbed, tree kept light) and its fire names the node
 (`items_node`) rather than shipping the screenshot in the request.
+
+### 2026-10-30 — Message roles: user / system / developer, picked per turn
+
+Clément: "when editing a message, be able to change its ROLE … so OpenAI models can get
+`developer` messages. It's fine if people hit errors when they pick a role a given
+provider doesn't accept." `developer` is a node role now (`tree_ops.ROLES`, `tree.ts
+NodeRole`). The edit dialog's role label becomes a `user · system · developer` toggle
+(`RoleToggle.svelte`) for those three kinds of row, and the composer row carries the same
+toggle for what you send; CLI: `--role` on chat / compare / send / continue.
+
+Three rules changed with it, each because the old one silently lost a message once roles
+can be chosen:
+- **Every node goes out with a fire.** `sentInFire` / `cli._keep_in_ancestry` dropped
+  item-less system nodes because the server composes the prompt; a user row switched to
+  system would never have reached the model. Checked before changing: every stored system
+  node (13, all on the Terra store) carries recorded items, so no existing thread changes.
+- **The composed workspace / thread prompt is skipped only when the thread OPENS with a
+  system / developer node** (`routes/chat.py`). It used to be skipped when ANY system
+  message was present, which would mute the workspace prompt the moment a developer note
+  appeared mid-thread.
+- **Samples fold under any non-assistant node** (`tree_ops.is_fire_parent`, `tree.ts
+  isFireParent`, `workspace_store`'s placement check): a thread may now end on a
+  developer turn.
+
+`editUserFork` / `editUserForkCopy` / `editSystemFork` became one `editInputFork`: the
+role is a parameter, so the edit semantics can't depend on which role the row had
+before. User rows behave as before; a user row followed by more input turns (a recorded
+run) now carries them, as a system row's edit already did. A recorded turn's items take
+the new role (`editedInputItems`), screenshots kept. Roles are passed through to every
+backend unchanged, per Clément: on tinker, Qwen3's renderer writes `<|im_start|>developer`,
+gpt-oss renders a real developer message, and the DeepSeek V3 renderer's source raises
+`Unsupported role` (read, not fired). Checked
+live on an isolated instance: an edited user→developer row and a composer developer send
+on gpt-6-luna (request: thread prompt first, developer turns in place), `continue --role
+system`, `send --role developer`, Qwen3-8B and gpt-oss-20b native renders.

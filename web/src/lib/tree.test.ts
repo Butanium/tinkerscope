@@ -9,14 +9,12 @@ import {
   activePath,
   activeMessages,
   ancestryMessages,
-  editSystemFork,
-  editedUserItems,
-  appendUserTurn,
+  editInputFork,
+  editedInputItems,
+  appendTurn,
   foldAssistant,
   regenTarget,
   regenReplace,
-  editUserFork,
-  editUserForkCopy,
   editAssistant,
   deleteSubtree,
   deleteSiblings,
@@ -102,9 +100,9 @@ test('treeFromMessages round-trips active messages', () => {
   assertValid(t);
 });
 
-test('activeMessages excludes system turns', () => {
-  const t = treeFromMessages([{ role: 'system', content: 'sys' }, U('hi'), A('yo')]);
-  eq(activeMessages(t), [U('hi'), A('yo')]);
+test('activeMessages sends system / developer turns in place', () => {
+  const t = treeFromMessages([{ role: 'system', content: 'sys' }, U('hi'), A('yo'), { role: 'developer', content: 'dev' }]);
+  eq(activeMessages(t), [{ role: 'system', content: 'sys' }, U('hi'), A('yo'), { role: 'developer', content: 'dev' }]);
 });
 
 // A recorded call's thread: system node (items) → user (items, a screenshot) → reply.
@@ -127,11 +125,12 @@ test('a recorded system node goes out with a fire (its items by reference)', () 
 test('editing a recorded system node forks a thread and regenerates the first reply', () => {
   const t = recordedThread();
   const [sys, u1] = activePath(t);
-  const r = editSystemFork(t, sys.id, 'be Pop', false, [{ role: 'developer', content: [{ type: 'input_text', text: 'be Pip' }] }])!;
+  const items = [{ role: 'system', content: [{ type: 'input_text', text: 'be Pip' }] }];
+  const r = editInputFork(t, sys.id, 'be Pop', { role: 'system', items })!;
   assertValid(r.tree);
   const path = activePath(r.tree);
   eq(path.map((n) => n.role), ['system', 'user']); // copied up to the first reply
-  eq(path[0].items, [{ role: 'developer', content: 'be Pop' }]);
+  eq(path[0].items, [{ role: 'system', content: [{ type: 'input_text', text: 'be Pop' }] }]);
   eq(path[1].items_ref, u1.id); // the copy reads the original's screenshot blob
   eq(r.fireFrom, path[1].id);
   eq(ancestryMessages(r.tree, path[1].id)[1].items_node, u1.id);
@@ -140,7 +139,7 @@ test('editing a recorded system node forks a thread and regenerates the first re
 
 test('Shift: the whole conversation is copied under the new prompt, nothing fires', () => {
   const t = recordedThread();
-  const r = editSystemFork(t, activePath(t)[0].id, 'be Pop', true)!;
+  const r = editInputFork(t, activePath(t)[0].id, 'be Pop', { role: 'system', copyDownstream: true })!;
   eq(activePath(r.tree).map((n) => n.content), ['be Pop', 'look', 'ok', 'more', 'done']);
   eq(r.fireFrom, null);
 });
@@ -148,7 +147,7 @@ test('Shift: the whole conversation is copied under the new prompt, nothing fire
 test('an EMPTY system edit drops the prompt: the copy starts a thread at the first turn', () => {
   const t = recordedThread();
   const [sys, u1] = activePath(t);
-  const r = editSystemFork(t, sys.id, '', false)!;
+  const r = editInputFork(t, sys.id, '', { role: 'system' })!;
   assertValid(r.tree);
   const path = activePath(r.tree);
   eq(path.map((n) => n.role), ['user']);
@@ -164,35 +163,66 @@ test('editing a recorded user turn replaces its text and keeps the screenshot', 
     { role: 'user', content: 'events: [...]' },
     { role: 'user', content: [{ type: 'input_text', text: 'your screenshot:' }, img] }
   ];
-  eq(editedUserItems(items, 'events: [edited]'), [{ role: 'user', content: 'events: [edited]' }, { role: 'user', content: [img] }]);
-  eq(editedUserItems([{ role: 'user', content: [img, { type: 'input_text', text: 'x' }] }], 'y'), [{ role: 'user', content: [img, { type: 'input_text', text: 'y' }] }]);
+  eq(editedInputItems(items, 'events: [edited]', 'user'), [{ role: 'user', content: 'events: [edited]' }, { role: 'user', content: [img] }]);
+  eq(editedInputItems([{ role: 'user', content: [img, { type: 'input_text', text: 'x' }] }], 'y', 'user'), [{ role: 'user', content: [img, { type: 'input_text', text: 'y' }] }]);
   const t = recordedThread();
   const u1 = activePath(t)[1];
-  const r = editUserFork(t, u1.id, 'new text', undefined, items)!;
-  eq(r.tree.nodes[r.newUserId].items?.[1], { role: 'user', content: [img] });
-  eq(r.fireMessages[r.fireMessages.length - 1].items?.length, 2);
-  const c = editUserForkCopy(t, u1.id, 'new text', undefined, items)!;
-  eq(c.tree.nodes[c.newUserId].items?.length, 2);
+  const r = editInputFork(t, u1.id, 'new text', { role: 'user', items })!;
+  eq(r.tree.nodes[r.newId].items?.[1], { role: 'user', content: [img] });
+  eq(r.fireFrom, r.newId);
+  eq(ancestryMessages(r.tree, r.newId).at(-1)!.items?.length, 2);
+  const c = editInputFork(t, u1.id, 'new text', { role: 'user', copyDownstream: true, items })!;
+  eq(c.tree.nodes[c.newId].items?.length, 2);
 });
 
-// ── appendUserTurn ───────────────────────────────────────────────────
-test('appendUserTurn on empty tree makes a root user node', () => {
-  const { tree, nodeId } = appendUserTurn(emptyTree(), 'first');
+test('a role change forks a sibling with the new role; recorded items follow it', () => {
+  const t = linear4(); // U1 A1 U2 A2
+  const u2 = activePath(t)[2].id;
+  const r = editInputFork(t, u2, 'answer in French', { role: 'developer' })!;
+  assertValid(r.tree);
+  eq(activeMessages(r.tree), [U('U1'), A('A1'), { role: 'developer', content: 'answer in French' }]);
+  eq(r.fireFrom, r.newId);
+  eq(siblingInfo(r.tree, r.newId).count, 2); // the user turn is still there
+  // a recorded turn: every message item takes the role, the screenshot stays
+  const img = { type: 'input_image', image_url: 'data:image/png;base64,AAA' };
+  eq(editedInputItems([{ role: 'user', content: [{ type: 'input_text', text: 'x' }, img] }], 'y', 'developer'), [
+    { role: 'developer', content: [{ type: 'input_text', text: 'y' }, img] }
+  ]);
+  // back to user: a root user fork may carry a thread system prompt, an instruction never does
+  const sysRoot = treeFromMessages([{ role: 'system', content: 'be Pip' }, U('hi'), A('yo')]);
+  const back = editInputFork(sysRoot, activePath(sysRoot)[0].id, 'be Pop', { role: 'user', systemPrompt: 'be kind' })!;
+  eq(back.tree.nodes[back.newId].role, 'user');
+  eq(back.tree.nodes[back.newId].system_prompt, 'be kind');
+  const dev = editInputFork(sysRoot, activePath(sysRoot)[0].id, 'be Pop', { role: 'developer', systemPrompt: 'x' })!;
+  eq(dev.tree.nodes[dev.newId].system_prompt, undefined);
+});
+
+test('editing a mid-thread instruction regenerates the reply below it', () => {
+  const t = treeFromMessages([U('q'), A('a'), { role: 'developer', content: 'be brief' }, A('b')]);
+  const dev = activePath(t)[2];
+  const r = editInputFork(t, dev.id, 'be long', { role: 'developer' })!;
+  eq(r.fireFrom, r.newId);
+  eq(activePath(r.tree).map((n) => n.content), ['q', 'a', 'be long']);
+});
+
+// ── appendTurn ───────────────────────────────────────────────────
+test('appendTurn on empty tree makes a root user node', () => {
+  const { tree, nodeId } = appendTurn(emptyTree(), 'first');
   eq(tree.rootChildren.length, 1);
   eq(tree.nodes[nodeId].role, 'user');
   eq(tree.nodes[nodeId].parent, null);
   eq(activeMessages(tree), [U('first')]);
 });
 
-test('appendUserTurn extends the active leaf', () => {
+test('appendTurn extends the active leaf', () => {
   const t0 = linear4();
-  const { tree } = appendUserTurn(t0, 'U3');
+  const { tree } = appendTurn(t0, 'U3');
   eq(msgContents(tree), ['U1', 'A1', 'U2', 'A2', 'U3']);
 });
 
-test('appendUserTurn atRoot branches as a sibling first message', () => {
+test('appendTurn atRoot branches as a sibling first message', () => {
   const t0 = linear4();
-  const { tree, nodeId } = appendUserTurn(t0, 'alt', true);
+  const { tree, nodeId } = appendTurn(t0, 'alt', true);
   eq(tree.rootChildren.length, 2);
   eq(tree.nodes[nodeId].parent, null);
   eq(msgContents(tree), ['alt']); // new branch IS the active path
@@ -205,7 +235,7 @@ test('appendUserTurn atRoot branches as a sibling first message', () => {
 
 // ── foldAssistant ────────────────────────────────────────────────────
 test('foldAssistant makes N siblings, selects first, copies reasoning/raw', () => {
-  const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+  const { tree: t1, nodeId: u } = appendTurn(emptyTree(), 'q');
   const { tree, ids } = foldAssistant(t1, u, [
     { content: 's0', reasoning: 'r0', raw_text: 'x0', sample_index: 0 },
     { content: 's1', sample_index: 1 },
@@ -221,7 +251,7 @@ test('foldAssistant makes N siblings, selects first, copies reasoning/raw', () =
 });
 
 test('foldAssistant orders by sample_index and skips error samples', () => {
-  const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+  const { tree: t1, nodeId: u } = appendTurn(emptyTree(), 'q');
   const { tree, ids } = foldAssistant(t1, u, [
     { content: 'second', sample_index: 1 },
     { error: 'boom', sample_index: 2 },
@@ -241,7 +271,7 @@ test('foldAssistant on a pruned parent is a quiet no-op', () => {
 test('foldAssistant preserves the per-sample thinking mode (both-batches)', () => {
   // thinking='both' chats tag each half; the tag must land on (and survive
   // cloning of) the folded nodes. Single-mode samples stay untagged.
-  const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+  const { tree: t1, nodeId: u } = appendTurn(emptyTree(), 'q');
   const { tree, ids } = foldAssistant(t1, u, [
     { content: 'plain', thinking: false, sample_index: 0 },
     { content: 'cot', reasoning: 'hm', thinking: true, sample_index: 1 },
@@ -250,15 +280,15 @@ test('foldAssistant preserves the per-sample thinking mode (both-batches)', () =
   eq(tree.nodes[ids[0]].thinking, false);
   eq(tree.nodes[ids[1]].thinking, true);
   eq(tree.nodes[ids[2]].thinking, undefined);
-  // survives a clone (every op deep-clones; appendUserTurn suffices as a probe)
-  const { tree: t2 } = appendUserTurn(tree, 'next');
+  // survives a clone (every op deep-clones; appendTurn suffices as a probe)
+  const { tree: t2 } = appendTurn(tree, 'next');
   eq(t2.nodes[ids[0]].thinking, false);
   eq(t2.nodes[ids[1]].thinking, true);
 });
 
 // ── n>1 sibling cycling ──────────────────────────────────────────────
 test('selecting a different sample sibling re-derives the active path', () => {
-  const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+  const { tree: t1, nodeId: u } = appendTurn(emptyTree(), 'q');
   const { tree: t2, ids } = foldAssistant(t1, u, [{ content: 's0' }, { content: 's1' }, { content: 's2' }]);
   const t3 = setSelected(t2, ids[2]);
   eq(activeMessages(t3), [U('q'), A('s2')]);
@@ -322,32 +352,33 @@ test('regenReplace from a user row replaces its active reply in place', () => {
 });
 
 // ── edit user (fork + regen) ─────────────────────────────────────────
-test('editUserFork makes a user sibling, selects it, fires from it', () => {
+test('editInputFork makes a user sibling, selects it, fires from it', () => {
   const t = linear4();
   const u2 = activePath(t)[2].id;
-  const r = editUserFork(t, u2, 'U2-edited')!;
+  const r = editInputFork(t, u2, 'U2-edited', { role: 'user' })!;
   eq(activeMessages(r.tree), [U('U1'), A('A1'), U('U2-edited')]); // A2 dropped, awaiting reply
-  eq(r.fireMessages, [U('U1'), A('A1'), U('U2-edited')]);
-  eq(siblingInfo(r.tree, r.newUserId).count, 2); // original U2 preserved
+  eq(ancestryMessages(r.tree, r.fireFrom!), [U('U1'), A('A1'), U('U2-edited')]);
+  eq(siblingInfo(r.tree, r.newId).count, 2); // original U2 preserved
   // fold the new reply under it
-  const { tree } = foldAssistant(r.tree, r.newUserId, [{ content: 'A2-fresh' }]);
+  const { tree } = foldAssistant(r.tree, r.newId, [{ content: 'A2-fresh' }]);
   eq(msgContents(tree), ['U1', 'A1', 'U2-edited', 'A2-fresh']);
   assertValid(tree);
 });
 
 // ── edit user (shift: fork + copy downstream, no fire) ───────────────
-test('editUserForkCopy duplicates the downstream chain with fresh ids, original intact', () => {
+test('a Shift edit duplicates the downstream chain with fresh ids, original intact', () => {
   const t = linear4(); // U1 A1 U2 A2
   const u1 = activePath(t)[0].id;
   const origNodeCount = Object.keys(t.nodes).length;
-  const r = editUserForkCopy(t, u1, 'U1-edited')!;
+  const r = editInputFork(t, u1, 'U1-edited', { role: 'user', copyDownstream: true })!;
+  eq(r.fireFrom, null);
   // new active branch = edited U1 + copied A1,U2,A2
   eq(msgContents(r.tree), ['U1-edited', 'A1', 'U2', 'A2']);
   assertValid(r.tree);
   // fresh ids — node count grew by 1 (new user) + 3 (copied downstream) = 4
   eq(Object.keys(r.tree.nodes).length, origNodeCount + 4);
   // original branch still reachable: cycle root back
-  const back = cycle(r.tree, r.newUserId, -1);
+  const back = cycle(r.tree, r.newId, -1);
   eq(msgContents(back), ['U1', 'A1', 'U2', 'A2']);
   // every selected key/value live (the critique's invariant)
   assertValid(back);
@@ -442,7 +473,7 @@ test('delete a mid node prunes its whole subtree', () => {
 
 test('CRITIQUE: deleting an EARLIER sibling does NOT move the active branch (selection-by-id)', () => {
   // parent U with three assistant children c0,c1,c2; select c1.
-  const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+  const { tree: t1, nodeId: u } = appendTurn(emptyTree(), 'q');
   const { tree: t2, ids } = foldAssistant(t1, u, [{ content: 'c0' }, { content: 'c1' }, { content: 'c2' }]);
   const sel = setSelected(t2, ids[1]); // c1 active
   eq(activeMessages(sel), [U('q'), A('c1')]);
@@ -453,7 +484,7 @@ test('CRITIQUE: deleting an EARLIER sibling does NOT move the active branch (sel
 });
 
 test('deleting the selected sibling falls back to the last surviving one', () => {
-  const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+  const { tree: t1, nodeId: u } = appendTurn(emptyTree(), 'q');
   const { tree: t2, ids } = foldAssistant(t1, u, [{ content: 'c0' }, { content: 'c1' }, { content: 'c2' }]);
   const sel = setSelected(t2, ids[1]); // c1
   const after = deleteSubtree(sel, ids[1]); // delete the selected c1
@@ -471,7 +502,7 @@ test('delete the only root empties the tree', () => {
 });
 
 test('deleteSiblings removes ALL branches at this level (shift+delete)', () => {
-  const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+  const { tree: t1, nodeId: u } = appendTurn(emptyTree(), 'q');
   const { tree: t2, ids } = foldAssistant(t1, u, [{ content: 'A' }, { content: 'B' }, { content: 'C' }]);
   const after = deleteSiblings(t2, ids[1]); // delete from the middle branch
   eq(t2.nodes[u].children.length, 3);
@@ -482,7 +513,7 @@ test('deleteSiblings removes ALL branches at this level (shift+delete)', () => {
 
 // ── cycle ────────────────────────────────────────────────────────────
 test('cycle wraps around the ends (1-2-3-1…)', () => {
-  const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+  const { tree: t1, nodeId: u } = appendTurn(emptyTree(), 'q');
   const { tree: t2, ids } = foldAssistant(t1, u, [{ content: 'c0' }, { content: 'c1' }]);
   // fold selects first = c0
   eq(siblingInfo(t2, ids[0]).index, 0);
@@ -537,7 +568,7 @@ test('REVIEW: multi-turn CLI extends the branch in place, does NOT strand a dupl
 });
 
 test('REVIEW: reconcile re-selects a matching NON-active sibling (CLI hit a hidden branch)', () => {
-  const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+  const { tree: t1, nodeId: u } = appendTurn(emptyTree(), 'q');
   const { tree: t2, ids } = foldAssistant(t1, u, [{ content: 'A-a' }, { content: 'A-b' }]);
   const sel = setSelected(t2, ids[0]); // A-a active
   eq(activeMessages(sel), [U('q'), A('A-a')]);
@@ -564,26 +595,26 @@ test('STORAGE-V2: has_* blob flags survive every clone-based op', () => {
   // A light node (loaded from the server) carries flags instead of payloads;
   // ops clone field-by-field, so a missed field would silently strip the flag
   // and the UI would stop offering the token view on old turns after ANY edit.
-  const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+  const { tree: t1, nodeId: u } = appendTurn(emptyTree(), 'q');
   const { tree: t2, ids } = foldAssistant(t1, u, [{ content: 'A' }]);
   t2.nodes[ids[0]].has_token_logprobs = true; // simulate a server-loaded light node
   t2.nodes[ids[0]].has_raw_meta = true;
-  const t3 = appendUserTurn(t2, 'q2').tree; // any cloneTree-based op
+  const t3 = appendTurn(t2, 'q2').tree; // any cloneTree-based op
   eq(t3.nodes[ids[0]].has_token_logprobs, true, 'has_token_logprobs lost in clone');
   eq(t3.nodes[ids[0]].has_raw_meta, true, 'has_raw_meta lost in clone');
   const t4 = setSelected(t3, ids[0]);
   eq(t4.nodes[ids[0]].has_raw_meta, true, 'has_raw_meta lost in setSelected');
 });
 
-test('STORAGE-V2: editUserForkCopy copies do NOT inherit id-bound blob flags', () => {
+test('STORAGE-V2: Shift-edit copies do NOT inherit id-bound blob flags', () => {
   // A copied node gets a FRESH id — no blob exists under it server-side, so an
   // inherited flag would make consumers fetch (and cache "empty") forever.
-  const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+  const { tree: t1, nodeId: u } = appendTurn(emptyTree(), 'q');
   const { tree: t2, ids } = foldAssistant(t1, u, [{ content: 'A' }]);
   t2.nodes[ids[0]].has_token_logprobs = true;
   const sel = setSelected(t2, ids[0]); // put the flagged assistant on the active path
-  const r = editUserForkCopy(sel, u, 'q-edited')!;
-  const copiedAsst = r.tree.nodes[r.newUserId].children[0];
+  const r = editInputFork(sel, u, 'q-edited', { role: 'user', copyDownstream: true })!;
+  const copiedAsst = r.tree.nodes[r.newId].children[0];
   ok(copiedAsst != null, 'downstream assistant was copied');
   ok(!r.tree.nodes[copiedAsst].has_token_logprobs, 'copy must not claim a blob it lacks');
   // the ORIGINAL keeps its flag
@@ -594,10 +625,10 @@ test('STORAGE-V2: editUserForkCopy copies do NOT inherit id-bound blob flags', (
 
 test('threadStarts unions root threads across panels by trimmed content', () => {
   // panel A: threads q1, q2 (q2 selected); panel B: 'q2 ' (whitespace variant) + q3
-  const a1 = appendUserTurn(emptyTree(), 'q1');
-  const a2 = appendUserTurn(a1.tree, 'q2', true);
-  const b1 = appendUserTurn(emptyTree(), 'q2 ');
-  const b2 = appendUserTurn(b1.tree, 'q3', true);
+  const a1 = appendTurn(emptyTree(), 'q1');
+  const a2 = appendTurn(a1.tree, 'q2', true);
+  const b1 = appendTurn(emptyTree(), 'q2 ');
+  const b2 = appendTurn(b1.tree, 'q3', true);
   const starts = threadStarts({ A: a2.tree, B: b2.tree });
   eq(starts.length, 3);
   eq(starts[0].content, 'q1');
@@ -612,8 +643,8 @@ test('threadStarts unions root threads across panels by trimmed content', () => 
 });
 
 test('threadStarts: duplicate same-content roots in one panel collapse to one entry', () => {
-  const a1 = appendUserTurn(emptyTree(), 'q');
-  const a2 = appendUserTurn(a1.tree, 'q', true); // identical sibling, now selected
+  const a1 = appendTurn(emptyTree(), 'q');
+  const a2 = appendTurn(a1.tree, 'q', true); // identical sibling, now selected
   const starts = threadStarts({ A: a2.tree });
   eq(starts.length, 1);
   eq(starts[0].roots.A, a1.nodeId); // first occurrence wins as the switch target
@@ -622,17 +653,17 @@ test('threadStarts: duplicate same-content roots in one panel collapse to one en
 
 // ── thread system prompts (root-node field) ──────────────────────────
 
-test('appendUserTurn stamps the thread system prompt on a ROOT node only', () => {
-  const r = appendUserTurn(emptyTree(), 'q', true, 'be terse');
+test('appendTurn stamps the thread system prompt on a ROOT node only', () => {
+  const r = appendTurn(emptyTree(), 'q', true, 'be terse');
   eq(r.tree.nodes[r.nodeId].system_prompt, 'be terse');
   // mid-thread appends never stamp (the field is root-only)
-  const mid = appendUserTurn(r.tree, 'follow-up', false, 'ignored');
+  const mid = appendTurn(r.tree, 'follow-up', false, 'ignored');
   eq(mid.tree.nodes[mid.nodeId].system_prompt, undefined);
   assertValid(mid.tree);
 });
 
 test('system_prompt survives clone-based ops', () => {
-  const r = appendUserTurn(emptyTree(), 'q', true, 'be terse');
+  const r = appendTurn(emptyTree(), 'q', true, 'be terse');
   const f = foldAssistant(r.tree, r.nodeId, [{ content: 'a' }]);
   const c = cycle(f.tree, f.ids[0], 0); // any op → cloneTree path
   eq(f.tree.nodes[r.nodeId].system_prompt, 'be terse');
@@ -640,31 +671,31 @@ test('system_prompt survives clone-based ops', () => {
   void c;
 });
 
-test('editUserFork on a root carries the fork system prompt; non-root ignores it', () => {
-  const r = appendUserTurn(emptyTree(), 'q', true, 'be terse');
-  const fork = editUserFork(r.tree, r.nodeId, 'q', 'be verbose')!;
-  eq(fork.tree.nodes[fork.newUserId].system_prompt, 'be verbose');
+test('editing a root user turn carries the fork system prompt; non-root ignores it', () => {
+  const r = appendTurn(emptyTree(), 'q', true, 'be terse');
+  const fork = editInputFork(r.tree, r.nodeId, 'q', { role: 'user', systemPrompt: 'be verbose' })!;
+  eq(fork.tree.nodes[fork.newId].system_prompt, 'be verbose');
   eq(fork.tree.nodes[r.nodeId].system_prompt, 'be terse'); // original untouched
   // a non-root user edit never gains the field
-  const f = foldAssistant(fork.tree, fork.newUserId, [{ content: 'a' }]);
-  const mid = appendUserTurn(f.tree, 'follow-up');
-  const midFork = editUserFork(mid.tree, mid.nodeId, 'edited', 'ignored')!;
-  eq(midFork.tree.nodes[midFork.newUserId].system_prompt, undefined);
+  const f = foldAssistant(fork.tree, fork.newId, [{ content: 'a' }]);
+  const mid = appendTurn(f.tree, 'follow-up');
+  const midFork = editInputFork(mid.tree, mid.nodeId, 'edited', { role: 'user', systemPrompt: 'ignored' })!;
+  eq(midFork.tree.nodes[midFork.newId].system_prompt, undefined);
   assertValid(midFork.tree);
 });
 
-test('editUserForkCopy on a root carries the fork system prompt', () => {
-  const r = appendUserTurn(emptyTree(), 'q', true, 'be terse');
+test('a Shift edit of a root carries the fork system prompt', () => {
+  const r = appendTurn(emptyTree(), 'q', true, 'be terse');
   const f = foldAssistant(r.tree, r.nodeId, [{ content: 'a' }]);
-  const copy = editUserForkCopy(f.tree, r.nodeId, 'q2', 'be verbose')!;
-  eq(copy.tree.nodes[copy.newUserId].system_prompt, 'be verbose');
+  const copy = editInputFork(f.tree, r.nodeId, 'q2', { role: 'user', copyDownstream: true, systemPrompt: 'be verbose' })!;
+  eq(copy.tree.nodes[copy.newId].system_prompt, 'be verbose');
   assertValid(copy.tree);
 });
 
 test('threadStarts: same first message under different system prompts = DISTINCT threads', () => {
-  const a1 = appendUserTurn(emptyTree(), 'q', true, 'letter only');
-  const a2 = appendUserTurn(a1.tree, 'q', true, 'think step by step');
-  const a3 = appendUserTurn(a2.tree, 'q', true); // no thread system
+  const a1 = appendTurn(emptyTree(), 'q', true, 'letter only');
+  const a2 = appendTurn(a1.tree, 'q', true, 'think step by step');
+  const a3 = appendTurn(a2.tree, 'q', true); // no thread system
   const starts = threadStarts({ A: a3.tree });
   eq(starts.length, 3);
   eq(starts[0].system, 'letter only');
@@ -672,27 +703,27 @@ test('threadStarts: same first message under different system prompts = DISTINCT
   eq(starts[2].system, undefined);
   eq(starts[2].activeIn, ['A']);
   // and the same PAIR still unifies across panels
-  const b1 = appendUserTurn(emptyTree(), 'q ', true, 'letter only');
+  const b1 = appendTurn(emptyTree(), 'q ', true, 'letter only');
   const both = threadStarts({ A: a3.tree, B: b1.tree });
   eq(both.length, 3);
   eq(Object.keys(both[0].roots), ['A', 'B']);
 });
 
 test('threadSystemAt walks any depth up to the root thread prompt', () => {
-  const r = appendUserTurn(emptyTree(), 'q', true, 'be terse');
+  const r = appendTurn(emptyTree(), 'q', true, 'be terse');
   const f = foldAssistant(r.tree, r.nodeId, [{ content: 'a' }]);
-  const mid = appendUserTurn(f.tree, 'follow-up');
+  const mid = appendTurn(f.tree, 'follow-up');
   const f2 = foldAssistant(mid.tree, mid.nodeId, [{ content: 'b' }]);
   eq(threadSystemAt(f2.tree, f2.ids[0]), 'be terse'); // deep assistant → root prompt
   eq(threadSystemAt(f2.tree, r.nodeId), 'be terse'); // the root itself
-  const plain = appendUserTurn(f2.tree, 'other', true);
+  const plain = appendTurn(f2.tree, 'other', true);
   eq(threadSystemAt(plain.tree, plain.nodeId), undefined); // promptless thread
 });
 
 test('reconcileExternal matches the root by the (content, system) PAIR when known', () => {
   // two probe threads: same first message, different prompts
-  const a = appendUserTurn(emptyTree(), 'q', true, 'sysA');
-  const b = appendUserTurn(a.tree, 'q', true, 'sysB');
+  const a = appendTurn(emptyTree(), 'q', true, 'sysA');
+  const b = appendTurn(a.tree, 'q', true, 'sysB');
   // a transcript from the sysA probe folds under (re-selects) the sysA root…
   const t1 = rec(b.tree, [U('q'), A('r1')], 'sysA');
   eq(activePath(t1)[0].id, a.nodeId);
@@ -709,7 +740,7 @@ test('reconcileExternal matches the root by the (content, system) PAIR when know
 });
 
 test('reconcileExternal with UNKNOWN provenance keeps legacy content-only root matching', () => {
-  const a = appendUserTurn(emptyTree(), 'q', true, 'sysA');
+  const a = appendTurn(emptyTree(), 'q', true, 'sysA');
   const t = rec(a.tree, [U('q'), A('r')]); // no threadSystem arg
   eq(t.rootChildren.length, 1); // grafted onto the existing root, as before
   eq(activePath(t)[0].id, a.nodeId);
@@ -726,10 +757,10 @@ test('treeFromMessages stamps the thread system on its minted root', () => {
 test('selectPathTo reveals a deep off-path node by selecting every ancestor', () => {
   // two root threads; thread 1 holds a sample fan — select thread 2 first, then
   // jump to a NON-selected sample of thread 1: both levels must flip.
-  const { tree: t1, nodeId: u1 } = appendUserTurn(emptyTree(), 'q1');
+  const { tree: t1, nodeId: u1 } = appendTurn(emptyTree(), 'q1');
   const { tree: t2, ids } = foldAssistant(t1, u1, [{ content: 's0' }, { content: 's1' }]);
   const t3 = setSelected(t2, ids[1]); // s1 active within thread 1
-  const { tree: t4 } = appendUserTurn(t3, 'q2', true); // atRoot: a second thread
+  const { tree: t4 } = appendTurn(t3, 'q2', true); // atRoot: a second thread
   eq(activePath(t4)[0].content, 'q2'); // thread 2 is now the active root
   const t5 = selectPathTo(t4, ids[0]); // jump to s0, buried in thread 1
   eq(activeMessages(t5), [U('q1'), A('s0')]);
@@ -738,14 +769,14 @@ test('selectPathTo reveals a deep off-path node by selecting every ancestor', ()
 });
 
 test('selectPathTo is a same-ref no-op when the node is already active', () => {
-  const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+  const { tree: t1, nodeId: u } = appendTurn(emptyTree(), 'q');
   const { tree: t2, ids } = foldAssistant(t1, u, [{ content: 'a' }]);
   eq(selectPathTo(t2, ids[0]) === t2, true, 'active target must return the same ref');
   eq(selectPathTo(t2, 'no-such-node') === t2, true, 'unknown id must return the same ref');
 });
 
 test('selectPathTo bails whole on a broken parent chain (never half-selects)', () => {
-  const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+  const { tree: t1, nodeId: u } = appendTurn(emptyTree(), 'q');
   const { tree: t2, ids } = foldAssistant(t1, u, [{ content: 'a' }, { content: 'b' }]);
   const broken: ConvTree = structuredClone(t2);
   broken.nodes[u].parent = 'gone'; // orphan the chain above the fan
@@ -924,7 +955,7 @@ test('applyTreeOp/applyPanelOp reject filename-unsafe node ids (blob-name parity
 });
 
 test('applyTreeOp select is validated LWW: stale/unknown writes are same-ref no-ops', () => {
-  const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+  const { tree: t1, nodeId: u } = appendTurn(emptyTree(), 'q');
   const { tree: t2, ids } = foldAssistant(t1, u, [{ content: 'a' }, { content: 'b' }]);
   const t3 = applyTreeOp(t2, { op: 'select', parent_key: u, child_id: ids[1] });
   eq(t3.selected[u], ids[1]);
@@ -948,7 +979,7 @@ test('CONFLUENCE: reconcileExternal ops replayed via applyTreeOp reproduce its t
     { t0: emptyTree(), msgs: [U('q'), A('r', 'cot')] },
     { t0: linear4(), msgs: [U('cli question'), A('cli answer')] },
     { t0: linear4(), msgs: [U('U1'), A('A1'), U('U2'), A('A2'), U('U3')] },
-    { t0: appendUserTurn(emptyTree(), 'q', true, 'sysA').tree, msgs: [U('q'), A('r')], sys: 'sysB' }
+    { t0: appendTurn(emptyTree(), 'q', true, 'sysA').tree, msgs: [U('q'), A('r')], sys: 'sysB' }
   ];
   for (const c of cases) {
     const r = reconcileExternal(c.t0, c.msgs, c.sys);
@@ -960,7 +991,7 @@ test('CONFLUENCE: reconcileExternal ops replayed via applyTreeOp reproduce its t
 });
 
 test('selectedDiffOps reports exactly the selection writes between two trees', () => {
-  const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+  const { tree: t1, nodeId: u } = appendTurn(emptyTree(), 'q');
   const { tree: t2, ids } = foldAssistant(t1, u, [{ content: 'a' }, { content: 'b' }]);
   const t3 = setSelected(t2, ids[1]);
   const ops = selectedDiffOps(t2, t3);
@@ -973,8 +1004,8 @@ test('selectedDiffOps reports exactly the selection writes between two trees', (
 test('chainFrom recovers a fork-copy grafted chain (fresh user + downstream copies)', () => {
   const t = linear4();
   const u1 = activePath(t)[0].id;
-  const r = editUserForkCopy(t, u1, 'U1-edited')!;
-  const chain = chainFrom(r.tree, r.newUserId);
+  const r = editInputFork(t, u1, 'U1-edited', { role: 'user', copyDownstream: true })!;
+  const chain = chainFrom(r.tree, r.newId);
   eq(chain.length, 4, 'fork + 3 downstream copies');
   const nodes = chain.map((id) => r.tree.nodes[id]);
   eq(nodes.map((n) => n.content), ['U1-edited', 'A1', 'U2', 'A2']);
@@ -984,7 +1015,7 @@ test('chainFrom recovers a fork-copy grafted chain (fresh user + downstream copi
 });
 
 test('heavyNodeIds/lightenTree: fold-time lightening flags exactly the blob-bearing nodes', () => {
-  const { tree: t1, nodeId: u } = appendUserTurn(emptyTree(), 'q');
+  const { tree: t1, nodeId: u } = appendTurn(emptyTree(), 'q');
   const { tree: t2, ids } = foldAssistant(t1, u, [
     { content: 'with data', token_logprobs: [{ t: 'x', tid: 1, lp: -0.5 }], raw_meta: 'meta' },
     { content: 'plain' }
@@ -1004,7 +1035,7 @@ test('applyPanelOp: value-equal replace/copy echoes are SAME-REF no-ops (no re-r
   // content re-renders the column under the user's cursor (browser_undo caught
   // the restore echo doing exactly that). Key order must not matter — the echo
   // round-tripped through JSON + python.
-  const { tree } = appendUserTurn(emptyTree(), 'q');
+  const { tree } = appendTurn(emptyTree(), 'q');
   const trees = { p: tree };
   const reordered = JSON.parse(JSON.stringify(tree)) as ConvTree; // fresh refs
   eq(applyPanelOp(trees, { op: 'replace_tree', panel: 'p', tree: reordered }) === trees, true,

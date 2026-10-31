@@ -29,14 +29,15 @@ import {
   ancestryMessages,
   reconcileExternal,
   threadSystemAt,
-  editUserFork,
-  editUserForkCopy,
+  editInputFork,
   editAssistant,
   editToolResult,
   appendToolResults,
   isFireParent,
   pendingToolCalls,
-  editSystemFork,
+  isInputRole,
+  isInstruction,
+  type InputRole,
   deleteSubtree,
   deleteSiblings,
   setSelected,
@@ -540,80 +541,74 @@ class BranchOps {
     );
   }
 
-  /** Edit → fork. User: fork+regen (shift = fork+copy-downstream, no gen).
-   *  Assistant: a manual branch, never a generation — shift carries the
-   *  downstream turns onto it, same as on a user row (without it the new branch
-   *  is a leaf and everything below stays on the sibling you edited away from).
-   *  Empty edits are ignored.
+  /** Edit → fork. A turn a person wrote (user / system / developer): see
+   *  #editInput — `role` is what the dialog's role toggle picked (default: the
+   *  row's own). Assistant: a manual branch, never a generation — shift carries
+   *  the downstream turns onto it (without it the new branch is a leaf and
+   *  everything below stays on the sibling you edited away from).
    *  `systemPrompt` (root user rows only): the fork's THREAD system prompt —
    *  same question under a new prompt is just an edit that forks a sibling
    *  thread. Trimmed-empty ⇒ the fork has none.
    *
-   *  Async for one reason: an assistant edit hands the untouched part of the
-   *  original's token logprobs to the new node, and reading them may need the
-   *  blob fetched first. Callers fire-and-forget. */
+   *  Async because the original's heavy fields (token logprobs, recorded items)
+   *  may need fetching first. Callers fire-and-forget. */
   async applyEdit(
     panel: Panel,
     msg: ViewMessage,
     content: string,
     reasoning: string | undefined,
     copyDownstream: boolean,
-    systemPrompt?: string
+    systemPrompt?: string,
+    role?: InputRole
   ) {
     if (this.#d.panelBusy(panel) || msg.nodeId == null) return;
     if (msg.role === 'tool') {
       this.#editToolResult(panel, msg.nodeId, content, copyDownstream);
       return;
     }
-    if (msg.role === 'system') {
-      await this.#editSystem(panel, msg.nodeId, content, copyDownstream);
+    if (isInputRole(msg.role)) {
+      await this.#editInput(panel, msg.nodeId, content, role ?? msg.role, copyDownstream, systemPrompt);
       return;
     }
     const text = content.trim();
     // Assistant turns may be thinking-only (empty answer) — keep the edit if
-    // either field has text; user turns still require a non-empty body.
-    if (!text && !(msg.role === 'assistant' && reasoning && reasoning.trim())) return;
+    // either field has text.
+    if (!text && !(reasoning && reasoning.trim())) return;
     panelScroll.preserve(panel);
     chat.clearPanelBucket(panel);
-    const sys = systemPrompt?.trim() || undefined;
-    if (msg.role === 'user') {
-      // a recorded turn keeps its screenshots: the edit replaces only its text
-      const items = await this.#itemsOf(panel, msg.nodeId);
-      if (copyDownstream) {
-        const r = editUserForkCopy(ws.treeFor(panel), msg.nodeId, text, sys, items);
-        if (r) this.#commitChain(panel, r.tree, r.newUserId);
-      } else {
-        const r = editUserFork(ws.treeFor(panel), msg.nodeId, text, sys, items);
-        if (!r) return;
-        if (items?.length) {
-          // blobbed like a fold (screenshots stay out of the light tree); the fire
-          // then names the node instead of shipping the images in the request
-          this.#commitChain(panel, r.tree, r.newUserId);
-          this.#fireForPanel(panel, r.newUserId, ancestryMessages(ws.treeFor(panel), r.newUserId) as ChatMessage[]);
-          return;
-        }
-        ws.setTree(panel, r.tree, {
-          ops: [{ op: 'add_nodes', nodes: [opNode(r.tree, r.newUserId)], select: true }]
-        });
-        this.#fireForPanel(panel, r.newUserId, r.fireMessages as ChatMessage[]);
-      }
-    } else if (msg.role === 'assistant') {
-      const tlp = await this.#tokensOf(panel, msg.nodeId);
-      const items = await this.#itemsOf(panel, msg.nodeId);
-      // Re-read the tree AFTER the await: the fetch yields, and the node could
-      // have been pruned/cycled away meanwhile (editAssistant returns null then).
-      const r = editAssistant(ws.treeFor(panel), msg.nodeId, text, reasoning, tlp, copyDownstream, items);
-      if (r) this.#commitChain(panel, r.tree, r.newId);
-    }
+    const tlp = await this.#tokensOf(panel, msg.nodeId);
+    const items = await this.#itemsOf(panel, msg.nodeId);
+    // Re-read the tree AFTER the await: the fetch yields, and the node could
+    // have been pruned/cycled away meanwhile (editAssistant returns null then).
+    const r = editAssistant(ws.treeFor(panel), msg.nodeId, text, reasoning, tlp, copyDownstream, items);
+    if (r) this.#commitChain(panel, r.tree, r.newId);
   }
 
-  /** Edit a system node (a recorded call's system message) like a first message:
-   *  a sibling thread under the new prompt (empty = none at all), the conversation
-   *  copied below it (Shift: all of it, no reply; else up to the first reply,
-   *  regenerated). */
-  async #editSystem(panel: Panel, nodeId: string, content: string, copyDownstream: boolean) {
+  /** Edit a turn a person wrote — text and/or role — like a first message: a
+   *  sibling, the turns up to the first reply copied below it, that reply
+   *  regenerated (Shift: everything copied, no reply). A user turn's text is
+   *  trimmed and can't be empty; a system / developer turn keeps its text to the
+   *  byte (a recorded prompt), and empty drops it. A recorded turn keeps its
+   *  screenshots: the edit replaces only its text. */
+  async #editInput(
+    panel: Panel,
+    nodeId: string,
+    content: string,
+    role: InputRole,
+    copyDownstream: boolean,
+    systemPrompt?: string
+  ) {
+    const orig = ws.treeFor(panel).nodes[nodeId];
+    if (!orig) return;
+    const text = role === 'user' ? content.trim() : content;
+    if (!text.trim() && !isInstruction(orig.role)) return;
     const items = await this.#itemsOf(panel, nodeId);
-    const r = editSystemFork(ws.treeFor(panel), nodeId, content, copyDownstream, items);
+    const r = editInputFork(ws.treeFor(panel), nodeId, text, {
+      role,
+      copyDownstream,
+      systemPrompt: systemPrompt?.trim() || undefined,
+      items
+    });
     if (!r) return;
     panelScroll.preserve(panel);
     chat.clearPanelBucket(panel);
@@ -697,14 +692,15 @@ class BranchOps {
     content: string,
     reasoning: string | undefined,
     copyDownstream: boolean,
-    systemPrompt?: string
+    systemPrompt?: string,
+    role?: InputRole
   ) {
     if (msg.nodeId == null) return;
     const depth = activePath(ws.treeFor(panel)).findIndex((n) => n.id === msg.nodeId);
     if (depth < 0) return;
     for (const p of this.#d.panelSels()) {
       const node = activePath(ws.treeFor(p.panel))[depth];
-      if (node) void this.applyEdit(p.panel, { ...msg, nodeId: node.id }, content, reasoning, copyDownstream, systemPrompt);
+      if (node) void this.applyEdit(p.panel, { ...msg, nodeId: node.id }, content, reasoning, copyDownstream, systemPrompt, role);
     }
   }
 

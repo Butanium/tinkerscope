@@ -35,6 +35,7 @@
   import { relWhen } from '$lib/when';
   import { DragReorder } from '$lib/drag-reorder.svelte';
   import ThreadSwitcher from '$lib/ThreadSwitcher.svelte';
+  import RoleToggle from '$lib/RoleToggle.svelte';
   import ChartModal from '$lib/ChartModal.svelte';
   import TagModal from '$lib/TagModal.svelte';
   import SlideshowModal from '$lib/SlideshowModal.svelte';
@@ -81,11 +82,13 @@
   import {
     activePath,
     activeMessages,
-    appendUserTurn,
+    appendTurn,
+    isInstruction,
     pendingToolCalls,
     siblingsOf,
     threadStarts,
-    tokenBlobNodeIds
+    tokenBlobNodeIds,
+    type InputRole
   } from '$lib/tree';
   import type {
     Run,
@@ -823,6 +826,8 @@
   // appending to the active thread. Transient — deliberately not persisted, so a
   // reload never silently reopens a mode where sends stop extending the thread.
   let branchFromRoot = $state(false);
+  // The role the composer's message is sent as (RoleToggle in the composer row).
+  let composerRole = $state<InputRole>('user');
   /** Every panel a send reaches is on a thread with its OWN system prompt (a
    *  system row, or the thread prompt on its first message), so the workspace one
    *  applies nowhere: its chip would only confuse. A fresh thread (⑂) would use it. */
@@ -831,7 +836,7 @@
       targetSels.length > 0 &&
       targetSels.every((p) => {
         const root = activePath(ws.treeFor(p.panel))[0];
-        return !!root && (root.role === 'system' || !!root.system_prompt);
+        return !!root && (isInstruction(root.role) || !!root.system_prompt);
       })
   );
   // THREAD system prompt for the next branch-from-start send: stamped on the new
@@ -876,11 +881,12 @@
       // A new user turn lands at the active LEAF — below anything an open
       // all-samples view hides. Close it, or the send looks like nothing happened.
       samplesOpen[p.panel] = null;
-      const { tree, nodeId } = appendUserTurn(
+      const { tree, nodeId } = appendTurn(
         ws.treeFor(p.panel),
         text,
         branchFromRoot,
-        newThreadSystem(p.panel, branchFromRoot)
+        newThreadSystem(p.panel, branchFromRoot),
+        composerRole
       );
       if (!branchFromRoot) pendingThreadSystem[p.panel] = '';
       ws.setTree(p.panel, tree, {
@@ -914,7 +920,7 @@
     // The per-panel bubble ALWAYS continues this panel's active thread; ⑂
     // branch-from-start is a main-composer-only affordance (locked decision).
     samplesOpen[panel] = null; // same reason as sendMessage: the reply lands below the hidden region
-    const { tree, nodeId } = appendUserTurn(ws.treeFor(panel), text, false, newThreadSystem(panel, false));
+    const { tree, nodeId } = appendTurn(ws.treeFor(panel), text, false, newThreadSystem(panel, false));
     pendingThreadSystem[panel] = '';
     ws.setTree(panel, tree, {
       ops: [{ op: 'add_nodes', nodes: [opNode(tree, nodeId)], select: true }]
@@ -2945,7 +2951,7 @@
             <div class="messages" use:scrollRegister={p.panel}>
               <!-- a thread that starts with its own system node (a recorded call) has its
                    prompt right there — no thread-prompt row to edit above it -->
-              {#if threadRoot?.role !== 'system'}
+              {#if !isInstruction(threadRoot?.role)}
               <ThreadSystemRow
                 system={threadRoot?.system_prompt}
                 empty={!threadRoot}
@@ -2984,7 +2990,7 @@
                   onDiscardSiblings={(all, path) => branchOps.discardOthers(p.panel, msg, all && isComparing && !focusPanel, path)}
                   onContinueSample={(idx) => branchOps.continueSample(p.panel, msg, idx)}
                   onDeleteSample={(idx) => branchOps.deleteSample(p.panel, msg, idx)}
-                  onEdit={(content, reasoning, copyDownstream, allPanels, system) => (allPanels ? branchOps.applyEditAll(p.panel, msg, content, reasoning, copyDownstream, system) : branchOps.applyEdit(p.panel, msg, content, reasoning, copyDownstream, system))}
+                  onEdit={(content, reasoning, copyDownstream, allPanels, system, role) => (allPanels ? branchOps.applyEditAll(p.panel, msg, content, reasoning, copyDownstream, system, role) : branchOps.applyEdit(p.panel, msg, content, reasoning, copyDownstream, system, role))}
                   onCopy={(all, withThinking) => branchOps.copyMessage(p.panel, msg, all, withThinking)}
                   otherPanels={panelSels.filter((x) => x.panel !== p.panel).map((x) => ({ id: x.panel, label: panelLabel(x) }))}
                   onSendToPanel={(dest) => branchOps.sendBranchToPanel(p.panel, msg, dest)}
@@ -3136,6 +3142,7 @@
              two axes are orthogonal (fold never mutes). A thread's own system
              prompt (ThreadSystemRow, top of each panel) overrides this one. -->
         <div class="prefill-row">
+          <RoleToggle bind:value={composerRole} testid="composer-role" />
           {#if !workspaceSystemMoot}
           <SplitChip
             label="system prompt"
@@ -3275,8 +3282,8 @@
               : historyBrowsing
                 ? 'History mode -- up/down browse, Esc exit'
                 : narrow
-                  ? 'Message'
-                  : 'Type a message... (Enter to send, Esc for history)'}
+                  ? composerRole === 'user' ? 'Message' : `${composerRole} message`
+                  : `Type a ${composerRole === 'user' ? '' : `${composerRole} `}message... (Enter to send, Esc for history)`}
           disabled={!canChat || !ws.activeId}
         ></textarea>
         {#if narrow}

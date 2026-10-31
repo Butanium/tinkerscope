@@ -23,7 +23,7 @@
   import Icon from '$lib/Icon.svelte';
   import type { HighlightRule } from '$lib/types';
 
-  const ROLES = ['', 'user', 'assistant', 'system'] as const;
+  const ROLES = ['', 'user', 'assistant', 'system', 'developer'] as const;
 
   let editingId = $state<string | null>(null);
   let draft = $state<HighlightRule | null>(null);

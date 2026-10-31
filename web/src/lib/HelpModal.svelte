@@ -291,6 +291,15 @@ codex plugin add tinkerscope@tinkerscope</pre>
         full editable copy of the conversation instead of a branch that dead-ends at the edit.
       </p>
       <p class="help-note">
+        <b>Roles.</b> While you edit a user, system or developer message, its role label becomes a
+        <code>user · system · developer</code> switch: pick another role and Save forks the turn under
+        that role. The same switch sits at the left of the composer row and sets the role of what you
+        send. Every system and developer message is sent where it stands in the thread; the workspace
+        or thread prompt is still sent first, unless the thread itself opens with a system or developer
+        message. Each role goes to the model as is: OpenAI models read <code>developer</code>, and a
+        provider or chat template that doesn't know a role answers with its own error.
+      </p>
+      <p class="help-note">
         Delete is the exception that really does remove something. <Icon name="undo" /> in the sidebar
         icon row — or <kbd>Ctrl/⌘</kbd>+<kbd>Z</kbd> — puts back the last delete, discard-others,
         thread reset or closed panel (model, slot and conversation) in this workspace, up to 50 of them, for as long as the tab stays open.
@@ -606,7 +615,7 @@ codex plugin add tinkerscope@tinkerscope</pre>
         <i>encrypted (N tokens)</i> when there's no summary, calls and their outputs. The recorded system message is the
         thread's first row and edits like a first message: a new thread under the edited prompt, the
         conversation copied below it and its first reply regenerated (Shift: copy all, no reply);
-        <b>drop system prompt</b> in that editor forks it with none. While every thread you'd send to has
+        <b>drop message</b> in that editor forks it with none. While every thread you'd send to has
         its own prompt, the composer's <b>system prompt</b> pill hides: it wouldn't apply. Sends there go
         through OpenRouter's Responses API with those items unchanged. A computer call is answered with a
         screenshot file instead of text.

@@ -217,7 +217,7 @@ def _unit_scope(u: Unit) -> str:
         return "thinking"
     if u.field == "system_prompt":
         return "system"
-    return {"assistant": "reply", "user": "user", "system": "system"}.get(u.role, "reply")
+    return {"assistant": "reply", "user": "user", "system": "system", "developer": "system"}.get(u.role, "reply")
 
 
 def search(

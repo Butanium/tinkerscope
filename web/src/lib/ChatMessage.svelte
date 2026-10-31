@@ -27,6 +27,8 @@
   import TokenHeatOverlay from '$lib/TokenHeatOverlay.svelte';
   import ToolCalls from '$lib/ToolCalls.svelte';
   import ResponsesItems from '$lib/ResponsesItems.svelte';
+  import RoleToggle from '$lib/RoleToggle.svelte';
+  import { isInputRole, isInstruction, type InputRole } from '$lib/tree';
   import type { ViewMessage, SampleData, TokenLogprob } from '$lib/types';
 
   let {
@@ -84,7 +86,7 @@
     onDiscardSiblings?: (allPanels: boolean, wholePath: boolean) => void;
     onContinueSample: (sampleIndex: number) => void;
     onDeleteSample: (sampleIndex: number) => void;
-    onEdit: (content: string, reasoning: string | undefined, copyDownstream: boolean, allPanels: boolean, system?: string) => void;
+    onEdit: (content: string, reasoning: string | undefined, copyDownstream: boolean, allPanels: boolean, system?: string, role?: InputRole) => void;
     onCopy: (all: boolean, withThinking: boolean) => void;
     onTag: (content: string, sampleIndex: number | null, totalSamples: number | null, reasoning: string, quick: boolean) => void;
     onCycle: (delta: number) => void;
@@ -322,17 +324,20 @@
   let editHasReasoning = $state(false);
   // Closed-model thinking (tKind set): no textarea — keep it as is, or drop it.
   let editDropThinking = $state(false);
-  // a system row's edit can also drop the prompt (the fork starts with no system message)
+  // a system / developer row's edit can also drop it (the fork goes on without that message)
   let editDropSystem = $state(false);
+  // the role the edit forks as (user / system / developer rows: the head's toggle)
+  let editRole = $state<InputRole>('user');
   let editShift = $state(false);
   let editAll = $state(false);
   // Thread-system field (ROOT user rows only): editing it — like editing the
   // content — forks a sibling THREAD; "same question, new prompt" is just an edit.
   let editSystem = $state('');
-  let editHasSystem = $derived(msg.role === 'user' && !!msg.isRoot);
+  let editHasSystem = $derived(msg.role === 'user' && !!msg.isRoot && editRole === 'user');
   function startEdit(shift: boolean, all: boolean) {
     if (!canEdit) return;
     editing = true;
+    if (isInputRole(msg.role)) editRole = msg.role;
     editShift = shift;
     editAll = all;
     editDraft = msg.content;
@@ -351,7 +356,8 @@
       reasoning,
       editShift,
       editAll,
-      editHasSystem ? editSystem : undefined
+      editHasSystem ? editSystem : undefined,
+      isInputRole(msg.role) ? editRole : undefined
     );
     editing = false;
   }
@@ -762,12 +768,16 @@
     class:kb-focused={focused}
     class:reveal-flash={revealed}
     data-row={rowIndex}
-    style="background: {roleColor(msg.role)};"
+    style="background: {roleColor(editing && isInputRole(msg.role) ? editRole : msg.role)};"
     onclick={onFocusRow}
   >
     <div class="message-head">
       <div class="message-head-left">
-        <div class="message-role">{msg.role}</div>
+        {#if editing && msg.nodeId != null && isInputRole(msg.role)}
+          <RoleToggle bind:value={editRole} testid="edit-role" />
+        {:else}
+          <div class="message-role">{msg.role}</div>
+        {/if}
         {#if msg.role === 'tool'}
           <code class="tool-result-name" data-tooltip={msg.tool_call_id ? `answers call ${msg.tool_call_id}` : undefined} use:tip>{msg.name || 'result'}</code>
           {#if msg.handler}<span class="auto-tag" data-testid="auto-answered" data-tooltip="Answered by its {msg.handler} handler, not by hand" use:tip>auto</span>{/if}
@@ -929,19 +939,6 @@
         ></textarea>
         <div class="edit-field-label">Response</div>
       {/if}
-      {#if msg.role === 'system'}
-        <div class="edit-field-label edit-sealed-head">
-          <span>System prompt</span>
-          <button
-            class="edit-drop-thinking"
-            class:dropped={editDropSystem}
-            data-testid="edit-drop-system"
-            data-tooltip={editDropSystem ? 'Keep the system prompt' : 'Fork with no system prompt'}
-            use:tip
-            onclick={() => (editDropSystem = !editDropSystem)}
-          >{editDropSystem ? 'undo drop' : 'drop system prompt'}</button>
-        </div>
-      {/if}
       {#if editDropSystem}
         <div class="edit-sealed-text dropped" data-testid="edit-system-dropped">dropped</div>
       {:else}
@@ -949,7 +946,7 @@
       <textarea
         class="edit-textarea"
         bind:value={editDraft}
-        rows={msg.role === 'system' ? 16 : 4}
+        rows={isInstruction(msg.role) && msg.isRoot ? 16 : 4}
         autofocus
         onkeydown={(e) => {
           if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commitEdit(); }
@@ -958,6 +955,16 @@
       ></textarea>
       {/if}
       <div class="edit-actions">
+        {#if isInstruction(msg.role)}
+          <button
+            class="edit-drop-thinking edit-drop-message"
+            class:dropped={editDropSystem}
+            data-testid="edit-drop-system"
+            data-tooltip={editDropSystem ? 'Keep this message' : 'Fork without this message'}
+            use:tip
+            onclick={() => (editDropSystem = !editDropSystem)}
+          >{editDropSystem ? 'undo drop' : 'drop message'}</button>
+        {/if}
         <button class="btn-edit-cancel" onclick={cancelEdit}>Cancel</button>
         <button class="btn-edit-save" onclick={commitEdit}>Save{editShift ? ' fork' : ''}</button>
       </div>
@@ -1015,7 +1022,7 @@
       {#if msg.running && !isMultiSample && onStop && !readOnly}
         <div class="stop-turn-row">{@render stopBtn()}</div>
       {/if}
-      {#if (msg.role !== 'system' || msg.nodeId != null) && (msg.content || msg.raw_text || msg.reasoning || msg.role === 'tool' || msg.tool_calls?.length || (msg.nodeId != null && !msg.running))}
+      {#if (!isInstruction(msg.role) || msg.nodeId != null) && (msg.content || msg.raw_text || msg.reasoning || msg.role === 'tool' || msg.tool_calls?.length || (msg.nodeId != null && !msg.running))}
         <OverflowRow klass="hover-actions" resetKey={msg.nodeId ?? msg.content}>
           {#if msg.raw_text}
             <!-- Raw leads the row (Clément: very left, always visible — first
@@ -1023,7 +1030,7 @@
             <button class="btn-raw" class:active={rawSingle} onclick={() => (rawSingle = !rawSingle)} data-tooltip="Raw model output, tags preserved" use:tip>Raw</button>
           {/if}
           {#if canEdit && !readOnly}
-            {#if msg.role !== 'system'}{@render regenGroup()}{/if}
+            {#if !isInstruction(msg.role)}{@render regenGroup()}{/if}
             {#if msg.role === 'assistant'}{@render continueBtn()}{/if}
             <button
               class="btn-act"
@@ -1033,7 +1040,7 @@
                 ? 'Edit a copy of the conversation (no reply)'
                 : msg.role === 'user'
                   ? 'Edit and regenerate (Shift: copy, no reply)'
-                  : msg.role === 'system'
+                  : isInstruction(msg.role)
                   ? 'Edit and regenerate the first reply (Shift: copy, no reply)'
                   : msg.role === 'tool'
                     ? 'Edit the result and regenerate (Shift: no reply)'

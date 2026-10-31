@@ -4,7 +4,7 @@
 import {
   __resetIds,
   emptyTree,
-  appendUserTurn,
+  appendTurn,
   foldAssistant,
   pendingToolCalls,
   appendToolResults,
@@ -48,7 +48,7 @@ const call = (id: string, name: string, args = '{}'): ToolCall => ({
 /** user → assistant(calls) — the shape every test starts from. */
 function withCalls(calls: ToolCall[]): { t: ConvTree; asst: string } {
   __resetIds();
-  const u = appendUserTurn(emptyTree(), 'hi');
+  const u = appendTurn(emptyTree(), 'hi');
   const f = foldAssistant(u.tree, u.nodeId, [{ content: '', tool_calls: calls, finish_reason: 'tool_calls' }]);
   return { t: f.tree, asst: f.ids[0] };
 }
@@ -120,7 +120,7 @@ test('a tool node survives the op layer (role allowed, fields kept)', () => {
 
 test('a node with verbatim items goes out inline, or by node id once light', () => {
   __resetIds();
-  const u = appendUserTurn(emptyTree(), 'hi');
+  const u = appendTurn(emptyTree(), 'hi');
   const items = [{ type: 'reasoning', id: 'rs_1', summary: [], encrypted_content: 'B' }, { type: 'function_call', call_id: 'c1', name: 'f', arguments: '{}' }];
   const f = foldAssistant(u.tree, u.nodeId, [{ content: '', items, tool_calls: [call('c1', 'f')] }]);
   const id = f.ids[0];
@@ -143,7 +143,7 @@ test('a computer call is pending until a screenshot result answers it', () => {
 
 test('no pending calls on a plain thread', () => {
   __resetIds();
-  const u = appendUserTurn(emptyTree(), 'hi');
+  const u = appendTurn(emptyTree(), 'hi');
   const f = foldAssistant(u.tree, u.nodeId, [{ content: 'hello' }]);
   eq(pendingToolCalls(f.tree), null);
   eq(pendingToolCalls(emptyTree()), null);

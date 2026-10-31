@@ -3,7 +3,7 @@
 //   node web/src/lib/reasoning.test.ts
 
 import { thinkingKind, isSealed, thinkingHeader, encryptedNote, itemsThinkingKind } from './reasoning.ts';
-import { foldAssistant, editAssistant, editedItems, ancestryMessages, editUserForkCopy, activePath, type ConvTree } from './tree.ts';
+import { foldAssistant, editAssistant, editedItems, ancestryMessages, editInputFork, activePath, type ConvTree } from './tree.ts';
 import type { ReasoningDetail } from './types.ts';
 
 let passed = 0;
@@ -89,7 +89,7 @@ test('rewritten thinking drops the payload (it would not be what the model saw)'
 
 test('a fork-copy keeps the payload with its text', () => {
   const { t } = lunaTree();
-  const r = editUserForkCopy(t, 'u', 'q, reworded')!;
+  const r = editInputFork(t, 'u', 'q, reworded', { role: 'user', copyDownstream: true })!;
   const path = activePath(r.tree);
   eq(path[1].reasoning_details, LUNA);
 });

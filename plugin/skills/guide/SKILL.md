@@ -169,6 +169,15 @@ siblings mix thinking and non-thinking draws, a filter at the turn's top right �
 `all`, brain (with thinking), struck brain (without), each with its count —
 narrows the cards.
 
+**Roles** — while you edit a user, system or developer message, its role label
+becomes a `user · system · developer` switch; pick another role and Save forks the
+turn under it (same rules as any edit: regenerate below, Shift copies, Ctrl does
+every panel). The same switch at the left of the composer row sets the role of what
+you send. System and developer messages are sent where they stand; the workspace or
+thread prompt still goes first unless the thread itself opens with one. Roles go out
+as is — OpenAI models read `developer`, and a provider or chat template that doesn't
+know a role answers with its own error (Qwen's template just writes the role header).
+
 **Thread** — a workspace can hold several independent conversations. The `⑂
 branch from start` toggle next to the composer makes your next message a new
 first message instead of a reply. The switcher beside it lists every thread
@@ -239,7 +248,7 @@ under another key, so the model won't see it. Sending there uses OpenRouter's Re
 API with those items unchanged. The recorded system message is the thread's first row
 and edits like a first message: a sibling thread under the edited prompt with the
 conversation copied below it (screenshots included) and the first reply regenerated;
-Shift copies the whole conversation without generating; **drop system prompt** in the editor
+Shift copies the whole conversation without generating; **drop message** in the editor
 forks it with no system message at all. While every thread a send reaches has its own
 prompt (a system row, or a thread prompt), the composer's **system prompt** pill is
 hidden — it wouldn't apply; it comes back for ⑂ branch-from-start. A computer call's result form asks for a screenshot

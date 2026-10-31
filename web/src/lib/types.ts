@@ -214,7 +214,7 @@ export type WireSetting = {
 // `reasoning` (assistant turns only) travels with the message so the sampler can hand the
 // renderer the full turn and let it apply its own history policy; `content` stays answer-only.
 export type ChatMessage = {
-  role: 'user' | 'assistant' | 'system' | 'tool';
+  role: 'user' | 'assistant' | 'system' | 'developer' | 'tool';
   content: string;
   reasoning?: string;
   /** An OpenRouter turn's reasoning payload — replayed to that provider's models. */
@@ -621,7 +621,7 @@ export type SampleData = {
  * cards (by index) to their folded sibling node ids for click-to-select.
  */
 export type ViewMessage = {
-  role: 'user' | 'assistant' | 'system' | 'tool';
+  role: 'user' | 'assistant' | 'system' | 'developer' | 'tool';
   content: string;
   /** Assistant rows: the calls this turn made. Tool rows: the call answered. */
   tool_calls?: ToolCall[];

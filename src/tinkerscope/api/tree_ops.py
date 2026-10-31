@@ -67,7 +67,16 @@ from . import tool_handlers
 log = logging.getLogger("tinkerscope.tree_ops")
 
 ROOT = "__root__"
-ROLES = ("user", "assistant", "system", "tool")
+ROLES = ("user", "assistant", "system", "developer", "tool")
+# Instructions: sent in place like any turn; one that OPENS a thread is the
+# thread's prompt, and the server then composes none (routes/chat.py).
+INSTRUCTION_ROLES = ("system", "developer")
+
+
+def is_fire_parent(node: Any) -> bool:
+    """Can an assistant turn fold under this node? Any turn but an assistant one
+    (tree.ts isFireParent)."""
+    return isinstance(node, dict) and node.get("role") in ROLES and node.get("role") != "assistant"
 
 # Per-process random session prefix for server-minted node ids — the Python
 # `nid()` (tree.ts:172). One namespace, two kinds of writer: browser tabs and

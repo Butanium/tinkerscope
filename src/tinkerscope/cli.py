@@ -56,6 +56,8 @@ from .api.tree_ops import active_path as _active_path
 from .api import openrouter_responses as _oresp
 from .api.tree_ops import check_tools as _check_tools
 from .api.tree_ops import ancestry as _ancestry
+from .api.tree_ops import INSTRUCTION_ROLES as _INSTRUCTION_ROLES
+from .api.tree_ops import is_fire_parent as _is_fire_parent
 from .api.tree_ops import mint_node_id as _mint_node_id
 from .api.tree_ops import root_of as _root_of
 from .api.tree_ops import selected_child as _selected_child
@@ -299,15 +301,15 @@ _MSG_KEYS = ("role", "content", "reasoning", "reasoning_details", "tool_calls", 
 
 def _norm_msgs(entries: Any, what: str) -> list[dict]:
     """A transcript from a file (OpenAI chat-completions shape) → /api/chat
-    messages: role user|assistant|system|tool, `content` null → "" (a calls-only
+    messages: role user|assistant|system|developer|tool, `content` null → "" (a calls-only
     assistant turn), tool_calls / tool_call_id / name / reasoning_details kept,
     anything else dropped."""
     if not isinstance(entries, list) or not entries:
         _die(f"{what} must be a non-empty JSON list of messages")
     out = []
     for m in entries:
-        if not isinstance(m, dict) or m.get("role") not in ("user", "assistant", "system", "tool"):
-            _die(f"bad {what} entry (role must be user/assistant/system/tool): {str(m)[:200]}")
+        if not isinstance(m, dict) or m.get("role") not in ("user", "assistant", "system", "developer", "tool"):
+            _die(f"bad {what} entry (role must be user/assistant/system/developer/tool): {str(m)[:200]}")
         c = m.get("content")
         if c is None and not (m["role"] == "assistant" and m.get("tool_calls")):
             _die(f"bad {what} entry — each needs {{role, content}} (content may be null only on an "
@@ -377,7 +379,7 @@ def _active_forks(tree: dict) -> int:
 
 # ---------- Transcript digest formatting ----------
 
-_ROLE_TAG = {"assistant": "asst", "user": "user", "system": "sys", "tool": "tool"}
+_ROLE_TAG = {"assistant": "asst", "user": "user", "system": "sys", "developer": "dev", "tool": "tool"}
 
 
 def _oneline(s: str, width: int) -> str:
@@ -1388,6 +1390,26 @@ def _call_params(
 _EFFORTS = ("default", "none", "minimal", "low", "medium", "high", "xhigh", "max")
 
 
+_INPUT_ROLES = ("user", "system", "developer")
+
+
+def _role_option(what: str):
+    return typer.Option(
+        "user", "--role",
+        help=f"role of {what}: user | system | developer (sent as is — a provider or chat "
+             "template that doesn't know the role answers with its own error)",
+    )
+
+
+def _check_role(role: str, thread_system: Optional[str] = None) -> str:
+    if role not in _INPUT_ROLES:
+        _die(f"--role must be one of {', '.join(_INPUT_ROLES)} (got {role!r})")
+    if role != "user" and thread_system:
+        _die(f"--system with --role {role}: a thread that opens with a {role} message is its own "
+             "prompt — put the prompt in the message instead")
+    return role
+
+
 def _effort_option():
     return typer.Option(
         None, "--effort",
@@ -1452,6 +1474,7 @@ def _chat_body(
     system: Optional[str],
     panel: str,
     prefill: Optional[str] = None,
+    role: str = "user",
 ) -> dict:
     """Build a /api/chat ChatRequest body.
 
@@ -1460,7 +1483,7 @@ def _chat_body(
     EXTENDS it. Type raw `<think>`; DeepSeek/Kimi/Qwen3.5 auto-open one in thinking
     mode (a redundant `<think>` is dropped), Qwen3 opens nothing.
     """
-    messages: list[dict] = [{"role": "user", "content": prompt}]
+    messages: list[dict] = [{"role": role, "content": prompt}]
     if prefill:
         messages.append({"role": "assistant", "content": prefill})
     body: dict = {
@@ -1502,7 +1525,8 @@ def _fmt_param(v: Any) -> str:
 @app.command("chat")
 def cmd_chat(
     run: str = typer.Argument(..., help="run id or unique substring (optional @checkpoint), or a model: `openrouter:<id>`, `base:<model>`, `ckpt:<sampler_path>`, `vllm:<name>`"),
-    prompt: str = typer.Argument(..., help="user message"),
+    prompt: str = typer.Argument(..., help="the message (a user turn unless --role)"),
+    role: str = _role_option("the message"),
     n: int = typer.Option(1, "--n", help="number of samples to draw"),
     temperature: Optional[float] = typer.Option(None, "--temperature", help="this call only; omit = inherit the global param (see `tinkerscope params`)"),
     max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="this call only; omit = inherit the global param"),
@@ -1532,7 +1556,8 @@ def cmd_chat(
     # overriding the global) — a `chat` is a new thread now, so its prompt is
     # thread identity, not a call-scoped global override.
     system, thread_system = _new_thread_system(_system_arg(system, system_file, no_system))
-    body = _chat_body(ref, ckpt, prompt, n, temperature, max_tokens, think, system, pid, prefill)
+    _check_role(role, thread_system)
+    body = _chat_body(ref, ckpt, prompt, n, temperature, max_tokens, think, system, pid, prefill, role)
     _with_effort(body, effort)
     if thread_system is not None:
         body["thread_system_prompt"] = thread_system
@@ -1542,7 +1567,7 @@ def cmd_chat(
     # SAVED panel bindings are never rewritten by a headless CLI command.
     conv_id = _get("/api/state").get("workspace_id")
     if conv_id:
-        parents, turn_err = _emit_user_turns(conv_id, [{"id": pid}], prompt, thread_system)
+        parents, turn_err = _emit_user_turns(conv_id, [{"id": pid}], prompt, thread_system, role)
         if turn_err is not None:
             _die(turn_err)
         body["workspace_id"] = conv_id
@@ -1559,7 +1584,8 @@ def cmd_chat(
 def cmd_compare(
     run_a: str = typer.Argument(..., help="run A → primary pane: id/substring (optional @checkpoint) or a model selector (`openrouter:…` / `base:…` / `ckpt:…` / `vllm:…`)"),
     run_b: str = typer.Argument(..., help="run B → compare pane: same forms as run A"),
-    prompt: str = typer.Argument(..., help="user message"),
+    prompt: str = typer.Argument(..., help="the message (a user turn unless --role)"),
+    role: str = _role_option("the message"),
     run: list[str] = typer.Option([], "--run", help="additional run(s) → 3rd, 4th, … panes (repeatable)"),
     n: int = typer.Option(1, "--n", help="number of samples per side"),
     temperature: Optional[float] = typer.Option(None, "--temperature", help="this call only; omit = inherit the global param"),
@@ -1579,6 +1605,7 @@ def cmd_compare(
     _set_timeout(timeout)
     # Thread-authoring --system + placement writing: same contract as `chat`.
     system, thread_system = _new_thread_system(_resolve_sys(system, no_system))
+    _check_role(role, thread_system)
     catalog = _models()
     # Resolve every run (A, B, then each --run) to (run, checkpoint, panel_id). Runs
     # are resolved BEFORE minting so an unresolvable arg doesn't burn panel numbers.
@@ -1596,7 +1623,7 @@ def cmd_compare(
     parents: dict[str, str] = {}
     if conv_id:
         parents, turn_err = _emit_user_turns(
-            conv_id, [{"id": pid} for (_r, _ck, pid) in specs], prompt, thread_system
+            conv_id, [{"id": pid} for (_r, _ck, pid) in specs], prompt, thread_system, role
         )
         if turn_err is not None:
             _die(turn_err)
@@ -1612,7 +1639,7 @@ def cmd_compare(
     results: list[tuple[str, dict, _StreamResult]] = []
     think: "bool | str | None" = "both" if thinking_both else thinking
     for (ref, ckpt, pid) in specs:
-        body = _chat_body(ref, ckpt, prompt, n, temperature, max_tokens, think, system, pid, prefill)
+        body = _chat_body(ref, ckpt, prompt, n, temperature, max_tokens, think, system, pid, prefill, role)
         _with_effort(body, effort)
         if thread_system is not None:
             body["thread_system_prompt"] = thread_system
@@ -1697,10 +1724,11 @@ def _panel_chat_body(
     system: Optional[str],
     prefill: Optional[str],
     thread_system: Optional[str] = None,
+    role: str = "user",
 ) -> dict:
-    """ChatRequest for a live panel AS BOUND — a fresh single-user-turn history
+    """ChatRequest for a live panel AS BOUND — a fresh one-message history
     (+ optional assistant prefill). Thin wrapper over `_panel_body`."""
-    messages: list[dict] = [{"role": "user", "content": prompt}]
+    messages: list[dict] = [{"role": role, "content": prompt}]
     if prefill:
         messages.append({"role": "assistant", "content": prefill})
     return _panel_body(panel, messages, n, temperature, max_tokens, thinking, system,
@@ -1831,7 +1859,7 @@ def _qualified_handle(ws_id: Optional[str], panel: str, node_id: str) -> str:
 
 
 def _emit_user_turns(
-    conv_id: str, targets: list[dict], prompt: str, thread_system: Optional[str]
+    conv_id: str, targets: list[dict], prompt: str, thread_system: Optional[str], role: str = "user"
 ) -> tuple[dict[str, str], Optional[str]]:
     """Persist one NEW-THREAD user turn per target panel — the writer's own
     `add_nodes` ops, emitted BEFORE the fire (HANDOFF_SERVER_AUTHORITY §4.3: a
@@ -1847,7 +1875,7 @@ def _emit_user_turns(
     parents: dict[str, str] = {}
     for p in targets:
         nid = _mint_node_id()
-        node: dict = {"id": nid, "role": "user", "content": prompt, "parent": None}
+        node: dict = {"id": nid, "role": role, "content": prompt, "parent": None}
         if thread_system:
             node["system_prompt"] = thread_system
         ops.append({"op": "add_nodes", "panel": p["id"], "nodes": [node], "select": True})
@@ -1895,6 +1923,7 @@ def _fire_send(
     tools: Optional[list] = None,
     wire: Optional[dict] = None,
     extra: Optional[dict] = None,
+    role: str = "user",
 ) -> list[tuple[str, dict, _StreamResult]]:
     """Fire one fresh-history chat per target panel, concurrently; join and return
     [(panel_id, panel, result)] with each result's collected samples. The
@@ -1906,7 +1935,7 @@ def _fire_send(
     persists: the fire is ephemeral (bucket render + stdout only)."""
     parents: dict[str, str] = {}
     if conv_id:
-        parents, turn_err = _emit_user_turns(conv_id, targets, prompt, thread_system)
+        parents, turn_err = _emit_user_turns(conv_id, targets, prompt, thread_system, role)
         if turn_err is not None:
             # No fire without the persisted turns: report per-panel (send dies on
             # the collected failures; battery records them and continues).
@@ -1923,7 +1952,7 @@ def _fire_send(
     results: list[tuple[str, dict, _StreamResult]] = []
     for p in targets:
         body = _panel_chat_body(p, prompt, n, temperature, max_tokens, think, system, prefill,
-                                thread_system=thread_system)
+                                thread_system=thread_system, role=role)
         _with_effort(body, effort)
         if tools is not None:
             body["tools"] = tools
@@ -1965,7 +1994,8 @@ def _print_first_token_tables(results: list[tuple[str, dict, _StreamResult]], js
 
 @app.command("send")
 def cmd_send(
-    prompt: Optional[str] = typer.Argument(None, help="user message — fired as a NEW thread at the current panels (or --file)"),
+    prompt: Optional[str] = typer.Argument(None, help="the message — fired as a NEW thread at the current panels (or --file); a user turn unless --role"),
+    role: str = _role_option("the message"),
     n: int = typer.Option(1, "--n", help="samples per panel"),
     temperature: Optional[float] = typer.Option(None, "--temperature", help="this call only; omit = inherit the global param (see `tinkerscope params`)"),
     max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="this call only; omit = inherit the global param"),
@@ -2017,6 +2047,7 @@ def cmd_send(
         conv_id = _create_send_workspace(_derived_ws_name(prompt), targets)
     think: "bool | str | None" = "both" if thinking_both else thinking
     system, thread_system = _new_thread_system(_system_arg(system, system_file, no_system))
+    _check_role(role, thread_system)
     # The global part is the TARGET workspace's own prompt, as the browser would send
     # it — not the bus global, which is whatever workspace a browser has open (or
     # nothing, headless).
@@ -2043,7 +2074,7 @@ def cmd_send(
     results = _fire_send(targets, prompt, prefill, n, temperature, max_tokens,
                          think, system, show_logprobs, json_out,
                          thread_system=thread_system, conv_id=conv_id, effort=effort, tools=tools, wire=wire,
-                         extra=extra)
+                         extra=extra, role=role)
     if first_token:
         _print_first_token_tables(results, json_out)
     failures, code = _fire_failures(results, lambda pid, p: f"{pid} ({_short_run(p.get('run_id'))})")
@@ -2188,26 +2219,21 @@ def _tool_result_msg(call: dict, result: str) -> dict:
     return {"role": "tool", "content": result, "tool_call_id": cid, **({"name": name} if name else {})}
 
 
-def _keep_in_ancestry(m: dict) -> bool:
-    """System-role nodes are dropped from a fire's messages (the server composes the
-    system prompt) — except a recorded one carrying verbatim Responses items, which
-    IS the system message, sent as it was (the server then composes none)."""
-    return m.get("role") != "system" or bool(m.get("items") or m.get("has_items"))
-
-
 def _continue_messages(ancestry: list[dict], prompt: Optional[str], prefill: Optional[str],
-                       tool_results: Optional[list[str]] = None) -> list[dict]:
+                       tool_results: Optional[list[str]] = None, role: str = "user") -> list[dict]:
     """Assemble the /api/chat messages from an ancestry (root→target, role/content)
     plus optional appends, and REFUSE invalid sequences up front (the server would
     reject them anyway, less legibly). The ancestry's LAST role decides:
-      - ends on an ASSISTANT turn → a user message is required (turn-level loom: the
+      - ends on an ASSISTANT turn → a message is required (turn-level loom: the
         follow-up/probe); an optional --prefill then seeds the fresh answer.
-      - ends on a USER turn → NO message (that would be two user turns); we re-sample
-        that turn, optionally seeded by --prefill (a thinking opener / truncated-own-
-        CoT continuation).
-    Content is answer-only (CoT excluded): the native renderer rebuilds each turn and
-    applies its own history policy. Placement is `parent_node`, never content match."""
-    pairs = [_wire_msg(m) for m in ancestry if _keep_in_ancestry(m)]
+      - ends on a USER / SYSTEM / DEVELOPER turn → no message re-samples that turn,
+        optionally seeded by --prefill (a thinking opener / truncated-own-CoT
+        continuation); a message is added first unless it would be a second user
+        turn in a row.
+    The message is a `role` turn (user by default). Content is answer-only (CoT
+    excluded): the native renderer rebuilds each turn and applies its own history
+    policy. Placement is `parent_node`, never content match."""
+    pairs = [_wire_msg(m) for m in ancestry]
     if not pairs:
         _die("empty ancestry — nothing to continue from")
     calls = pairs[-1].get("tool_calls") if pairs[-1]["role"] == "assistant" else None
@@ -2219,21 +2245,15 @@ def _continue_messages(ancestry: list[dict], prompt: Optional[str], prefill: Opt
         _die(f"the target turn made {len(calls)} tool call(s) — answer them with --tool-result "
              "(one per call, in order) before continuing")
     last = pairs[-1]["role"]
-    if last == "tool":
-        # the model's turn after its tool results; a message adds a user turn first
-        if prompt is not None:
-            pairs.append({"role": "user", "content": prompt})
-    elif last == "assistant":
-        if prompt is None:
-            _die("target ends on an ASSISTANT turn — pass a user message (inline / --file) to add a "
-                 "turn, or target a user turn (--node/--turn) with --prefill to loom its answer")
-        pairs.append({"role": "user", "content": prompt})
-    elif last == "user":
-        if prompt is not None:
-            _die("target ends on a USER turn — a message here would be two user turns in a row. Drop it "
-                 "to re-sample this turn (optionally with --prefill), or target an assistant turn to add one")
-    else:
-        _die(f"target ends on a {last!r} turn — nothing to continue")
+    if last == "assistant" and prompt is None:
+        _die("target ends on an ASSISTANT turn — pass a message (inline / --file) to add a "
+             "turn, or target a user turn (--node/--turn) with --prefill to loom its answer")
+    if last == "user" and role == "user" and prompt is not None:
+        _die("target ends on a USER turn — a message here would be two user turns in a row. Drop it "
+             "to re-sample this turn (optionally with --prefill), target an assistant turn to add one, "
+             "or pass --role system|developer")
+    if prompt is not None:
+        pairs.append({"role": role, "content": prompt})
     if prefill is not None:
         pairs.append({"role": "assistant", "content": prefill})
     return pairs
@@ -2241,7 +2261,8 @@ def _continue_messages(ancestry: list[dict], prompt: Optional[str], prefill: Opt
 
 @app.command("continue")
 def cmd_continue(
-    prompt: Optional[str] = typer.Argument(None, help="user message to append AFTER the target (turn-level loom / the probe). Omit to re-sample a user-turn target with only --prefill."),
+    prompt: Optional[str] = typer.Argument(None, help="message to append AFTER the target (turn-level loom / the probe). Omit to re-sample a user-turn target with only --prefill."),
+    role: str = _role_option("the appended message"),
     n: int = typer.Option(1, "--n", help="samples per panel"),
     temperature: Optional[float] = typer.Option(None, "--temperature", help="this call only; omit = inherit the global param (see `tinkerscope params`)"),
     max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="this call only; omit = inherit the global param"),
@@ -2299,6 +2320,7 @@ def cmd_continue(
     --prefill only ever seeds a tiny thinking opener or a truncated OWN CoT continuation;
     never a fabricated or partial turn."""
     _set_timeout(timeout)
+    _check_role(role)
     prompt = _arg_or_file(prompt, file, "message", "--file")
     prefill = _arg_or_file(prefill, prefill_file, "prefill", "--prefill-file")
     tree_mode = thread is not None or turn is not None or node is not None
@@ -2443,7 +2465,7 @@ def cmd_continue(
             thread_system = (ancestry[0].get("system_prompt") if ancestry else "") or ""
         if no_system:
             thread_system = ""  # --no-system suppresses the thread part too
-        plans.append((p, _continue_messages(ancestry, prompt, prefill, tool_result or None), thread_system, anchor))
+        plans.append((p, _continue_messages(ancestry, prompt, prefill, tool_result or None, role), thread_system, anchor))
 
     if fixed_ancestry is not None:
         # No anchor → no parent_node → the server folds nothing. Same loudness
@@ -2469,16 +2491,13 @@ def cmd_continue(
             # fork that differs), so the browser follows the CLI to where the
             # samples will land instead of extending an invisible sibling.
             turn_ops.extend(_select_path_ops(trees.get(p["id"]) or {}, p["id"], anchor["id"]))
-            if anchor.get("role") == "user":
-                fire_parent[p["id"]] = anchor["id"]
-                continue
             # The turns this continue appends under the anchor, as one chain: the
-            # tool results answering its calls, then the user message.
+            # tool results answering its calls, then the message.
             added: list[dict] = []
             if tool_result:
                 added.extend(_tool_result_msgs(anchor.get("tool_calls") or [], tool_result))
             if prompt is not None:
-                added.append({"role": "user", "content": prompt})
+                added.append({"role": role, "content": prompt})
             parent_id = anchor["id"]
             chain = []
             for m in added:
@@ -2487,7 +2506,7 @@ def cmd_continue(
                 parent_id = new_id
             if chain:
                 turn_ops.append({"op": "add_nodes", "panel": p["id"], "select": True, "nodes": chain})
-            if chain or anchor.get("role") == "tool":
+            if chain or _is_fire_parent(anchor):
                 fire_parent[p["id"]] = parent_id
         if turn_ops:
             _post(f"/api/workspaces/{c['id']}/ops", {"ops": turn_ops})
@@ -2501,7 +2520,7 @@ def cmd_continue(
         if tool_result:
             add.append(f"+{len(tool_result)} tool result(s)")
         if prompt is not None:
-            add.append("+user")
+            add.append(f"+{role}")
         if prefill is not None:
             add.append(f"+prefill({_oneline(prefill, 24)})")
         if fixed_ancestry is not None:
@@ -4244,8 +4263,8 @@ def cmd_replay(
         t += 1
         if turn and t not in turn:
             continue
-        prefix = [m for m in path[:i] if _keep_in_ancestry(m)]
-        if not prefix or prefix[-1].get("role") not in ("user", "tool"):
+        prefix = path[:i]
+        if not prefix or not _is_fire_parent(prefix[-1]):
             skipped.append(f"turn {t} ({nd['id']}): follows a {prefix[-1]['role'] if prefix else 'nothing'} turn")
             continue
         jobs.append((t, nd, prefix))
@@ -4367,7 +4386,7 @@ def _recovered_reasoning(call_dir: Path) -> dict[str, dict]:
 def _item_side(it: dict) -> str:
     t = it.get("type") or "message"
     if t == "message":
-        return {"system": "system", "developer": "system", "assistant": "assistant"}.get(it.get("role"), "user")
+        return {"system": "system", "developer": "developer", "assistant": "assistant"}.get(it.get("role"), "user")
     if t.endswith("_call_output"):
         return "tool"
     return "assistant"  # reasoning, function_call, computer_call, …
@@ -4375,7 +4394,7 @@ def _item_side(it: dict) -> str:
 
 def _items_nodes(items: list[dict], recovered: dict[str, dict]) -> tuple[list[dict], int]:
     """Recorded Responses items → tree nodes (chained in order): consecutive
-    system / user / assistant-side items group into one node, each tool output is
+    system / developer / user / assistant-side items group into one node, each tool output is
     its own node. A node's `items` are the WIRE form — an id-only reasoning item
     gains the blob recovered from the call that produced it (a blob is bound to its
     item id, so it goes back under that id); `items_recorded` keeps exactly what was
@@ -4452,7 +4471,7 @@ def _responses_call_body(data: Any, f: Path, model: Optional[str], panel: str, i
     rec_model = req.get("model")
     ref = _resolve_model_arg(model)[0] if model else (
         f"openrouter:{_oresp.openai_model(rec_model)}" if rec_model else None)
-    system = "\n\n".join(nd["content"] for nd in nodes if nd["role"] == "system")
+    system = "\n\n".join(nd["content"] for nd in nodes if nd["role"] in _INSTRUCTION_ROLES)
     extra = {k: v for k, v in req.items() if k not in ("input", "model", "tools", "reasoning")}
     body = {
         "trees": {panel: {"nodes": tree_nodes, "rootChildren": [root], "selected": selected}},
@@ -4568,10 +4587,12 @@ def cmd_import(
         if not isinstance(tr, dict) or not isinstance(tr.get("messages"), list):
             _die("expected a workspace body (with `trees`) or a transcript (with `messages`)")
         msgs = _norm_msgs(tr["messages"], "messages")
-        sys_parts = [m["content"] for m in msgs if m["role"] == "system"]
+        # leading system messages are the prompt; later ones are turns, kept in place
+        lead = next((i for i, m in enumerate(msgs) if m["role"] != "system"), len(msgs))
+        sys_parts = [m["content"] for m in msgs[:lead]]
         if tr.get("system"):
             sys_parts.insert(0, tr["system"])
-        msgs = [m for m in msgs if m["role"] != "system"]
+        msgs = msgs[lead:]
         if not msgs:
             _die("the transcript has no non-system message")
         sys_text = "\n\n".join(sys_parts)
@@ -4647,10 +4668,12 @@ def cmd_export(
         if pid is None:
             _die("the workspace has no thread")
         path = _thread_nodes(c, pid, thread)
-        system = (path[0].get("system_prompt") or "") or (_ws_system(c) or "")
+        # a thread that opens with a system / developer message carries its own prompt
+        opens = bool(path) and path[0].get("role") in _INSTRUCTION_ROLES
+        system = "" if opens else (path[0].get("system_prompt") or "") or (_ws_system(c) or "")
         lay = next((r for r in (c.get("panels") or []) if isinstance(r, dict) and r.get("id") == pid), {})
         doc: dict = {"model": lay.get("run_id"), "system": system, "tools": c.get("tools") or [],
-                     "messages": [_wire_msg(m) for m in path if m.get("role") != "system"]}
+                     "messages": [_wire_msg(m) for m in path]}
     else:
         doc = {k: v for k, v in c.items() if k not in ("rev",)}
         if blobs:

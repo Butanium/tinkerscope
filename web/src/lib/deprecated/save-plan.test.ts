@@ -3,7 +3,7 @@
 // (no dep added; respects the supply-chain age gate). Exit code != 0 on failure.
 
 import { planSave, heavyNodeIds, lightenTree, type ConvFields } from './save-plan.ts';
-import { emptyTree, appendUserTurn, type ConvTree, type TreeNode } from '../tree.ts';
+import { emptyTree, appendTurn, type ConvTree, type TreeNode } from '../tree.ts';
 
 let passed = 0;
 let failed = 0;
@@ -37,8 +37,8 @@ const FIELDS: ConvFields = {
   seen_panels: ['primary'],
   panel_seq: 3
 };
-const t1: ConvTree = appendUserTurn(emptyTree(), 'hello').tree;
-const t2: ConvTree = appendUserTurn(emptyTree(), 'other').tree;
+const t1: ConvTree = appendTurn(emptyTree(), 'hello').tree;
+const t2: ConvTree = appendTurn(emptyTree(), 'other').tree;
 
 // ── kinds ─────────────────────────────────────────────────────────────
 test('no dirt → none', () => {

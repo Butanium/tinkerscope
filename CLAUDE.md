@@ -918,6 +918,12 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     app.css) and **focus**
     (`?focus=<panel>` → `visibleSels` / `targetSels`; a render filter, never written
     to reduced/send-target meta).
+  - `lib/RoleToggle.svelte` — the `user · system · developer` switch: the edit
+    dialog's head on those rows (Save forks under the picked role — `tree.ts
+    editInputFork`, the ONE edit path for the three) and the composer row (the
+    role of what you send). Every system / developer node is sent in place; the
+    server composes the workspace / thread prompt unless the thread OPENS with one
+    (`routes/chat.py`). Roles pass through to every backend unchanged.
   - `lib/ThreadSwitcher.svelte` — the composer-row **cross-panel thread jump**:
     a popover (next to the ⑂ branch-from-start toggle) listing
     `threadStarts(convo.trees)` — every root thread across all panels with its

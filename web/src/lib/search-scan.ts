@@ -76,7 +76,7 @@ function snippetParts(
 function hitScope(field: string, role: string): string {
   if (field === 'reasoning') return 'thinking';
   if (field === 'system_prompt') return 'system';
-  return role === 'user' ? 'user' : role === 'system' ? 'system' : 'reply';
+  return role === 'user' ? 'user' : role === 'system' || role === 'developer' ? 'system' : 'reply';
 }
 
 export function searchWorkspaces(

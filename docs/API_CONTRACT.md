@@ -203,7 +203,11 @@ prefill?, loom_cut?, loom_text?, finish_reason?, parent, children[],
 has_token_logprobs?, has_raw_meta?, reasoning_details?, reasoning_tokens?,
 reasoning_account?, tool_calls?, tool_call_id?, name?, handler?,
 prefill_unsupported?}`
-+ a `selected` map (parentId|`"__root__"` → selected child id). `finish_reason:
++ a `selected` map (parentId|`"__root__"` → selected child id). `role` is
+`user | assistant | system | developer | tool`. Every node on a path goes out with a
+fire, system / developer ones in place; the server prepends the composed workspace /
+thread prompt unless the thread OPENS with a system / developer node (that message is
+then the prompt). Samples fold under any non-assistant node. `finish_reason:
 "length"` marks a turn cut off by the max-tokens limit (the UI badges it).
 `reasoning_details` is a closed model's reasoning payload, verbatim from OpenRouter
 (`reasoning.summary` / `reasoning.encrypted` / `reasoning.text`+`signature` items);
@@ -227,8 +231,7 @@ node (fork-copy, a system-prompt edit) reads the original node's blobs — clien
 `items_node: items_ref`. The node's light fields (`content`,
 `reasoning`, `tool_calls` — a computer call is typed `computer_call`) are derived from
 its items. A chat message referencing items (`items` inline or `items_node`) puts the
-chat on the Responses wire: items go out verbatim, item-less nodes are converted, a
-system node with items replaces the composed system prompt.
+chat on the Responses wire: items go out verbatim, item-less nodes are converted.
 
 **Tool use** (OpenRouter only; OpenAI chat-completions shape). `role` may be
 `"tool"`. An assistant node's `tool_calls` = `[{id, type:"function", function:{name,
@@ -353,7 +356,8 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
                           // sampling call, raw_meta (request block keyed `vllm_model`),
                           // continue_tokens (loom) honored; top_k / presence_penalty /
                           // repetition_penalty forwarded. Token-streams at n==1.
-  "messages": [{"role":"user","content":"…"}],   // required. An entry may also carry
+  "messages": [{"role":"user","content":"…"}],   // required; role user|assistant|system|
+                          // developer|tool, each sent as is. An entry may also carry
                           // reasoning_details (assistant), tool_calls (assistant),
                           // tool_call_id + name (role "tool") — forwarded to OpenRouter —
                           // and `items` (verbatim Responses items) or `items_node` (the
@@ -450,14 +454,14 @@ Stored under `~/.local/state/tinkerscope/<sha1(scan_roots)[:12]>/workspaces/`.
                           // (workspace scoping, below); with parent_node set it is also
                           // where the server FOLDS.
   "parent_node": null,    // SERVER-AUTHORED FOLD placement (HANDOFF_SERVER_AUTHORITY
-                          // §4.3): the id of the USER node the samples fold under at
+                          // §4.3): the id of the node (user / system / developer / tool) the samples fold under at
                           // terminal. The writer persists that node as its OWN add_nodes
                           // op BEFORE the fire (send and regen are the same shape — the
                           // request carries no user content of its own; a pre-start
                           // failure can't lose the turn). Setting it makes the home
                           // workspace mandatory: explicit workspace_id → else the bus's
                           // open workspace → else 400. Also 400 with commit:false (a fold
-                          // IS a commit). A parent that doesn't exist / isn't a user node
+                          // IS a commit). A parent that doesn't exist / is an assistant node
                           // is a pre-start `error` (SSE + bus chat_error), like an
                           // unsampleable run. null = legacy fire: nothing is
                           // persisted anywhere (P3 removed the echo commit too) —
