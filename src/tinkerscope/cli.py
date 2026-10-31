@@ -4383,57 +4383,49 @@ def _recovered_reasoning(call_dir: Path) -> dict[str, dict]:
     return found
 
 
-def _item_side(it: dict) -> str:
-    t = it.get("type") or "message"
-    if t == "message":
-        return {"system": "system", "developer": "developer", "assistant": "assistant"}.get(it.get("role"), "user")
-    if t.endswith("_call_output"):
-        return "tool"
-    return "assistant"  # reasoning, function_call, computer_call, …
+def _turn_node(side: str, wire_items: list[dict], recorded: list[dict], names: dict) -> dict:
+    """One turn's items → its tree node: role, the light fields derived from the
+    items, the items themselves (`items_recorded` too when they differ). `names`
+    maps a call id to its function name, for a tool output's node."""
+    nd: dict = {"role": side, "items": wire_items}
+    if recorded != wire_items:
+        nd["items_recorded"] = recorded
+    if side == "assistant":
+        d = _oresp.derive(wire_items)
+        nd["content"] = d["content"]
+        if d.get("reasoning"):
+            nd["reasoning"] = d["reasoning"]
+        if d.get("tool_calls"):
+            nd["tool_calls"] = d["tool_calls"]
+        if d["encrypted"]:
+            nd["reasoning_account"] = _FOREIGN_ACCOUNT
+    else:
+        nd["content"] = _oresp.input_text(wire_items)
+        if side == "tool":
+            nd["tool_call_id"] = wire_items[0].get("call_id") or ""
+            if names.get(nd["tool_call_id"]):
+                nd["name"] = names[nd["tool_call_id"]]
+    return nd
 
 
 def _items_nodes(items: list[dict], recovered: dict[str, dict]) -> tuple[list[dict], int]:
-    """Recorded Responses items → tree nodes (chained in order): consecutive
-    system / developer / user / assistant-side items group into one node, each tool output is
-    its own node. A node's `items` are the WIRE form — an id-only reasoning item
-    gains the blob recovered from the call that produced it (a blob is bound to its
-    item id, so it goes back under that id); `items_recorded` keeps exactly what was
-    sent when that differs. Returns (nodes, blobs recovered)."""
-    groups: list[tuple[str, list[dict], list[dict]]] = []
+    """Recorded Responses items → tree nodes (chained in order), one per turn
+    (`openrouter_responses.turns`): each input message, each tool output, each model
+    turn. A node's `items` are the WIRE form — an id-only reasoning item gains the
+    blob recovered from the call that produced it (a blob is bound to its item id, so
+    it goes back under that id); `items_recorded` keeps exactly what was sent when
+    that differs. Returns (nodes, blobs recovered)."""
+    wire: list[dict] = []
     n_rec = 0
     for it in items:
-        side = _item_side(it)
-        wire = it
         if it.get("type") == "reasoning" and not it.get("encrypted_content") and it.get("id") in recovered:
-            wire = {**it, "encrypted_content": recovered[it["id"]]["encrypted_content"]}
+            it = {**it, "encrypted_content": recovered[it["id"]]["encrypted_content"]}
             n_rec += 1
-        if side == "tool" or not groups or groups[-1][0] != side:
-            groups.append((side, [], []))
-        groups[-1][1].append(wire)
-        groups[-1][2].append(it)
+        wire.append(it)
     names = {it.get("call_id"): it.get("name") or ("computer" if it.get("type") == "computer_call" else None)
              for it in items if (it.get("type") or "").endswith("_call")}
-    nodes = []
-    for side, wire_items, recorded in groups:
-        nd: dict = {"role": side, "items": wire_items}
-        if recorded != wire_items:
-            nd["items_recorded"] = recorded
-        if side == "assistant":
-            d = _oresp.derive(wire_items)
-            nd["content"] = d["content"]
-            if d.get("reasoning"):
-                nd["reasoning"] = d["reasoning"]
-            if d.get("tool_calls"):
-                nd["tool_calls"] = d["tool_calls"]
-            if d["encrypted"]:
-                nd["reasoning_account"] = _FOREIGN_ACCOUNT
-        else:
-            nd["content"] = _oresp.input_text(wire_items)
-            if side == "tool":
-                nd["tool_call_id"] = wire_items[0].get("call_id") or ""
-                if names.get(nd["tool_call_id"]):
-                    nd["name"] = names[nd["tool_call_id"]]
-        nodes.append(nd)
+    nodes = [_turn_node(side, [wire[i] for i in idx], [items[i] for i in idx], names)
+             for side, idx in _oresp.turns(items)]
     return nodes, n_rec
 
 

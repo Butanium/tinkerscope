@@ -3566,3 +3566,27 @@ message: it does, on chat completions and Responses, both roles (gpt-6-luna). So
 rows get the regenerate button too: it samples a reply directly under the row, a sibling
 of whatever followed it. `regenTarget` already allowed it (any non-assistant turn is a
 fire parent since the roles change); only `ChatMessage` hid the button.
+
+### 2026-10-31 — The Responses-call importer makes one row per message
+
+Clément: "the importer is therefore false, it should not merge like this". `_items_nodes`
+grouped consecutive same-side items into one node: the recorded system prompt plus a later
+system message became one system row, a run of user items (events + "(Your previous turn was
+empty)" nudges, up to 55 in a row in the Terra calls) one user row. The wire was right — each
+node kept its items verbatim — but a row drew several messages and an edit collapsed them
+into one. Now `openrouter_responses.turns` decides: every input message and every tool output
+is its own turn; a model turn is its reasoning, message and calls, and a new one starts at a
+reasoning or message item once the turn already has a message or a call (so parallel calls
+stay one turn). Measured on the 103 calls in data/raw/calls before choosing that rule: replayed
+assistant runs are only `reasoning function_call` (62) and `function_call` (5), and outputs
+`reasoning message` / `message` / `reasoning function_call`. Round trip on the largest call
+(65 items → 63 rows): `export --responses` gives back the recorded input byte for byte.
+
+Already-imported workspaces: `scripts/split_recorded_items.py` replaces each merged node with
+a chain of fresh nodes in its sibling slot (fresh ids: blobs are write-once per id), re-hangs
+its children under the last piece and carries the selections; a graft copy (`items_ref`) gets
+pieces pointing at the original's pieces. One `replace_tree` per panel in one batch, so the
+merged nodes land in the trash journal. Checked on a snapshot of the Terra state before
+touching :8770: for every node that survived, the Responses input its ancestry stands for
+hashes the same before and after (559 + 96 + 236 nodes, 0 changed); only the 16 merged nodes
+vanished.

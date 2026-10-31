@@ -322,8 +322,10 @@ followed by a developer one) stay rows in order, sent exactly as in the file.
 `tinkerscope import --responses-call CALL.json [--include-output] [--name N] [--id ID]
 [--model SEL] [--calls-dir DIR]` builds a workspace: the call's tools verbatim (incl.
 `{"type":"computer"}`), `wire: {api: "responses", reasoning, …}`, and ONE thread whose nodes
-hold the input items VERBATIM — a system (or developer) node, one node per run of user messages, one per
-run of assistant-side items (reasoning / calls), one per tool output. An id-only reasoning
+hold the input items VERBATIM — one node per input message (system / developer / user), one
+per model turn (its reasoning, message and calls), one per tool output. Workspaces imported
+before 2026-10-31 grouped runs of messages into one row: `scripts/split_recorded_items.py <ws>`
+splits them in place (samples below kept; the merged rows go to the trash). An id-only reasoning
 item (how such scaffolds replay reasoning) gets the encrypted blob recovered from the call
 that produced it, found in `--calls-dir` (default: the file's folder); `items_recorded`
 keeps what was really sent. `--include-output` appends the call's own output as the last

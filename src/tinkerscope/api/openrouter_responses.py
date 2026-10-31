@@ -99,6 +99,34 @@ def message_items(m: dict) -> list[dict]:
     return [{"role": role, "content": m.get("content") or ""}]
 
 
+def item_side(it: dict) -> str:
+    """Which turn kind an item belongs to: an input message's own role, `tool` for a
+    call's output, `assistant` for the model's reasoning / message / calls."""
+    t = it.get("type") or "message"
+    if t == "message":
+        return {"system": "system", "developer": "developer", "assistant": "assistant"}.get(it.get("role"), "user")
+    if t.endswith("_call_output"):
+        return "tool"
+    return "assistant"  # reasoning, function_call, computer_call, …
+
+
+def turns(items: list[dict]) -> list[tuple[str, list[int]]]:
+    """Recorded items → the turns they stand for, as (side, item indices) in order:
+    every input message and every tool output is its own turn; a model turn is its
+    reasoning, message and calls (parallel calls included), and a new one starts at a
+    reasoning or message item once the current turn has a message or a call."""
+    out: list[tuple[str, list[int]]] = []
+    for i, it in enumerate(items):
+        side = item_side(it)
+        if side == "assistant" and out and out[-1][0] == "assistant":
+            started = any((items[j].get("type") or "message") != "reasoning" for j in out[-1][1])
+            if not (started and (it.get("type") or "message") in ("reasoning", "message")):
+                out[-1][1].append(i)
+                continue
+        out.append((side, [i]))
+    return out
+
+
 def build_input(messages: list[dict]) -> list[dict]:
     items: list[dict] = []
     for m in messages:

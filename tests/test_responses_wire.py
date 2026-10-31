@@ -77,16 +77,27 @@ def test_elided_record_keeps_shape():
     assert v["input"][1]["encrypted_content"] == "<encrypted, 50 chars>"
 
 
-def test_items_group_into_nodes_with_recovered_reasoning():
+def test_items_become_one_node_per_turn_with_recovered_reasoning():
     recovered = {"rs_1": {"id": "rs_1", "type": "reasoning", "encrypted_content": "BLOB", "summary": []}}
-    nodes, n = cli._items_nodes([SYS, U1, U2, RS, FC, FCO, U1, CC], recovered)
+    nodes, n = cli._items_nodes([SYS, SYS, U1, U2, RS, FC, FCO, U1, CC], recovered)
     assert n == 1
-    assert [nd["role"] for nd in nodes] == ["system", "user", "assistant", "tool", "user", "assistant"]
-    asst = nodes[2]
+    # every input message is its own row — never merged with its neighbours
+    assert [nd["role"] for nd in nodes] == ["system", "system", "user", "user", "assistant", "tool", "user", "assistant"]
+    asst = nodes[4]
     assert asst["items"][0] == {**RS, "encrypted_content": "BLOB"} and asst["items_recorded"] == [RS, FC]
     assert asst["tool_calls"][0]["id"] == "call_1" and asst["reasoning_account"] == cli._FOREIGN_ACCOUNT
-    assert nodes[3] == {"role": "tool", "items": [FCO], "content": "posted", "tool_call_id": "call_1", "name": "post"}
-    assert nodes[1]["content"] == "hello\n\nscreen:" and "items_recorded" not in nodes[1]
+    assert nodes[5] == {"role": "tool", "items": [FCO], "content": "posted", "tool_call_id": "call_1", "name": "post"}
+    assert nodes[2] == {"role": "user", "items": [U1], "content": "hello"} and nodes[3]["content"] == "screen:"
+
+
+def test_model_turns_split_at_a_new_reasoning_or_message():
+    MSG = {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "hi"}]}
+    FC2 = {**FC, "id": "fc_2", "call_id": "call_3"}
+    assert R.turns([RS, FC, FC2]) == [("assistant", [0, 1, 2])]  # parallel calls: one turn
+    assert R.turns([RS, MSG, FC, RS, FC2]) == [("assistant", [0, 1, 2]), ("assistant", [3, 4])]
+    assert R.turns([MSG, MSG]) == [("assistant", [0]), ("assistant", [1])]
+    assert R.turns([RS, RS, FC]) == [("assistant", [0, 1, 2])]
+    assert R.turns([FC, FCO, U1]) == [("assistant", [0]), ("tool", [1]), ("user", [2])]
 
 
 def test_responses_call_body(tmp_path):
