@@ -598,10 +598,10 @@ class BranchOps {
   }
 
   /** Edit a system node (a recorded call's system message) like a first message:
-   *  a sibling thread under the new prompt, the conversation copied below it
-   *  (Shift: all of it, no reply; else up to the first reply, regenerated). */
+   *  a sibling thread under the new prompt (empty = none at all), the conversation
+   *  copied below it (Shift: all of it, no reply; else up to the first reply,
+   *  regenerated). */
   async #editSystem(panel: Panel, nodeId: string, content: string, copyDownstream: boolean) {
-    if (!content.trim()) return;
     const items = await this.#itemsOf(panel, nodeId);
     const r = editSystemFork(ws.treeFor(panel), nodeId, content, copyDownstream, items);
     if (!r) return;

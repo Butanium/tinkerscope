@@ -144,6 +144,19 @@ test('Shift: the whole conversation is copied under the new prompt, nothing fire
   eq(r.fireFrom, null);
 });
 
+test('an EMPTY system edit drops the prompt: the copy starts a thread at the first turn', () => {
+  const t = recordedThread();
+  const [sys, u1] = activePath(t);
+  const r = editSystemFork(t, sys.id, '', false)!;
+  assertValid(r.tree);
+  const path = activePath(r.tree);
+  eq(path.map((n) => n.role), ['user']);
+  eq(path[0].parent, null);
+  eq(path[0].items_ref, u1.id);
+  eq(r.fireFrom, path[0].id);
+  eq(ancestryMessages(r.tree, path[0].id).map((m) => m.role), ['user']); // no system message at all
+});
+
 // ── appendUserTurn ───────────────────────────────────────────────────
 test('appendUserTurn on empty tree makes a root user node', () => {
   const { tree, nodeId } = appendUserTurn(emptyTree(), 'first');

@@ -823,6 +823,17 @@
   // appending to the active thread. Transient — deliberately not persisted, so a
   // reload never silently reopens a mode where sends stop extending the thread.
   let branchFromRoot = $state(false);
+  /** Every panel a send reaches is on a thread with its OWN system prompt (a
+   *  system row, or the thread prompt on its first message), so the workspace one
+   *  applies nowhere: its chip would only confuse. A fresh thread (⑂) would use it. */
+  let workspaceSystemMoot = $derived(
+    !branchFromRoot &&
+      targetSels.length > 0 &&
+      targetSels.every((p) => {
+        const root = activePath(ws.treeFor(p.panel))[0];
+        return !!root && (root.role === 'system' || !!root.system_prompt);
+      })
+  );
   // THREAD system prompt for the next branch-from-start send: stamped on the new
   // thread's root node; it overrides the global prompt server-side. Only
   // settable while ⑂ is armed (the composer is authoring a root node then);
@@ -3125,6 +3136,7 @@
              two axes are orthogonal (fold never mutes). A thread's own system
              prompt (ThreadSystemRow, top of each panel) overrides this one. -->
         <div class="prefill-row">
+          {#if !workspaceSystemMoot}
           <SplitChip
             label="system prompt"
             active={systemActive}
@@ -3136,6 +3148,7 @@
             onpower={toggleSystemOn}
             onfold={() => (showSystem = !showSystem)}
           />
+          {/if}
           {#snippet composerScope()}
             <PrefillScopeToggle
               embedded
@@ -3201,7 +3214,7 @@
             use:tip
           >{#if ws.tools}{@const on = offeredCount(ws.tools, ws.toolHandlers)}tools · {on === ws.tools.length ? on : `${on}/${ws.tools.length}`}{:else}tools{/if}</button>
         </div>
-        {#if showSystem}
+        {#if showSystem && !workspaceSystemMoot}
           <div transition:fold>
           <!-- disabled until the workspace is OPEN: an edit in the load window
                would race the open claim (its flush can be stamped null / get

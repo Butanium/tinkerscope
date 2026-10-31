@@ -322,6 +322,8 @@
   let editHasReasoning = $state(false);
   // Closed-model thinking (tKind set): no textarea — keep it as is, or drop it.
   let editDropThinking = $state(false);
+  // a system row's edit can also drop the prompt (the fork starts with no system message)
+  let editDropSystem = $state(false);
   let editShift = $state(false);
   let editAll = $state(false);
   // Thread-system field (ROOT user rows only): editing it — like editing the
@@ -337,6 +339,7 @@
     editHasReasoning = msg.role === 'assistant' && (!!msg.reasoning || !!sealedKind);
     editReasoning = msg.reasoning ?? '';
     editDropThinking = false;
+    editDropSystem = false;
     editSystem = msg.system_prompt ?? '';
   }
   function commitEdit() {
@@ -344,7 +347,7 @@
     // along), '' means dropped — tree.ts editAssistant keys on exactly that.
     const reasoning = sealedKind ? (editDropThinking ? '' : msg.reasoning) : editHasReasoning ? editReasoning : undefined;
     onEdit(
-      editDraft,
+      editDropSystem ? '' : editDraft,
       reasoning,
       editShift,
       editAll,
@@ -926,6 +929,22 @@
         ></textarea>
         <div class="edit-field-label">Response</div>
       {/if}
+      {#if msg.role === 'system'}
+        <div class="edit-field-label edit-sealed-head">
+          <span>System prompt</span>
+          <button
+            class="edit-drop-thinking"
+            class:dropped={editDropSystem}
+            data-testid="edit-drop-system"
+            data-tooltip={editDropSystem ? 'Keep the system prompt' : 'Fork with no system prompt'}
+            use:tip
+            onclick={() => (editDropSystem = !editDropSystem)}
+          >{editDropSystem ? 'undo drop' : 'drop system prompt'}</button>
+        </div>
+      {/if}
+      {#if editDropSystem}
+        <div class="edit-sealed-text dropped" data-testid="edit-system-dropped">dropped</div>
+      {:else}
       <!-- svelte-ignore a11y_autofocus -->
       <textarea
         class="edit-textarea"
@@ -937,6 +956,7 @@
           else if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
         }}
       ></textarea>
+      {/if}
       <div class="edit-actions">
         <button class="btn-edit-cancel" onclick={cancelEdit}>Cancel</button>
         <button class="btn-edit-save" onclick={commitEdit}>Save{editShift ? ' fork' : ''}</button>

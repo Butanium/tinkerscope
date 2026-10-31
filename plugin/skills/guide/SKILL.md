@@ -239,7 +239,10 @@ under another key, so the model won't see it. Sending there uses OpenRouter's Re
 API with those items unchanged. The recorded system message is the thread's first row
 and edits like a first message: a sibling thread under the edited prompt with the
 conversation copied below it (screenshots included) and the first reply regenerated;
-Shift copies the whole conversation without generating. A computer call's result form asks for a screenshot
+Shift copies the whole conversation without generating; **drop system prompt** in the editor
+forks it with no system message at all. While every thread a send reaches has its own
+prompt (a system row, or a thread prompt), the composer's **system prompt** pill is
+hidden — it wouldn't apply; it comes back for ⑂ branch-from-start. A computer call's result form asks for a screenshot
 file instead of text.
 
 **"Do these two checkpoints differ?"** Add a panel per checkpoint, send the same

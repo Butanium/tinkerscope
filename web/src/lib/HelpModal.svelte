@@ -605,7 +605,9 @@ codex plugin add tinkerscope@tinkerscope</pre>
         enlarge), reasoning as a normal Thinking fold (the summary; an edit can only keep or drop it) or a small
         <i>encrypted (N tokens)</i> when there's no summary, calls and their outputs. The recorded system message is the
         thread's first row and edits like a first message: a new thread under the edited prompt, the
-        conversation copied below it and its first reply regenerated (Shift: copy all, no reply). Sends there go
+        conversation copied below it and its first reply regenerated (Shift: copy all, no reply);
+        <b>drop system prompt</b> in that editor forks it with none. While every thread you'd send to has
+        its own prompt, the composer's <b>system prompt</b> pill hides: it wouldn't apply. Sends there go
         through OpenRouter's Responses API with those items unchanged. A computer call is answered with a
         screenshot file instead of text.
       </p>

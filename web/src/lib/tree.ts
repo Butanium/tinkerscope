@@ -585,7 +585,7 @@ export function editUserForkCopy(
  *  Heavy fields are deliberately NOT carried: a copy is a new node with no blob
  *  behind it, and `token_logprobs` belong to the ids the model actually sampled. */
 function graftDownstream(t: ConvTree, rootId: string, chain: TreeNode[]): void {
-  let curParent = rootId;
+  let curParent = rootId; // may be ROOT: the copy then starts a new thread
   for (const node of chain) {
     const cid = nid();
     t.nodes[cid] = {
@@ -608,10 +608,10 @@ function graftDownstream(t: ConvTree, rootId: string, chain: TreeNode[]): void {
         : node.has_items
           ? { has_items: true, items_ref: node.items_ref ?? node.id }
           : {}),
-      parent: curParent,
+      parent: curParent === ROOT ? null : curParent,
       children: []
     };
-    t.nodes[curParent].children.push(cid);
+    childArray(t, curParent).push(cid);
     t.selected[curParent] = cid;
     curParent = cid;
   }
@@ -622,7 +622,8 @@ function graftDownstream(t: ConvTree, rootId: string, chain: TreeNode[]): void {
  *  conversation — all of it with `copyDownstream` (nothing is generated), else
  *  only the turns up to the first reply, which `fireFrom` then regenerates. The
  *  new node keeps the original item's role (system / developer); its text is
- *  one plain part. */
+ *  one plain part. Empty `content` DROPS the prompt: the copy starts a new thread
+ *  at the first turn below it, with no system message at all. */
 export function editSystemFork(
   t0: ConvTree,
   sysId: string,
@@ -637,6 +638,14 @@ export function editSystemFork(
   const graft = copyDownstream ? below : firstReply < 0 ? below : below.slice(0, firstReply);
   const t = cloneTree(t0);
   const parentKey = orig.parent ?? ROOT;
+  if (!content.trim()) {
+    if (!graft.length) return null; // nothing would be left of the thread
+    graftDownstream(t, parentKey, graft);
+    const newId = t.selected[parentKey];
+    let last = newId;
+    while (t.nodes[last].children.length) last = t.nodes[last].children[0];
+    return { tree: t, newId, fireFrom: !copyDownstream && t.nodes[last].role !== 'assistant' ? last : null };
+  }
   const id = nid();
   const role = (items ?? []).find((it) => it?.role === 'system' || it?.role === 'developer')?.role ?? 'system';
   t.nodes[id] = {
