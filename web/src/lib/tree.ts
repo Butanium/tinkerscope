@@ -17,14 +17,17 @@ export const ROOT = '__root__';
 
 export type NodeRole = 'user' | 'assistant' | 'system' | 'developer' | 'tool';
 
-/** The roles a person writes a turn as: the edit dialog's and the composer's
- *  role toggle. Each is sent as is; a provider that doesn't know one errors. */
-export const INPUT_ROLES = ['user', 'system', 'developer'] as const;
-export type InputRole = (typeof INPUT_ROLES)[number];
+/** A turn a person wrote, edited as such (editInputFork). */
+export type InputRole = 'user' | 'system' | 'developer';
 
 export function isInputRole(role: string | undefined): role is InputRole {
-  return (INPUT_ROLES as readonly string[]).includes(role ?? '');
+  return role === 'user' || role === 'system' || role === 'developer';
 }
+
+/** The roles the toggle offers (edit dialog, composer). Not `developer`: OpenAI
+ *  reads it as system, and Qwen3's chat template drops it without a word. A
+ *  developer row (a recorded call's) keeps its role unless the toggle moves it. */
+export const ROLE_CHOICES: readonly InputRole[] = ['user', 'system'];
 
 /** A system / developer turn. Sent in place like any turn; one that OPENS a
  *  thread is the thread's prompt, and the server then composes none. */

@@ -163,15 +163,15 @@ immediately. Deleting a WORKSPACE is soft too (moved to
 `workspaces/.deleted/<id>-<ts>/` for 90 days), but that one has no CLI front end
 yet: move the directory back by hand and restart the server.
 
-**Roles.** `chat` / `compare` / `send` / `continue` take `--role user|system|developer`
-for the message you write (default user) — e.g. `continue --role developer "Answer in
-French from now on."` adds a developer turn and samples the reply under it. Every
-system / developer turn on a thread is sent in place; the workspace / thread prompt is
-still sent first unless the thread OPENS with one (then that message is the prompt, so
-`--system` with a non-user `--role` on a new thread is refused). Roles go out as is: a
-provider or chat template that doesn't know one answers with its own error (Qwen's
-template just renders `<|im_start|>developer`). `continue` re-samples a user / system /
-developer target when given no message, and refuses only a second USER turn in a row.
+**Roles.** `chat` / `compare` / `send` / `continue` take `--role user|system` for the
+message you write (default user) — e.g. `continue --role system "Answer in French from
+now on."` adds a system turn and samples the reply under it. Every system turn on a
+thread is sent in place; the workspace / thread prompt is still sent first unless the
+thread OPENS with one (then that message is the prompt, so `--system` with
+`--role system` on a new thread is refused). No `developer`: OpenAI reads it as system
+and Qwen3's chat template drops it silently — a recorded call's developer message
+(import) still goes out as recorded. `continue` re-samples a user / system target when
+given no message, and refuses only a second USER turn in a row.
 
 `send`/`continue` also take `--logprobs` (per-token logprob + top-5 alts, native
 tinker sampling only: `run_id` + `base_model` at any `n`. A single `n=1` fire to
@@ -691,7 +691,7 @@ tinkerscope open <run>
   # Select a run or model in single mode; the browser switches live.
 tinkerscope chat <run> <prompt> [options]
   # Sample from a run's checkpoint or any model; stream completions to stdout and the browser.
-  --role TEXT                       role of the message: user | system | developer (sent as is — a provider or chat template that doesn't know the role answers with its own error)  [default: user]
+  --role TEXT                       role of the message: user | system  [default: user]
   --n INTEGER                       number of samples to draw  [default: 1]
   --temperature FLOAT               this call only; omit = inherit the global param (see `tinkerscope params`)
   --max-tokens INTEGER              this call only; omit = inherit the global param
@@ -708,7 +708,7 @@ tinkerscope chat <run> <prompt> [options]
   --timeout FLOAT                   cancel each chat after this many seconds (default: none — a cold tinker model can take minutes before its first sample); samples already finished are kept
 tinkerscope compare <run_a> <run_b> <prompt> [options]
   # Compare N runs on one prompt — A→primary, B→compare, --run extras→p-2,p-3,… all stream...
-  --role TEXT                       role of the message: user | system | developer (sent as is — a provider or chat template that doesn't know the role answers with its own error)  [default: user]
+  --role TEXT                       role of the message: user | system  [default: user]
   --run TEXT (repeatable)           additional run(s) → 3rd, 4th, … panes (repeatable)
   --n INTEGER                       number of samples per side  [default: 1]
   --temperature FLOAT               this call only; omit = inherit the global param
@@ -724,7 +724,7 @@ tinkerscope compare <run_a> <run_b> <prompt> [options]
   --timeout FLOAT                   cancel each chat after this many seconds (default: none — a cold tinker model can take minutes before its first sample); samples already finished are kept
 tinkerscope send [prompt] [options]
   # Fire the prompt as a NEW THREAD at the CURRENT panels of the open workspace — the CLI twin of...
-  --role TEXT                       role of the message: user | system | developer (sent as is — a provider or chat template that doesn't know the role answers with its own error)  [default: user]
+  --role TEXT                       role of the message: user | system  [default: user]
   --n INTEGER                       samples per panel  [default: 1]
   --temperature FLOAT               this call only; omit = inherit the global param (see `tinkerscope params`)
   --max-tokens INTEGER              this call only; omit = inherit the global param
@@ -751,7 +751,7 @@ tinkerscope send [prompt] [options]
   --timeout FLOAT                   cancel each chat after this many seconds (default: none — a cold tinker model can take minutes before its first sample); samples already finished are kept
 tinkerscope continue [prompt] [options]
   # LOOM from an existing branch: rebuild the message history up to a target node and sample a...
-  --role TEXT                       role of the appended message: user | system | developer (sent as is — a provider or chat template that doesn't know the role answers with its own error)  [default: user]
+  --role TEXT                       role of the appended message: user | system  [default: user]
   --n INTEGER                       samples per panel  [default: 1]
   --temperature FLOAT               this call only; omit = inherit the global param (see `tinkerscope params`)
   --max-tokens INTEGER              this call only; omit = inherit the global param

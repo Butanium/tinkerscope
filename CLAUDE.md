@@ -918,12 +918,15 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     app.css) and **focus**
     (`?focus=<panel>` → `visibleSels` / `targetSels`; a render filter, never written
     to reduced/send-target meta).
-  - `lib/RoleToggle.svelte` — the `user · system · developer` switch: the edit
-    dialog's head on those rows (Save forks under the picked role — `tree.ts
-    editInputFork`, the ONE edit path for the three) and the composer row (the
-    role of what you send). Every system / developer node is sent in place; the
+  - `lib/RoleToggle.svelte` — the `user · system` switch (`tree.ts ROLE_CHOICES`):
+    the edit dialog's head on user / system / developer rows (Save forks under the
+    picked role — `tree.ts editInputFork`, the ONE edit path for the three; a
+    developer row's switch also shows `developer`, so leaving it alone keeps it)
+    and the composer row (the role of what you send). `developer` is not offered
+    (OpenAI reads it as system, Qwen3's template drops it silently) but stays a node
+    role for recorded calls. Every system / developer node is sent in place; the
     server composes the workspace / thread prompt unless the thread OPENS with one
-    (`routes/chat.py`). Roles pass through to every backend unchanged.
+    (`routes/chat.py`).
   - `lib/ThreadSwitcher.svelte` — the composer-row **cross-panel thread jump**:
     a popover (next to the ⑂ branch-from-start toggle) listing
     `threadStarts(convo.trees)` — every root thread across all panels with its

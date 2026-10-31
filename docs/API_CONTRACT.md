@@ -204,7 +204,8 @@ has_token_logprobs?, has_raw_meta?, reasoning_details?, reasoning_tokens?,
 reasoning_account?, tool_calls?, tool_call_id?, name?, handler?,
 prefill_unsupported?}`
 + a `selected` map (parentId|`"__root__"` → selected child id). `role` is
-`user | assistant | system | developer | tool`. Every node on a path goes out with a
+`user | assistant | system | developer | tool` (`developer` comes from recorded calls;
+the UI and `--role` offer user / system only). Every node on a path goes out with a
 fire, system / developer ones in place; the server prepends the composed workspace /
 thread prompt unless the thread OPENS with a system / developer node (that message is
 then the prompt). Samples fold under any non-assistant node. `finish_reason:

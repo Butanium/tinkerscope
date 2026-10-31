@@ -291,13 +291,13 @@ codex plugin add tinkerscope@tinkerscope</pre>
         full editable copy of the conversation instead of a branch that dead-ends at the edit.
       </p>
       <p class="help-note">
-        <b>Roles.</b> While you edit a user, system or developer message, its role label becomes a
-        <code>user · system · developer</code> switch: pick another role and Save forks the turn under
-        that role. The same switch sits at the left of the composer row and sets the role of what you
-        send. Every system and developer message is sent where it stands in the thread; the workspace
-        or thread prompt is still sent first, unless the thread itself opens with a system or developer
-        message. Regenerate on a system or developer row samples a reply right under it. Each role goes to the model as is: OpenAI models read <code>developer</code>, and a
-        provider or chat template that doesn't know a role answers with its own error.
+        <b>Roles.</b> While you edit a user or system message, its role label becomes a
+        <code>user · system</code> switch: pick the other role and Save forks the turn under it. The
+        same switch sits at the left of the composer row and sets the role of what you send. Every
+        system message is sent where it stands in the thread; the workspace or thread prompt is still
+        sent first, unless the thread itself opens with a system message. Regenerate on a system row
+        samples a reply right under it. A <i>developer</i> message from a recorded call keeps its role
+        (its switch shows it too) and is sent as recorded.
       </p>
       <p class="help-note">
         Delete is the exception that really does remove something. <Icon name="undo" /> in the sidebar

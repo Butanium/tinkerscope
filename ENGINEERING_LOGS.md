@@ -3590,3 +3590,14 @@ merged nodes land in the trash journal. Checked on a snapshot of the Terra state
 touching :8770: for every node that survived, the Responses input its ancestry stands for
 hashes the same before and after (559 + 96 + 236 nodes, 0 changed); only the 16 merged nodes
 vanished.
+
+### 2026-10-31 — `developer` dropped from the role toggle and `--role`
+
+Clément's call, after the team lead rendered it: Qwen3's official HF chat template drops a
+`developer` message silently ([system, user, assistant, developer "DEV-B", system, user] →
+DEV-B absent, no exception), so on the vLLM path a developer turn vanished without an error;
+tinker's qwen3 renderer writes `<|im_start|>developer` literally, a role the model never
+trained on; OpenAI reads developer as system. So the toggle (`tree.ts ROLE_CHOICES`) and
+`--role` offer user / system. `developer` stays a node role: recorded calls carry it and
+replay it verbatim, and a developer row's toggle shows its own role too, so an edit that
+leaves the toggle alone keeps it.

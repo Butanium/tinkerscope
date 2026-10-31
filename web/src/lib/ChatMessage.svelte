@@ -28,7 +28,7 @@
   import ToolCalls from '$lib/ToolCalls.svelte';
   import ResponsesItems from '$lib/ResponsesItems.svelte';
   import RoleToggle from '$lib/RoleToggle.svelte';
-  import { isInputRole, isInstruction, type InputRole } from '$lib/tree';
+  import { ROLE_CHOICES, isInputRole, isInstruction, type InputRole } from '$lib/tree';
   import type { ViewMessage, SampleData, TokenLogprob } from '$lib/types';
 
   let {
@@ -774,7 +774,8 @@
     <div class="message-head">
       <div class="message-head-left">
         {#if editing && msg.nodeId != null && isInputRole(msg.role)}
-          <RoleToggle bind:value={editRole} testid="edit-role" />
+          <!-- a developer row shows its own role too, so leaving the toggle alone keeps it -->
+          <RoleToggle bind:value={editRole} roles={ROLE_CHOICES.includes(msg.role) ? ROLE_CHOICES : [...ROLE_CHOICES, msg.role]} testid="edit-role" />
         {:else}
           <div class="message-role">{msg.role}</div>
         {/if}

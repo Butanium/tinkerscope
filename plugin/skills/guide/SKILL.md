@@ -169,15 +169,15 @@ siblings mix thinking and non-thinking draws, a filter at the turn's top right �
 `all`, brain (with thinking), struck brain (without), each with its count —
 narrows the cards.
 
-**Roles** — while you edit a user, system or developer message, its role label
-becomes a `user · system · developer` switch; pick another role and Save forks the
-turn under it (same rules as any edit: regenerate below, Shift copies, Ctrl does
-every panel). The same switch at the left of the composer row sets the role of what
-you send. System and developer messages are sent where they stand; the workspace or
-thread prompt still goes first unless the thread itself opens with one. Regenerate on
-a system / developer row samples a reply right under it. Roles go out
-as is — OpenAI models read `developer`, and a provider or chat template that doesn't
-know a role answers with its own error (Qwen's template just writes the role header).
+**Roles** — while you edit a user or system message, its role label becomes a
+`user · system` switch; pick the other role and Save forks the turn under it (same
+rules as any edit: regenerate below, Shift copies, Ctrl does every panel). The same
+switch at the left of the composer row sets the role of what you send. System
+messages are sent where they stand; the workspace or thread prompt still goes first
+unless the thread itself opens with one. Regenerate on a system row samples a reply
+right under it. There's no `developer` choice: OpenAI reads it as system, and Qwen's
+chat template drops it silently. A developer message from a recorded call keeps its
+role (its switch shows it) and goes out as recorded.
 
 **Thread** — a workspace can hold several independent conversations. The `⑂
 branch from start` toggle next to the composer makes your next message a new

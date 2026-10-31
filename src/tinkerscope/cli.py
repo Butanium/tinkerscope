@@ -1390,15 +1390,12 @@ def _call_params(
 _EFFORTS = ("default", "none", "minimal", "low", "medium", "high", "xhigh", "max")
 
 
-_INPUT_ROLES = ("user", "system", "developer")
+# Not `developer`: OpenAI reads it as system, and Qwen3's chat template drops it silently.
+_INPUT_ROLES = ("user", "system")
 
 
 def _role_option(what: str):
-    return typer.Option(
-        "user", "--role",
-        help=f"role of {what}: user | system | developer (sent as is — a provider or chat "
-             "template that doesn't know the role answers with its own error)",
-    )
+    return typer.Option("user", "--role", help=f"role of {what}: user | system")
 
 
 def _check_role(role: str, thread_system: Optional[str] = None) -> str:
