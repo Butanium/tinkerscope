@@ -55,6 +55,7 @@ follow-ups live in `docs/TODO.md`.) Was a single `IDEAS.md` until 2026-08-06 —
 - [Availability auto-refresh](availability-auto-refresh.md) — the servable set only refetches on the manual button; a TTL or a send-404 hook would keep grey/⚠ honest
 - [Continuous thinking-effort slider for tml models](tml-effort-slider.md) — tml_v0 has an `effort` dial in [0, 1); we map it to a binary {0.0, 0.9}
 - [Gate the whole-conversation continue path by CAPABILITY](continue-gate-by-capability.md) — `renderer_name.startswith("tml")` is brittle; YAGNI until a 2nd such renderer
+- [Refuse a fire whose chat template dropped a message](template-drop-guard.md) — native / vLLM paths hold the rendered prompt; check each message's text is in it. Parked: no template in use is known to drop a system turn
 - [Naming a checkpoint is a one-way write](unname-a-checkpoint.md) — no route removes a label, so a name you regret is unfixable from the UI; wants designing together with a rename affordance, and a pack-shipped name comes back with the pack
 
 ### UI affordances & consistency
