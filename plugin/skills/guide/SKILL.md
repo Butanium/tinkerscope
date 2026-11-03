@@ -98,7 +98,12 @@ probabilities, the loom, raw view), or an *OpenRouter
 reference model* for comparison against something known. Sending a message fires
 it into every panel at once, so the columns are the same prompt answered by
 different models. Drag a column header to reorder; the sidebar pickers and the
-send chips follow. A header's **focus** button (corner arrows, next to the `−`
+send chips follow. Click a column's title (or the pencil beside it) to **name the
+panel** — "Odin conversation" instead of a model id repeated four times; the name
+shows in the send chips, the send-to menu, the chart and the sidebar, with the
+model kept muted next to it in the header. A blank name goes back to the model.
+Each column's "continue this panel" box has its own `user · system` switch for the
+role of what you type there; until you touch it, it follows the composer's. A header's **focus** button (corner arrows, next to the `−`
 fold) shows that panel alone, full width, with the composer sending to it only —
 the same button, `Esc` or browser Back returns to all panels; it's in the URL
 (`?focus=<panel>`), so a reload keeps it. At the bottom of each column, above its
@@ -184,6 +189,17 @@ branch from start` toggle next to the composer makes your next message a new
 first message instead of a reply. The switcher beside it lists every thread
 across all panels, with a marker for whether the thread exists in every panel or
 only some.
+
+Threads can be **named**. A panel with more than one thread (or a named one)
+shows a `⑂` bar under its header: which thread it's on (`3/5 · name`, or the
+opening of an unnamed one), a picker over that panel's threads, and a pencil to
+name it. A name names *that panel's* thread; the **all N panels** chip beside the
+field (or `Ctrl`+`Enter`) names it in every panel holding the same thread. In the
+switcher, named threads are listed by name (opening underneath) and each row's
+pencil renames the whole row. Two threads that open with the same message but
+carry different names are separate rows — recorded calls often share one long
+system-prompt opening, and the name is what tells them apart. The CLI has the
+same: `tinkerscope rename panel|thread|ws`, and `--panel` / `--thread` take names.
 
 ## Things people actually want to do
 
@@ -570,6 +586,7 @@ Hold a modifier, then click a row-toolbar button:
 | `Shift` + continue | Resume *inside* the think block |
 | `Shift` + copy | Include the thinking text |
 | `Shift` + bookmark | Pin instantly, no note dialog |
+| `Shift` + send to panel | Append this row and everything below it to the END of the picked panel's current conversation (instead of copying the context up to here as a thread) |
 
 And in the sidebar: `Shift` + New workspace makes it blank rather than
 inheriting the current models; `Shift` + Add panel adds an empty panel rather

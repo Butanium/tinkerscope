@@ -884,6 +884,9 @@ export type ThreadStart = {
   content: string;
   /** The thread's system prompt (root node field) — absent = global only. */
   system?: string;
+  /** The user-given name its roots carry (workspace `thread_names`, keyed
+   *  `threadKey(panel, root)`) — absent = unnamed. */
+  name?: string;
   /** panelId → that panel's matching root node id. */
   roots: Record<string, string>;
   /** Panels where this thread is currently the SELECTED root. */
@@ -891,12 +894,15 @@ export type ThreadStart = {
 };
 
 /** Union of root THREADS (branch-from-start first messages) across panels,
- *  identified by the (trimmed first-message content, thread system prompt)
- *  PAIR, in order of first appearance — the same question under two different
- *  system prompts is two distinct threads (the probe-battery pattern).
- *  Threads are per-panel — different models may hold different probe sets —
- *  so `roots` records which panels have each one; there is no forced alignment. */
-export function threadStarts(trees: Record<string, ConvTree>): ThreadStart[] {
+ *  identified by the (trimmed first-message content, thread system prompt,
+ *  name) TRIPLE, in order of first appearance — the same question under two
+ *  different system prompts is two distinct threads (the probe-battery pattern),
+ *  and so are two same-opening roots named differently: a name says "this one
+ *  is its own conversation" (recorded calls share a 45k-char opening across
+ *  unrelated threads). Threads are per-panel — different models may hold
+ *  different probe sets — so `roots` records which panels have each one; there
+ *  is no forced alignment. */
+export function threadStarts(trees: Record<string, ConvTree>, names: Record<string, string> = {}): ThreadStart[] {
   const out: ThreadStart[] = [];
   const byKey = new Map<string, ThreadStart>();
   for (const [pid, t] of Object.entries(trees)) {
@@ -904,17 +910,48 @@ export function threadStarts(trees: Record<string, ConvTree>): ThreadStart[] {
     for (const rid of t.rootChildren) {
       const node = t.nodes[rid];
       if (!node) continue;
-      const key = (node.system_prompt ?? '') + '\u0000' + node.content.trim();
+      const name = names[threadKey(pid, rid)];
+      const key = (node.system_prompt ?? '') + '\u0000' + node.content.trim() + '\u0000' + (name ?? '');
       let ts = byKey.get(key);
       if (!ts) {
-        ts = { content: node.content, system: node.system_prompt, roots: {}, activeIn: [] };
+        ts = { content: node.content, system: node.system_prompt, name, roots: {}, activeIn: [] };
         byKey.set(key, ts);
         out.push(ts);
       }
-      if (!(pid in ts.roots)) ts.roots[pid] = rid; // first same-pair sibling wins
+      if (!(pid in ts.roots)) ts.roots[pid] = rid; // first same-key sibling wins
       if (rid === sel) ts.activeIn.push(pid);
     }
   }
+  return out;
+}
+
+/** A thread's key in the workspace's `thread_names`: `<panel>:<root id>`. Not
+ *  the bare root id — a duplicated panel (copy_tree) keeps its node ids, so one
+ *  root id can open threads in two panels that then go separate ways. */
+export function threadKey(panel: string, rootId: string): string {
+  return `${panel}:${rootId}`;
+}
+
+/** The `thread_names` keys of every root in the switcher row that `panel`'s root
+ *  `rootId` belongs to (same opening, system prompt and name), across panels and
+ *  within one — what "name it everywhere" writes, so a renamed row stays one row. */
+export function threadRowKeys(
+  trees: Record<string, ConvTree>,
+  names: Record<string, string>,
+  panel: string,
+  rootId: string
+): string[] {
+  const probe = trees[panel]?.nodes[rootId];
+  if (!probe || probe.parent !== null) return [threadKey(panel, rootId)];
+  const sig = (n: TreeNode, pid: string, id: string) =>
+    (n.system_prompt ?? '') + '\u0000' + n.content.trim() + '\u0000' + (names[threadKey(pid, id)] ?? '');
+  const want = sig(probe, panel, rootId);
+  const out: string[] = [];
+  for (const [pid, t] of Object.entries(trees))
+    for (const rid of t.rootChildren) {
+      const n = t.nodes[rid];
+      if (n && sig(n, pid, rid) === want) out.push(threadKey(pid, rid));
+    }
   return out;
 }
 
@@ -969,6 +1006,22 @@ export function opNode(t: ConvTree, id: string): OpNode {
   return Object.fromEntries(
     Object.entries(rest).filter(([, v]) => v !== undefined)
   ) as OpNode;
+}
+
+/** Copy `chain` (a slice of some panel's active path) onto the END of `t0`'s
+ *  active path as fresh-id nodes, selected — Shift + send-to-panel: "carry on
+ *  this conversation with what was said over there". An empty tree starts a new
+ *  thread with it. Same copy rules as graftDownstream (light fields, recorded
+ *  items by reference, no token_logprobs). */
+export function appendChain(t0: ConvTree, chain: TreeNode[]): { tree: ConvTree; ops: TreeOp[] } {
+  if (!chain.length) return { tree: t0, ops: [] };
+  const t = cloneTree(t0);
+  const path = activePath(t);
+  const at = path.length ? path[path.length - 1].id : ROOT;
+  graftDownstream(t, at, chain);
+  const first = t.selected[at];
+  const ids = chainFrom(t, first).slice(0, chain.length);
+  return { tree: t, ops: [{ op: 'add_nodes', nodes: ids.map((id) => opNode(t, id)), select: true }] };
 }
 
 /** The single-child chain hanging from `startId` along `selected` — exactly what

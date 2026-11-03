@@ -24,6 +24,7 @@
     filterPlaceholder = 'Type to filter…',
     disabled = false,
     maxRows = 50,
+    plainLabel = false,
     onpick
   }: {
     items: Item[];
@@ -35,6 +36,9 @@
     disabled?: boolean;
     /** Rows rendered before the "+N more — keep typing" cap. */
     maxRows?: number;
+    /** End-ellipsis the trigger label instead of TruncLabel's keep-the-tail
+     *  split (which suits run names, not prose). */
+    plainLabel?: boolean;
     onpick: (id: string) => void;
   } = $props();
 
@@ -93,7 +97,7 @@
     onclick={toggle}
   >
     <span class="picker-dropdown-trigger-label" class:placeholder={!selectedLabel}>
-      {#if selectedLabel}<TruncLabel label={selectedLabel} />{:else}{placeholder}{/if}
+      {#if selectedLabel && plainLabel}<span class="plain-label">{selectedLabel}</span>{:else if selectedLabel}<TruncLabel label={selectedLabel} />{:else}{placeholder}{/if}
     </span>
     <svg class="picker-dropdown-chevron" class:open width="12" height="12" viewBox="0 0 16 16" fill="none">
       <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
@@ -107,6 +111,7 @@
 </div>
 
 <style>
+  .plain-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .picker-dropdown {
     position: relative;
   }

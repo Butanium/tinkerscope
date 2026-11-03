@@ -33,6 +33,7 @@ import type {
   PanelState,
   ChatMessage,
   Workspace,
+  Names,
   WorkspaceSummary,
   NodeBlobs,
   HighlightRule,
@@ -177,6 +178,8 @@ function installWorkspace(entry: {
   send_targets?: string[];
   seen_panels?: string[];
   panel_seq?: number;
+  panel_names?: Names | null;
+  thread_names?: Names | null;
 }): Workspace {
   const [light, blobs] = splitTrees(entry.trees ?? {});
   const ts = nowIso();
@@ -194,6 +197,8 @@ function installWorkspace(entry: {
     // Monotone like the server's upsert: a re-install of the same id must not walk
     // the panel-id counter backwards past ids the overlay copy already handed out.
     panel_seq: Math.max(entry.panel_seq ?? 0, prev?.panel_seq ?? 0),
+    panel_names: entry.panel_names ?? null,
+    thread_names: entry.thread_names ?? null,
     created_at: prev?.created_at ?? ts,
     updated_at: ts
   };

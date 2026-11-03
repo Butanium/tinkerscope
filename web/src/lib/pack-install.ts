@@ -269,7 +269,9 @@ export async function install(
       // Mirrors pack.py's apply_pack: export ships the whole stored body, so the
       // panel-id counter travels OUT — dropping it on the way IN lands every
       // installed workspace at 0, and the next mint then leans on seen_panels alone.
-      panel_seq: body.panel_seq ?? 0
+      panel_seq: body.panel_seq ?? 0,
+      panel_names: body.panel_names ?? null,
+      thread_names: body.thread_names ?? null
     });
     if (typeof source === 'string') staticSetWorkspaceSource(id, source);
     out.push({ id, name: wsName });

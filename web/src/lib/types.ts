@@ -412,6 +412,9 @@ export type ChatRequest = {
   workspace_id?: string | null;
 };
 
+/** {id: name} — a workspace's `panel_names` / `thread_names` (server: tree_ops.check_names). */
+export type Names = Record<string, string>;
+
 /** Workspace-level fields that accompany every meta write (set_meta / PATCH).
  *  Was save-plan.ts's ConvFields; lives here since the ops cutover retired it. */
 export type ConvFields = {
@@ -434,6 +437,8 @@ export type SetMetaFields = Partial<ConvFields> & {
   wire?: WireSetting | null;
   tool_handlers?: ToolHandlers | null;
   tool_max_steps?: number | null;
+  panel_names?: Names | null;
+  thread_names?: Names | null;
 };
 
 /** One workspace mutation on the wire — POST /api/workspaces/{id}/ops and the
@@ -539,6 +544,10 @@ export type Workspace = {
    *  auto-answered rounds per fire (null = the server default, 5). */
   tool_handlers?: ToolHandlers | null;
   tool_max_steps?: number | null;
+  /** User-given names: {panel id: name} and {thread ROOT node id: name}.
+   *  Absent/null = nothing named (the model label / first message stand in). */
+  panel_names?: Names | null;
+  thread_names?: Names | null;
   /** Per-panel branch trees, keyed by panel id ('primary','compare','p-2',…). */
   trees: Record<string, ConvTree>;
   /** Legacy 2-panel shape — present only on un-migrated saved workspaces; the

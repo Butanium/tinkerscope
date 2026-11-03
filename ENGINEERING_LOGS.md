@@ -3601,3 +3601,37 @@ trained on; OpenAI reads developer as system. So the toggle (`tree.ts ROLE_CHOIC
 `--role` offer user / system. `developer` stays a node role: recorded calls carry it and
 replay it verbatim, and a developer row's toggle shows its own role too, so an edit that
 leaves the toggle alone keeps it.
+
+### 2026-11-02 — panel and thread names; Shift + send-to appends; a role switch per panel box
+
+Clément asked to rename "threads", then said he meant the panels the conversations sit in, and
+asked for both. Storage: two workspace meta maps through `set_meta`, whole-map LWW like
+`tool_handlers` — `panel_names` ({panel id: name}) and `thread_names`. Not on the node (the
+confluence guard rules out in-place node edits) and not inside the `panels` layout rows (every
+layout writer rebuilds `{id, run_id, checkpoint}` and would drop it).
+
+`thread_names` is keyed `<panel>:<root id>`, not by root id: a duplicated panel (`copy_tree`)
+keeps its node ids, so in the Terra workspace `20521c77` one root id opens thread 1 of both p-1
+and p-3, and a bare-id key made naming one name both (the CLI fork caught it). `duplicateTo`
+copies the source panel's names under the new id.
+
+The switcher's row key now includes the name. Keying by opening alone was the first plan; the
+data refuted it: in `20521c77` one 45k-char system-prompt root opens four different conversations
+(the Odin talk, the system-channel attempt, …), so a row borrowing one root's name would label
+all four and switch all four. A name is the user saying "this one is its own thread". The
+compare case (one send → N same-opening roots) is handled on the write side: the strip's
+"all N panels" chip / Ctrl+Enter and the switcher's row pencil write every root in the row, so it
+stays one row. The CLI's `rename thread --all-panels` uses the same row rule.
+
+Shift + send-to-panel (Clément's ask, same session): append this row → the end of the active path
+onto the END of the picked panel's active path (`tree.ts appendChain`, graftDownstream's copy
+rules — recorded items by `items_ref`, no logprobs). Gotcha found while verifying: the
+"Shift was held when the menu opened" flag was set by a pointerdown capture on a wrapper that
+also contains the menu items, so picking a destination reset it to replace mode. The replace was
+a silent no-op on the test data (p-4 already held that branch), which is why only the API check
+showed it.
+
+Deploy note: the new web build emits `panel_names` / `thread_names` in `set_meta`, which a server
+from before 045aeec rejects with a 409 for the whole batch (unknown meta field). The UI was
+previewed from a copy of the tree (`/var/tmp/tscope-preview`, own `vite build`) so building
+web/dist didn't push it to :8767 / :8770 before their servers were restarted.

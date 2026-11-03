@@ -53,6 +53,8 @@
   import PrefillScopeToggle from '$lib/PrefillScopeToggle.svelte';
   import { fold } from '$lib/motion';
   import ThreadSystemRow from '$lib/ThreadSystemRow.svelte';
+  import ThreadStrip from '$lib/ThreadStrip.svelte';
+  import PanelTitle from '$lib/PanelTitle.svelte';
   import ToolResultForm from '$lib/ToolResultForm.svelte';
   import ToolsModal from '$lib/ToolsModal.svelte';
   import { offeredCount } from '$lib/tools-def';
@@ -821,6 +823,8 @@
   }
   // Per-panel composer drafts for the "continue this panel" bubbles (compare).
   let panelDraft = $state<Partial<Record<Panel, string>>>({});
+  // Each bubble's role switch; unset = follows the composer's.
+  let panelRole = $state<Partial<Record<Panel, InputRole>>>({});
   // Branch-from-start mode: while ON, each send starts a NEW root-level branch
   // (a sibling first message, cycleable via ‹k/N› on the first row) instead of
   // appending to the active thread. Transient — deliberately not persisted, so a
@@ -920,7 +924,7 @@
     // The per-panel bubble ALWAYS continues this panel's active thread; ⑂
     // branch-from-start is a main-composer-only affordance (locked decision).
     samplesOpen[panel] = null; // same reason as sendMessage: the reply lands below the hidden region
-    const { tree, nodeId } = appendTurn(ws.treeFor(panel), text, false, newThreadSystem(panel, false));
+    const { tree, nodeId } = appendTurn(ws.treeFor(panel), text, false, newThreadSystem(panel, false), panelRole[panel] ?? composerRole);
     pendingThreadSystem[panel] = '';
     ws.setTree(panel, tree, {
       ops: [{ op: 'add_nodes', nodes: [opNode(tree, nodeId)], select: true }]
@@ -2023,8 +2027,13 @@
   // live-updates while a batch streams.
   let showChart = $state(false);
 
+  /** What a panel is called everywhere it's listed (send chips, send-to menu,
+   *  chart bars…): its user-given name, else its model. */
   function panelLabel(p: PanelSel | undefined): string {
     if (!p) return '';
+    return ws.panelNames[p.panel] ?? modelLabel(p);
+  }
+  function modelLabel(p: PanelSel): string {
     if (isOpenrouterSel(p.run_id)) return modelCatalog.openrouterLabel(p.run_id);
     if (isBaseSel(p.run_id)) return modelCatalog.baseLabel(p.run_id);
     if (isCkptSel(p.run_id)) return modelCatalog.ckptLabel(p.run_id);
@@ -2512,6 +2521,9 @@
                modelCatalog store — see its `modelItems`. -->
           {@const modelItems = modelCatalog.modelItems(p.run_id)}
           <div class="model-block">
+            {#if ws.panelNames[p.panel]}
+              <div class="model-block-name" data-testid="sidebar-panel-name"><TruncLabel label={ws.panelNames[p.panel]} /></div>
+            {/if}
             <div class="model-slot-row">
               <div class="model-slot-select">
                 {#if readOnly}
@@ -2930,7 +2942,7 @@
                   <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor"><circle cx="2.5" cy="3" r="1.2" /><circle cx="7.5" cy="3" r="1.2" /><circle cx="2.5" cy="7" r="1.2" /><circle cx="7.5" cy="7" r="1.2" /><circle cx="2.5" cy="11" r="1.2" /><circle cx="7.5" cy="11" r="1.2" /></svg>
                 </span>
                 {/if}
-                <span class="column-title"><TruncLabel label={panelLabel(p)} /></span>
+                <PanelTitle model={modelLabel(p)} name={ws.panelNames[p.panel]} {readOnly} onRename={(n) => ws.setPanelName(p.panel, n)} />
                 {#if isComparing && summarizePanelParams(panelParamsOf(p.panel))}
                   <!-- two columns of the same model differ only here, so say it where the columns are told apart -->
                   <span class="column-params" data-testid="column-params" data-tooltip="This panel's own params (sidebar → panel params)" use:tip>{summarizePanelParams(panelParamsOf(p.panel))}</span>
@@ -2949,6 +2961,7 @@
                 {/if}
               </div>
             {/if}
+            <ThreadStrip panel={p.panel} busy={panelBusy(p.panel)} {readOnly} />
             <div class="messages" use:scrollRegister={p.panel}>
               <!-- a thread that starts with its own system node (a recorded call) has its
                    prompt right there — no thread-prompt row to edit above it -->
@@ -2994,7 +3007,7 @@
                   onEdit={(content, reasoning, copyDownstream, allPanels, system, role) => (allPanels ? branchOps.applyEditAll(p.panel, msg, content, reasoning, copyDownstream, system, role) : branchOps.applyEdit(p.panel, msg, content, reasoning, copyDownstream, system, role))}
                   onCopy={(all, withThinking) => branchOps.copyMessage(p.panel, msg, all, withThinking)}
                   otherPanels={panelSels.filter((x) => x.panel !== p.panel).map((x) => ({ id: x.panel, label: panelLabel(x) }))}
-                  onSendToPanel={(dest) => branchOps.sendBranchToPanel(p.panel, msg, dest)}
+                  onSendToPanel={(dest, append) => (append ? branchOps.appendBranchToPanel(p.panel, msg, dest) : branchOps.sendBranchToPanel(p.panel, msg, dest))}
                   panelId={p.panel}
                   onCycle={(delta) => branchOps.cycleBranch(p.panel, msg, delta)}
                   onLoom={(cut, altTid) => branchOps.loomBranch(p.panel, msg, cut, altTid)}
@@ -3096,10 +3109,12 @@
                    scrollable .messages so it stays stationary when branch cycling
                    changes the content height above it (a longer reply extends
                    below the fold instead of pushing the composer around). -->
+              {@const pRole = panelRole[p.panel] ?? composerRole}
               <div class="panel-send">
+                <RoleToggle value={pRole} onchange={(r) => (panelRole[p.panel] = r)} testid="panel-role" />
                 <input
                   class="panel-send-input"
-                  placeholder={panelBusy(p.panel) ? 'generating…' : '＋ continue this panel'}
+                  placeholder={panelBusy(p.panel) ? 'generating…' : pRole === 'user' ? '＋ continue this panel' : `＋ ${pRole} message to this panel`}
                   bind:value={panelDraft[p.panel]}
                   onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendToPanel(p.panel); } }}
                 />
@@ -3123,7 +3138,7 @@
            but the thread switcher stays — it's pure navigation over the baked
            threads, and without it a multi-thread workspace looks single-threaded. -->
       {#if readOnly}
-        {#if threadStarts(ws.trees).length > 1}
+        {#if threadStarts(ws.trees, ws.threadNames).length > 1}
           <div class="input-bar readonly-bar">
             <div class="prefill-row"><ThreadSwitcher /></div>
           </div>
@@ -3483,6 +3498,7 @@
   /* ── Model picker ──────────────────────────────────────────────── */
   .model-block { display: flex; flex-direction: column; gap: var(--space-1); padding-bottom: var(--space-2); margin-bottom: var(--space-2); border-bottom: 1px solid var(--color-border-light); }
   .model-block:last-of-type { border-bottom: none; margin-bottom: 0; }
+  .model-block-name { display: flex; min-width: 0; font-size: 0.76rem; font-weight: 600; color: var(--color-text); }
   .model-slot-row { display: flex; gap: var(--space-2); align-items: center; }
   .model-slot-select { flex: 1; min-width: 0; }
   /* Read-only stand-in for the model PickerDropdown: same slot, no affordance. */

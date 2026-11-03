@@ -104,7 +104,8 @@
     onStop?: () => void;
     // Other panels this branch can be copied into (compare). Empty → no picker.
     otherPanels?: { id: string; label: string }[];
-    onSendToPanel?: (destPanel: string) => void;
+    /** `append`: Shift — this row → the end, onto the dest's current conversation. */
+    onSendToPanel?: (destPanel: string, append: boolean) => void;
     /** This row's panel id — prefixed onto the copied node handle so it addresses
      *  THIS column's turn (a cloned tree shares node ids across panels). */
     panelId?: string;
@@ -304,6 +305,8 @@
   // flash individually (clicking one must not light up the others).
   let copiedMsg = $state(false);
   let copiedWs = $state(false);
+  /** Shift was down when the send-to menu was opened (append mode). */
+  let sendAppend = $state(false);
   let copiedId = $state(false);
   let copiedTimer: ReturnType<typeof setTimeout> | undefined;
   function flashCopied(which: 'msg' | 'conv' | 'id') {
@@ -673,23 +676,36 @@
 {/snippet}
 
 <!-- Send this branch's context (root→here) into another panel's thread: an
-     ActionMenu popover listing the other panels. -->
+     ActionMenu popover listing the other panels. Shift (held when opening it, or
+     when picking): APPEND this row → the end onto the picked panel's current
+     conversation instead. -->
 {#snippet sendToPicker()}
   {#if otherPanels.length && onSendToPanel && msg.nodeId != null}
-    <ActionMenu label="Send this branch's context to another panel" testid="send-to" resetKey={msg.nodeId ?? ''}>
-      {#snippet trigger()}
-        <Icon name="send-to" />
-      {/snippet}
-      {#snippet children(close)}
-        {#each otherPanels as op (op.id)}
-          <button
-            class="row-menu-item"
-            role="menuitem"
-            onclick={() => { close(); onSendToPanel?.(op.id); }}
-          >→ {op.label}</button>
-        {/each}
-      {/snippet}
-    </ActionMenu>
+    {@const append = sendAppend || shiftDown}
+    <!-- records Shift on the TRIGGER press only: the menu items render inside this
+         wrapper too, and picking one must not reset the mode it was opened in -->
+    <span class="send-to-wrap" onpointerdowncapture={(e) => { if (!(e.target as Element).closest?.('.row-menu-item')) sendAppend = e.shiftKey; }}>
+      <ActionMenu
+        label={shiftDown ? "Append from here to the end onto another panel's conversation" : "Send this branch's context to another panel"}
+        testid="send-to"
+        resetKey={msg.nodeId ?? ''}
+      >
+        {#snippet trigger()}
+          <Icon name="send-to" />
+        {/snippet}
+        {#snippet children(close)}
+          {#if append}<div class="row-menu-note">append here → end to</div>{/if}
+          {#each otherPanels as op (op.id)}
+            <button
+              class="row-menu-item"
+              role="menuitem"
+              data-testid={append ? 'send-to-append' : 'send-to-panel'}
+              onclick={(e) => { const a = append || e.shiftKey; close(); sendAppend = false; onSendToPanel?.(op.id, a); }}
+            >{append ? '⤵' : '→'} {op.label}</button>
+          {/each}
+        {/snippet}
+      </ActionMenu>
+    </span>
   {/if}
 {/snippet}
 

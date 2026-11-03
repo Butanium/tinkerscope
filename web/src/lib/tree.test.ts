@@ -24,6 +24,9 @@ import {
   siblingInfo,
   siblingsOf,
   threadStarts,
+  threadRowKeys,
+  threadKey,
+  appendChain,
   threadSystemAt,
   reconcileExternal,
   assertValid,
@@ -662,6 +665,45 @@ test('threadStarts: duplicate same-content roots in one panel collapse to one en
   eq(starts.length, 1);
   eq(starts[0].roots.A, a1.nodeId); // first occurrence wins as the switch target
   eq(starts[0].activeIn, ['A']); // active detection still sees the selected twin
+});
+
+test('threadStarts: a name splits same-opening roots into their own rows', () => {
+  // one root id in two panels (a duplicated panel keeps ids) — names key on panel:root
+  const a = appendTurn(emptyTree(), 'long recorded prompt');
+  const trees = { A: a.tree, B: structuredClone(a.tree), C: structuredClone(a.tree) };
+  const names = { [threadKey('B', a.nodeId)]: 'Odin' };
+  const starts = threadStarts(trees, names);
+  eq(starts.length, 2);
+  eq(Object.keys(starts[0].roots), ['A', 'C']);
+  eq(starts[0].name, undefined);
+  eq(starts[1].name, 'Odin');
+  eq(Object.keys(starts[1].roots), ['B']);
+  // the switcher row a rename writes: same opening AND same current name
+  eq(threadRowKeys(trees, names, 'A', a.nodeId), [threadKey('A', a.nodeId), threadKey('C', a.nodeId)]);
+  eq(threadRowKeys(trees, names, 'B', a.nodeId), [threadKey('B', a.nodeId)]);
+});
+
+test('appendChain copies a path slice onto the end of another tree, selected', () => {
+  const src = treeFromMessages([
+    { role: 'user', content: 'u1' },
+    { role: 'assistant', content: 'a1' },
+    { role: 'system', content: 's2' },
+    { role: 'assistant', content: 'a2' }
+  ]);
+  const dst = treeFromMessages([{ role: 'user', content: 'x' }, { role: 'assistant', content: 'y' }]);
+  const before = activePath(dst).map((n) => n.id);
+  const r = appendChain(dst, activePath(src).slice(2));
+  assertValid(r.tree);
+  const path = activePath(r.tree);
+  eq(path.map((n) => n.content), ['x', 'y', 's2', 'a2']);
+  eq(path.slice(0, 2).map((n) => n.id), before);
+  eq(path[2].role, 'system');
+  // fresh ids, persisted as ONE add_nodes chain
+  eq(path.slice(2).some((n) => src.nodes[n.id]), false);
+  eq(r.ops.length, 1);
+  eq((r.ops[0] as { nodes: unknown[] }).nodes.length, 2);
+  // an empty destination starts a thread with it
+  eq(activePath(appendChain(emptyTree(), activePath(src).slice(2)).tree).map((n) => n.content), ['s2', 'a2']);
 });
 
 // ── thread system prompts (root-node field) ──────────────────────────

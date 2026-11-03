@@ -47,6 +47,9 @@ import {
   lightenTree,
   cycle as cycleTree,
   siblingsOf,
+  selectedChildId,
+  ROOT,
+  appendChain,
   type ConvTree,
   type ThreadStart,
   type TokenLogprob,
@@ -291,6 +294,18 @@ class BranchOps {
       const next = setSelected(tree, rid);
       ws.setTree(panel, next, { ops: selectedDiffOps(tree, next) });
     }
+  }
+
+  /** Switch ONE panel to the root thread `rootId` (the panel thread strip's
+   *  picker) — switchThread's per-panel body. */
+  selectThread(panel: Panel, rootId: string) {
+    if (this.#d.panelBusy(panel)) return;
+    const tree = ws.treeFor(panel);
+    if (!tree.nodes[rootId] || selectedChildId(tree, ROOT) === rootId) return;
+    panelScroll.snap(panel);
+    chat.clearPanelBucket(panel);
+    const next = setSelected(tree, rootId);
+    ws.setTree(panel, next, { ops: selectedDiffOps(tree, next) });
   }
 
   /** Pick an n>1 sample card as the active branch, then COLLAPSE to the single
@@ -750,6 +765,19 @@ class BranchOps {
     const r = reconcileExternal(ws.treeFor(destPanel), msgs, threadSystemAt(srcTree, msg.nodeId));
     ws.setTree(destPanel, r.tree, { ops: r.ops });
     panelScroll.snap(destPanel); // land on the grafted thread's latest turn
+  }
+
+  /** Shift + send-to: copy this row and everything below it on the active path
+   *  onto the END of `destPanel`'s current conversation. */
+  appendBranchToPanel(srcPanel: Panel, msg: ViewMessage, destPanel: Panel) {
+    if (msg.nodeId == null || destPanel === srcPanel || this.#d.panelBusy(destPanel)) return;
+    const path = activePath(ws.treeFor(srcPanel));
+    const i = path.findIndex((n) => n.id === msg.nodeId);
+    if (i < 0) return;
+    chat.clearPanelBucket(destPanel);
+    const r = appendChain(ws.treeFor(destPanel), path.slice(i));
+    ws.setTree(destPanel, r.tree, { ops: r.ops });
+    panelScroll.snap(destPanel);
   }
 }
 

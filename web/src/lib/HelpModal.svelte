@@ -100,6 +100,7 @@
         { keys: ['Shift'], icon: 'discard-path', btn: 'discard others', what: 'Keep only the path on screen: every branch off it, in the whole thread, goes' },
         { keys: ['Shift'], icon: 'continue', btn: 'continue', what: 'Resume INSIDE the think block (assistant turns with reasoning)' },
         { keys: ['Shift'], icon: 'copy', btn: 'copy', what: 'Include the thinking text in the copy' },
+        { keys: ['Shift'], icon: 'send-to', btn: 'send to panel', what: "Append this row and everything below it to the end of that panel's conversation" },
         { keys: ['Shift'], icon: 'tag', btn: 'bookmark', what: 'Pin instantly, skipping the note dialog' }
       ]
     },
@@ -368,7 +369,10 @@ codex plugin add tinkerscope@tinkerscope</pre>
       <h3>Comparing models</h3>
       <p>
         With more than one panel, a send fans out to all of them. The <b>Send to</b> chips above the composer
-        narrow that to a subset; the small box at the bottom of a column continues <em>that</em> column alone.
+        narrow that to a subset; the small box at the bottom of a column continues <em>that</em> column alone,
+        as <b>user</b> or <b>system</b> (its own switch; until you touch it, it follows the composer's).
+        Click a column's title to <b>name the panel</b> — the name replaces the model in the send chips, the
+        send-to menu and the chart (the model stays beside it, muted); blank goes back to the model.
         A column header has a grip to drag it into a new position and a <b>−</b> to fold it out of the way
         (folded panels are skipped by the chart unless you ask for them). Its <Icon name="focus" /> shows
         that panel <b>alone</b>, full width, and the composer then sends to it only — <Icon name="unfocus" />,
@@ -421,6 +425,14 @@ codex plugin add tinkerscope@tinkerscope</pre>
         message rather than a reply — a second <b>thread</b> in the same workspace. The switcher beside it
         lists every thread across all panels so you can jump between them; a dot tells you whether a thread
         exists in every panel or only some.
+      </p>
+      <p class="help-note">
+        A panel with more than one thread shows a <b>⑂ thread bar</b> under its header: which thread it's
+        on, a picker over its threads, and <Icon name="edit" /> to <b>name</b> it. A name names that panel's
+        thread; <b>all N panels</b> (or <kbd>Ctrl</kbd>+<kbd>Enter</kbd>) names it in every panel that holds
+        the same thread. The switcher lists named threads by name and renames a whole row with its
+        <Icon name="edit" />. Two threads that open with the same message but carry different names are
+        separate rows.
       </p>
       <p class="help-note">
         A thread can have its <b>own system prompt</b>: the <b>system</b> row at the top of each panel. On an

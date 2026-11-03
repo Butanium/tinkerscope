@@ -54,6 +54,7 @@ import type {
   SetMetaFields,
   ToolDef,
   ToolHandlers,
+  Names,
   WireSetting
 } from './types';
 
@@ -114,6 +115,11 @@ class ConversationsStore {
    *  like `tools`; written with them by setToolConfig. */
   toolHandlers = $state.raw<ToolHandlers | null>(null);
   toolMaxSteps = $state.raw<number | null>(null);
+  /** User-given panel / thread names ({panel id: name}, {`<panel>:<root id>`:
+   *  name}). Written by setPanelName / setThreadNames (immediate set_meta, the
+   *  whole map — LWW like tool_handlers), mirrored by #applyMetaEvent. */
+  panelNames = $state.raw<Names>({});
+  threadNames = $state.raw<Names>({});
 
   /** Hook (assigned by +page, which owns patchState): flush the pending debounced
    *  /api/state patch — assigning its response into live.state — BEFORE any
@@ -451,7 +457,17 @@ class ConversationsStore {
     this.#mirror();
     // Keep-ids clone server-side — no tree bytes travel, and shared ids preserve
     // cross-panel blob sharing (workspace_store keys blobs by node id).
-    this.#emit([{ op: 'copy_tree', from_panel: srcPanel, to_panel: dstPanel }]);
+    // The clone's threads keep their names (keys are `<panel>:<root>`).
+    let names = this.threadNames;
+    const pre = `${srcPanel}:`;
+    for (const [k, v] of Object.entries(this.threadNames))
+      if (k.startsWith(pre)) names = withName(names, `${dstPanel}:${k.slice(pre.length)}`, v);
+    const ops: WorkspaceOp[] = [{ op: 'copy_tree', from_panel: srcPanel, to_panel: dstPanel }];
+    if (names !== this.threadNames) {
+      this.threadNames = names;
+      ops.push({ op: 'set_meta', fields: { thread_names: names } });
+    }
+    this.#emit(ops);
   }
 
   /** Seed a panel with an EMPTY thread (Shift+add panel = blank, vs duplicateTo's
@@ -665,7 +681,9 @@ class ConversationsStore {
         ...(this.tools ? { tools: this.tools } : {}),
         ...(this.wire ? { wire: this.wire } : {}),
         ...(this.toolHandlers ? { tool_handlers: this.toolHandlers } : {}),
-        ...(this.toolMaxSteps != null ? { tool_max_steps: this.toolMaxSteps } : {})
+        ...(this.toolMaxSteps != null ? { tool_max_steps: this.toolMaxSteps } : {}),
+        ...(Object.keys(this.panelNames).length ? { panel_names: this.panelNames } : {}),
+        ...(Object.keys(this.threadNames).length ? { thread_names: this.threadNames } : {})
       });
       // The create is this mirror's rev BASELINE (same role as a body GET) —
       // ops events for the follow-up batches arrive contiguously above it.
@@ -880,6 +898,8 @@ class ConversationsStore {
     this.wire = null;
     this.toolHandlers = null;
     this.toolMaxSteps = null;
+    this.panelNames = {};
+    this.threadNames = {};
     // A fresh workspace gets its OWN counter, seeded from the ids it starts with —
     // not whatever the previously-open one had reached. Carrying that over is safe
     // (mintPanelId also refuses anything in `taken`) but it persists a number with
@@ -1059,6 +1079,8 @@ class ConversationsStore {
     this.wire = conv.wire ?? null;
     this.toolHandlers = conv.tool_handlers && Object.keys(conv.tool_handlers).length ? conv.tool_handlers : null;
     this.toolMaxSteps = conv.tool_max_steps ?? null;
+    this.panelNames = conv.panel_names ?? {};
+    this.threadNames = conv.thread_names ?? {};
     // The STORE-OWNED layout: the workspace's stored panels, or — for a
     // layout-less legacy body — whatever layout was already shown (kept, as
     // before; its first save then bakes it in).
@@ -1289,7 +1311,29 @@ class ConversationsStore {
     } }]);
   }
 
+  /** Name a panel (blank = back to its model label). */
+  setPanelName(panel: string, name: string): void {
+    const next = withName(this.panelNames, panel, name);
+    if (next === this.panelNames) return;
+    this.panelNames = next;
+    if (!this.activeId || this.#loadFailed) return;
+    this.#emit([{ op: 'set_meta', fields: { panel_names: next } }]);
+  }
+
+  /** Name several threads at once (keys = tree.ts threadKey; blank = unname) —
+   *  ONE set_meta, so a name given to a whole switcher row lands as one write. */
+  setThreadNames(keys: string[], name: string): void {
+    let next = this.threadNames;
+    for (const k of keys) next = withName(next, k, name);
+    if (next === this.threadNames) return;
+    this.threadNames = next;
+    if (!this.activeId || this.#loadFailed) return;
+    this.#emit([{ op: 'set_meta', fields: { thread_names: next } }]);
+  }
+
   #applyMetaEvent(fields: SetMetaFields): void {
+    if ('panel_names' in fields) this.panelNames = fields.panel_names ?? {};
+    if ('thread_names' in fields) this.threadNames = fields.thread_names ?? {};
     if ('tools' in fields) this.tools = fields.tools?.length ? fields.tools : null;
     if ('wire' in fields) this.wire = fields.wire ?? null;
     if ('tool_handlers' in fields)
@@ -1337,3 +1381,14 @@ class ConversationsStore {
 }
 
 export const workspaces = new ConversationsStore();
+
+/** `names` with `id` named `name` (whitespace collapsed, as the server stores it;
+ *  blank removes the key). Returns the SAME ref when nothing changes. */
+function withName(names: Names, id: string, name: string): Names {
+  const clean = name.split(/\s+/).filter(Boolean).join(' ').slice(0, 120).trim();
+  if ((names[id] ?? '') === clean) return names;
+  const next = { ...names };
+  if (clean) next[id] = clean;
+  else delete next[id];
+  return next;
+}

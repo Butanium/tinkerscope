@@ -934,6 +934,17 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     one calls `branchOps.switchThread`; renders only when ≥2 distinct threads.
     Smoke `tests/small-smokes/browser_thread_switcher.py` (seeded, token-free —
     covers divergent thread sets, no-force-align, save/reload persistence).
+  - `lib/ThreadStrip.svelte` / `lib/PanelTitle.svelte` — **names**. The workspace
+    meta maps `panel_names` ({panel id: name}) and `thread_names` (keyed
+    `<panel>:<root id>` — `tree.ts threadKey`; NOT the bare root id, because a
+    duplicated panel keeps its node ids) are whole-map LWW via `set_meta`
+    (`tree_ops.check_names`; `ws.setPanelName` / `ws.setThreadNames`).
+    `panelLabel(p)` in +page = name ?? model, so every list of panels follows.
+    PanelTitle = the compare column title (click to rename). ThreadStrip = the
+    per-panel `⑂` bar (shown at ≥2 threads or a name): picker + rename; "all N
+    panels" / Ctrl+Enter writes `threadRowKeys` = the switcher row. The switcher
+    row key INCLUDES the name (recorded calls share one opening across unrelated
+    threads), mirrored by the CLI's `--all-panels`.
   - `lib/TruncLabel.svelte` — the middle-ellipsis label: a two-span flex trick
     (head clips with `flex:0 1 auto`, tail always shows) over `splitTail`, plus
     the full-name `use:tip` tooltip backstop. The SINGLE-LABEL renderer — the
