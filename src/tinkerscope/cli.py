@@ -3124,7 +3124,7 @@ def _resolve_workspace(sel: str, convs: Optional[list[dict]] = None) -> dict:
         return matches[0]
     if not matches:
         _die(f"no workspace matching {sel!r} (id-prefix or name substring)")
-    listing = "\n".join(f"  - {m.get('id','')[:8]}  {m.get('name')}" for m in matches[:30])
+    listing = "\n".join(f"  - {m.get('id','')}  {m.get('name')}" for m in matches[:30])
     _die(f"ambiguous workspace {sel!r} — {len(matches)} candidates:\n{listing}")
     raise AssertionError  # unreachable
 
@@ -3174,7 +3174,29 @@ def _aim_at_node(
     # same rule as `_one_selector`, and for the same reason.
     if ws_part is not None and selector is not None and ws_part != selector:
         _die(f"handle names workspace {ws_part!r} but --ws says {selector!r} — pass one")
+    if ws_part is not None and selector is None:
+        ws_part = _handle_workspace(ws_part, panel_part, node)
     return node, panel or panel_part, selector or ws_part
+
+
+def _handle_workspace(ws_part: str, panel_part: Optional[str], node: str) -> str:
+    """A handle's workspace part is an id PREFIX, and custom ids can share one
+    (`terra-p4-tests` / `terra-p4-memuser` → `terra-p4`; browsers before
+    2026-11-02 always copied 8 chars). When it names several workspaces, the one
+    holding the node wins; otherwise the prefix goes on unchanged."""
+    summaries = _get("/api/workspaces")
+    if any(c.get("id") == ws_part for c in summaries):
+        return ws_part
+    cands = [c["id"] for c in summaries if (c.get("id") or "").startswith(ws_part)]
+    if len(cands) < 2:
+        return ws_part
+    holding = []
+    for cid in cands:
+        trees = _get(f"/api/workspaces/{cid}").get("trees") or {}
+        pools = [trees.get(panel_part)] if panel_part else list(trees.values())
+        if any(node in ((t or {}).get("nodes") or {}) for t in pools):
+            holding.append(cid)
+    return holding[0] if len(holding) == 1 else ws_part
 
 
 def _one_selector(positional: Optional[str], ws_opt: Optional[str]) -> Optional[str]:

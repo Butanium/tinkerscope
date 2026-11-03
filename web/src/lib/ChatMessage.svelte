@@ -308,6 +308,16 @@
   // flash individually (clicking one must not light up the others).
   let copiedMsg = $state(false);
   let copiedWs = $state(false);
+  /** The shortest prefix (≥8 chars) of `id` that no other id starts with — the
+   *  workspace part of a node handle. A fixed 8 collided on custom ids sharing a
+   *  stem (`terra-p4-tests` / `terra-p4-memuser`), and the CLI then refused it. */
+  function uniquePrefix(id: string, ids: string[]): string {
+    for (let n = 8; n < id.length; n++) {
+      const p = id.slice(0, n);
+      if (!ids.some((o) => o !== id && o.startsWith(p))) return p;
+    }
+    return id;
+  }
   /** Shift was down when the send-to menu was opened (append mode). */
   let sendAppend = $state(false);
   let copiedId = $state(false);
@@ -732,7 +742,7 @@
      one line). -->
 {#snippet copyIdBtn(id: string | null | undefined)}
   {#if id}
-    {@const wsPrefix = ws.activeId?.slice(0, 8)}
+    {@const wsPrefix = ws.activeId ? uniquePrefix(ws.activeId, ws.list.map((c) => c.id)) : undefined}
     {@const handle = [wsPrefix, panelId, id].filter(Boolean).join(':')}
     <button
       class="btn-act"
