@@ -102,8 +102,9 @@ send chips follow. Click a column's title (or the pencil beside it) to **name th
 panel** — "Odin conversation" instead of a model id repeated four times; the name
 shows in the send chips, the send-to menu, the chart and the sidebar, with the
 model kept muted next to it in the header. A blank name goes back to the model.
-Each column's "continue this panel" box has its own `user · system` switch for the
-role of what you type there; until you touch it, it follows the composer's. A header's **focus** button (corner arrows, next to the `−`
+Each column has its own `user · system` switch, left of its prefill pill, for the
+role of what you type in its "continue this panel" box; until you touch it, it
+follows the composer's. A header's **focus** button (corner arrows, next to the `−`
 fold) shows that panel alone, full width, with the composer sending to it only —
 the same button, `Esc` or browser Back returns to all panels; it's in the URL
 (`?focus=<panel>`), so a reload keeps it. At the bottom of each column, above its
@@ -566,6 +567,7 @@ answer to "which one is that"):
 | bookmark | tag/label outline | pin this sample with a note |
 | copy message | two overlapping squares | just this message |
 | copy conversation | the same, with text lines | the whole thread as markdown |
+| download conversation | an arrow dropping into a tray | the whole thread as a standalone HTML page (thinking folded, light/dark) to send to someone |
 | send to panel | two crossing arrows | copy this branch's context into another panel |
 | view all samples | eye | spread the turn's sibling branches out as cards (later turns hide while open) |
 | copy node handle | `#` | `<ws>:<panel>:<node>` — paste into `tinkerscope samples/continue --node …` in any terminal |

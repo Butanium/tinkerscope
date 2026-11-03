@@ -26,7 +26,7 @@
     // prefill scope: the thinking half / the answer (non-thinking) half
     | 'think' | 'answer' | 'no-think' | 'search'
     | 'new-blank' | 'arrow-right' | 'sidebar-fold' | 'sidebar-unfold'
-    | 'theme-light' | 'theme-dark' | 'theme-auto' | 'eye' | 'upload' | 'external';
+    | 'theme-light' | 'theme-dark' | 'theme-auto' | 'eye' | 'upload' | 'download' | 'external';
 </script>
 
 <script lang="ts">
@@ -36,6 +36,9 @@
 {#if name === 'upload'}
   <!-- open a file FROM this computer: an arrow rising out of a tray -->
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M8 10.5V2.5M5 5.5L8 2.5l3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M2.5 10v3.5h11V10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
+{:else if name === 'download'}
+  <!-- save a file TO this computer: an arrow dropping into a tray (upload's mirror) -->
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M8 2.5v8M5 7.5l3 3 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M2.5 10v3.5h11V10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'regen'}
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none"><path d="M1.714 8a6.286 6.286 0 0 1 11.314 -3.771M14.286 8a6.286 6.286 0 0 1 -11.314 3.771" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /><path d="M13.143 1.7v2.872h-2.872M2.857 14.3v-2.872h2.872" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg>
 {:else if name === 'replace'}

@@ -57,6 +57,7 @@
     onStop,
     otherPanels = [],
     onSendToPanel,
+    onDownload,
     panelId,
     rowIndex = -1,
     focused = false,
@@ -104,6 +105,8 @@
     onStop?: () => void;
     // Other panels this branch can be copied into (compare). Empty → no picker.
     otherPanels?: { id: string; label: string }[];
+    /** Save the panel's conversation as a standalone HTML page. */
+    onDownload?: () => void;
     /** `append`: Shift — this row → the end, onto the dest's current conversation. */
     onSendToPanel?: (destPanel: string, append: boolean) => void;
     /** This row's panel id — prefixed onto the copied node handle so it addresses
@@ -675,6 +678,15 @@
   </button>
 {/snippet}
 
+<!-- Download the WHOLE conversation as a standalone HTML page (lib/conv-html). -->
+{#snippet downloadConvBtn()}
+  {#if onDownload}
+    <button class="btn-act" data-tooltip="Download the conversation as an HTML page" use:tip aria-label="Download conversation" data-testid="download-conv" onclick={() => onDownload?.()}>
+      <Icon name="download" />
+    </button>
+  {/if}
+{/snippet}
+
 <!-- Send this branch's context (root→here) into another panel's thread: an
      ActionMenu popover listing the other panels. Shift (held when opening it, or
      when picking): APPEND this row → the end onto the picked panel's current
@@ -887,6 +899,7 @@
           {/if}
           {@render copyMsgBtn()}
           {@render copyConvBtn()}
+          {@render downloadConvBtn()}
           {#if !readOnly}{@render sendToPicker()}{/if}
           {@render samplesViewBtn()}
           {@render copyIdBtn(msg.nodeId)}
@@ -1080,6 +1093,7 @@
           {/if}
           {@render copyMsgBtn()}
           {@render copyConvBtn()}
+          {@render downloadConvBtn()}
           {#if !readOnly}{@render sendToPicker()}{/if}
           {@render samplesViewBtn()}
           {@render copyIdBtn(msg.nodeId)}

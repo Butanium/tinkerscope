@@ -3007,6 +3007,7 @@
                   onEdit={(content, reasoning, copyDownstream, allPanels, system, role) => (allPanels ? branchOps.applyEditAll(p.panel, msg, content, reasoning, copyDownstream, system, role) : branchOps.applyEdit(p.panel, msg, content, reasoning, copyDownstream, system, role))}
                   onCopy={(all, withThinking) => branchOps.copyMessage(p.panel, msg, all, withThinking)}
                   otherPanels={panelSels.filter((x) => x.panel !== p.panel).map((x) => ({ id: x.panel, label: panelLabel(x) }))}
+                  onDownload={() => branchOps.downloadConversation(p.panel, { panel: panelLabel(p), model: modelLabel(p) })}
                   onSendToPanel={(dest, append) => (append ? branchOps.appendBranchToPanel(p.panel, msg, dest) : branchOps.sendBranchToPanel(p.panel, msg, dest))}
                   panelId={p.panel}
                   onCycle={(delta) => branchOps.cycleBranch(p.panel, msg, delta)}
@@ -3059,6 +3060,7 @@
               {@const pp = panelPrefillOf(p.panel)}
               {@const ppOpen = !!panelPrefillOpen[panelPrefillKey(p.panel)]}
               {@const ppSkipped = panelPrefillActive(p.panel) && !scopeApplies(pp?.scope ?? 'all', panelThinking(p.panel))}
+              {@const pRole = panelRole[p.panel] ?? composerRole}
               <!-- This panel's prefill: kept in focus mode too (it still governs
                    the composer's sends here), unlike the continue box below. -->
               {#snippet ppScope()}
@@ -3073,6 +3075,10 @@
                 />
               {/snippet}
               <div class="panel-prefill-line" class:skipped={ppSkipped}>
+                {#if !focusPanel}
+                  <!-- the role of what this column's own box sends (hidden in focus mode with the box) -->
+                  <RoleToggle value={pRole} onchange={(r) => (panelRole[p.panel] = r)} testid="panel-role" />
+                {/if}
                 <span class="all-host" class:all={prefillFanOut}>
                   <SplitChip
                     label="prefill"
@@ -3109,9 +3115,7 @@
                    scrollable .messages so it stays stationary when branch cycling
                    changes the content height above it (a longer reply extends
                    below the fold instead of pushing the composer around). -->
-              {@const pRole = panelRole[p.panel] ?? composerRole}
               <div class="panel-send">
-                <RoleToggle value={pRole} onchange={(r) => (panelRole[p.panel] = r)} testid="panel-role" />
                 <input
                   class="panel-send-input"
                   placeholder={panelBusy(p.panel) ? 'generating…' : pRole === 'user' ? '＋ continue this panel' : `＋ ${pRole} message to this panel`}

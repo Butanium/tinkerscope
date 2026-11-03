@@ -21,6 +21,9 @@ import { undo } from './undo.svelte';
 import { assembleAssistantRaw } from './render';
 import { isSealed } from './reasoning';
 import { conversationText } from './conv-text';
+import { conversationHtml } from './conv-html';
+import { renderMarkdown } from './highlight-render';
+import katex from 'katex';
 import { parseRawMetaModel, thinkResumeCut, type RawMetaModel } from './loom';
 import {
   activePath,
@@ -50,6 +53,7 @@ import {
   selectedChildId,
   ROOT,
   appendChain,
+  threadKey,
   type ConvTree,
   type ThreadStart,
   type TokenLogprob,
@@ -746,6 +750,31 @@ class BranchOps {
       text = fmt(msg.content, msg.reasoning);
     }
     navigator.clipboard?.writeText(text);
+  }
+
+  /** Save the panel's active conversation (copy conversation's scope) as a
+   *  standalone HTML page. `labels`: the panel's display name and model. */
+  downloadConversation(panel: Panel, labels: { panel: string; model: string }) {
+    const path = activePath(ws.treeFor(panel));
+    if (!path.length) return;
+    const st = live.state;
+    const wsOn = st?.system_enabled ?? !!st?.system_prompt?.trim();
+    const wsName = ws.list.find((c) => c.id === ws.activeId)?.name ?? '';
+    const threadName = ws.threadNames[threadKey(panel, path[0].id)];
+    const title = threadName || wsName || 'Conversation';
+    const html = conversationHtml(path, {
+      render: (md) => renderMarkdown(md, []),
+      title,
+      meta: [threadName ? wsName : '', labels.panel !== labels.model ? labels.panel : '', labels.model],
+      workspaceSystem: wsOn ? (st?.system_prompt ?? '') : '',
+      katexVersion: katex.version
+    });
+    const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'conversation';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+    a.download = `${slug}-${panel}.html`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
   /** GRAFT a branch's ancestry (root→this node) into ANOTHER panel as an extra

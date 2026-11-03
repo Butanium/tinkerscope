@@ -613,6 +613,10 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
     are CLI knobs). **Has `search-scan.test.ts`** with fixtures mirroring
     `tests/test_search.py` — semantic drift between the engines fails whichever
     side moved.
+  - `lib/conv-html.ts` — a thread as a standalone HTML page (the row toolbar's
+    **download conversation**; `branchOps.downloadConversation`). Same scope and
+    system-prompt rule as `conv-text.ts`'s copy; renderer injected, KaTeX css
+    linked only when math rendered.
   - `lib/kbnav.ts` — keyboard row-navigation helpers: nav-key set, clamped
     focus-index stepping, the typing-target/modal-open guards. Consumed by
     +page's *Keyboard row navigation* section (click a row → focus ring; ↑/↓

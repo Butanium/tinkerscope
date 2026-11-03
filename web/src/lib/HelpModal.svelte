@@ -34,6 +34,7 @@
     { icon: 'tag', name: 'bookmark', what: 'pin this sample with a note' },
     { icon: 'copy', name: 'copy message', what: 'just this message' },
     { icon: 'copy-all', name: 'copy conversation', what: 'the whole thread as markdown' },
+    { icon: 'download', name: 'download conversation', what: 'the whole thread as an HTML page to share' },
     { icon: 'send-to', name: 'send to panel', what: "copy this branch's context into another panel" },
     { icon: 'eye', name: 'view all samples', what: "spread a turn's sibling branches out as cards (later turns hide meanwhile)" },
     { icon: 'hash', name: 'copy node handle', what: '`<ws>:<panel>:<node>` — paste into `tinkerscope samples --node …` or `tinkerscope continue --node …` in ANY terminal (the ws prefix means no dependence on which workspace is open there)' }
@@ -370,7 +371,7 @@ codex plugin add tinkerscope@tinkerscope</pre>
       <p>
         With more than one panel, a send fans out to all of them. The <b>Send to</b> chips above the composer
         narrow that to a subset; the small box at the bottom of a column continues <em>that</em> column alone,
-        as <b>user</b> or <b>system</b> (its own switch; until you touch it, it follows the composer's).
+        as <b>user</b> or <b>system</b> (the switch left of its prefill pill; until you touch it, it follows the composer's).
         Click a column's title to <b>name the panel</b> — the name replaces the model in the send chips, the
         send-to menu and the chart (the model stays beside it, muted); blank goes back to the model.
         A column header has a grip to drag it into a new position and a <b>−</b> to fold it out of the way
