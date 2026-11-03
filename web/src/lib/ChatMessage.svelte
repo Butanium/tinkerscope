@@ -682,30 +682,27 @@
 {#snippet sendToPicker()}
   {#if otherPanels.length && onSendToPanel && msg.nodeId != null}
     {@const append = sendAppend || shiftDown}
-    <!-- records Shift on the TRIGGER press only: the menu items render inside this
-         wrapper too, and picking one must not reset the mode it was opened in -->
-    <span class="send-to-wrap" onpointerdowncapture={(e) => { if (!(e.target as Element).closest?.('.row-menu-item')) sendAppend = e.shiftKey; }}>
-      <ActionMenu
-        label={shiftDown ? "Append from here to the end onto another panel's conversation" : "Send this branch's context to another panel"}
-        testid="send-to"
-        resetKey={msg.nodeId ?? ''}
-      >
-        {#snippet trigger()}
-          <Icon name="send-to" />
-        {/snippet}
-        {#snippet children(close)}
-          {#if append}<div class="row-menu-note">append here → end to</div>{/if}
-          {#each otherPanels as op (op.id)}
-            <button
-              class="row-menu-item"
-              role="menuitem"
-              data-testid={append ? 'send-to-append' : 'send-to-panel'}
-              onclick={(e) => { const a = append || e.shiftKey; close(); sendAppend = false; onSendToPanel?.(op.id, a); }}
-            >{append ? '⤵' : '→'} {op.label}</button>
-          {/each}
-        {/snippet}
-      </ActionMenu>
-    </span>
+    <ActionMenu
+      label={shiftDown ? "Append from here to the end onto another panel's conversation" : "Send this branch's context to another panel"}
+      testid="send-to"
+      resetKey={msg.nodeId ?? ''}
+      onTriggerDown={(e) => (sendAppend = e.shiftKey)}
+    >
+      {#snippet trigger()}
+        <Icon name="send-to" />
+      {/snippet}
+      {#snippet children(close)}
+        {#if append}<div class="row-menu-note">append here → end to</div>{/if}
+        {#each otherPanels as op (op.id)}
+          <button
+            class="row-menu-item"
+            role="menuitem"
+            data-testid={append ? 'send-to-append' : 'send-to-panel'}
+            onclick={(e) => { const a = append || e.shiftKey; close(); sendAppend = false; onSendToPanel?.(op.id, a); }}
+          >{append ? '⤵' : '→'} {op.label}</button>
+        {/each}
+      {/snippet}
+    </ActionMenu>
   {/if}
 {/snippet}
 

@@ -117,7 +117,6 @@ mark.hl-mark.hl-join-r { padding-right: 0; border-top-right-radius: 0; border-bo
 .row-menu-item:hover:not(:disabled) { background: var(--color-accent-bg); color: var(--color-accent); }
 .row-menu-item:disabled { opacity: 0.4; cursor: default; }
 .row-menu-note { padding: 2px 9px 3px; font-size: 0.64rem; color: var(--color-text-muted); white-space: nowrap; }
-.send-to-wrap { display: contents; }
 
 /* ── Raw toggle button ────────────────────────────────────────────── */
 .btn-raw { background: none; border: 1px solid var(--color-border); border-radius: var(--radius); padding: 2px 8px; font-size: 0.7rem; font-weight: 600; font-family: var(--font-mono); color: var(--color-text-muted); opacity: 0.5; transition: all 0.15s; letter-spacing: 0.02em; }

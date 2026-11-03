@@ -17,6 +17,7 @@
     testid = 'row-menu',
     resetKey = '',
     trigger,
+    onTriggerDown,
     children
   }: {
     label?: string;
@@ -27,6 +28,9 @@
     resetKey?: string;
     /** Trigger button content; defaults to a ⋯ glyph. */
     trigger?: Snippet;
+    /** Pointerdown on the trigger — lets a caller record a modifier held when
+     *  the menu was opened (send-to's Shift = append). */
+    onTriggerDown?: (e: PointerEvent) => void;
     children: Snippet<[() => void]>;
   } = $props();
 
@@ -93,6 +97,7 @@
     aria-haspopup="menu"
     aria-expanded={open}
     data-testid={testid}
+    onpointerdown={onTriggerDown}
     onclick={() => (open = !open)}
   >
     {#if trigger}{@render trigger()}{:else}

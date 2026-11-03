@@ -42,7 +42,9 @@
     open = false;
   }
   function onWindowClick(e: MouseEvent) {
-    if (open && wrap && !wrap.contains(e.target as Node)) open = false;
+    // composedPath, not contains(target): the rename pencil swaps its row for an
+    // input, so by the time this runs the clicked node is detached
+    if (open && wrap && !e.composedPath().includes(wrap)) open = false;
   }
   function onKey(e: KeyboardEvent) {
     if (open && e.key === 'Escape' && editing === null) open = false;
