@@ -225,6 +225,9 @@ tinkerscope trash [action] [handle]           # Recover deleted branches.
 tinkerscope refresh                           # Rescan the filesystem + re-probe sampling capabilities.
 tinkerscope wait                              # Block until no generation is running — the sequential-wave primitive: fire, `tinkerscope...
 tinkerscope serve [dirs...]                   # Serve the API + web UI for DIRS (bare `tinkerscope <dir>` is shorthand for this).
+tinkerscope rename ws <name>                  # Rename a workspace (the sidebar picker's name; `--ws <name>` matches it).
+tinkerscope rename panel <panel> [name]       # Name a panel (a column) — its title and send chip; the model shows beside it.
+tinkerscope rename thread [name]              # Name a thread (one root of a panel's tree); --all-panels names its whole switcher row.
 tinkerscope tools set <name>                  # Add/replace a tool's definition, set how its calls are answered, or switch it off/on.
 tinkerscope tools rm <name>                   # Remove a tool from the workspace (definition + handler).
 tinkerscope tools max-steps <n>               # Set the workspace's cap on auto-answered rounds per fire (default 5).

@@ -39,7 +39,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 from urllib.parse import quote
 
 import httpx
@@ -1786,10 +1786,9 @@ def _send_targets(
         c = c if c is not None else next((x for x in _workspaces() if x.get("id") == conv_id), None)
         folded = set((c or {}).get("reduced_panels") or [])
     if panel:
-        missing = [pid for pid in panel if pid not in by_id]
-        if missing:
-            _die(f"no panel(s) {', '.join(missing)}; on screen: {', '.join(by_id)}")
-        targets = [by_id[pid] for pid in panel]
+        if c is None and conv_id and any(spec not in by_id for spec in panel):
+            c = next((x for x in _workspaces() if x.get("id") == conv_id), None)  # for panel names
+        targets = [by_id[_resolve_panel(spec, c, by_id)] for spec in panel]
     else:
         targets = [p for p in panels if p["id"] not in folded]
     unbound = [p["id"] for p in targets if not p.get("run_id")]
@@ -2008,7 +2007,7 @@ def cmd_send(
     prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the models extend; raw `<think>` ok"),
     file: Optional[str] = typer.Option(None, "--file", help="read the user message from a file (a probe template — mutually exclusive with the positional prompt)"),
     prefill_file: Optional[str] = typer.Option(None, "--prefill-file", help="read the assistant prefill from a file (mutually exclusive with --prefill)"),
-    panel: list[str] = typer.Option([], "--panel", help="target only these panel ids (repeatable); overrides folding"),
+    panel: list[str] = typer.Option([], "--panel", help="target only these panels — ids or panel names (repeatable); overrides folding"),
     ws: Optional[str] = typer.Option(None, "--ws", "--conv", help="workspace to fire into (id-prefix/name); when it isn't the open one, models bind from ITS saved layout. Default = the open workspace, auto-created if none"),
     new_ws: Optional[str] = typer.Option(None, "--new-ws", metavar="NAME", help="create a fresh workspace with this name (seeded with the current panels), claim the bus, and fire into it"),
     include_folded: bool = typer.Option(False, "--include-folded", help="also fire at browser-folded panels"),
@@ -2098,11 +2097,14 @@ def _select_path_ops(tree: dict, panel: str, node_id: str) -> list[dict]:
     return ops
 
 
-def _continue_target(tree: dict, thread: Optional[int], turn: Optional[int], node: Optional[str]) -> dict:
+def _continue_target(
+    tree: dict, thread: Optional[str], turn: Optional[int], node: Optional[str],
+    c: Optional[dict] = None, pid: str = "?",
+) -> dict:
     """Resolve the node whose ancestry `continue` loops from, within ONE panel's tree.
     `--node` pinpoints it (id or unique prefix); else walk a root thread's SELECTED
-    path — `--thread K` (default: the active root) to its leaf, narrowed to turn N's
-    answer by `--turn N`. Errors (never guesses) on an empty panel / bad range /
+    path — `--thread K|name` (default: the active root) to its leaf, narrowed to turn
+    N's answer by `--turn N`. Errors (never guesses) on an empty panel / bad range /
     ambiguous node."""
     nodes = tree.get("nodes", {})
     if node is not None:
@@ -2121,9 +2123,7 @@ def _continue_target(tree: dict, thread: Optional[int], turn: Optional[int], nod
     if not roots:
         _die("panel has no threads yet — nothing to continue (use `tinkerscope send` to start one)")
     if thread is not None:
-        if not (1 <= thread <= len(roots)):
-            _die(f"--thread {thread} out of range (panel has {len(roots)} thread(s) — see `tinkerscope ws`)")
-        root = roots[thread - 1]
+        root = _resolve_thread(tree, thread, c, pid)
     else:
         root = _selected_child(tree, ROOT)
     path = _thread_path(tree, root)
@@ -2277,8 +2277,8 @@ def cmd_continue(
     prefill: Optional[str] = typer.Option(None, "--prefill", help="assistant prefill the model extends — a thinking opener ('Hmm,') or its own truncated CoT; raw `<think>` ok"),
     prefill_file: Optional[str] = typer.Option(None, "--prefill-file", help="read the prefill from a file (mutually exclusive with --prefill) — e.g. the model's own truncated CoT"),
     prefill_scope: Optional[str] = typer.Option(None, "--prefill-scope", help="all|think|non_think — which half(s) a thinking-both prefill applies to (default all)"),
-    panel: list[str] = typer.Option([], "--panel", help="target only these panel ids (repeatable); default = all unfolded panels"),
-    thread: Optional[int] = typer.Option(None, "--thread", help="1-indexed root thread to continue (per panel); default = the panel's active thread"),
+    panel: list[str] = typer.Option([], "--panel", help="target only these panels — ids or panel names (repeatable); default = all unfolded panels"),
+    thread: Optional[str] = typer.Option(None, "--thread", help="root thread to continue (per panel): 1-indexed K or a thread NAME (a name with no --panel targets only the panels that have it); default = the panel's active thread"),
     turn: Optional[int] = typer.Option(None, "--turn", help="1-indexed user turn on the thread's path to loom from; default = the leaf"),
     node: Optional[str] = typer.Option(None, "--node", help="target node handle — `<node>`, `<panel>:<node>` or `<ws>:<panel>:<node>` (the browser's Copy-node-id button gives the last form); pinpoints the loom point in ONE panel's tree"),
     conv: Optional[str] = typer.Option(None, "--ws", "--conv", help="workspace for --thread/--turn/--node targeting (id-prefix/name); default = the one open in the browser"),
@@ -2399,12 +2399,14 @@ def cmd_continue(
             _die(f"node {node!r} matches trees of panels {', '.join(owners)} — disambiguate with --panel")
 
     if panel:
-        missing = [pid for pid in panel if pid not in by_id]
-        if missing:
-            _die(f"no panel(s) {', '.join(missing)}; on screen: {', '.join(by_id)}")
-        targets = [by_id[pid] for pid in panel]
+        targets = [by_id[_resolve_panel(spec, c, by_id)] for spec in panel]
     else:
         targets = [p for p in panels if p["id"] not in folded]
+        has = _thread_panels(c, trees, thread, None) if c is not None else None
+        if has is not None:  # --thread <name>: only the panels holding that thread
+            targets = [p for p in targets if p["id"] in has]
+            if not targets:
+                _die(f"thread {thread!r} is only in folded panel(s) {', '.join(sorted(has))} — pass --panel")
     unbound = [p["id"] for p in targets if not p.get("run_id")]
     targets = [p for p in targets if p.get("run_id")]
     if not targets:
@@ -2454,7 +2456,7 @@ def cmd_continue(
                     "start one with `tinkerscope send`, or graft an external transcript "
                     "with --ancestry-file"
                 )
-            anchor = _continue_target(saved_tree, thread, turn, node)
+            anchor = _continue_target(saved_tree, thread, turn, node, c, p["id"])
             ancestry = _ancestry(saved_tree, anchor["id"])
             # the targeted thread's OWN prompt (root node) — explicit "", not None,
             # when absent, so looming a promptless thread never carries another
@@ -2645,7 +2647,7 @@ def cmd_battery(
     thinking: Optional[bool] = typer.Option(None, "--thinking/--no-thinking", help="default thinking mode; omit = inherit the global param"),
     system: Optional[str] = typer.Option(None, "--system", help="default system prompt for probes without `system:`; omit = inherit the global one"),
     no_system: bool = typer.Option(False, "--no-system", help="default to NO system prompt (front-matter `system:`/`no-system:` overrides)"),
-    panel: list[str] = typer.Option([], "--panel", help="default target panels (repeatable); front-matter `panel:` overrides"),
+    panel: list[str] = typer.Option([], "--panel", help="default target panels — ids or panel names (repeatable); front-matter `panel:` overrides"),
     include_folded: bool = typer.Option(False, "--include-folded", help="also fire at browser-folded panels"),
     force: bool = typer.Option(False, "--force", help="fire even while a generation is in flight"),
     first_token: bool = typer.Option(True, "--first-token/--no-first-token", help="print each panel's first-token distribution after every probe (default on)"),
@@ -3064,8 +3066,12 @@ def cmd_state(
         # P3). msgs=None means "no source", distinct from an empty thread —
         # printing that as "(0 msgs)" was the review's --no-link lie.
         msgs: Optional[list[dict]] = None
+        tag = _panel_tag(open_conv, p["id"])
         if open_conv is not None:
             t = (open_conv.get("trees") or {}).get(p["id"])
+            tname = _thread_name(open_conv, p["id"], _selected_child(t, ROOT) if t and t.get("nodes") else None)
+            if tname:
+                tag += f'  · thread "{tname}"'
             msgs = [
                 {"role": nd.get("role"), "content": nd.get("content", ""),
                  **({"reasoning": nd["reasoning"]} if nd.get("reasoning") else {})}
@@ -3074,16 +3080,16 @@ def cmd_state(
         bind = _short_run(p.get("run_id")) + (f"@{p['checkpoint']}" if p.get("checkpoint") else "")
         if p["id"] in reduced and not include_folded:
             skipped.append(p["id"])
-            print(f"▸ {p['id']}  {bind}   (folded — --include-folded to expand)")
+            print(f"▸ {tag}  {bind}   (folded — --include-folded to expand)")
             print()
             continue
         if msgs is None:
             why = ("transcript skipped: --no-link" if conv_id and not link
                    else "no transcript: workspace not in saved set" if conv_id
                    else "no transcript: no workspace open")
-            print(f"▸ {p['id']}  {bind}   ({why})")
+            print(f"▸ {tag}  {bind}   ({why})")
         else:
-            print(f"▸ {p['id']}  {bind}   ({len(msgs)} msgs)")
+            print(f"▸ {tag}  {bind}   ({len(msgs)} msgs)")
         if p.get("thread_system_prompt"):
             print(f"   thread system: {_oneline(p['thread_system_prompt'], 200)}")
         for line in _digest(msgs or [], _fmt_msg, full, width):
@@ -3199,12 +3205,13 @@ def _list_workspaces(convs: list[dict]) -> None:
     print(f"\n{len(rows)} workspace(s)   (expand: `tinkerscope ws <id|name>`)")
 
 
-def _thread_index(tree: dict, width: int) -> list[str]:
+def _thread_index(tree: dict, width: int, c: Optional[dict] = None, pid: str = "") -> list[str]:
     """Compact index of a panel's root THREADS (branch-from-start siblings):
-    one line per thread with its first message + first-turn fan-out size, `*` =
-    the active one. Empty when the panel has a single thread (nothing to index)."""
+    one line per thread with its name (if any) + first message + first-turn
+    fan-out size, `*` = the active one. Empty when the panel has a single unnamed
+    thread (nothing to index)."""
     roots = tree.get("rootChildren", [])
-    if len(roots) < 2:
+    if len(roots) < 2 and not (roots and _thread_name(c, pid, roots[0])):
         return []
     nodes = tree.get("nodes", {})
     sel_root = _selected_child(tree, ROOT)
@@ -3217,7 +3224,9 @@ def _thread_index(tree: dict, width: int) -> list[str]:
         fan = len(nd.get("children", []))
         uturns = sum(1 for n in _thread_path(tree, rid) if n.get("role") == "user")
         tail = f"({fan} sample{'' if fan == 1 else 's'}" + (f", {uturns} turns)" if uturns > 1 else ")") if fan else "(no samples yet)"
-        out.append(f"   {star}{k}· {_oneline(nd.get('content', ''), max(20, width - 28))}   {tail}")
+        name = _thread_name(c, pid, rid)
+        head = f'"{name}"  ' if name else ""
+        out.append(f"   {star}{k}· {head}{_oneline(nd.get('content', ''), max(20, width - 28 - len(head)))}   {tail}")
         if nd.get("system_prompt"):
             out.append(f"      sys: {_oneline(nd['system_prompt'], max(20, width - 34))}")
     return out
@@ -3268,8 +3277,10 @@ def _panel_threads(c: dict, pid: str, tree: dict) -> list[dict]:
             "ws": c.get("name") or "?",
             "ws_id": (c.get("id") or "")[:8],
             "panel": pid,
+            "panel_name": _panel_name(c, pid),
             "model": model,
             "k": k,
+            "name": _thread_name(c, pid, rid),
             "turns": _uturns(_thread_path(tree, rid)),
             "deep": _uturns(deep),
             "samples": len(nd.get("children", [])),
@@ -3285,7 +3296,7 @@ def cmd_threads(
     min_turns: int = typer.Option(1, "--min-turns", help="only threads whose DEEPEST branch has ≥N user turns (2+ = multi-turn)"),
     ws: Optional[str] = typer.Option(None, "--ws", help="restrict to one workspace (id-prefix or name substring)"),
     model: Optional[str] = typer.Option(None, "--model", help="only panels whose model/checkpoint contains this substring"),
-    grep: Optional[str] = typer.Option(None, "--grep", help="only threads whose FIRST message contains this text (case-insensitive)"),
+    grep: Optional[str] = typer.Option(None, "--grep", help="only threads whose name or FIRST message contains this text (case-insensitive)"),
     width: int = typer.Option(72, "--width", help="first-message truncation width"),
     include_folded: bool = typer.Option(True, "--include-folded/--no-folded", help="include panels folded in the browser (default: yes — folding is a view choice, not a filter)"),
     json_out: bool = typer.Option(False, "--json", help="emit rows as JSON (untruncated first messages)"),
@@ -3311,7 +3322,7 @@ def cmd_threads(
     if model:
         rows = [r for r in rows if model.lower() in r["model"].lower()]
     if grep:
-        rows = [r for r in rows if grep.lower() in (r["first"] or "").lower()]
+        rows = [r for r in rows if grep.lower() in f"{r['name'] or ''}\n{r['first'] or ''}".lower()]
     rows = [r for r in rows if r["deep"] >= min_turns]
     rows.sort(key=lambda r: r["deep"], reverse=True)
     if json_out:
@@ -3320,13 +3331,15 @@ def cmd_threads(
     if not rows:
         print("no threads matched  (loosen --min-turns / --model / --grep)")
         return
+    named = any(r["name"] for r in rows)
     table = [
         {
             "ws": _oneline(r["ws"], 24),
             "ws_id": r["ws_id"],
-            "panel": r["panel"],
+            "panel": _oneline(_panel_tag({"panel_names": {r["panel"]: r["panel_name"]}}, r["panel"]), 24),
             "model": _oneline(r["model"], 34),
             "k": ("*" if r["active"] else "") + str(r["k"]),
+            "name": _oneline(r["name"] or "", 28),
             "deep": r["deep"],
             "turns": r["turns"],
             "n": r["samples"],
@@ -3334,31 +3347,129 @@ def cmd_threads(
         }
         for r in rows
     ]
-    _print_table(table, ["ws", "ws_id", "panel", "model", "k", "deep", "turns", "n", "first message"])
+    cols = ["ws", "ws_id", "panel", "model", "k", "name", "deep", "turns", "n", "first message"]
+    _print_table(table, cols if named else [col for col in cols if col != "name"])
     print(
         f"\n{len(rows)} thread(s)   deep = user turns on the DEEPEST branch, turns = on the selected one, "
-        "* = active\nread one: `tinkerscope ws <ws_id> --panel <panel> --thread <k> --deepest --full`"
+        "* = active\nread one: `tinkerscope ws <ws_id> --panel <panel> --thread <k|name> --deepest --full`"
+        + ("" if named else "   ·   name one: `tinkerscope rename thread <name> --ws <ws_id> --panel <panel> --thread <k>`")
     )
 
 
-def _resolve_walk(tree: dict, thread: Optional[int], deepest: bool, pid: str) -> tuple[list[dict], str]:
-    """The transcript a `ws` invocation asks for: which root thread (--thread K,
-    else the selected one) walked which way (--deepest, else the selection).
-    Returns (path, label)."""
+# ── panel / thread names (workspace meta `panel_names` / `thread_names`) ─────
+# A name is a label the human gave in the browser (or `tinkerscope rename`), keyed
+# by panel id / `<panel>:<thread root id>`. The thread key carries the panel because
+# root ids are NOT unique across panels: an add-panel duplicate (`copy_tree`) keeps
+# every node id. Every `--panel` accepts a panel name and every `--thread` a thread
+# name, resolved here: exact (case-insensitive) first, then a unique substring.
+def _panel_name(c: Optional[dict], pid: str) -> Optional[str]:
+    return ((c or {}).get("panel_names") or {}).get(pid)
+
+
+def _thread_key(pid: str, root_id: str) -> str:
+    return f"{pid}:{root_id}"
+
+
+def _thread_name(c: Optional[dict], pid: str, root_id: Optional[str]) -> Optional[str]:
+    return ((c or {}).get("thread_names") or {}).get(_thread_key(pid, root_id)) if root_id else None
+
+
+def _panel_tag(c: Optional[dict], pid: str) -> str:
+    """`p-3 "Odin"` — the id (what every flag takes) plus the name when there is one."""
+    n = _panel_name(c, pid)
+    return f'{pid} "{n}"' if n else pid
+
+
+def _match_name(spec: str, named: list[tuple[str, str]], what: str) -> Optional[str]:
+    """`named` = [(id, name)] → the id whose name is `spec` (case-insensitive), else
+    the one whose name CONTAINS it. None = no match; dies when several do."""
+    s = spec.strip().lower()
+    for hits in ([i for i, n in named if n.lower() == s], [i for i, n in named if s in n.lower()]):
+        if len(hits) == 1:
+            return hits[0]
+        if len(hits) > 1:
+            listing = ", ".join(f'"{n}"' for i, n in named if i in hits)
+            _die(f"{what} {spec!r} is ambiguous — it matches {listing}")
+    return None
+
+
+def _resolve_panel(spec: str, c: Optional[dict], known: Iterable[str]) -> str:
+    """A `--panel` value → panel id: an id as-is, else a panel NAME among `known`."""
+    known = list(known)
+    if spec in known:
+        return spec
+    names = (c or {}).get("panel_names") or {}
+    hit = _match_name(spec, [(pid, names[pid]) for pid in known if names.get(pid)], "panel")
+    if hit is None:
+        _die(f"no panel {spec!r}; panels: {', '.join(_panel_tag(c, p) for p in known) or '(none)'}")
+    return hit
+
+
+def _find_thread(tree: dict, spec: str, c: Optional[dict], pid: str) -> Optional[str]:
+    """A `--thread` value → root node id in ONE panel's tree, or None when this
+    panel has no such thread. All digits = the 1-indexed K of `ws`'s `threads:`
+    index; anything else = a thread name."""
     roots = tree.get("rootChildren", [])
-    if thread is not None:
-        if not 1 <= thread <= len(roots):
-            _die(f"panel {pid} has {len(roots)} thread(s); --thread {thread} out of range")
-        root_id = roots[thread - 1]
-    else:
-        root_id = _selected_child(tree, ROOT)
+    s = spec.strip()
+    if s.isdigit():
+        k = int(s)
+        return roots[k - 1] if 1 <= k <= len(roots) else None
+    named = [(rid, _thread_name(c, pid, rid)) for rid in roots]
+    return _match_name(s, [(rid, n) for rid, n in named if n], "thread")
+
+
+def _resolve_thread(tree: dict, spec: str, c: Optional[dict], pid: str) -> str:
+    """`_find_thread`, dying with what the panel does have when it misses."""
+    rid = _find_thread(tree, spec, c, pid)
+    if rid is not None:
+        return rid
+    roots = tree.get("rootChildren", [])
+    if spec.strip().isdigit():
+        _die(f"panel {pid} has {len(roots)} thread(s); --thread {spec} out of range")
+    named = [f'{k} "{_thread_name(c, pid, r)}"' for k, r in enumerate(roots, 1) if _thread_name(c, pid, r)]
+    _die(f"no thread named {spec!r} in panel {pid}"
+         + (f"; named there: {', '.join(named)}" if named else " (none of its threads has a name)"))
+    raise AssertionError  # _die exits
+
+
+def _thread_label(tree: dict, root_id: Optional[str], c: Optional[dict], pid: str) -> str:
+    """`thread 2 "Post-compaction call"` — K as `ws`/`threads` number it, plus the name."""
+    roots = tree.get("rootChildren", [])
+    k = roots.index(root_id) + 1 if root_id in roots else "?"
+    n = _thread_name(c, pid, root_id)
+    return f'thread {k} "{n}"' if n else f"thread {k}"
+
+
+def _resolve_walk(
+    tree: dict, thread: Optional[str], deepest: bool, pid: str, c: Optional[dict] = None,
+) -> tuple[list[dict], str]:
+    """The transcript a `ws` invocation asks for: which root thread (--thread K or
+    name, else the selected one) walked which way (--deepest, else the selection).
+    Returns (path, label)."""
+    root_id = _resolve_thread(tree, thread, c, pid) if thread is not None else _selected_child(tree, ROOT)
     path = (_deepest_path(tree, root_id) if deepest else _thread_path(tree, root_id)) if root_id else []
-    label = "active" if thread is None else f"thread {thread}"
+    if thread is None:
+        name = _thread_name(c, pid, root_id)
+        label = "active" + (f' "{name}"' if name else "")
+    else:
+        label = _thread_label(tree, root_id, c, pid)
     return path, label + (", deepest branch" if deepest else "")
 
 
+def _thread_panels(c: dict, trees: dict, thread: Optional[str], panel: Optional[str]) -> Optional[set[str]]:
+    """With `--thread <name>` and no `--panel`, the panels that HAVE that thread
+    (the others are skipped, not errors — a name usually lives in one panel).
+    None = no narrowing (no --thread, a K, or an explicit --panel)."""
+    if thread is None or panel or thread.strip().isdigit():
+        return None
+    has = {pid for pid, t in trees.items() if _find_thread(t, thread, c, pid) is not None}
+    if not has:
+        _die(f"no thread named {thread!r} in any panel of this workspace")
+    return has
+
+
 def _workspace_json(
-    c: dict, panel: Optional[str], include_folded: bool, thread: Optional[int], deepest: bool,
+    c: dict, panel: Optional[str], include_folded: bool, thread: Optional[str], deepest: bool,
     provenance: bool = False,
 ) -> dict:
     """The selected transcript(s) as STRUCTURED data — untruncated content, CoT,
@@ -3369,14 +3480,19 @@ def _workspace_json(
     layout = {p["id"]: p for p in (c.get("panels") or [])}
     reduced = set(c.get("reduced_panels") or [])
     prods = _Producers() if provenance else None
+    if panel:
+        panel = _resolve_panel(panel, c, trees)
+    has_thread = _thread_panels(c, trees, thread, panel)
     panels_out = []
     for pid, t in trees.items():
         if panel and pid != panel:
             continue
         if pid in reduced and not include_folded and not panel:
             continue
+        if has_thread is not None and pid not in has_thread:
+            continue
         lay = layout.get(pid, {})
-        path, which = _resolve_walk(t, thread, deepest, pid)
+        path, which = _resolve_walk(t, thread, deepest, pid, c)
         pv = (_turn_provenance(c, [nd["id"] for nd in path if nd.get("role") == "assistant"], prods)
               if prods is not None else {})
         roots = t.get("rootChildren", [])
@@ -3396,12 +3512,14 @@ def _workspace_json(
             })
         panels_out.append({
             "panel": pid,
+            "panel_name": _panel_name(c, pid),
             "model": _short_run(lay.get("run_id")) + (f"@{lay['checkpoint']}" if lay.get("checkpoint") else ""),
             "run_id": lay.get("run_id"),
             "checkpoint": lay.get("checkpoint"),
             "folded": pid in reduced,
             "walk": which,
-            "thread_k": (thread if thread is not None else (roots.index(root_id) + 1 if root_id in roots else None)),
+            "thread_k": roots.index(root_id) + 1 if root_id in roots else None,
+            "thread_name": _thread_name(c, pid, root_id),
             "n_threads": len(roots),
             "user_turns": _uturns(path),
             **({"panel_model": prods.of_panel(lay)} if prods is not None else {}),
@@ -3440,7 +3558,7 @@ def _print_provenance(c: dict, path: list[dict], lay: dict, prods: _Producers) -
 
 def _show_workspace(
     c: dict, panel: Optional[str], full: bool, show_tree: bool, width: int, include_folded: bool = False,
-    thread: Optional[int] = None, deepest: bool = False, provenance: bool = False,
+    thread: Optional[str] = None, deepest: bool = False, provenance: bool = False,
 ) -> None:
     prods = _Producers() if provenance else None
     trees = c.get("trees") or {}
@@ -3454,39 +3572,43 @@ def _show_workspace(
     total_nodes = sum(len(t.get("nodes", {})) for t in trees.values())
     total_bps = sum(_branch_point_count(t) for t in trees.values())
     print(f"{len(trees)} panel(s) · {total_nodes} nodes · {total_bps} branch points\n")
+    if panel:
+        panel = _resolve_panel(panel, c, trees)
+    has_thread = _thread_panels(c, trees, thread, panel)
     shown = 0
     skipped: list[str] = []
     for pid, t in trees.items():
         if panel and pid != panel:
             continue
+        if has_thread is not None and pid not in has_thread:
+            continue
         shown += 1
         lay = layout.get(pid, {})
         bind = _short_run(lay.get("run_id")) + (f"@{lay['checkpoint']}" if lay.get("checkpoint") else "")
+        tag = _panel_tag(c, pid)
         # Folded (reduced) panels are skipped by default — an explicit --panel
         # always overrides the fold (you asked for it by name).
         if pid in reduced and not include_folded and not panel:
             skipped.append(pid)
-            print(f"▸ {pid}  ← {bind}   (folded — --include-folded or --panel {pid} to expand)")
+            print(f"▸ {tag}  ← {bind}   (folded — --include-folded or --panel {pid} to expand)")
             continue
-        ap, which = _resolve_walk(t, thread, deepest, pid)
+        ap, which = _resolve_walk(t, thread, deepest, pid, c)
         nf = sum(1 for nd in ap if len(_siblings(t, nd)) > 1)
-        print(f"▸ {pid}  ← {bind}   ({which}: {len(ap)} msgs, {nf} fork{'' if nf == 1 else 's'} on path)")
+        print(f"▸ {tag}  ← {bind}   ({which}: {len(ap)} msgs, {nf} fork{'' if nf == 1 else 's'} on path)")
         if show_tree:
             # --thread narrows the tree to that thread (it used to be ignored here,
             # so `--thread 2 --tree` printed every thread of the panel)
-            roots = None if thread is None else [t["rootChildren"][thread - 1]]
+            roots = None if thread is None else [_resolve_thread(t, thread, c, pid)]
             for line in _render_tree(t, width, roots):
                 print(line)
         else:
-            for line in _thread_index(t, width):
+            for line in _thread_index(t, width, c, pid):
                 print(line)
             for line in _digest(ap, lambda nd, w, fl: _fmt_node(t, nd, w, fl), full, width):
                 print(line)
         if prods is not None:
             _print_provenance(c, ap, lay, prods)
         print()
-    if panel and shown == 0:
-        _die(f"workspace has no panel {panel!r}; panels: {', '.join(trees) or '(none)'}")
     if skipped:
         print(f"{len(skipped)} folded panel(s) skipped: {', '.join(skipped)}   (--include-folded to expand all, or --panel <id> for one)")
 
@@ -3495,15 +3617,15 @@ def _show_workspace(
 def cmd_ws(
     selector: Optional[str] = typer.Argument(None, help="workspace id-prefix or name substring; omit to list all"),
     ws_opt: Optional[str] = typer.Option(None, "--ws", "--conv", help="same as the positional selector, for symmetry with `grep`/`node`/`threads` (which can only take it as an option)"),
-    panel: Optional[str] = typer.Option(None, "--panel", help="restrict to one panel id (p-1/p-2/… — older workspaces also have primary/compare); overrides folding"),
+    panel: Optional[str] = typer.Option(None, "--panel", help="restrict to one panel — id (p-1/p-2/…; older workspaces also have primary/compare) or panel name; overrides folding"),
     full: bool = typer.Option(False, "--full", help="show the whole active path, not just first/last-2"),
     tree: bool = typer.Option(False, "--tree", help="show the full branch tree (all branches; only thread K's with --thread K), `*` = active"),
     width: int = typer.Option(160, "--width", help="per-message truncation width"),
     include_folded: bool = typer.Option(
         False, "--include-folded", help="also expand panels folded in the browser UI (skipped by default)"
     ),
-    thread: Optional[int] = typer.Option(
-        None, "--thread", help="walk root thread K (the `threads:` index / `tinkerscope threads`) instead of the active one"
+    thread: Optional[str] = typer.Option(
+        None, "--thread", help="walk root thread K (the `threads:` index / `tinkerscope threads`) or a thread NAME instead of the active one; a name with no --panel shows only the panels that have it"
     ),
     deepest: bool = typer.Option(
         False, "--deepest", help="walk the thread's LONGEST branch instead of its selected one"
@@ -3576,7 +3698,7 @@ def _show_samples(
     turn: Optional[int],
     full: bool,
     width: int,
-    thread: Optional[int] = None,
+    thread: Optional[str] = None,
     node: Optional[str] = None,
     sample_k: Optional[int] = None,
     slice_rng: Optional[tuple[int, int]] = None,
@@ -3589,6 +3711,8 @@ def _show_samples(
     trees = c.get("trees") or {}
     if not trees:
         _die("workspace has no panels")
+    if panel:
+        panel = _resolve_panel(panel, c, trees)
     reduced = set(c.get("reduced_panels") or [])
     if node is not None:
         # --node pinpoints a fork ANYWHERE in a tree (grep prints the ids) —
@@ -3628,18 +3752,15 @@ def _show_samples(
             pid = panel  # explicit --panel always overrides the fold
         else:
             ordered = _panels_in_display_order(c, trees)
+            has = _thread_panels(c, trees, thread, None)  # a thread NAME picks its panel
+            if has is not None:
+                ordered = [p for p in ordered if p in has]
             candidates = [p for p in ordered if p not in reduced] or ordered
             pid = candidates[0]  # the LEFTMOST unfolded column
-        t = trees.get(pid)
-        if t is None:
-            _die(f"no panel {panel!r}; panels: {', '.join(trees) or '(none)'}")
+        t = trees[pid]
         roots = t.get("rootChildren", [])
-        path, _ = _resolve_walk(t, thread, deepest, pid)
-        if thread is not None:
-            thread_k = thread
-        else:
-            sel_root = _selected_child(t, ROOT)
-            thread_k = roots.index(sel_root) + 1 if sel_root in roots else 1
+        path, _ = _resolve_walk(t, thread, deepest, pid, c)
+        thread_k = roots.index(path[0]["id"]) + 1 if path and path[0].get("id") in roots else 1
         user_idx = [i for i, n in enumerate(path) if n.get("role") == "user"]
         if not user_idx:
             _die(f"panel {pid} thread {thread_k} has no user turns on its selected path")
@@ -3707,8 +3828,10 @@ def _show_samples(
         counts, doubled, untagged = _tag_tally([s.get("content", "") for s in samples])
         print(json.dumps({
             "workspace_id": c.get("id"), "workspace_name": c.get("name"),
-            "panel": pid, "run_id": lay.get("run_id"), "checkpoint": lay.get("checkpoint"),
-            "thread": thread_k, "thread_count": len(roots), "position": pos_part,
+            "panel": pid, "panel_name": _panel_name(c, pid),
+            "run_id": lay.get("run_id"), "checkpoint": lay.get("checkpoint"),
+            "thread": thread_k, "thread_name": _thread_name(c, pid, roots[thread_k - 1] if thread_k and thread_k <= len(roots) else None),
+            "thread_count": len(roots), "position": pos_part,
             "thread_system": thread_sys,
             "prompt": unode.get("content", ""),
             "tally": {"counts": counts, "doubled_draft": doubled, "untagged": untagged},
@@ -3723,8 +3846,10 @@ def _show_samples(
         return
 
     print(f"workspace: {c.get('name')}  ({(c.get('id') or '')[:8]})")
-    thread_part = f"thread {thread_k or '?'}/{len(roots)}   ·   " if len(roots) > 1 else ""
-    print(f"panel {pid}  ← {bind}   ·   {thread_part}{pos_part}   ·   {len(samples)} sample(s)")
+    tname = _thread_name(c, pid, roots[thread_k - 1] if thread_k and thread_k <= len(roots) else None)
+    thread_part = "thread" + (f" {thread_k or '?'}/{len(roots)}" if len(roots) > 1 else "") + (f' "{tname}"' if tname else "")
+    thread_part = f"{thread_part}   ·   " if (len(roots) > 1 or tname) else ""
+    print(f"panel {_panel_tag(c, pid)}  ← {bind}   ·   {thread_part}{pos_part}   ·   {len(samples)} sample(s)")
     if thread_sys:
         print(f"thread system: {_oneline(thread_sys, 200)}")
     if len(trees) > 1 and panel is None:
@@ -3771,8 +3896,8 @@ def _show_samples(
 def cmd_samples(
     selector: Optional[str] = typer.Argument(None, help="workspace id-prefix or name substring; omit → the workspace open in the browser"),
     ws_opt: Optional[str] = typer.Option(None, "--ws", "--conv", help="same as the positional selector, for symmetry with `grep`/`node`/`threads` (which can only take it as an option)"),
-    panel: Optional[str] = typer.Option(None, "--panel", help="panel id (p-1/p-2/… — older workspaces also have primary/compare); default = the LEFTMOST non-folded panel (layout order, i.e. the column order on screen). Explicit --panel overrides folding"),
-    thread: Optional[int] = typer.Option(None, "--thread", help="1-indexed root thread (branch-from-start sibling) to walk; default = the active one. Thread numbers: the `threads:` index in `tinkerscope ws <id>`"),
+    panel: Optional[str] = typer.Option(None, "--panel", help="panel id (p-1/p-2/… — older workspaces also have primary/compare) or panel name; default = the LEFTMOST non-folded panel (layout order, i.e. the column order on screen) — the leftmost that HAS it when --thread is a name. Explicit --panel overrides folding"),
+    thread: Optional[str] = typer.Option(None, "--thread", help="root thread to walk — 1-indexed K (the `threads:` index in `tinkerscope ws <id>`) or a thread NAME; default = the active one"),
     turn: Optional[int] = typer.Option(None, "--turn", help="1-indexed user turn on the thread's path whose responses to show; default = the last one"),
     node: Optional[str] = typer.Option(None, "--node", help="node handle — `<node>`, `<panel>:<node>` or `<ws>:<panel>:<node>` (the browser's Copy-node-id button gives the last form; `tinkerscope grep` prints ids). Pinpoints the fork directly, reaching NON-selected branches --thread/--turn can't. An assistant id shows the fan-out it belongs to"),
     full: bool = typer.Option(False, "--full", help="each sample's COMPLETE answer + full CoT (default: answer + one-line CoT preview)"),
@@ -4193,26 +4318,21 @@ def _panel_model(c: dict, panel: str, model: Optional[str]) -> dict:
     return {"run_id": lay["run_id"], "checkpoint": lay.get("checkpoint")}
 
 
-def _thread_nodes(c: dict, panel: str, thread: Optional[int]) -> list[dict]:
-    """A panel's thread as its SELECTED path, root → leaf (light nodes)."""
+def _thread_nodes(c: dict, panel: str, thread: Optional[str]) -> list[dict]:
+    """A panel's thread (--thread K or name, else the active one) as its SELECTED
+    path, root → leaf (light nodes). `panel` is an already-resolved id."""
     tree = (c.get("trees") or {}).get(panel)
     if not (tree or {}).get("nodes"):
         _die(f"panel {panel} of workspace {c.get('name')!r} has no thread")
-    roots = tree.get("rootChildren") or []
-    if thread is not None:
-        if not 1 <= thread <= len(roots):
-            _die(f"--thread {thread} out of range (panel has {len(roots)} thread(s))")
-        root = roots[thread - 1]
-    else:
-        root = _selected_child(tree, ROOT)
+    root = _resolve_thread(tree, thread, c, panel) if thread is not None else _selected_child(tree, ROOT)
     return _thread_path(tree, root)
 
 
 @app.command("replay")
 def cmd_replay(
     ws: str = typer.Option(..., "--ws", "--conv", help="workspace (id-prefix or name substring)"),
-    panel: str = typer.Option(..., "--panel", help="the panel whose thread to replay"),
-    thread: Optional[int] = typer.Option(None, "--thread", help="1-indexed root thread; default = the panel's active one"),
+    panel: str = typer.Option(..., "--panel", help="the panel whose thread to replay (id or panel name)"),
+    thread: Optional[str] = typer.Option(None, "--thread", help="root thread — 1-indexed K or a thread NAME; default = the panel's active one"),
     turn: list[int] = typer.Option([], "--turn", help="only these assistant turns, 1-indexed along the path (repeatable)"),
     n: int = typer.Option(1, "--n", help="samples per turn"),
     model: Optional[str] = typer.Option(None, "--model", help="sample this model instead of the panel's (run[@ckpt] or a selector like openrouter:<id>)"),
@@ -4242,6 +4362,7 @@ def cmd_replay(
     from concurrent.futures import ThreadPoolExecutor
 
     c = _resolve_workspace(ws)
+    panel = _resolve_panel(panel, c, c.get("trees") or {})
     path = _thread_nodes(c, panel, thread)
     binding = _panel_model(c, panel, model)
     sysarg = _system_arg(system, system_file, no_system)
@@ -4487,7 +4608,7 @@ def _responses_call_body(data: Any, f: Path, model: Optional[str], panel: str, i
     return body, kind
 
 
-def _responses_export(c: dict, panel: Optional[str], thread: Optional[int]) -> dict:
+def _responses_export(c: dict, panel: Optional[str], thread: Optional[str]) -> dict:
     """One thread as the Responses request it would replay: each node's RECORDED
     items (verbatim), converted chat-shaped fields for nodes without any."""
     trees = c.get("trees") or {}
@@ -4519,7 +4640,7 @@ def _responses_export(c: dict, panel: Optional[str], thread: Optional[int]) -> d
 
 # ---------- import / export: a workspace as a file ----------
 
-_IMPORT_KEYS = ("name", "system_prompt", "system_enabled", "tools", "wire", "tool_handlers", "tool_max_steps", "trees", "panels",
+_IMPORT_KEYS = ("name", "system_prompt", "system_enabled", "tools", "wire", "tool_handlers", "tool_max_steps", "panel_names", "thread_names", "trees", "panels",
                 "reduced_panels", "send_targets", "seen_panels", "panel_seq")
 _HEAVY_FLAGS = {"has_token_logprobs": "token_logprobs", "has_raw_meta": "raw_meta", "has_items": "items",
                 "has_items_recorded": "items_recorded"}
@@ -4640,8 +4761,8 @@ def cmd_export(
     ws: str = typer.Argument(..., help="workspace id-prefix or name substring"),
     blobs: bool = typer.Option(False, "--blobs", help="inline each node's heavy data (raw_meta, token_logprobs) so `import` restores it"),
     openai: bool = typer.Option(False, "--openai", help="export ONE thread as a chat transcript {model, system, tools, messages} instead of the workspace body"),
-    panel: Optional[str] = typer.Option(None, "--panel", help="--openai: the panel (default: the first one with a thread)"),
-    thread: Optional[int] = typer.Option(None, "--thread", help="--openai: 1-indexed root thread (default: the active one)"),
+    panel: Optional[str] = typer.Option(None, "--panel", help="--openai/--responses: the panel, id or panel name (default: the first one with a thread — or with the named --thread)"),
+    thread: Optional[str] = typer.Option(None, "--thread", help="--openai/--responses: root thread, 1-indexed K or a thread NAME (default: the active one)"),
     out: Optional[str] = typer.Option(None, "--out", help="write here instead of stdout"),
     responses: bool = typer.Option(False, "--responses", help="export ONE thread as a Responses-API request {input: {model, input, tools, reasoning}} — each node's recorded items verbatim (what `import --responses-call` takes back)"),
 ) -> None:
@@ -4651,6 +4772,10 @@ def cmd_export(
     tool results and reasoning payloads included), its effective system prompt and
     the workspace's tools."""
     c = _resolve_workspace(ws)
+    if panel:
+        panel = _resolve_panel(panel, c, c.get("trees") or {})
+    elif thread is not None and (has := _thread_panels(c, c.get("trees") or {}, thread, None)):
+        panel = next(p for p in (c.get("trees") or {}) if p in has)
     if responses:
         doc = _responses_export(c, panel, thread)
     elif openai:
@@ -4684,6 +4809,134 @@ def cmd_export(
         print(f"wrote {out} ({len(text)} chars)", file=sys.stderr)
     else:
         print(text)
+
+
+rename_app = typer.Typer(
+    add_completion=False, no_args_is_help=True,
+    help="Name a workspace, a panel or a thread. Panel and thread names show in the browser "
+         "and in `ws` / `threads` / `state` / `samples`, and every --panel / --thread accepts them.",
+)
+app.add_typer(rename_app, name="rename")
+
+
+def _name_arg(name: Optional[str], clear: bool) -> str:
+    """The new name, or "" for --clear (an empty name removes the key server-side)."""
+    if clear and name:
+        _die("pass a name or --clear, not both")
+    if not clear and not (name or "").strip():
+        _die("pass a name (or --clear to remove the current one)")
+    return "" if clear else " ".join(name.split())
+
+
+@rename_app.command("ws")
+def cmd_rename_ws(
+    name: str = typer.Argument(..., help="the new workspace name"),
+    ws: Optional[str] = typer.Option(None, "--ws", "--conv", help="workspace (id-prefix/name); default = the one open in the browser"),
+) -> None:
+    """Rename a workspace (the sidebar picker's name; `--ws <name>` matches it)."""
+    c = _tools_workspace(ws)
+    if not name.strip():
+        _die("a workspace name can't be empty")
+    _send_request("PATCH", f"/api/workspaces/{c['id']}", {"name": " ".join(name.split())})
+    print(f"workspace {(c.get('id') or '')[:8]}: {c.get('name')!r} → {' '.join(name.split())!r}")
+
+
+@rename_app.command("panel")
+def cmd_rename_panel(
+    panel: str = typer.Argument(..., help="panel id (p-1/p-2/…) or its current name"),
+    name: Optional[str] = typer.Argument(None, help="the new name — shown as the column title, with the model beside it"),
+    ws: Optional[str] = typer.Option(None, "--ws", "--conv", help="workspace (id-prefix/name); default = the one open in the browser"),
+    clear: bool = typer.Option(False, "--clear", help="remove the panel's name (the title goes back to the model)"),
+) -> None:
+    """Name a panel (a column) — its title and send chip; the model shows beside it.
+
+    Any --panel flag accepts the name."""
+    c = _tools_workspace(ws)
+    known = list(dict.fromkeys([p["id"] for p in (c.get("panels") or []) if isinstance(p, dict) and p.get("id")]
+                               + list(c.get("trees") or {})))
+    pid = _resolve_panel(panel, c, known)
+    new = _name_arg(name, clear)
+    names = dict(c.get("panel_names") or {})
+    old = names.get(pid)
+    if new:
+        names[pid] = new
+    else:
+        names.pop(pid, None)
+    _send_request("PATCH", f"/api/workspaces/{c['id']}", {"panel_names": names})
+    print(f"panel {pid}: " + (f"{old!r} → " if old else "") + (f"{new!r}" if new else "name cleared"))
+
+
+@rename_app.command("thread")
+def cmd_rename_thread(
+    name: Optional[str] = typer.Argument(None, help="the new thread name"),
+    node: Optional[str] = typer.Option(None, "--node", help="any node of the thread — `<node>`, `<panel>:<node>` or `<ws>:<panel>:<node>` (the browser's Copy-node-id button gives the last form)"),
+    ws: Optional[str] = typer.Option(None, "--ws", "--conv", help="workspace (id-prefix/name); default = the one open in the browser, or the one holding --node"),
+    panel: Optional[str] = typer.Option(None, "--panel", help="panel id or name (with --thread / the active thread); default = the only panel, if there is one"),
+    thread: Optional[str] = typer.Option(None, "--thread", help="1-indexed K or the current name; default = the panel's active thread"),
+    all_panels: bool = typer.Option(False, "--all-panels", help="also every other panel's root in the same switcher row (same first message, thread system prompt and current name) — the browser's Ctrl+save"),
+    clear: bool = typer.Option(False, "--clear", help="remove the thread's name"),
+) -> None:
+    """Name a thread (one root of a panel's tree); --all-panels names its whole switcher row.
+
+    A thread is a branch-from-start conversation. The name belongs to that ONE
+    panel's root; --all-panels extends it to every panel's root with the same
+    opening and current name, like renaming a row of the browser's thread switcher.
+    Any --thread flag accepts the name."""
+    new = _name_arg(name, clear)
+    node_id: Optional[str] = None
+    if node is not None:
+        if thread is not None:
+            _die("--node pinpoints the thread — drop --thread")
+        node_id, panel, ws = _aim_at_node(node, panel, ws)
+    if ws is None and node_id is not None and not (_get("/api/state") or {}).get("workspace_id"):
+        holder = _find_workspace_holding_node(node_id)  # browserless: node ids are self-contained
+        if holder is None:
+            _die(f"no saved workspace holds a node matching {node_id!r}")
+        ws = holder["id"]
+    c = _tools_workspace(ws)
+    trees = c.get("trees") or {}
+    pid = _resolve_panel(panel, c, trees) if panel else None
+    if node_id is not None:
+        found = [(p, nd) for p in ([pid] if pid else list(trees))
+                 for nd in _node_prefix_hits((trees[p] or {}).get("nodes") or {}, node_id)]
+        exact = [(p, nd) for p, nd in found if nd.get("id") == node_id]
+        found = exact[:1] or found
+        if not found:
+            _die(f"no node matching {node_id!r}" + (f" in panel {pid}" if pid else " in this workspace"))
+        if len(found) > 1:
+            listing = ", ".join(f"{p}:{nd.get('id')}" for p, nd in found[:6])
+            _die(f"ambiguous node {node_id!r} — {listing}")
+        pid, nd = found[0]
+        root = _root_of(trees[pid], nd["id"])
+    else:
+        if pid is None:
+            with_threads = [p for p, t in trees.items() if (t or {}).get("rootChildren")]
+            if len(with_threads) != 1:
+                _die("which panel? pass --panel (or --node); panels with threads: "
+                     + (", ".join(_panel_tag(c, p) for p in with_threads) or "none"))
+            pid = with_threads[0]
+        t = trees[pid]
+        if not t.get("rootChildren"):
+            _die(f"panel {pid} has no thread yet")
+        root = _resolve_thread(t, thread, c, pid) if thread is not None else _selected_child(t, ROOT)
+    names = dict(c.get("thread_names") or {})
+    targets = [(pid, root)]
+    if all_panels:
+        def row_key(p: str, rid: str) -> tuple:
+            r = (trees[p].get("nodes") or {}).get(rid) or {}
+            return (r.get("system_prompt") or "", (r.get("content") or "").strip(), _thread_name(c, p, rid) or "")
+        key = row_key(pid, root)
+        targets += [(p, rid) for p, t in trees.items() if p != pid
+                    for rid in (t or {}).get("rootChildren", []) if row_key(p, rid) == key]
+    old = _thread_name(c, pid, root)
+    for p, rid in targets:
+        if new:
+            names[_thread_key(p, rid)] = new
+        else:
+            names.pop(_thread_key(p, rid), None)
+    _send_request("PATCH", f"/api/workspaces/{c['id']}", {"thread_names": names})
+    where = ", ".join(f"{p} {_thread_label(trees[p], rid, None, p)}" for p, rid in targets)
+    print(f"{where}: " + (f"{old!r} → " if old else "") + (f"{new!r}" if new else "name cleared"))
 
 
 @app.command("trash")

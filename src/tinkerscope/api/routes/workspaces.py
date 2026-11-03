@@ -59,6 +59,10 @@ class WorkspaceCreate(BaseModel):
     # auto_continue?, timeout?}}; api/tool_handlers.py) + the auto-answer step cap.
     tool_handlers: dict[str, Any] | None = None
     tool_max_steps: int | None = None
+    # User-given names: {panel id: name} and {"<panel>:<thread root id>": name}
+    # (tree_ops.check_names). None = nothing named.
+    panel_names: dict[str, Any] | None = None
+    thread_names: dict[str, Any] | None = None
     # N-panel shape: {panel_id: opaque tree}.
     trees: dict[str, Any] | None = None
     # legacy 2-panel shape (transitional CLI callers) — synthesized into `trees`.
@@ -89,6 +93,8 @@ class WorkspacePatch(BaseModel):
     wire: dict[str, Any] | None = None
     tool_handlers: dict[str, Any] | None = None
     tool_max_steps: int | None = None
+    panel_names: dict[str, Any] | None = None
+    thread_names: dict[str, Any] | None = None
     panels: list[dict[str, Any]] | None = None
     reduced_panels: list[str] | None = None
     send_targets: list[str] | None = None
@@ -205,6 +211,8 @@ def create_workspace(req: WorkspaceCreate) -> dict:
         tools = tree_ops.check_tools(req.tools)
         handlers = tool_handlers.check_tool_handlers(req.tool_handlers)
         max_steps = tool_handlers.check_max_steps(req.tool_max_steps)
+        panel_names = tree_ops.check_names(req.panel_names)
+        thread_names = tree_ops.check_names(req.thread_names)
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
     return store.upsert(
@@ -216,6 +224,8 @@ def create_workspace(req: WorkspaceCreate) -> dict:
         wire=req.wire,
         tool_handlers=handlers,
         tool_max_steps=max_steps,
+        panel_names=panel_names,
+        thread_names=thread_names,
         trees=trees,
         panels=req.panels or [],
         reduced_panels=req.reduced_panels,

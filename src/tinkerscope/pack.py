@@ -45,7 +45,7 @@ from typing import Any, Callable, Iterable
 
 import yaml
 
-from .api import tool_handlers
+from .api import tool_handlers, tree_ops
 from .api.state import DEFAULT_PANEL_ID
 
 VERSION = 1
@@ -401,6 +401,8 @@ def apply_pack(pack: Pack, *, force: bool = False, reseed: bool = False, on_conf
                 {k: v for k, v in (body.get("tool_handlers") or {}).items()
                  if isinstance(v, dict) and v.get("mode") != "python"}),
             tool_max_steps=body.get("tool_max_steps"),
+            panel_names=tree_ops.check_names(body.get("panel_names")),
+            thread_names=tree_ops.check_names(body.get("thread_names")),
             trees=body.get("trees") or {},
             panels=body.get("panels") or [],
             reduced_panels=body.get("reduced_panels") or [],

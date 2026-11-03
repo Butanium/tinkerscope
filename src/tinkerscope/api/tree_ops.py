@@ -110,7 +110,12 @@ META_FIELDS = (
     "wire",
     "tool_handlers",
     "tool_max_steps",
+    "panel_names",
+    "thread_names",
 )
+
+#: Longest panel / thread name kept (longer is cut, not refused — a name is a label).
+NAME_MAX = 120
 
 # Reserved panel ids the pre-multipanel {tree, compare_tree} shape maps onto.
 _LEGACY_PANELS = (("tree", "primary"), ("compare_tree", "compare"))
@@ -411,6 +416,34 @@ def normalize_panels(panels: Any, trees: Any) -> Any:
     return kept or [panels[0]]
 
 
+def check_names(v: Any) -> Optional[dict]:
+    """Validate a `panel_names` ({panel id: name}) or `thread_names`
+    ({"<panel>:<thread root node id>": name}) map. Whole-map LWW like
+    `tool_handlers`. Names are stripped and capped at NAME_MAX; an empty name
+    removes its key, and an empty map stores as None.
+
+    A thread key carries its panel because root ids repeat across panels: an
+    add-panel duplicate (`copy_tree`) keeps every node id. Keys of panels / roots
+    that no longer exist are kept: panel ids are never reused, so a stale key names
+    nothing — and a restored column or undone delete gets its name back."""
+    if v is None:
+        return None
+    if not isinstance(v, dict):
+        raise ValueError("names must be an object {id: name}")
+    out: dict[str, str] = {}
+    for k, name in v.items():
+        if not isinstance(k, str) or not k:
+            raise ValueError("name keys must be non-empty strings")
+        if name is None:
+            continue
+        if not isinstance(name, str):
+            raise ValueError(f"name for {k!r} must be a string")
+        name = " ".join(name.split())[:NAME_MAX].strip()
+        if name:
+            out[k] = name
+    return out or None
+
+
 def check_tools(v: Any) -> Optional[list]:
     """Validate a workspace's `tools` meta, stored VERBATIM: chat-shaped functions
     `{type: "function", function: {name, …}}`, flat Responses-API functions
@@ -465,6 +498,8 @@ def apply_meta(body: dict, fields: dict, trees: Any = None) -> tuple[dict, bool]
             v = tool_handlers.check_tool_handlers(v)
         elif k == "tool_max_steps":
             v = tool_handlers.check_max_steps(v)
+        elif k in ("panel_names", "thread_names"):
+            v = check_names(v)
         if k not in body or body[k] != v:
             changed = True
         body[k] = v

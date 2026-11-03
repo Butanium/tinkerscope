@@ -136,6 +136,7 @@ tinkerscope params [--temperature T] [--max-tokens M] [--n N] [--thinking/--no-t
 tinkerscope ws                                         # list saved WORKSPACES + branch metadata (alias: tinkerscope conv)
 tinkerscope ws <id|name> [--panel P] [--full] [--tree] [--include-folded] [--thread K] [--deepest] [--json]  # expand one: active branch + fork counts (--tree = all branches; --thread/--deepest = read a NON-active conversation; --json = export the transcript)
 tinkerscope threads [--min-turns N] [--ws W] [--model SUB] [--grep TXT] [--json]  # cross-workspace index of EVERY root thread + its deepest-branch turn count
+tinkerscope rename ws|panel|thread …                   # NAME a workspace / a panel (column) / a thread — names show in the browser and here, and every --panel / --thread accepts them
 tinkerscope probe <run>[@ckpt] "<prompt>" [--n N] [--ancestry-file F] [--json]  # sample ANY model off-workspace: nothing broadcast, nothing committed
 tinkerscope samples [conv] [--panel P] [--thread K|--node ID] [--turn N] [--sample K] [--slice S[:L]] [--full] [--first-token]  # ALL n-sample siblings at one fork + <tag> tally; --sample/--slice = read ONE sample in PIECES; --first-token = the model's P(first generated token) at this fork
 tinkerscope grep "<text>" [--ws WS] [--regex] [-i] [--link]  # search EVERY branch of all workspaces: content + thinking + system prompts (server-side; = the browser's Ctrl+K); --link appends a ?w=…&node=… deep-link URL per hit that opens the browser AT the match
@@ -421,6 +422,18 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   index) instead of the active one; `--deepest` follows its longest branch instead of
   the selected one. Without these, a thread the panel no longer points at can be
   *listed* but never *read* — `samples --thread K` only shows one fork's fan-out.
+- **Names.** The human can name panels (columns) and threads in the browser; you can
+  with `tinkerscope rename panel <panel> <name>` / `rename thread <name> --panel P
+  [--thread K] | --node <handle>` (`--all-panels` = the same opening in every panel,
+  `--clear` to drop one). Names print in `ws` (`▸ p-3 "Odin"`, `"name"` in the
+  `threads:` index), `threads` (a `name` column; `--grep` matches names too), `state`
+  and `samples`, and EVERY `--panel` takes a panel name and every `--thread` a thread
+  name (exact, else a unique substring — all digits = K). A thread name with no
+  `--panel` narrows to the panels that have it. A thread name belongs to ONE panel's
+  root: panels that open with the same message (common after an add-panel duplicate
+  or an imported call) don't share it. When you set up a probe workspace for the human,
+  name its panels after the CONDITION ("memory as user", "note after ask") — a column
+  titled by the model alone is unreadable when every column runs the same model.
 - **Exporting a conversation to render elsewhere** (a report, an artifact, a diff):
   `tinkerscope ws <id> --panel P --thread K --json` emits the selected transcript as
   structured data — untruncated content, CoT, node ids, and each turn's
@@ -740,7 +753,7 @@ tinkerscope send [prompt] [options]
   --prefill TEXT                    assistant prefill the models extend; raw `<think>` ok
   --file TEXT                       read the user message from a file (a probe template — mutually exclusive with the positional prompt)
   --prefill-file TEXT               read the assistant prefill from a file (mutually exclusive with --prefill)
-  --panel TEXT (repeatable)         target only these panel ids (repeatable); overrides folding
+  --panel TEXT (repeatable)         target only these panels — ids or panel names (repeatable); overrides folding
   --ws TEXT                         workspace to fire into (id-prefix/name); when it isn't the open one, models bind from ITS saved layout. Default = the open workspace, auto-created if none
   --new-ws NAME                     create a fresh workspace with this name (seeded with the current panels), claim the bus, and fire into it
   --include-folded                  also fire at browser-folded panels
@@ -769,8 +782,8 @@ tinkerscope continue [prompt] [options]
   --prefill TEXT                    assistant prefill the model extends — a thinking opener ('Hmm,') or its own truncated CoT; raw `<think>` ok
   --prefill-file TEXT               read the prefill from a file (mutually exclusive with --prefill) — e.g. the model's own truncated CoT
   --prefill-scope TEXT              all|think|non_think — which half(s) a thinking-both prefill applies to (default all)
-  --panel TEXT (repeatable)         target only these panel ids (repeatable); default = all unfolded panels
-  --thread INTEGER                  1-indexed root thread to continue (per panel); default = the panel's active thread
+  --panel TEXT (repeatable)         target only these panels — ids or panel names (repeatable); default = all unfolded panels
+  --thread TEXT                     root thread to continue (per panel): 1-indexed K or a thread NAME (a name with no --panel targets only the panels that have it); default = the panel's active thread
   --turn INTEGER                    1-indexed user turn on the thread's path to loom from; default = the leaf
   --node TEXT                       target node handle — `<node>`, `<panel>:<node>` or `<ws>:<panel>:<node>` (the browser's Copy-node-id button gives the last form); pinpoints the loom point in ONE panel's tree
   --ws TEXT                         workspace for --thread/--turn/--node targeting (id-prefix/name); default = the one open in the browser
@@ -791,7 +804,7 @@ tinkerscope battery <probes_dir> [options]
   --thinking/--no-thinking          default thinking mode; omit = inherit the global param
   --system TEXT                     default system prompt for probes without `system:`; omit = inherit the global one
   --no-system                       default to NO system prompt (front-matter `system:`/`no-system:` overrides)
-  --panel TEXT (repeatable)         default target panels (repeatable); front-matter `panel:` overrides
+  --panel TEXT (repeatable)         default target panels — ids or panel names (repeatable); front-matter `panel:` overrides
   --include-folded                  also fire at browser-folded panels
   --force                           fire even while a generation is in flight
   --first-token/--no-first-token    print each panel's first-token distribution after every probe (default on)
@@ -849,27 +862,27 @@ tinkerscope threads [options]
   --min-turns INTEGER               only threads whose DEEPEST branch has ≥N user turns (2+ = multi-turn)  [default: 1]
   --ws TEXT                         restrict to one workspace (id-prefix or name substring)
   --model TEXT                      only panels whose model/checkpoint contains this substring
-  --grep TEXT                       only threads whose FIRST message contains this text (case-insensitive)
+  --grep TEXT                       only threads whose name or FIRST message contains this text (case-insensitive)
   --width INTEGER                   first-message truncation width  [default: 72]
   --include-folded/--no-folded      include panels folded in the browser (default: yes — folding is a view choice, not a filter)
   --json                            emit rows as JSON (untruncated first messages)
 tinkerscope ws [selector] [options]
   # Browse saved WORKSPACES (multi-panel, branchable; `conv` is a back-compat alias).
   --ws TEXT                         same as the positional selector, for symmetry with `grep`/`node`/`threads` (which can only take it as an option)
-  --panel TEXT                      restrict to one panel id (p-1/p-2/… — older workspaces also have primary/compare); overrides folding
+  --panel TEXT                      restrict to one panel — id (p-1/p-2/…; older workspaces also have primary/compare) or panel name; overrides folding
   --full                            show the whole active path, not just first/last-2
   --tree                            show the full branch tree (all branches; only thread K's with --thread K), `*` = active
   --width INTEGER                   per-message truncation width  [default: 160]
   --include-folded                  also expand panels folded in the browser UI (skipped by default)
-  --thread INTEGER                  walk root thread K (the `threads:` index / `tinkerscope threads`) instead of the active one
+  --thread TEXT                     walk root thread K (the `threads:` index / `tinkerscope threads`) or a thread NAME instead of the active one; a name with no --panel shows only the panels that have it
   --deepest                         walk the thread's LONGEST branch instead of its selected one
   --json                            emit the selected transcript(s) as structured JSON (untruncated content + CoT + node ids)
   --provenance                      say which model sampled each assistant turn on the walked path (from its raw_meta; a blobless turn is matched to an identical recorded one) and whether it is the panel's model — the on-policy check
 tinkerscope samples [selector] [options]
   # Show every sibling response (the n-sample fan-out) at ONE fork, each with its CoT, plus a...
   --ws TEXT                         same as the positional selector, for symmetry with `grep`/`node`/`threads` (which can only take it as an option)
-  --panel TEXT                      panel id (p-1/p-2/… — older workspaces also have primary/compare); default = the LEFTMOST non-folded panel (layout order, i.e. the column order on screen). Explicit --panel overrides folding
-  --thread INTEGER                  1-indexed root thread (branch-from-start sibling) to walk; default = the active one. Thread numbers: the `threads:` index in `tinkerscope ws <id>`
+  --panel TEXT                      panel id (p-1/p-2/… — older workspaces also have primary/compare) or panel name; default = the LEFTMOST non-folded panel (layout order, i.e. the column order on screen) — the leftmost that HAS it when --thread is a name. Explicit --panel overrides folding
+  --thread TEXT                     root thread to walk — 1-indexed K (the `threads:` index in `tinkerscope ws <id>`) or a thread NAME; default = the active one
   --turn INTEGER                    1-indexed user turn on the thread's path whose responses to show; default = the last one
   --node TEXT                       node handle — `<node>`, `<panel>:<node>` or `<ws>:<panel>:<node>` (the browser's Copy-node-id button gives the last form; `tinkerscope grep` prints ids). Pinpoints the fork directly, reaching NON-selected branches --thread/--turn can't. An assistant id shows the fan-out it belongs to
   --full                            each sample's COMPLETE answer + full CoT (default: answer + one-line CoT preview)
@@ -903,8 +916,8 @@ tinkerscope node <node_id> [options]
 tinkerscope replay [options]
   # Resample every assistant turn of a thread from its exact prefix: at each turn the model...
   --ws TEXT                         workspace (id-prefix or name substring)
-  --panel TEXT                      the panel whose thread to replay
-  --thread INTEGER                  1-indexed root thread; default = the panel's active one
+  --panel TEXT                      the panel whose thread to replay (id or panel name)
+  --thread TEXT                     root thread — 1-indexed K or a thread NAME; default = the panel's active one
   --turn INTEGER (repeatable)       only these assistant turns, 1-indexed along the path (repeatable)
   --n INTEGER                       samples per turn  [default: 1]
   --model TEXT                      sample this model instead of the panel's (run[@ckpt] or a selector like openrouter:<id>)
@@ -938,8 +951,8 @@ tinkerscope export <ws> [options]
   # Print a workspace as JSON: its body (what `import` takes back, `--blobs` for a complete...
   --blobs                           inline each node's heavy data (raw_meta, token_logprobs) so `import` restores it
   --openai                          export ONE thread as a chat transcript {model, system, tools, messages} instead of the workspace body
-  --panel TEXT                      --openai: the panel (default: the first one with a thread)
-  --thread INTEGER                  --openai: 1-indexed root thread (default: the active one)
+  --panel TEXT                      --openai/--responses: the panel, id or panel name (default: the first one with a thread — or with the named --thread)
+  --thread TEXT                     --openai/--responses: root thread, 1-indexed K or a thread NAME (default: the active one)
   --out TEXT                        write here instead of stdout
   --responses                       export ONE thread as a Responses-API request {input: {model, input, tools, reasoning}} — each node's recorded items verbatim (what `import --responses-call` takes back)
 tinkerscope trash [action] [handle] [options]
@@ -963,6 +976,21 @@ tinkerscope serve [dirs...] [options]
   --vllm-url URL                    a vLLM (OpenAI-compatible) server whose served models join the picker as `vllm:<name>` — sampled natively (token ids, logprobs, loom); same as $TINKERSCOPE_VLLM_URL
   --multi-user                      several people on this one instance: each browser (and each `tinkerscope --session <id>`) gets its OWN sidebar — panel selection, open workspace, sampling params, running — while workspaces, highlights and pins stay shared; same as TINKERSCOPE_MULTI_USER=1
   --allow-tool-code                 let PYTHON tool handlers run (each call in a subprocess on this machine, with a timeout); off, they behave like manual tools — static handlers always run; same as TINKERSCOPE_ALLOW_TOOL_CODE=1
+tinkerscope rename ws <name> [options]
+  # Rename a workspace (the sidebar picker's name; `--ws <name>` matches it).
+  --ws TEXT                         workspace (id-prefix/name); default = the one open in the browser
+tinkerscope rename panel <panel> [name] [options]
+  # Name a panel (a column) — its title and send chip; the model shows beside it.
+  --ws TEXT                         workspace (id-prefix/name); default = the one open in the browser
+  --clear                           remove the panel's name (the title goes back to the model)
+tinkerscope rename thread [name] [options]
+  # Name a thread (one root of a panel's tree); --all-panels names its whole switcher row.
+  --node TEXT                       any node of the thread — `<node>`, `<panel>:<node>` or `<ws>:<panel>:<node>` (the browser's Copy-node-id button gives the last form)
+  --ws TEXT                         workspace (id-prefix/name); default = the one open in the browser, or the one holding --node
+  --panel TEXT                      panel id or name (with --thread / the active thread); default = the only panel, if there is one
+  --thread TEXT                     1-indexed K or the current name; default = the panel's active thread
+  --all-panels                      also every other panel's root in the same switcher row (same first message, thread system prompt and current name) — the browser's Ctrl+save
+  --clear                           remove the thread's name
 tinkerscope tools set <name> [options]
   # Add/replace a tool's definition, set how its calls are answered, or switch it off/on.
   --ws TEXT                         workspace (id-prefix/name); default = the open one
