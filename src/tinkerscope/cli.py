@@ -1849,9 +1849,10 @@ def _derived_ws_name(prompt: str) -> str:
 def _qualified_handle(ws_id: Optional[str], panel: str, node_id: str) -> str:
     """The paste-ready `<ws>:<panel>:<node>` handle every printer emits (P3
     §4.4): self-contained, so `--node` resolves it with NO open-workspace
-    context. The ws part is an 8-char id prefix — `_split_node_handle` +
-    `_resolve_workspace` take prefixes."""
-    return f"{(ws_id or '')[:8]}:{panel}:{node_id}" if ws_id else f"{panel}:{node_id}"
+    context. The FULL workspace id, like the browser's copy button: an 8-char
+    prefix collided on ids sharing a stem (`_handle_workspace` still resolves
+    such old handles by the node)."""
+    return f"{ws_id}:{panel}:{node_id}" if ws_id else f"{panel}:{node_id}"
 
 
 def _emit_user_turns(
@@ -3132,8 +3133,9 @@ def _resolve_workspace(sel: str, convs: Optional[list[dict]] = None) -> dict:
 def _split_node_handle(handle: str) -> tuple[Optional[str], Optional[str], str]:
     """Parse a node handle into (workspace, panel, node).
 
-    The browser's Copy-node-id button hands out `<ws>:<panel>:<node>` (an 8-char
-    workspace prefix) — a bare node id is ambiguous whenever a tree was cloned
+    The browser's Copy-node-id button hands out `<ws>:<panel>:<node>` (the full
+    workspace id; copies before 2026-11-02 carry an 8-char prefix) — a bare node
+    id is ambiguous whenever a tree was cloned
     across panels, and the panel is what `continue`/`samples` need in order to
     loom into the right column. Colon is a
     safe separator: no panel id (`p-1`, and the older `primary`/`compare`) and no
@@ -3181,8 +3183,8 @@ def _aim_at_node(
 
 def _handle_workspace(ws_part: str, panel_part: Optional[str], node: str) -> str:
     """A handle's workspace part is an id PREFIX, and custom ids can share one
-    (`terra-p4-tests` / `terra-p4-memuser` → `terra-p4`; browsers before
-    2026-11-02 always copied 8 chars). When it names several workspaces, the one
+    (`terra-p4-tests` / `terra-p4-memuser` → `terra-p4`; handles copied before
+    2026-11-02 carried 8 chars). When it names several workspaces, the one
     holding the node wins; otherwise the prefix goes on unchanged."""
     summaries = _get("/api/workspaces")
     if any(c.get("id") == ws_part for c in summaries):

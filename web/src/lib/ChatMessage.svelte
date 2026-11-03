@@ -308,16 +308,6 @@
   // flash individually (clicking one must not light up the others).
   let copiedMsg = $state(false);
   let copiedWs = $state(false);
-  /** The shortest prefix (≥8 chars) of `id` that no other id starts with — the
-   *  workspace part of a node handle. A fixed 8 collided on custom ids sharing a
-   *  stem (`terra-p4-tests` / `terra-p4-memuser`), and the CLI then refused it. */
-  function uniquePrefix(id: string, ids: string[]): string {
-    for (let n = 8; n < id.length; n++) {
-      const p = id.slice(0, n);
-      if (!ids.some((o) => o !== id && o.startsWith(p))) return p;
-    }
-    return id;
-  }
   /** Shift was down when the send-to menu was opened (append mode). */
   let sendAppend = $state(false);
   let copiedId = $state(false);
@@ -731,9 +721,12 @@
 <!-- Copy this node's handle — the CLI's addressing currency (`tinkerscope
      samples/continue/node --node <handle>`).
 
-     `<ws-prefix>:<panel>:<node>` (§4.4, fully qualified since P3): the ws part
-     makes the handle paste-able into ANY terminal — no dependence on which
-     workspace happens to be open there (the CLI resolves an id-prefix). The
+     `<ws>:<panel>:<node>` (§4.4, fully qualified since P3): the ws part makes
+     the handle paste-able into ANY terminal — no dependence on which workspace
+     happens to be open there. The FULL workspace id: an 8-char prefix collided
+     on ids sharing a stem (terra-p4-tests / terra-p4-memuser) and the CLI
+     refused the handle, and any shorter-but-unique prefix can collide again
+     with a workspace made later. The
      panel part disambiguates clones: a tree cloned into another panel keeps
      its node ids, so one id names the same turn in N panels, and the panel is
      what binds the handle to THIS column's model. Colon is safe: no workspace
@@ -742,8 +735,7 @@
      one line). -->
 {#snippet copyIdBtn(id: string | null | undefined)}
   {#if id}
-    {@const wsPrefix = ws.activeId ? uniquePrefix(ws.activeId, ws.list.map((c) => c.id)) : undefined}
-    {@const handle = [wsPrefix, panelId, id].filter(Boolean).join(':')}
+    {@const handle = [ws.activeId, panelId, id].filter(Boolean).join(':')}
     <button
       class="btn-act"
       class:copied={copiedId}

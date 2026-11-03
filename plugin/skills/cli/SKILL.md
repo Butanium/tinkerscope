@@ -471,7 +471,9 @@ dialogue inside one panel. The wire matches (`/api/workspaces`, `workspace_id`,
   workspace JSON — it replaces both.
 - **Node handles are `<ws>:<panel>:<node>`** (the browser's copy button emits
   the full three-part form since P3 — paste-able into any terminal, no
-  dependence on the open workspace). An id is unique per WORKSPACE, not per
+  dependence on the open workspace; the ws part is the FULL workspace id —
+  handles copied before 2026-11-02 carry an 8-char prefix, and when several ids
+  share it the CLI picks the workspace holding the node). An id is unique per WORKSPACE, not per
   panel — a tree cloned into another panel keeps its ids — so one id often names
   the same turn in several panels, which is why the handle carries the panel.
   Every `--node` (plus `tinkerscope node <handle>`) takes

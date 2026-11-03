@@ -39,6 +39,22 @@ await test('parses the three-part handle, prefix or full ws id', () => {
   eq(parseNodeHandle(`${WS.id}:primary:n96zo5`), { ws: WS.id, panel: 'primary', node: 'n96zo5' });
 });
 
+await test('custom ids: parsed, and a shared 8-char prefix resolves to the workspace holding the node', async () => {
+  eq(parseNodeHandle('terra-p4-memuser:p-2:nfsz8f'), { ws: 'terra-p4-memuser', panel: 'p-2', node: 'nfsz8f' });
+  const tree = (node: string) => ({ 'p-2': { rootChildren: [node], selected: {}, nodes: { [node]: { id: node, role: 'user', content: 'x', parent: null, children: [] } } } });
+  const bodies: Record<string, any> = {
+    'terra-p4-tests': { id: 'terra-p4-tests', name: 'tests', trees: tree('n1') },
+    'terra-p4-memuser': { id: 'terra-p4-memuser', name: 'memuser', trees: tree('nfsz8f') }
+  };
+  const l = async () => Object.values(bodies).map((b) => ({ id: b.id, name: b.name })) as any;
+  const g = async (id: string) => bodies[id];
+  const hit = (await resolveNodeHandle({ ws: 'terra-p4', panel: 'p-2', node: 'nfsz8f' }, l, g)) as any;
+  eq(hit.workspace_id, 'terra-p4-memuser');
+  // a full id that is also a prefix of another id is exact, not ambiguous
+  bodies['terra-p4'] = { id: 'terra-p4', name: 'stem', trees: tree('n9') };
+  eq(((await resolveNodeHandle({ ws: 'terra-p4', panel: 'p-2', node: 'n9' }, l, g)) as any).workspace_id, 'terra-p4');
+});
+
 await test('ordinary searches are not handles', () => {
   for (const q of ['smoke', 'should i smoke during the party?', 'p-4:a1', 'a:b:c d', 'ratio 3:2:1'])
     eq(parseNodeHandle(q), null, q);

@@ -8,7 +8,8 @@ import type { SearchHit, SearchResponse, Workspace, WorkspaceSummary } from './t
 
 export type NodeHandle = { ws: string; panel: string; node: string };
 
-const HANDLE = /^([0-9a-f][0-9a-f-]{3,35}):([A-Za-z][\w-]*):([A-Za-z0-9]+)$/;
+// ws part = any store id (`^[A-Za-z0-9_-]+$`: uuids AND custom ids like `terra-p4-memuser`)
+const HANDLE = /^([A-Za-z0-9_-]{4,}):([A-Za-z][\w-]*):([A-Za-z0-9]+)$/;
 
 export function parseNodeHandle(q: string): NodeHandle | null {
   const m = HANDLE.exec(q.trim());
@@ -21,9 +22,18 @@ export async function resolveNodeHandle(
   list: () => Promise<WorkspaceSummary[]>,
   get: (id: string) => Promise<Workspace>
 ): Promise<SearchHit | string> {
-  const matches = (await list()).filter((w) => w.id.startsWith(h.ws));
+  const all = await list();
+  const exact = all.find((w) => w.id === h.ws);
+  let matches = exact ? [exact] : all.filter((w) => w.id.startsWith(h.ws));
   if (!matches.length) return `no workspace with id ${h.ws}…`;
-  if (matches.length > 1) return `${h.ws} matches ${matches.length} workspaces — paste more of the id`;
+  if (matches.length > 1) {
+    // A handle copied before 2026-11-02 carries an 8-char prefix, which ids sharing
+    // a stem collide on — the workspace holding the node is the one it meant.
+    const holding: WorkspaceSummary[] = [];
+    for (const w of matches) if ((await get(w.id)).trees?.[h.panel]?.nodes?.[h.node]) holding.push(w);
+    if (holding.length !== 1) return `${h.ws} matches ${matches.length} workspaces — paste more of the id`;
+    matches = holding;
+  }
   const wsBody = await get(matches[0].id);
   const tree = wsBody.trees?.[h.panel];
   if (!tree) return `workspace ${wsBody.name} has no panel ${h.panel}`;
