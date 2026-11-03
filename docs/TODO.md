@@ -105,6 +105,14 @@ streaming + auto-discovery + CLI-drive foundation. Order is rough priority.
 
 ## Next
 
+- [ ] **Names — follow-ups (shipped 2026-11-02, 045aeec/b6032f4).** (a) No browser entry
+  point to name a panel in single-panel mode (no column header) or a panel's ONLY,
+  unnamed thread (the ⑂ bar shows at ≥2 threads or a name) — CLI only today. (b) The
+  switcher-row rule exists twice: TS `threadRowKeys` (includes same-opening siblings in
+  ONE panel) and the CLI's `rename thread --all-panels` ("every other panel's root…") —
+  check they agree on that case and pin it with a shared vector like `tree_vectors/`.
+  — Opus 5.5, session 4f071237
+
 - [x] **Token probs on the PROSE, not instead of it — SHIPPED 2026-08-03.**
   The sidebar toggle is now Off / **Over** / **Tokens**. Over keeps the markdown
   render (and the thinking fold, and the highlight colors) and paints the
