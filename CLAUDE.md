@@ -616,7 +616,8 @@ SvelteKit SPA under `web/src`. Three kinds of file, by suffix:
   - `lib/conv-html.ts` — a thread as a standalone HTML page (the row toolbar's
     **download conversation**; `branchOps.downloadConversation`). Same scope and
     system-prompt rule as `conv-text.ts`'s copy; renderer injected, KaTeX css
-    linked only when math rendered.
+    linked only when math rendered. The page's copy / download-markdown buttons
+    read a JSON block (`<` escaped so message text can't close the script).
   - `lib/kbnav.ts` — keyboard row-navigation helpers: nav-key set, clamped
     focus-index stepping, the typing-target/modal-open guards. Consumed by
     +page's *Keyboard row navigation* section (click a row → focus ring; ↑/↓

@@ -567,7 +567,7 @@ answer to "which one is that"):
 | bookmark | tag/label outline | pin this sample with a note |
 | copy message | two overlapping squares | just this message |
 | copy conversation | the same, with text lines | the whole thread as markdown |
-| download conversation | an arrow dropping into a tray | the whole thread as a standalone HTML page (thinking folded, light/dark) to send to someone |
+| download conversation | an arrow dropping into a tray | the whole thread as a standalone HTML page to send to someone: thinking folded, light/dark, **Copy markdown** / **Download .md** at the top, a copy button on each message (on hover) |
 | send to panel | two crossing arrows | copy this branch's context into another panel |
 | view all samples | eye | spread the turn's sibling branches out as cards (later turns hide while open) |
 | copy node handle | `#` | `<ws>:<panel>:<node>` — paste into `tinkerscope samples/continue --node …` in any terminal |
